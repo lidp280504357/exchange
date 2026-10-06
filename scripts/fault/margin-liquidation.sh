@@ -5,13 +5,14 @@
 # about 1.33, ASTRA counting at 0.7); an operator's price event drops
 # ASTRA 20%: the monitor warns the account (MARGIN_WARNED in its inbox),
 # finds it at its liquidation level (1.10) twice in a row and, with
-# margin.liquidation on for this user only, liquidates it: as much ASTRA
-# sold against the simulated market as the loan and the 2% fee need
-# (review DD C19), the fee to the insurance fund and nothing out of it,
-# the loan owed before the drop repaid, the account NORMAL again. Then
-# the price goes back.
+# margin.liquidation on for this user (unless on for everyone),
+# liquidates it: as much ASTRA sold against the simulated market as the
+# loan and the 2% fee need (review DD C19), the fee to the insurance fund
+# and nothing out of it, the loan owed before the drop repaid, the
+# account NORMAL again. Then the price goes back up by the exact inverse
+# of the drop.
 #
-# The drop is the platform's, not only this user's (review DH C20 ③):
+# The drop is the platform's, not only this user's (review DH C20 3):
 # every margin account holding ASTRA with a debt may be warned (and
 # mailed), and a position on ASTRA-USDT-PERP may be liquidated or
 # deleveraged, which the jump back does not undo. The drill skips while a
@@ -40,8 +41,8 @@ SYMBOL=ASTRA-USDT
 simpost() {
   local out
   out=$(remote "sudo docker compose $COMPOSE_FILES exec -T market-sim /app/exchangectl sim call POST $1 $(printf %q "$2") 2>&1" || true)
-  SIM_STATUS=$(grep -oE '^HTTP [0-9]+' <<<"$out" | tail -1 | cut -d' ' -f2)
-  SIM_BODY=$(sed -n '/^{/,/^}/p' <<<"$out")
+  SIM_STATUS=$(grep -oE '^HTTP [0-9]+' <<<"$out" | tail -1 | cut -d' ' -f2 || true)
+  SIM_BODY=$(sed -n '/^{/,/^}/p' <<<"$out" || true)
 }
 simget() { remote "sudo docker compose $COMPOSE_FILES exec -T market-sim wget -qO- 'http://127.0.0.1:8098$1'"; }
 # back_by PRICE: the jump that takes the target to PRICE.
@@ -100,21 +101,25 @@ put_back() {
     EXIT_FAILED=1
   fi
 }
-# back_to PRICE: the target back to PRICE as the drill ends (review DH
-# C20 ①); a jump refused or lost (the budget, someone's target, market-sim
+# undo SIZE: the jump that undoes a jump of SIZE, exactly (1 / (1 + SIZE)
+# - 1, review DK C22 3): the drift of the model since does not count
+# against one operator's room.
+undo() { jq -rn --argjson s "$1" '(1 / (1 + $s) - 1) * 10000 | round / 10000'; }
+# back_up SIZE: the drop of SIZE undone as the drill ends (review DH C20
+# 1); a jump refused or lost (the budget, someone's target, market-sim
 # down) leaves ASTRA lower for everyone: it fails the run and says how to
 # put it back.
-back_to() {
+back_up() {
   local body
-  body="{\"type\":\"JUMP\",\"size\":$(back_by "$1" || echo null),\"actor\":\"fault-ops\",\"reason\":\"fault: back after the liquidation\"}"
+  body="{\"type\":\"JUMP\",\"size\":$(undo "$1"),\"actor\":\"fault-ops\",\"reason\":\"fault: back after the liquidation\"}"
   simpost /internal/sim/events "$body"
   if [[ $SIM_STATUS != 201 ]]; then
-    echo "WARN ASTRA's target is not back at $1 (HTTP ${SIM_STATUS:-none} $SIM_BODY); by hand, on the server in /opt/exchange/infra:" >&2
-    echo "     sudo docker compose $COMPOSE_FILES exec -T market-sim /app/exchangectl sim call POST /internal/sim/events '{\"type\":\"JUMP\",\"size\":<$1 / the target now - 1>,\"actor\":\"ops\",\"reason\":\"back after the margin drill\"}'" >&2
+    echo "WARN ASTRA's target is not back up (HTTP ${SIM_STATUS:-none} $SIM_BODY); by hand, on the server in /opt/exchange/infra:" >&2
+    echo "     sudo docker compose $COMPOSE_FILES exec -T market-sim /app/exchangectl sim call POST /internal/sim/events '$body'" >&2
     EXIT_FAILED=1
     return
   fi
-  echo "ok   ASTRA's target back to $1"
+  echo "ok   ASTRA's target back up by $(undo "$1") (the drop of $1 undone)"
 }
 
 EMAIL="fault-margin-$RUN@example.com"
@@ -132,6 +137,30 @@ on_for_user margin.auto_borrow "$USER_ID"
 on_for_user margin.liquidation "$USER_ID"
 sleep 6
 
+# unwind: the ASTRA sold back with AUTO_REPAY and what is still owed
+# repaid: a drill that skips after its buy leaves no loan (review DK C22
+# 2).
+unwind() {
+  local qty bid
+  call GET /v1/margin/accounts "" "${AUTH[@]}"
+  qty=$(jq -r '[.cross.balances[] | select(.asset == "ASTRA")][0].free // "0"' <<<"$BODY")
+  if [[ $qty != 0 ]] && book; then
+    bid=$(jq -r '.bids[0][0] | tonumber * 0.99 * 10000 | floor / 10000' <<<"$BODY")
+    call POST /v1/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$bid\",\"quantity\":\"$(jq -rn --argjson q "$qty" '$q | floor')\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_REPAY\"}" "${AUTH[@]}" -H "Idempotency-Key: fault-margin-$RUN-unwind"
+    for _ in $(seq 30); do # the sale repays as it settles
+      call GET /v1/margin/loans "" "${AUTH[@]}"
+      [[ $(jq '.items | length' <<<"$BODY") == 0 ]] && break
+      sleep 1
+    done
+  fi
+  call POST /v1/margin/repay '{"account":"MARGIN_CROSS","asset":"USDT","amount":"ALL"}' "${AUTH[@]}" -H "Idempotency-Key: fault-margin-$RUN-unwind-repay"
+  call GET /v1/margin/loans "" "${AUTH[@]}"
+  if [[ $(jq '.items | length' <<<"$BODY") != 0 ]]; then
+    echo "WARN the drill's user $USER_ID still owes: $BODY" >&2
+    EXIT_FAILED=1
+  fi
+}
+
 echo "== 100 USDT on the cross account, about 210 USDT of ASTRA bought with AUTO_BORROW"
 call POST /v1/margin/transfer '{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"100"}' "${AUTH[@]}" -H "Idempotency-Key: fault-margin-$RUN-in"
 expect 200 - "100 USDT into the cross account"
@@ -142,6 +171,10 @@ book() {
 eventually 60 "$SYMBOL shows a two-sided book" book
 ASK=$(jq -r '.asks[0][0]' <<<"$BODY")
 QTY=$(jq -rn --argjson ask "$ASK" '210 / $ask | floor')
+if (($(others_on_perp) > 0)); then
+  echo "skip: a position on ASTRA-USDT-PERP of a user other than the bots opened meanwhile; the drop could liquidate it"
+  exit 0
+fi
 PRICE=$(jq -rn --argjson ask "$ASK" '$ask * 1.01 * 10000 | floor / 10000')
 call POST /v1/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$PRICE\",\"quantity\":\"$QTY\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_BORROW\"}" "${AUTH[@]}" -H "Idempotency-Key: fault-margin-$RUN-buy"
 expect 202 - "a buy of $QTY ASTRA at $PRICE on the cross account, AUTO_BORROW"
@@ -160,31 +193,36 @@ echo "     owed before the drop: $OWED USDT"
 echo "== an operator's event drops ASTRA 20%"
 if (($(others_on_perp) > 0)); then
   echo "skip: a position on ASTRA-USDT-PERP of a user other than the bots opened meanwhile; the drop could liquidate it"
+  unwind
   exit 0
 fi
 WARNABLE=$(pg "SELECT count(*) FROM ledger.accounts a WHERE a.owner_type = 'USER' AND a.account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED') AND a.asset = 'ASTRA' AND a.available + a.frozen > 0 AND a.owner_id::text <> '$USER_ID' AND EXISTS (SELECT 1 FROM ledger.accounts d WHERE d.owner_type = 'USER' AND d.owner_id = a.owner_id AND d.scope = a.scope AND d.account_type IN (a.account_type || '_DEBT', a.account_type || '_INTEREST') AND d.available <> 0)")
 echo "note: $WARNABLE other margin accounts hold ASTRA with a debt; the drop may warn (and mail) them"
 FROM=$(simget /internal/sim | jq -r .target_price)
 DOWN=$(jq -rn --argjson p "$FROM" '$p * 0.8 * 10000 | floor / 10000 | tostring')
-simpost /internal/sim/events "{\"type\":\"JUMP\",\"size\":$(back_by "$DOWN"),\"actor\":\"fault-ops\",\"reason\":\"fault: liquidate a margin account\"}"
+DROP=$(back_by "$DOWN")
+simpost /internal/sim/events "{\"type\":\"JUMP\",\"size\":$DROP,\"actor\":\"fault-ops\",\"reason\":\"fault: liquidate a margin account\"}"
 [[ $SIM_STATUS == 201 ]] || { echo "FAIL the jump: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
 # shellcheck disable=SC2016 # expanded when the drill ends
-at_exit 'back_to "$FROM"'
-echo "ok   the target goes from $FROM to $DOWN"
+at_exit 'back_up "$DROP"'
+echo "ok   the target goes from $FROM to $DOWN (a jump of $DROP)"
 has_notice() {
   call GET /v1/notifications "" "${AUTH[@]}" && [[ $STATUS == 200 && $(jq --arg t "$1" '[.items[] | select(.type == $t)] | length' <<<"$BODY") -ge 1 ]]
 }
-eventually 240 "the account warned: MARGIN_WARNED in its inbox (review DH C20 ④)" has_notice MARGIN_WARNED
+eventually 240 "the account warned: MARGIN_WARNED in its inbox (review DH C20 4)" has_notice MARGIN_WARNED
 # settled: the liquidation COMPLETED, or stopped where the drill fails at
-# once (STUCK): SHORTFALL, or a repayment the ledger refused.
+# once (STUCK): SHORTFALL, or its latest repayment refused and the step
+# not moved on for a minute (a refused repayment is made again under a new
+# key, review DD C19 3: one alone is no failure, review DK C22 1).
 STUCK=""
 settled() {
-  local st
+  local st refused
   st=$(pg "SELECT status FROM margin.liquidations WHERE user_id = '$USER_ID' ORDER BY started_at DESC LIMIT 1")
   if [[ $st == SHORTFALL ]]; then
     STUCK="the liquidation waits for the insurance fund (SHORTFALL)"
-  elif [[ -n $st && $(pg "SELECT count(*) FROM margin.repays WHERE user_id = '$USER_ID' AND liquidation_id IS NOT NULL AND status = 'FAILED'") != 0 ]]; then
-    STUCK="the ledger refused a liquidation's repayment ($(pg "SELECT failure FROM margin.repays WHERE user_id = '$USER_ID' AND liquidation_id IS NOT NULL AND status = 'FAILED' LIMIT 1"))"
+  elif [[ -n $st && $st != COMPLETED ]]; then
+    refused=$(pg "SELECT r.failure FROM margin.liquidations l CROSS JOIN LATERAL (SELECT status, failure FROM margin.repays WHERE liquidation_id = l.liquidation_id ORDER BY created_at DESC LIMIT 1) r WHERE l.user_id = '$USER_ID' AND l.status <> 'COMPLETED' AND r.status = 'FAILED' AND l.step_at < now() - interval '60 seconds'")
+    [[ -z $refused ]] || STUCK="the ledger keeps refusing the liquidation's repayment ($refused)"
   fi
   [[ -n $STUCK || $st == COMPLETED ]]
 }
@@ -192,14 +230,14 @@ eventually 300 "the liquidation over" settled
 [[ -z $STUCK ]] || { echo "FAIL $STUCK" >&2; exit 1; }
 call GET /v1/margin/liquidations "" "${AUTH[@]}"
 check '.items[0].status == "COMPLETED" and .items[0].account == "MARGIN_CROSS" and (.items[0].margin_level | tonumber) <= 1.1 and .items[0].repaid[0].asset == "USDT" and (.items[0].fee | tonumber) > 0 and .items[0].insurance_covered == "0"' "at or under 1.10, the ASTRA sold, the loan repaid, the fee charged, nothing from the insurance fund"
-check "(.items[0].repaid[0].amount | tonumber) >= $OWED and (.items[0].repaid[0].amount | tonumber) - $OWED < 0.01" "the $OWED USDT owed before the drop repaid (an hour's interest at most more; review DH C20 ⑤)"
+check "(.items[0].repaid[0].amount | tonumber) >= $OWED and (.items[0].repaid[0].amount | tonumber) - $OWED < 0.01" "the $OWED USDT owed before the drop repaid (an hour's interest at most more; review DH C20 5)"
 LIQ=$(jq -r .items[0].liquidation_id <<<"$BODY")
 FEE=$(jq -r .items[0].fee <<<"$BODY")
 [[ $(pg "SELECT trigger FROM margin.liquidations WHERE liquidation_id = '$LIQ'") == AUTO ]] ||
   { echo "FAIL the liquidation was not the monitor's" >&2; exit 1; }
 echo "ok   the monitor's (AUTO)"
 # What the account's postings moved into and out of the insurance fund:
-# the fee, exactly (review DH C20 ②).
+# the fee, exactly (review DH C20 2).
 TO_FUND=$(pg "SELECT coalesce(sum(jl.amount), 0) FROM ledger.margin_postings mp CROSS JOIN LATERAL jsonb_array_elements_text(mp.journals) j(id) JOIN ledger.journal_lines jl ON jl.journal_id = NULLIF(j.id, '')::uuid JOIN ledger.accounts a ON a.id = jl.account_id WHERE mp.user_id = '$USER_ID' AND a.account_type = 'INSURANCE_FUND' AND a.asset = 'USDT'")
 jq -en --argjson got "$TO_FUND" --argjson fee "$FEE" '$got == $fee' >/dev/null ||
   { echo "FAIL the insurance fund got $TO_FUND USDT from the account, not the fee $FEE" >&2; exit 1; }

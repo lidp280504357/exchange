@@ -378,11 +378,19 @@ func (s *Service) send(ctx context.Context, l ports.Liquidation, o ports.Liquida
 }
 
 // orderRefused tells the trading service's refusal of an order from a
-// failure that says nothing of it.
+// failure that says nothing of it: an answer naming the order (its
+// order_id) is that order's rejection, final whatever its status (review
+// DJ C23 ①: a rejection is replayed with the status it was stored with,
+// 403 or 503 too); one naming none is a request refused as it came when
+// it is Invalid, Conflict or Unprocessable; anything else (the service
+// unreachable, its own 403 or 404, a 5xx) is read again later.
 func orderRefused(err error) bool {
 	var e *apperr.Error
 	if !errors.As(err, &e) {
 		return false
+	}
+	if id, ok := e.Details["order_id"].(string); ok && id != "" {
+		return true
 	}
 	switch e.Kind {
 	case apperr.KindInvalid, apperr.KindConflict, apperr.KindUnprocessable:
@@ -678,6 +686,21 @@ func (s *Service) planBuys(ctx context.Context, l ports.Liquidation, holdings []
 	return plan, why, nil
 }
 
+// buyable is what buys of the needs, the largest first, spend of budget
+// as planBuys places them: each at most what is left, none under an
+// order's least.
+func buyable(needs []need, budget decimal.Decimal) decimal.Decimal {
+	spent := decimal.Zero
+	for _, n := range needs {
+		amount := decimal.Min(n.amount, budget.Sub(spent))
+		if amount.LessThan(n.least) {
+			continue
+		}
+		spent = spent.Add(amount)
+	}
+	return spent
+}
+
 // order is a liquidation's new order.
 func (s *Service) order(l ports.Liquidation, symbol, side string, attempt int, qty, quote decimal.Decimal) ports.LiquidationOrder {
 	now := s.Now()
@@ -710,15 +733,14 @@ func (s *Service) stepFee(ctx context.Context, l ports.Liquidation) (ports.Liqui
 		if err != nil {
 			return l, false, err
 		}
-		buys, sold := decimal.Zero, executed(orders, sideSell)
-		for _, n := range needs {
-			buys = buys.Add(n.amount)
-		}
+		sold := executed(orders, sideSell)
 		q := holding(holdings, l.QuoteAsset)
 		// What the buys may spend, the fee on the sales and on them taken:
-		// (free - debt - rate x sold) / (1 + rate).
+		// (free - debt - rate x sold) / (1 + rate); of it, what they will
+		// spend as planBuys places them (review DJ C23 ②: a buy too small
+		// for an order is left to the fund and pays no fee).
 		room := q.Free.Sub(q.Debt()).Sub(l.FeeRate.Mul(sold)).DivRound(decimal.NewFromInt(1).Add(l.FeeRate), 18)
-		buy := decimal.Max(decimal.Min(buys, room), decimal.Zero)
+		buy := buyable(needs, room)
 		fee := decimal.Min(sold.Add(buy).Mul(l.FeeRate).RoundFloor(decimals), q.Free)
 		if !fee.IsPositive() {
 			return s.next(ctx, l, StepBuy)

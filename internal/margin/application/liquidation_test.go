@@ -23,7 +23,9 @@ import (
 // order of its own, and the same attempt again answers the order as it
 // stands. fill is the share of an order that executes (nil: all of it;
 // whatever executes, at least a lot); pending is how many reads answer an
-// order NEW before it executes; fail answers every call while set.
+// order NEW before it executes; fail answers every call while set; reject
+// rejects an order it returns a refusal for, answered with the order's ID
+// then and on every replay, as the trading service does.
 type trading struct {
 	mu       sync.Mutex
 	ledger   *ledger
@@ -32,13 +34,15 @@ type trading struct {
 	fill     func(o ports.LiquidationOrder) decimal.Decimal
 	pending  int
 	fail     error
+	reject   func(o ports.LiquidationOrder) *apperr.Error
 	orders   map[string]*placed
 	sent     []ports.LiquidationOrder
 }
 
 type placed struct {
-	state ports.OrderState
-	reads int
+	state    ports.OrderState
+	reads    int
+	rejected error
 }
 
 var lot = d("0.0001")
@@ -68,6 +72,14 @@ func (t *trading) PlaceLiquidation(_ context.Context, user string, a domain.Acco
 		}}
 		t.orders[key] = p
 		t.sent = append(t.sent, o)
+		if t.reject != nil {
+			if e := t.reject(o); e != nil {
+				p.state.Status, p.rejected = "REJECTED", e.WithDetail("order_id", p.state.OrderID)
+			}
+		}
+	}
+	if p.rejected != nil {
+		return ports.OrderState{}, p.rejected
 	}
 	if p.state.Final() {
 		return p.state, nil
@@ -511,5 +523,173 @@ func TestLiquidationRepaysAgain(t *testing.T) {
 	}
 	if b := r.ledger.owed(u, cross, "USDT"); !b.borrowed.IsZero() || !b.interest.IsZero() {
 		t.Fatalf("the debt after %+v", b)
+	}
+}
+
+// TestLiquidationResumesAfterARestart checks that a liquidation goes on
+// from what it stored after margin-service restarts (review DJ C23 ③):
+// mid-sale, the order read again rather than placed a second time; at the
+// fee, the stored fee booked once under its key.
+func TestLiquidationResumesAfterARestart(t *testing.T) {
+	r := newLiquidationRig(t)
+	cross := domain.Cross()
+	u := r.open(t, d("0.1"), "USDT", d("2000"), map[string]string{"BTC": "0.1667"})
+	r.prices.setBTC("13000", true)
+	r.trading.pending = 2
+	feeDown := true
+	r.ledger.mu.Lock()
+	r.ledger.refuse = func(p ports.Posting) error {
+		if p.Moves[0].Type == domain.MoveLiquidationFee && feeDown {
+			return apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "ledger timed out")
+		}
+		return nil
+	}
+	r.ledger.mu.Unlock()
+	before := r.fund()
+	l := r.liquidate(t, u)
+	r.pass(t, 1, 3*time.Second)
+	if got := r.get(t, l.ID); got.Step != application.StepSell || got.Note != "waiting for the orders to execute" {
+		t.Fatalf("mid-sale %+v", got)
+	}
+	restart := func() {
+		svc := &application.Service{
+			Store: r.store, Ledger: r.ledger, Prices: r.prices, Instruments: r.pairs, Eligibility: eligible{}, Features: r.features,
+			Trading: r.trading, Log: r.svc.Log, Now: r.now,
+		}
+		r.svc, r.monitor = svc, &application.Monitor{Svc: svc, Liquidate: svc.AutoLiquidate}
+	}
+	restart()
+	r.pass(t, 3, 3*time.Second)
+	got := r.get(t, l.ID)
+	if got.Step != application.StepFee || !got.Fee.Equal(d("41.652")) || got.Note != "waiting for the ledger to book the fee" {
+		t.Fatalf("at the fee, the ledger away %+v", got)
+	}
+	restart()
+	r.ledger.mu.Lock()
+	feeDown = false
+	r.ledger.mu.Unlock()
+	r.pass(t, 2, 3*time.Second)
+	got = r.get(t, l.ID)
+	if got.Status != ports.LiquidationCompleted || !got.Traded.Equal(d("2082.6")) || !got.Fee.Equal(d("41.652")) ||
+		!r.fund().Equal(before.Add(d("41.652"))) {
+		t.Fatalf("after the restarts %+v (the fund %s)", got, r.fund())
+	}
+	if orders := r.orders(t, l.ID); len(orders) != 1 || orders[0].Attempt != 1 || len(r.trading.sent) != 1 {
+		t.Fatalf("one order, placed once: %+v, %d placed", orders, len(r.trading.sent))
+	}
+	if b := r.ledger.owed(u, cross, "USDT"); !b.borrowed.IsZero() || !b.free.Equal(d("40.928")) {
+		t.Fatalf("the USDT after %+v", b)
+	}
+}
+
+// TestLiquidationReplacesARejectedOrder checks an order the trading
+// service rejected (review DJ C23 ①): its answer names the order, so it
+// is REFUSED whatever its status (403 here, as a rejection is replayed
+// with the status it was stored with), and the next attempt sells.
+func TestLiquidationReplacesARejectedOrder(t *testing.T) {
+	r := newLiquidationRig(t)
+	u := r.open(t, d("0.1"), "USDT", d("2000"), map[string]string{"BTC": "0.1667"})
+	r.prices.setBTC("13000", true)
+	r.trading.reject = func(o ports.LiquidationOrder) *apperr.Error {
+		if o.Attempt == 1 {
+			return apperr.Forbidden("the account is not allowed to trade")
+		}
+		return nil
+	}
+	l := r.liquidate(t, u)
+	r.pass(t, 3, 3*time.Second)
+	got := r.get(t, l.ID)
+	orders := r.orders(t, l.ID)
+	if got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.IsZero() || len(orders) != 2 {
+		t.Fatalf("the liquidation %+v %+v", got, orders)
+	}
+	if o := orders[0]; o.Attempt != 1 || o.Status != ports.OrderRefused || o.OrderStatus != "REJECTED" || o.OrderID == "" ||
+		!strings.Contains(o.Error, apperr.CodeForbidden) {
+		t.Fatalf("the rejected order %+v", o)
+	}
+	if o := orders[1]; o.Attempt != 2 || o.Status != ports.OrderDone || !o.Quantity.Equal(orders[0].Quantity) {
+		t.Fatalf("the next attempt %+v", o)
+	}
+}
+
+// TestLiquidationIsolated checks an isolated account's liquidation: its
+// pair's base sold for the pair's quote, only as much as the loan and the
+// fee need; the rest stays in the account.
+func TestLiquidationIsolated(t *testing.T) {
+	r := newLiquidationRig(t)
+	ctx := context.Background()
+	isolated, err := domain.ParseAccount("MARGIN_ISOLATED", "BTC-USDT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := uuid.Must(uuid.NewV7()).String()
+	r.ledger.fund(u, "USDT", d("100"))
+	if _, err := r.svc.Transfer(ctx, application.TransferInput{
+		UserID: u, IdemKey: "t", Direction: domain.DirectionIn, Account: isolated, Asset: "USDT", Amount: d("100"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: u, IdemKey: "b", Account: isolated, Asset: "USDT", Amount: d("800")}); err != nil {
+		t.Fatal(err)
+	}
+	// The 900 USDT spent on 0.03 BTC; BTC down to 28,000: 0.03 x 28000 x
+	// 0.95 / 800.008 = 0.9975.
+	r.ledger.mu.Lock()
+	acct := r.ledger.margin[u][isolated]
+	acct["USDT"].free = decimal.Zero
+	acct["BTC"] = &balances{free: d("0.03")}
+	r.ledger.mu.Unlock()
+	r.prices.setBTC("28000", true)
+	l, err := r.svc.StartLiquidation(ctx, u, isolated, ports.TriggerManual, uuid.Must(uuid.NewV7()).String(), "ops@example.com")
+	if err != nil || l.QuoteAsset != "USDT" {
+		t.Fatalf("started %+v %v", l, err)
+	}
+	r.pass(t, 3, 3*time.Second)
+	got := r.get(t, l.ID)
+	// (800.008 / 0.98) x 1.02 = 832.67 to bring: 0.0298 BTC for 834.4, a
+	// fee of 16.688, 800.008 repaid.
+	if got.Status != ports.LiquidationCompleted || got.Account != isolated || !got.Traded.Equal(d("834.4")) ||
+		!got.Fee.Equal(d("16.688")) || !got.InsuranceCovered.IsZero() {
+		t.Fatalf("the liquidation %+v", got)
+	}
+	if orders := r.orders(t, l.ID); len(orders) != 1 || orders[0].Symbol != "BTC-USDT" || !orders[0].Quantity.Equal(d("0.0298")) {
+		t.Fatalf("the orders %+v", orders)
+	}
+	if b := r.ledger.owed(u, isolated, "USDT"); !b.borrowed.IsZero() || !b.interest.IsZero() || !b.free.Equal(d("17.704")) {
+		t.Fatalf("the USDT after %+v", b)
+	}
+	if b := r.ledger.owed(u, isolated, "BTC"); !b.free.Equal(d("0.0002")) {
+		t.Fatalf("the BTC after %+v", b)
+	}
+}
+
+// TestLiquidationAttemptsUsedUp checks the end of selling (review DJ C23
+// ③): a pair with its 1000 orders placed counts as one that never trades,
+// so what the account could not sell stays in it and the insurance fund
+// pays the debt.
+func TestLiquidationAttemptsUsedUp(t *testing.T) {
+	r := newLiquidationRig(t)
+	ctx := context.Background()
+	u := r.open(t, d("0.1"), "USDT", d("2000"), map[string]string{"BTC": "0.1667"})
+	r.prices.setBTC("13000", true)
+	l := r.liquidate(t, u)
+	at := r.now().Add(-time.Hour)
+	if err := r.store.Tx(ctx, func(repos ports.Repos) error {
+		return repos.Liquidations().AddOrder(ctx, ports.LiquidationOrder{
+			LiquidationID: l.ID, Symbol: "BTC-USDT", Side: "SELL", Attempt: 1000, Quantity: d("0.1602"), QuoteAmount: decimal.Zero,
+			Status: ports.OrderDone, OrderStatus: "EXPIRED", FilledQuantity: decimal.Zero, FilledQuote: decimal.Zero, CreatedAt: at,
+			UpdatedAt: at,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r.pass(t, 3, 3*time.Second)
+	got := r.get(t, l.ID)
+	if got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.Equal(d("2000.02")) || !got.Traded.IsZero() || !got.Fee.IsZero() ||
+		len(r.trading.sent) != 0 {
+		t.Fatalf("the liquidation %+v, %d placed", got, len(r.trading.sent))
+	}
+	if b := r.ledger.owed(u, domain.Cross(), "BTC"); !b.free.Equal(d("0.1667")) {
+		t.Fatalf("the BTC stays %+v", b)
 	}
 }
