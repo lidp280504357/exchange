@@ -1,9 +1,10 @@
 import {
-  channels, displayUnit, dec, errorText, formatPercent, formatPrice, routes, useCandles, useContract, useMarkPrice, useBookStep, useOrderBook, usePositions,
+  channels, displayUnit, dec, errorText, formatPercent, formatPrice, isInverse, routes, useCandles, useContract, useContracts, useMarkPrice, useBookStep,
+  useOrderBook, usePositions,
   useSyncing, useTerminalPrefs, useTicker, useTickerSeed, useTrades, useTradesSeed, type CandleInterval, type Contract,
 } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
-import { Button, CandleChart, EmptyState, ErrorState, FundingCountdown, OrderBook, PriceText, Sheet, Skeleton, TradeTape, cn, toast } from "@exchange/ui";
+import { Button, CandleChart, EmptyState, ErrorState, FundingCountdown, OrderBook, PriceText, Segmented, Sheet, Skeleton, TradeTape, cn, toast } from "@exchange/ui";
 import { ChevronDown, Info, Star, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -42,6 +43,7 @@ export default function FuturesTerminal() {
   const mark = useMarkPrice(sym).data;
   const positions = usePositions("");
   const fav = useFavorites();
+  const contracts = useContracts().data?.contracts;
 
   useEffect(() => {
     if (contract) visit(contract.symbol);
@@ -111,8 +113,33 @@ export default function FuturesTerminal() {
   const pd = dec.decimalsOf(contract.tick_size);
   const qd = dec.decimalsOf(contract.lot_size);
   const mine = (positions.data?.positions ?? []).length;
+  // USDT-margined or coin-margined (design 2026-10-06 §2.6): the switch
+  // goes to the same coin's contract of the other kind, or the first one
+  // trading; it shows once both kinds are listed.
+  const counterpart = (coin: boolean) => {
+    const kind = (contracts ?? []).filter((c) => isInverse(c) === coin);
+    return (kind.find((c) => c.base_asset === contract.base_asset) ?? kind.find((c) => c.status === "TRADING") ?? kind[0])?.symbol;
+  };
+  const both = counterpart(true) !== undefined && counterpart(false) !== undefined;
   return (
     <div className="pb-20">
+      {both && (
+        <div className="px-4 pb-2">
+          <Segmented
+            size="sm"
+            value={isInverse(contract) ? "coin" : "usdt"}
+            onValueChange={(v) => {
+              const next = counterpart(v === "coin");
+              if (next && next !== contract.symbol) navigate(routes.futures(next));
+            }}
+            items={[
+              { value: "usdt", label: t("mTrade.usdtMargined") },
+              { value: "coin", label: t("mTrade.coinMargined") },
+            ]}
+            aria-label={t("mTrade.marginKind")}
+          />
+        </div>
+      )}
       {mark?.degraded && (
         <div role="status" className="flex items-center gap-2 bg-warn px-4 py-2 text-xs text-brand-fg">
           <TriangleAlert size={14} />
@@ -166,6 +193,11 @@ export default function FuturesTerminal() {
   );
 }
 
+/** qtyUnitOf is the unit a contract's book and trades count in: its base asset, or whole contracts. */
+function qtyUnitOf(contract: Contract, contracts: string): string {
+  return isInverse(contract) ? contracts : contract.base_asset;
+}
+
 function ChartTab({ symbol, decimals }: { symbol: string; decimals: number }) {
   const stored = useTerminalPrefs((s) => s.interval);
   const set = useTerminalPrefs((s) => s.set);
@@ -196,6 +228,7 @@ function BookTab({
   markPrice?: string | null;
   onPick: (price: string, quantity?: string) => void;
 }) {
+  const { t } = useTranslation();
   const tk = useTicker(contract.symbol);
   const { steps, step, setStep } = useBookStep(contract.symbol, contract.tick_size, tk?.last);
   const view = useOrderBook(contract.symbol, LEVELS, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY, steps });
@@ -214,7 +247,7 @@ function BookTab({
       onPriceClick={onPick}
       syncing={syncing}
       loading={view.asks.length === 0 && view.bids.length === 0 && !tk}
-      base={contract.base_asset}
+      base={qtyUnitOf(contract, t("mTrade.contractsUnit"))}
       quote={contract.quote_asset}
       rowHeight={24}
     />
@@ -222,6 +255,7 @@ function BookTab({
 }
 
 function TradesTab({ contract, priceDecimals, qtyDecimals }: { contract: Contract; priceDecimals: number; qtyDecimals: number }) {
+  const { t } = useTranslation();
   useTradesSeed(contract.symbol);
   const trades = useTrades(contract.symbol);
   const tk = useTicker(contract.symbol);
@@ -231,7 +265,7 @@ function TradesTab({ contract, priceDecimals, qtyDecimals }: { contract: Contrac
       priceDecimals={priceDecimals}
       qtyDecimals={qtyDecimals}
       max={24}
-      base={contract.base_asset}
+      base={qtyUnitOf(contract, t("mTrade.contractsUnit"))}
       quote={contract.quote_asset}
       loading={trades.length === 0 && !tk}
       rowHeight={24}

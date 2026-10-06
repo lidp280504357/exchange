@@ -39,10 +39,18 @@ export function PairSheet({
     return [...spot, ...perp];
   }, [pairs.data, contracts.data, t]);
 
-  const shown = searchMarkets(
-    rows.filter((r) => group === "all" || (group === "fav" ? favorites.has(r.symbol) : group === "perp" ? r.futures : !r.futures && r.quote === group)),
-    query,
-  );
+  // The contracts group by margin once coin-margined ones are listed: USDT-margined ones quote in USDT, coin-margined ones in USD (design 2026-10-06 §2.6).
+  const coinM = rows.some((r) => r.futures && r.quote === "USD");
+  const inGroup = (r: Row) =>
+    group === "all" ||
+    (group === "fav"
+      ? favorites.has(r.symbol)
+      : group === "perp"
+        ? r.futures && !(coinM && r.quote === "USD")
+        : group === "coin"
+          ? r.futures && r.quote === "USD"
+          : !r.futures && r.quote === group);
+  const shown = searchMarkets(rows.filter(inGroup), query);
   const quotes = [...new Set(rows.filter((r) => !r.futures).map((r) => r.quote))];
 
   return (
@@ -65,7 +73,12 @@ export function PairSheet({
             { value: "fav", label: t("market.favorites") },
             { value: "all", label: t("common.all") },
             ...quotes.map((q2) => ({ value: q2, label: q2 })),
-            { value: "perp", label: t("market.futures") },
+            ...(coinM
+              ? [
+                  { value: "perp", label: t("mTrade.usdtMargined") },
+                  { value: "coin", label: t("mTrade.coinMargined") },
+                ]
+              : [{ value: "perp", label: t("market.futures") }]),
           ]}
         />
       </div>

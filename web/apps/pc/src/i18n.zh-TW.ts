@@ -13,6 +13,8 @@ export default {
     searchHint: "搜尋幣種",
     perpetual: "永續",
     allFutures: "全部合約",
+    usdtMargined: "U 本位",
+    coinMargined: "幣本位",
     testMode: "測試模式",
   },
 };

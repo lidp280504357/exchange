@@ -1,4 +1,4 @@
-import { dec, errorText, formatAmount, formatPercent, routes, useSettings } from "@exchange/core";
+import { dec, errorText, formatAmount, formatPercent, routes, useSettings, useSettleAssets } from "@exchange/core";
 import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
 import { useMarginEntry } from "@exchange/core/margin/hooks";
 import { accountShare, convertValue, referencePrice, valuePortfolio, type AccountView, type AssetRow, type Portfolio } from "@exchange/core/assets/valuation";
@@ -20,6 +20,7 @@ import {
   listItem,
 } from "@exchange/ui";
 import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, ChevronRight, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,7 +53,7 @@ export default function Overview() {
   const [view, setView] = useState<AccountView>("ALL");
   const [picked, setPicked] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const futures = useFuturesAccount(view === "FUTURES");
+  const qc = useQueryClient();
 
   const portfolio = useMemo(
     () => valuePortfolio(balances.data?.balances ?? [], (asset) => referencePrice(asset, live.tickers), margin),
@@ -60,7 +61,8 @@ export default function Overview() {
   );
   const btc = referencePrice("BTC", live.tickers);
 
-  const refresh = () => Promise.all([balances.refetch(), live.refetch(), view === "FUTURES" ? futures.refetch() : null]);
+  const refresh = () =>
+    Promise.all([balances.refetch(), live.refetch(), view === "FUTURES" ? qc.refetchQueries({ queryKey: ["derivatives", "account"], type: "active" }) : null]);
 
   const showAccount = (v: AccountView) => {
     setView(v);
@@ -95,7 +97,9 @@ export default function Overview() {
             onRetry={() => void balances.refetch()}
             meta={meta}
             onPick={setPicked}
-            futures={view === "FUTURES" ? <FuturesSummary query={futures} /> : null}
+            futures={
+              view === "FUTURES" ? <FuturesSummaries held={portfolio.rows.FUTURES.filter((r) => dec.sign(r.total) > 0).map((r) => r.asset)} meta={meta} /> : null
+            }
           />
         </motion.div>
       </div>
@@ -414,12 +418,29 @@ function AssetCard({ row, meta, onPick }: { row: AssetRow; meta: AssetMeta; onPi
   );
 }
 
-function FuturesSummary({ query }: { query: ReturnType<typeof useFuturesAccount> }) {
+// The FUTURES accounts' summaries: USDT's always, a coin's (coin-margined
+// contracts, design 2026-10-06 §2.6) once it holds something.
+function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
+  const settles = useSettleAssets();
+  return (
+    <div className="flex flex-col gap-2">
+      {settles
+        .filter((a) => a === "USDT" || held.includes(a))
+        .map((a) => (
+          <FuturesSummary key={a} asset={a} decimals={a === "USDT" ? 2 : shownDecimals(meta.decimals(a))} />
+        ))}
+    </div>
+  );
+}
+
+function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }) {
   const { t } = useTranslation();
   const links = useTradeLinks();
+  const query = useFuturesAccount(true, asset);
   const a = query.data;
   return (
-    <div data-testid="futures-summary" className="rounded-2 bg-bg-2 p-3">
+    <div data-testid={asset === "USDT" ? "futures-summary" : `futures-summary-${asset}`} className="rounded-2 bg-bg-2 p-3">
+      {asset !== "USDT" && <p className="mb-1 text-xs font-medium text-fg-2">{asset}</p>}
       {query.isError ? (
         <div className="flex items-center gap-2 text-sm text-fg-3">
           <span className="min-w-0 flex-1">
@@ -432,17 +453,17 @@ function FuturesSummary({ query }: { query: ReturnType<typeof useFuturesAccount>
       ) : (
         <div className="grid grid-cols-3 gap-2 text-xs">
           <Figure label={t("mAssets.overview.marginBalance")} loading={query.isPending}>
-            <AmountText value={a?.margin_balance} decimals={2} />
+            <AmountText value={a?.margin_balance} decimals={decimals} />
           </Figure>
           <Figure label={t("mAssets.overview.unrealized")} loading={query.isPending}>
-            <AmountText value={a?.unrealized_pnl} decimals={2} sign tone="auto" />
+            <AmountText value={a?.unrealized_pnl} decimals={decimals} sign tone="auto" />
           </Figure>
           <Figure label={t("mAssets.overview.transferable")} loading={query.isPending}>
-            <AmountText value={a?.transferable} decimals={2} />
+            <AmountText value={a?.transferable} decimals={decimals} />
           </Figure>
         </div>
       )}
-      <Link to={links.futures("USDT")} className="mt-1 flex min-h-tap items-center justify-center gap-1 text-sm font-medium text-brand">
+      <Link to={links.futures(asset)} className="mt-1 flex min-h-tap items-center justify-center gap-1 text-sm font-medium text-brand">
         <ChartCandlestick size={14} />
         {t("mAssets.overview.openFutures")}
       </Link>

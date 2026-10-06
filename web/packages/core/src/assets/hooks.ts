@@ -29,7 +29,7 @@ export const accountKeys = {
   balances: qk.balances,
   ledger: (asset: string, type: string) => [...qk.ledger, asset, type] as const,
   transfers: qk.transfers,
-  futuresAccount: ["derivatives", "account"] as const,
+  futuresAccount: (asset = "USDT") => ["derivatives", "account", asset] as const,
   eligibility: (feature: Feature, asset: string) => ["user", "eligibility", feature, asset] as const,
 };
 
@@ -167,13 +167,17 @@ export function useTransferAction() {
   };
 }
 
-/** useFuturesAccount returns the FUTURES account at the mark prices (margin balance, unrealized PnL, transferable). */
-export function useFuturesAccount(enabled = true) {
+/**
+ * useFuturesAccount returns a settlement asset's FUTURES account at the
+ * mark prices (margin balance, unrealized PnL, transferable): USDT's, or
+ * the coin's of a coin-margined contract.
+ */
+export function useFuturesAccount(enabled = true, asset = "USDT") {
   const signedIn = useSession(selectSignedIn);
   return useQuery({
-    queryKey: accountKeys.futuresAccount,
-    queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account")),
-    enabled: signedIn && enabled,
+    queryKey: accountKeys.futuresAccount(asset),
+    queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account", { params: { query: { asset: asset === "USDT" ? undefined : asset } } })),
+    enabled: signedIn && enabled && asset !== "",
     staleTime: 10_000,
     retry: retryServerErrors,
   });

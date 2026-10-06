@@ -1,4 +1,4 @@
-import { ApiError, dec, errorText, formatAmount, formatDecimal, newIdempotencyKey, useSettings } from "@exchange/core";
+import { ApiError, dec, errorText, formatAmount, formatDecimal, newIdempotencyKey, useSettings, useSettleAssets } from "@exchange/core";
 import { availableOf, useBalances, useFuturesAccount, useTransferAction, useTransfers, type Transfer as TransferRecord } from "@exchange/core/assets/hooks";
 import { checkTransfer, otherAccount, transferMax, type AccountType } from "@exchange/core/assets/transfer";
 import { sortAssets } from "@exchange/core/wallet/networks";
@@ -59,7 +59,10 @@ export default function Transfer() {
 
   const to = otherAccount(from);
   const list = balances.data?.balances;
-  const futures = useFuturesAccount(from === "FUTURES");
+  // What may leave FUTURES is bounded by the account of the asset's own
+  // contracts: USDT's, or a coin-margined contract's coin (design 2026-10-06 §2.6).
+  const settles = useSettleAssets();
+  const futures = useFuturesAccount(from === "FUTURES" && settles.includes(asset), asset);
   const decimals = meta.decimals(asset);
   const available = availableOf(list, from, asset);
   const transferable = from === "FUTURES" && futures.data?.asset === asset ? futures.data.transferable : null;

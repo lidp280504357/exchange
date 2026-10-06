@@ -1,4 +1,4 @@
-import { dec, errorText, routes, useContract, useMarkPrice, useTerminalPrefs } from "@exchange/core";
+import { dec, errorText, isInverse, routes, useContract, useMarkPrice, useTerminalPrefs } from "@exchange/core";
 import { Button, EmptyState, ErrorState } from "@exchange/ui";
 import { TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -55,6 +55,8 @@ export default function FuturesTerminal() {
 
   const priceDecimals = dec.decimalsOf(contract.tick_size);
   const qtyDecimals = dec.decimalsOf(contract.lot_size);
+  // A coin-margined contract's book and trades count whole contracts.
+  const qtyUnit = isInverse(contract) ? t("pcTrade.contractsUnit") : contract.base_asset;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-px bg-line-1">
       {mark?.degraded && (
@@ -67,7 +69,7 @@ export default function FuturesTerminal() {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(260px,22%)_minmax(0,1fr)_minmax(290px,24%)] gap-px">
         <BookPanel
           symbol={contract.symbol}
-          base={contract.base_asset}
+          base={qtyUnit}
           quote={contract.quote_asset}
           tickSize={contract.tick_size}
           priceDecimals={priceDecimals}
@@ -75,7 +77,7 @@ export default function FuturesTerminal() {
           markPrice={mark?.mark_price}
           onPick={onPick}
         />
-        <ChartPanel symbol={contract.symbol} priceDecimals={priceDecimals} qtyDecimals={qtyDecimals} base={contract.base_asset} />
+        <ChartPanel symbol={contract.symbol} priceDecimals={priceDecimals} qtyDecimals={qtyDecimals} base={qtyUnit} />
         <FuturesOrderPanel contract={contract} fill={fill} className="overflow-y-auto" />
       </div>
       <PanelResizer />

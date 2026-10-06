@@ -1,4 +1,4 @@
-import { dec, errorText, formatPercent, routes, useSettings } from "@exchange/core";
+import { dec, errorText, formatPercent, routes, useSettings, useSettleAssets } from "@exchange/core";
 import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
 import {
   accountShare,
@@ -469,7 +469,7 @@ function AssetsTable({
           />
         </div>
       </div>
-      {view === "FUTURES" && <FuturesSummary />}
+      {view === "FUTURES" && <FuturesSummaries held={rows.filter((r) => dec.sign(r.total) > 0).map((r) => r.asset)} meta={meta} />}
       <DataTable
         aria-label={t("pcAssets.overview.table")}
         columns={columns}
@@ -554,13 +554,31 @@ function ActionLink({ to, label, hint }: { to: string | null; label: string; hin
   );
 }
 
-function FuturesSummary() {
+// The FUTURES accounts' summaries: USDT's always, a coin's (coin-margined
+// contracts, design 2026-10-06 §2.6) once it holds something.
+function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
+  const settles = useSettleAssets();
+  return (
+    <>
+      {settles
+        .filter((a) => a === "USDT" || held.includes(a))
+        .map((a) => (
+          <FuturesSummary key={a} asset={a} decimals={a === "USDT" ? 2 : shownDecimals(meta.decimals(a))} />
+        ))}
+    </>
+  );
+}
+
+function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }) {
   const { t } = useTranslation();
-  const account = useFuturesAccount();
+  const account = useFuturesAccount(true, asset);
   const links = useTradeLinks();
   const a = account.data;
   return (
-    <div data-testid="futures-summary" className="mx-5 mb-3 flex flex-wrap items-center gap-x-8 gap-y-2 rounded-2 bg-bg-2 px-4 py-3 text-sm">
+    <div
+      data-testid={asset === "USDT" ? "futures-summary" : `futures-summary-${asset}`}
+      className="mx-5 mb-3 flex flex-wrap items-center gap-x-8 gap-y-2 rounded-2 bg-bg-2 px-4 py-3 text-sm"
+    >
       {account.isError ? (
         <span className="flex items-center gap-2 text-fg-3">
           {t("pcAssets.overview.futuresUnavailable")} · {errorText(account.error)}
@@ -571,17 +589,17 @@ function FuturesSummary() {
       ) : (
         <>
           <Figure label={t("pcAssets.overview.marginBalance")} loading={account.isPending}>
-            <AmountText value={a?.margin_balance} decimals={2} asset={a?.asset} />
+            <AmountText value={a?.margin_balance} decimals={decimals} asset={a?.asset} />
           </Figure>
           <Figure label={t("pcAssets.overview.unrealized")} loading={account.isPending}>
-            <AmountText value={a?.unrealized_pnl} decimals={2} sign tone="auto" asset={a?.asset} />
+            <AmountText value={a?.unrealized_pnl} decimals={decimals} sign tone="auto" asset={a?.asset} />
           </Figure>
           <Figure label={t("pcAssets.overview.transferable")} loading={account.isPending}>
-            <AmountText value={a?.transferable} decimals={2} asset={a?.asset} />
+            <AmountText value={a?.transferable} decimals={decimals} asset={a?.asset} />
           </Figure>
         </>
       )}
-      <Link to={links.futures("USDT")} className="ml-auto flex items-center gap-1 text-brand hover:brightness-110">
+      <Link to={links.futures(asset)} className="ml-auto flex items-center gap-1 text-brand hover:brightness-110">
         <ChartCandlestick size={14} />
         {t("pcAssets.overview.openFutures")}
       </Link>

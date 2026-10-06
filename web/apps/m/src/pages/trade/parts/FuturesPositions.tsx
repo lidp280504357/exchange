@@ -1,6 +1,7 @@
 import {
-  adjustPositionMargin, closeableQuantity, dec, enumLabel, errorText, formatAmount, formatPrice, liveFigures, newIdempotencyKey, placeConditionalOrder,
-  placeContractOrder, routes, useConditionalOrders, useContracts, useMarkPrice, usePositions, useTicker, type ConditionalOrder, type ContractPosition,
+  adjustPositionMargin, closeableQuantity, dec, enumLabel, errorText, formatAmount, formatDecimal, formatPrice, newIdempotencyKey, placeConditionalOrder,
+  placeContractOrder, routes, usdValue, useConditionalOrders, useContractMath, useContracts, useMarkPrice, usePositions, useTicker,
+  type ConditionalOrder, type Contract, type ContractPosition, type ContractTerms,
 } from "@exchange/core";
 import { Button, Dialog, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -9,8 +10,15 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { EmptyList } from "./EmptyList";
 
-type Specs = Map<string, { price: number; qty: number }>;
+type Spec = { price: number; qty: number; contract?: Contract };
+type Specs = Map<string, Spec>;
 const label = (symbol: string) => symbol.replace(/-PERP$/, "").replace("-", "");
+
+// A linear USDT contract's terms: the arithmetic of a position whose
+// contract the list no longer has (its own figures stand).
+const LINEAR: ContractTerms = {
+  quote_asset: "USDT", settle_asset: "USDT", contract_size: "0", tick_size: "0", lot_size: "0", price_band: "0", taker_fee_rate: "0", risk_tiers: [],
+};
 
 /**
  * FuturesPositions: the caller's positions as cards (design §7.2) with
@@ -23,7 +31,7 @@ export function FuturesPositions({ symbol, onTrade }: { symbol: string; onTrade?
   const tpsl = useConditionalOrders("");
   const contracts = useContracts();
   const specs = useMemo<Specs>(
-    () => new Map((contracts.data?.contracts ?? []).map((c) => [c.symbol, { price: dec.decimalsOf(c.tick_size), qty: dec.decimalsOf(c.lot_size) }])),
+    () => new Map((contracts.data?.contracts ?? []).map((c) => [c.symbol, { price: dec.decimalsOf(c.tick_size), qty: dec.decimalsOf(c.lot_size), contract: c }])),
     [contracts.data],
   );
   if (q.isPending) return <Skeleton className="m-4 h-40 rounded-3" />;
@@ -64,12 +72,14 @@ export function FuturesPositions({ symbol, onTrade }: { symbol: string; onTrade?
   );
 }
 
-function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: number; qty: number }; tpsl: ConditionalOrder[] }) {
+function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: Spec; tpsl: ConditionalOrder[] }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const math = useContractMath(spec.contract ?? LINEAR);
   const long = dec.sign(p.quantity) > 0;
   const mark = useMarkPrice(p.symbol).data;
-  const live = liveFigures(p, mark?.mark_price);
+  const live = math.live(p, mark?.mark_price);
+  const unit = math.inverse ? t("mTrade.contractsUnit") : undefined;
   const last = useTicker(p.symbol)?.last;
   const [closing, setClosing] = useState(false);
   const [tpslOpen, setTpslOpen] = useState(false);
@@ -125,10 +135,27 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: n
       }}
       priceDecimals={spec.price}
       qtyDecimals={spec.qty}
+      base={unit}
+      quote={math.settle}
+      quoteDecimals={math.amountDecimals}
       onClose={() => setClosing(true)}
       onTpSl={() => setTpslOpen(true)}
       onAdjustMargin={p.margin_mode === "ISOLATED" ? () => setMarginOpen(true) : undefined}
     >
+      {math.inverse && spec.contract && (
+        // What the contracts are worth in the coin and in USD, and the result in USD at the mark (design 2026-10-06 §2.6).
+        <div data-testid="position-value" className="flex flex-wrap justify-between gap-2 text-xs tabular-nums text-fg-2">
+          <span>
+            {t("mTrade.positionValue", {
+              coin: formatAmount(math.worth(p.quantity, live.markPrice), math.amountDecimals), asset: math.settle,
+              usd: formatAmount(usdValue(p.quantity, spec.contract.contract_size), 0),
+            })}
+          </span>
+          {dec.sign(live.markPrice) > 0 && (
+            <span>{t("mTrade.pnlUsd", { value: formatDecimal(dec.mul(live.unrealizedPnl, live.markPrice), { decimals: 2, rounding: "half", sign: true }) })}</span>
+          )}
+        </div>
+      )}
       {tpsl.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs text-fg-2">
           {tpsl.map((c) => (
@@ -142,7 +169,7 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: n
         open={closing}
         onOpenChange={setClosing}
         title={t("mTrade.closePosition")}
-        description={t("mTrade.closeHint", { size: formatAmount(size, spec.qty), symbol: label(p.symbol) })}
+        description={t("mTrade.closeHint", { size: unit ? `${formatAmount(size, spec.qty)} ${unit}` : formatAmount(size, spec.qty), symbol: label(p.symbol) })}
         size="sm"
         onConfirm={() => void close()}
         confirmLoading={busy}
@@ -153,8 +180,9 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: n
         open={tpslOpen}
         onOpenChange={setTpslOpen}
         side={long ? "LONG" : "SHORT"}
-        entryPrice={p.entry_price}
-        quantity={size}
+        // The dialog estimates a linear contract's result; a coin-margined one's is in its coin, so none shows.
+        entryPrice={math.inverse ? undefined : p.entry_price}
+        quantity={math.inverse ? undefined : size}
         markPrice={mark?.mark_price}
         lastPrice={last}
         priceDecimals={spec.price}
@@ -162,12 +190,12 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: n
         submitting={busy}
         symbol={label(p.symbol)}
       />
-      {marginOpen && <MarginSheet p={p} onDone={() => setMarginOpen(false)} />}
+      {marginOpen && <MarginSheet p={p} decimals={math.amountDecimals} onDone={() => setMarginOpen(false)} />}
     </PositionCard>
   );
 }
 
-function MarginSheet({ p, onDone }: { p: ContractPosition; onDone: () => void }) {
+function MarginSheet({ p, decimals, onDone }: { p: ContractPosition; decimals: number; onDone: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [mode, setMode] = useState<"add" | "remove">("add");
@@ -208,9 +236,9 @@ function MarginSheet({ p, onDone }: { p: ContractPosition; onDone: () => void })
             { value: "remove", label: t("mTrade.removeMargin") },
           ]}
         />
-        <NumberInput size="lg" aria-label={t("common.amount")} value={amount} onValueChange={setAmount} decimals={2} unit="USDT" />
+        <NumberInput size="lg" aria-label={t("common.amount")} value={amount} onValueChange={setAmount} decimals={decimals} unit={p.settle_asset} />
         <p className="text-xs text-fg-3">
-          {t("common.available")} · {formatAmount(p.margin, 2)} USDT
+          {t("common.available")} · {formatAmount(p.margin, decimals)} {p.settle_asset}
         </p>
       </div>
     </Sheet>

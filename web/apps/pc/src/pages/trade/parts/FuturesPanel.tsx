@@ -1,34 +1,58 @@
 import {
-  adjustPositionMargin, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, dec, enumLabel, errorText,
-  formatAmount, formatPercent, formatPrice, isActive, liveFigures, newIdempotencyKey, placeConditionalOrder, placeContractOrder, routes, selectSignedIn,
-  useConditionalOrders, useContractFills, useContractOpenOrders, useContractOrderHistory, useContracts, useFundingPayments, useMarkPrice,
-  usePositions, useSession, useTicker, type ConditionalOrder, type Contract, type ContractFill, type ContractOrder, type ContractPosition,
-  type FundingPayment,
+  adjustPositionMargin, assetDecimals, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, dec, enumLabel, errorText,
+  formatAmount, formatDecimal, formatPercent, formatPrice, isActive, isInverse, newIdempotencyKey, placeConditionalOrder, placeContractOrder, routes,
+  selectSignedIn, usdValue, useAssets, useConditionalOrders, useContractFills, useContractMath, useContractOpenOrders, useContractOrderHistory,
+  useContracts, useFundingPayments, useMarkPrice, usePositions, useSession, useTicker, type ConditionalOrder, type Contract, type ContractFill,
+  type ContractOrder, type ContractPosition, type ContractTerms, type FundingPayment,
 } from "@exchange/core";
 import {
   Button, Checkbox, DataTable, Dialog, EmptyState, NumberInput, PositionCard, Segmented, Tabs, TabsPanel, TimeText, TpSlDialog, toast, cn,
   type ColumnDef, type TpSlValues,
 } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { EmptyList, focusOrderForm } from "./EmptyList";
 
 export type FuturesTab = "positions" | "open" | "tpsl" | "history" | "fills" | "funding";
 
-type Specs = Map<string, { price: number; qty: number }>;
+type Spec = { price: number; qty: number; contract?: Contract };
+type Specs = Map<string, Spec>;
 
 function useSpecs(): Specs {
   const contracts = useContracts();
   return useMemo(
-    () => new Map((contracts.data?.contracts ?? []).map((c) => [c.symbol, { price: dec.decimalsOf(c.tick_size), qty: dec.decimalsOf(c.lot_size) }])),
+    () => new Map((contracts.data?.contracts ?? []).map((c) => [c.symbol, { price: dec.decimalsOf(c.tick_size), qty: dec.decimalsOf(c.lot_size), contract: c }])),
     [contracts.data],
   );
 }
 
-const spec = (s: Specs, symbol: string) => s.get(symbol) ?? { price: 2, qty: 3 };
+const spec = (s: Specs, symbol: string): Spec => s.get(symbol) ?? { price: 2, qty: 3 };
+
+// A linear USDT contract's terms: the arithmetic of a position whose
+// contract the list no longer has (its own figures stand).
+const LINEAR: ContractTerms = {
+  quote_asset: "USDT", settle_asset: "USDT", contract_size: "0", tick_size: "0", lot_size: "0", price_band: "0", taker_fee_rate: "0", risk_tiers: [],
+};
+
+/**
+ * useAmounts formats an amount in a settlement asset: USDT at the column's
+ * decimals, a coin (coin-margined contracts) at its own.
+ */
+function useAmounts() {
+  const assets = useAssets().data?.assets;
+  return useCallback(
+    (v: string | null | undefined, asset: string, usdt: number) => formatAmount(v, asset === "USDT" || !asset ? usdt : assetDecimals(assets, asset)),
+    [assets],
+  );
+}
 const label = (symbol: string) => symbol.replace(/-PERP$/, "").replace("-", "");
+/** qtyOf shows a quantity at its contract's decimals; a coin-margined contract's whole contracts with their unit. */
+const qtyOf = (s: Specs, symbol: string, v: string, unit: string) => {
+  const d = spec(s, symbol);
+  return isInverse(d.contract) ? `${formatAmount(v, d.qty)} ${unit}` : formatAmount(v, d.qty);
+};
 const sideClass = (side: string) => (side === "BUY" ? "text-up" : "text-down");
 
 /**
@@ -184,9 +208,10 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
   const { t } = useTranslation();
   const qc = useQueryClient();
   const d = spec(specs, p.symbol);
+  const math = useContractMath(d.contract ?? LINEAR);
   const long = dec.sign(p.quantity) > 0;
   const mark = useMarkPrice(p.symbol).data;
-  const live = liveFigures(p, mark?.mark_price);
+  const live = math.live(p, mark?.mark_price);
   const last = useTicker(p.symbol)?.last;
   const [closing, setClosing] = useState(false);
   const [tpslOpen, setTpslOpen] = useState(false);
@@ -243,10 +268,27 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
       }}
       priceDecimals={d.price}
       qtyDecimals={d.qty}
+      base={math.inverse ? t("pcTrade.contractsUnit") : undefined}
+      quote={math.settle}
+      quoteDecimals={math.amountDecimals}
       onClose={() => setClosing(true)}
       onTpSl={() => setTpslOpen(true)}
       onAdjustMargin={p.margin_mode === "ISOLATED" ? () => setMarginOpen(true) : undefined}
     >
+      {math.inverse && d.contract && (
+        // What the contracts are worth in the coin and in USD, and the result in USD at the mark (design 2026-10-06 §2.6).
+        <div data-testid="position-value" className="flex flex-wrap justify-between gap-2 text-xs tabular-nums text-fg-2">
+          <span>
+            {t("pcTrade.positionValue", {
+              coin: formatAmount(math.worth(p.quantity, live.markPrice), math.amountDecimals), asset: math.settle,
+              usd: formatAmount(usdValue(p.quantity, d.contract.contract_size), 0),
+            })}
+          </span>
+          {dec.sign(live.markPrice) > 0 && (
+            <span>{t("pcTrade.pnlUsd", { value: formatDecimal(dec.mul(live.unrealizedPnl, live.markPrice), { decimals: 2, rounding: "half", sign: true }) })}</span>
+          )}
+        </div>
+      )}
       {tpsl.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs text-fg-2">
           {tpsl.map((c) => (
@@ -260,7 +302,7 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
         open={closing}
         onOpenChange={setClosing}
         title={t("pcTrade.closePosition")}
-        description={t("pcTrade.closeHint", { size: formatAmount(size, d.qty), symbol: label(p.symbol) })}
+        description={t("pcTrade.closeHint", { size: qtyOf(specs, p.symbol, size, t("pcTrade.contractsUnit")), symbol: label(p.symbol) })}
         size="sm"
         onConfirm={() => void close()}
         confirmLoading={busy}
@@ -271,8 +313,9 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
         open={tpslOpen}
         onOpenChange={setTpslOpen}
         side={long ? "LONG" : "SHORT"}
-        entryPrice={p.entry_price}
-        quantity={size}
+        // The dialog estimates a linear contract's result; a coin-margined one's is in its coin, so none shows.
+        entryPrice={math.inverse ? undefined : p.entry_price}
+        quantity={math.inverse ? undefined : size}
         markPrice={mark?.mark_price}
         lastPrice={last}
         priceDecimals={d.price}
@@ -280,12 +323,12 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
         submitting={busy}
         symbol={label(p.symbol)}
       />
-      {marginOpen && <MarginDialog p={p} onDone={() => setMarginOpen(false)} />}
+      {marginOpen && <MarginDialog p={p} decimals={math.amountDecimals} onDone={() => setMarginOpen(false)} />}
     </PositionCard>
   );
 }
 
-function MarginDialog({ p, onDone }: { p: ContractPosition; onDone: () => void }) {
+function MarginDialog({ p, decimals, onDone }: { p: ContractPosition; decimals: number; onDone: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [mode, setMode] = useState<"add" | "remove">("add");
@@ -317,8 +360,8 @@ function MarginDialog({ p, onDone }: { p: ContractPosition; onDone: () => void }
             { value: "remove", label: t("pcTrade.removeMargin") },
           ]}
         />
-        <NumberInput aria-label={t("common.amount")} value={amount} onValueChange={setAmount} decimals={2} unit="USDT" autoFocus />
-        <p className="text-xs text-fg-3">{t("pcTrade.currentMargin", { value: formatAmount(p.margin, 2) })}</p>
+        <NumberInput aria-label={t("common.amount")} value={amount} onValueChange={setAmount} decimals={decimals} unit={p.settle_asset} autoFocus />
+        <p className="text-xs text-fg-3">{t("pcTrade.currentMargin", { value: formatAmount(p.margin, decimals), asset: p.settle_asset })}</p>
       </div>
     </Dialog>
   );
@@ -349,8 +392,9 @@ function OpenOrders({ query, specs, height }: { query: ReturnType<typeof useCont
       ) },
       { id: "price", header: t("common.price"), meta: { align: "right" }, cell: ({ row }) =>
         row.original.type === "MARKET" ? t("codes.MARKET") : formatPrice(row.original.price, spec(specs, row.original.symbol).price) },
-      { id: "qty", header: t("common.amount"), meta: { align: "right" }, cell: ({ row }) => formatAmount(row.original.quantity, spec(specs, row.original.symbol).qty) },
-      { id: "filled", header: t("pcTrade.filled"), meta: { align: "right" }, cell: ({ row }) => formatAmount(row.original.filled_quantity, spec(specs, row.original.symbol).qty) },
+      { id: "qty", header: t("common.amount"), meta: { align: "right" }, cell: ({ row }) => qtyOf(specs, row.original.symbol, row.original.quantity, t("pcTrade.contractsUnit")) },
+      { id: "filled", header: t("pcTrade.filled"), meta: { align: "right" }, cell: ({ row }) =>
+        qtyOf(specs, row.original.symbol, row.original.filled_quantity, t("pcTrade.contractsUnit")) },
       { id: "lev", header: t("pcTrade.leverage"), cell: ({ row }) => `${enumLabel(row.original.margin_mode)} ${row.original.leverage}x` },
       { id: "status", header: t("common.status"), cell: ({ row }) => enumLabel(row.original.status) },
       { id: "action", header: t("common.action"), meta: { align: "right", width: 80 }, cell: ({ row }) => (
@@ -386,7 +430,7 @@ function TpSlOrders({ query, specs, height }: { query: ReturnType<typeof useCond
       { id: "trigger", header: t("pcTrade.trigger"), meta: { align: "right" }, cell: ({ row }) =>
         `${row.original.trigger_by === "MARK" ? t("pcTrade.markPrice") : t("market.last")} ${formatPrice(row.original.trigger_price, spec(specs, row.original.symbol).price)}` },
       { id: "qty", header: t("common.amount"), meta: { align: "right" }, cell: ({ row }) =>
-        row.original.quantity ? formatAmount(row.original.quantity, spec(specs, row.original.symbol).qty) : t("pcTrade.wholePosition") },
+        row.original.quantity ? qtyOf(specs, row.original.symbol, row.original.quantity, t("pcTrade.contractsUnit")) : t("pcTrade.wholePosition") },
       { id: "action", header: t("common.action"), meta: { align: "right", width: 80 }, cell: ({ row }) => (
         <Button size="sm" variant="ghost" onClick={() => void cancel(row.original)}>
           {t("pcTrade.cancel")}
@@ -404,6 +448,7 @@ function TpSlOrders({ query, specs, height }: { query: ReturnType<typeof useCond
 function History({ symbol, specs, height, enabled }: { symbol: string; specs: Specs; height: number; enabled: boolean }) {
   const { t } = useTranslation();
   const q = useContractOrderHistory(symbol, enabled);
+  const amount = useAmounts();
   const rows = useMemo(() => (q.data?.pages ?? []).flatMap((p) => p.items).filter((o) => !isActive(o.status)), [q.data]);
   const columns = useMemo<ColumnDef<ContractOrder>[]>(
     () => [
@@ -415,15 +460,16 @@ function History({ symbol, specs, height, enabled }: { symbol: string; specs: Sp
       { id: "avg", header: t("pcTrade.avgPrice"), meta: { align: "right" }, cell: ({ row }) =>
         row.original.average_price ? formatPrice(row.original.average_price, spec(specs, row.original.symbol).price) : "—" },
       { id: "filled", header: t("pcTrade.filled"), meta: { align: "right" }, cell: ({ row }) =>
-        `${formatAmount(row.original.filled_quantity, spec(specs, row.original.symbol).qty)} / ${formatAmount(row.original.quantity, spec(specs, row.original.symbol).qty)}` },
+        `${formatAmount(row.original.filled_quantity, spec(specs, row.original.symbol).qty)} / ${qtyOf(specs, row.original.symbol, row.original.quantity, t("pcTrade.contractsUnit"))}` },
       { id: "pnl", header: t("pcTrade.realizedPnl"), meta: { align: "right" }, cell: ({ row }) => (
         <span className={cn(dec.sign(row.original.realized_pnl) > 0 && "text-up", dec.sign(row.original.realized_pnl) < 0 && "text-down")}>
-          {formatAmount(row.original.realized_pnl, 2)}
+          {amount(row.original.realized_pnl, row.original.settle_asset, 2)}
+          {row.original.settle_asset !== "USDT" && ` ${row.original.settle_asset}`}
         </span>
       ) },
       { id: "status", header: t("common.status"), cell: ({ row }) => enumLabel(row.original.status) },
     ],
-    [t, specs],
+    [t, specs, amount],
   );
   return (
     <DataTable columns={columns} data={rows} getRowId={(o) => o.order_id} loading={q.isPending} error={q.error} onRetry={() => void q.refetch()}
@@ -435,6 +481,7 @@ function History({ symbol, specs, height, enabled }: { symbol: string; specs: Sp
 function Fills({ symbol, specs, height, enabled }: { symbol: string; specs: Specs; height: number; enabled: boolean }) {
   const { t } = useTranslation();
   const q = useContractFills(symbol, enabled);
+  const amount = useAmounts();
   const rows = useMemo(() => (q.data?.pages ?? []).flatMap((p) => p.items), [q.data]);
   const columns = useMemo<ColumnDef<ContractFill>[]>(
     () => [
@@ -447,15 +494,17 @@ function Fills({ symbol, specs, height, enabled }: { symbol: string; specs: Spec
         </span>
       ) },
       { id: "price", header: t("common.price"), meta: { align: "right" }, cell: ({ row }) => formatPrice(row.original.price, spec(specs, row.original.symbol).price) },
-      { id: "qty", header: t("common.amount"), meta: { align: "right" }, cell: ({ row }) => formatAmount(row.original.quantity, spec(specs, row.original.symbol).qty) },
-      { id: "fee", header: t("common.fee"), meta: { align: "right" }, cell: ({ row }) => `${formatAmount(row.original.fee, 4)} USDT` },
+      { id: "qty", header: t("common.amount"), meta: { align: "right" }, cell: ({ row }) => qtyOf(specs, row.original.symbol, row.original.quantity, t("pcTrade.contractsUnit")) },
+      { id: "fee", header: t("common.fee"), meta: { align: "right" }, cell: ({ row }) =>
+        `${amount(row.original.fee, row.original.settle_asset, 4)} ${row.original.settle_asset || "USDT"}` },
       { id: "pnl", header: t("pcTrade.realizedPnl"), meta: { align: "right" }, cell: ({ row }) => (
         <span className={cn(dec.sign(row.original.realized_pnl) > 0 && "text-up", dec.sign(row.original.realized_pnl) < 0 && "text-down")}>
-          {formatAmount(row.original.realized_pnl, 2)}
+          {amount(row.original.realized_pnl, row.original.settle_asset, 2)}
+          {row.original.settle_asset !== "USDT" && ` ${row.original.settle_asset}`}
         </span>
       ) },
     ],
-    [t, specs],
+    [t, specs, amount],
   );
   return (
     <DataTable columns={columns} data={rows} getRowId={(f) => `${f.trade_id}:${f.order_id}`} loading={q.isPending} error={q.error}
@@ -468,19 +517,22 @@ function Fills({ symbol, specs, height, enabled }: { symbol: string; specs: Spec
 function Funding({ symbol, specs, height, enabled }: { symbol: string; specs: Specs; height: number; enabled: boolean }) {
   const { t } = useTranslation();
   const q = useFundingPayments(symbol, enabled);
+  const amount = useAmounts();
   const rows = useMemo(() => (q.data?.pages ?? []).flatMap((p) => p.items), [q.data]);
   const columns = useMemo<ColumnDef<FundingPayment>[]>(
     () => [
       { id: "time", header: t("common.time"), cell: ({ row }) => <TimeText value={row.original.funding_time} format="datetime" />, meta: { width: 150 } },
       { id: "contract", header: t("pcTrade.contract"), cell: ({ row }) => label(row.original.symbol) },
-      { id: "qty", header: t("pcTrade.positionSize"), meta: { align: "right" }, cell: ({ row }) => formatAmount(row.original.quantity, spec(specs, row.original.symbol).qty) },
+      { id: "qty", header: t("pcTrade.positionSize"), meta: { align: "right" }, cell: ({ row }) => qtyOf(specs, row.original.symbol, row.original.quantity, t("pcTrade.contractsUnit")) },
       { id: "rate", header: t("pcTrade.fundingRate"), meta: { align: "right" }, cell: ({ row }) => formatPercent(row.original.funding_rate, 4) },
       { id: "mark", header: t("pcTrade.markPrice"), meta: { align: "right" }, cell: ({ row }) => formatPrice(row.original.mark_price, spec(specs, row.original.symbol).price) },
       { id: "amount", header: t("pcTrade.fundingAmount"), meta: { align: "right" }, cell: ({ row }) => (
-        <span className={cn(dec.sign(row.original.amount) > 0 ? "text-up" : "text-down")}>{formatAmount(row.original.amount, 4)} USDT</span>
+        <span className={cn(dec.sign(row.original.amount) > 0 ? "text-up" : "text-down")}>
+          {amount(row.original.amount, row.original.settle_asset, 4)} {row.original.settle_asset || "USDT"}
+        </span>
       ) },
     ],
-    [t, specs],
+    [t, specs, amount],
   );
   return (
     <DataTable columns={columns} data={rows} getRowId={(f) => `${f.symbol}:${f.funding_time}:${f.position_side}`} loading={q.isPending} error={q.error}

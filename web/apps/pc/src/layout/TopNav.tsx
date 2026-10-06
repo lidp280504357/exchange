@@ -1,6 +1,6 @@
 import {
-  DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, signOut, useContracts, useSession, useSettings,
-  useTerminalPrefs, type Locale,
+  DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, isInverse, LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, signOut, useContracts, useSession,
+  useSettings, useTerminalPrefs, type Locale,
 } from "@exchange/core";
 import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
@@ -12,8 +12,8 @@ import { Link, NavLink } from "react-router";
 import { Logo } from "./Logo";
 import { SearchPalette } from "./SearchPalette";
 
-// How many contracts the futures menu names.
-const FUTURES_MENU_SIZE = 6;
+// How many contracts the futures menu names in each group.
+const FUTURES_MENU_SIZE = 5;
 
 /**
  * TopNav: the bar fixed on every page (design §6.1), TOP_NAV_HEIGHT tall — markets, spot,
@@ -30,15 +30,24 @@ export function TopNav() {
   const recentSpot = recent.filter((s) => !isContract(s)).slice(0, 5);
   const recentFutures = recent.filter(isContract);
   const contracts = useContracts();
-  // The futures menu names a few contracts, the ones visited lately first,
-  // then those trading in the list's order, and leads to the markets'
-  // futures tab for the rest (the list follows Binance's, design
-  // 2026-10-06 §3.4: some 90 contracts).
+  // The futures menu names a few contracts in two groups, USDT-margined and
+  // coin-margined (design 2026-10-06 §2.6): the ones visited lately first,
+  // then those trading in the list's order; each group leads to the
+  // markets' futures tab for the rest (the list follows Binance's, §3.4:
+  // some 100 contracts).
   const listed = contracts.data?.contracts ?? [];
   const bySymbol = new Map(listed.map((c) => [c.symbol, c]));
-  const menuFutures = [
-    ...new Set([...recentFutures.filter((s) => bySymbol.has(s)), ...listed.filter((c) => c.status === "TRADING").map((c) => c.symbol)]),
-  ].slice(0, FUTURES_MENU_SIZE);
+  const menuOf = (coin: boolean) =>
+    [
+      ...new Set([
+        ...recentFutures.filter((s) => bySymbol.has(s) && isInverse(bySymbol.get(s)) === coin),
+        ...listed.filter((c) => c.status === "TRADING" && isInverse(c) === coin).map((c) => c.symbol),
+      ]),
+    ].slice(0, FUTURES_MENU_SIZE);
+  const futuresGroups = [
+    { key: "usdt", label: t("pc.usdtMargined"), symbols: menuOf(false), all: `${routes.markets}?cat=futures` },
+    { key: "coin", label: t("pc.coinMargined"), symbols: menuOf(true), all: `${routes.markets}?cat=futures&margin=coin` },
+  ].filter((g) => g.symbols.length > 0);
   const brand = useBranding().name;
   // The top bar's layer is above the pages' sticky table headers: its menus
   // open over them (review B61).
@@ -60,16 +69,22 @@ export function TopNav() {
             <MenuLink to={routes.markets}>{t("nav.markets")} →</MenuLink>
           </Menu>
           <Menu label={t("nav.futures")} to={routes.futures(recentFutures[0] ?? DEFAULT_CONTRACT)}>
-            {menuFutures.map((symbol) => {
-              const c = bySymbol.get(symbol)!;
-              return (
-                <MenuLink key={symbol} to={routes.futures(symbol)}>
-                  {c.base_asset}
-                  {c.quote_asset} {t("pc.perpetual")}
-                </MenuLink>
-              );
-            })}
-            <MenuLink to={`${routes.markets}?cat=futures`}>{t("pc.allFutures")} →</MenuLink>
+            {futuresGroups.map((g) => (
+              <div key={g.key} data-testid={`futures-menu-${g.key}`}>
+                <p className="px-4 pb-1 pt-2 text-xs text-fg-3">{g.label}</p>
+                {g.symbols.map((symbol) => {
+                  const c = bySymbol.get(symbol)!;
+                  return (
+                    <MenuLink key={symbol} to={routes.futures(symbol)}>
+                      {c.base_asset}
+                      {c.quote_asset} {t("pc.perpetual")}
+                    </MenuLink>
+                  );
+                })}
+                <MenuLink to={g.all}>{t("pc.allFutures")} →</MenuLink>
+              </div>
+            ))}
+            {futuresGroups.length === 0 && <MenuLink to={`${routes.markets}?cat=futures`}>{t("pc.allFutures")} →</MenuLink>}
           </Menu>
           {signedIn && (
             <Menu label={t("nav.assets")} to={routes.assets}>

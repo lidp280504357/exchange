@@ -1,7 +1,7 @@
 import {
-  ApiError, checkRiskLimit, closeableQuantity, dec, dk, errorText, formatAmount, formatPrice, maxNotional, maxOpenQuantity, newIdempotencyKey,
-  openCost, openLimit, placeContractOrder, reservePrice, riskRoom, routes, selectSignedIn, sideExposure, updateContractSettings, useContractOpenOrders,
-  useContractSettings, useFuturesAccount, useMarkPrice, usePositions, useSession, useSettings, useTicker, type Contract, type NewContractOrder,
+  ApiError, closeableQuantity, dec, dk, errorText, formatAmount, formatPrice, maxNotional, newIdempotencyKey, openLimit, placeContractOrder, routes,
+  selectSignedIn, sideExposure, updateContractSettings, usdValue, useContractMath, useContractOpenOrders, useContractSettings, useFuturesAccount,
+  useMarkPrice, usePositions, useSession, useSettings, useTicker, type Contract, type NewContractOrder,
 } from "@exchange/core";
 import { Button, Checkbox, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Slider, Tabs, toast, cn } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,9 @@ type Action = { side: "BUY" | "SELL"; positionSide: "BOTH" | "LONG" | "SHORT"; r
  * leverage, then open or close with a limit or market order. Opening shows each side's cost
  * (margin plus fee) and the most the margin opens; closing takes at most
  * the position. One-way mode closes with reduce-only orders, hedge mode
- * by position side.
+ * by position side. A coin-margined contract (design 2026-10-06 §2.6)
+ * takes whole contracts, shows what they are worth in its coin and in
+ * USD, and reserves and reports in its coin's FUTURES account.
  */
 export function FuturesOrderForm({
   contract, fill, onPlaced, className,
@@ -39,7 +41,8 @@ export function FuturesOrderForm({
   const priceDecimals = dec.decimalsOf(contract.tick_size);
   const qtyDecimals = dec.decimalsOf(contract.lot_size);
   const settings = useContractSettings(symbol);
-  const account = useFuturesAccount();
+  const math = useContractMath(contract);
+  const account = useFuturesAccount(math.settle);
   const positions = usePositions(symbol);
   const openOrders = useContractOpenOrders(symbol);
   const mark = useMarkPrice(symbol).data;
@@ -62,6 +65,9 @@ export function FuturesOrderForm({
   const hedge = settings.data?.position_mode === "HEDGE";
   const available = account.data?.available ?? "0";
   const refPrice = type === "limit" ? price : (mark?.mark_price ?? tk?.last ?? "");
+  // A coin-margined contract's quantity is whole contracts.
+  const unit = math.inverse ? t("mTrade.contractsUnit") : contract.base_asset;
+  const transferTo = `${routes.transfer}?asset=${math.settle}`;
 
   // The book's click fills the price; a first visit takes the last price.
   useEffect(() => {
@@ -90,16 +96,14 @@ export function FuturesOrderForm({
   const orders = openOrders.data?.items ?? [];
   const exposure = (side: "BUY" | "SELL") => sideExposure(side, hedge ? (side === "BUY" ? "LONG" : "SHORT") : "BOTH", list, orders);
   const byMargin = (side: "BUY" | "SELL") => {
-    const at = reservePrice(side, type, price, mark?.mark_price ?? tk?.last ?? "", contract.price_band, contract.tick_size);
-    return at ? maxOpenQuantity(available, at, leverage, contract.taker_fee_rate, contract.lot_size) : "0";
+    const at = math.reservePrice(side, type, price, mark?.mark_price ?? tk?.last ?? "");
+    return at ? math.maxOpen(available, at, leverage) : "0";
   };
   const maxOpenOf = (side: "BUY" | "SELL") =>
-    dec.isDecimal(riskMark || "x")
-      ? openLimit(byMargin(side), riskRoom(contract.risk_tiers, leverage, riskMark, exposure(side), contract.lot_size))
-      : byMargin(side);
+    dec.isDecimal(riskMark || "x") ? openLimit(byMargin(side), math.riskRoom(leverage, riskMark, exposure(side))) : byMargin(side);
   const maxOpen = { BUY: maxOpenOf("BUY"), SELL: maxOpenOf("SELL") };
   const maxClose = (side: "BUY" | "SELL") => closeableQuantity((side === "SELL" ? longPos : shortPos)?.quantity);
-  const cost = quantity && refPrice ? openCost(refPrice, quantity, leverage, contract.taker_fee_rate) : "0";
+  const cost = quantity && refPrice ? math.openCost(refPrice, quantity, leverage) : "0";
 
   const actions: [Action, Action] =
     tab === "open"
@@ -125,12 +129,16 @@ export function FuturesOrderForm({
     if (type === "limit" && (!dec.isDecimal(price || "x") || dec.sign(price) <= 0)) return t("mTrade.needPrice");
     if (dec.lt(quantity, contract.min_quantity)) return t("mTrade.minQuantity", { value: contract.min_quantity });
     if (dec.gt(quantity, contract.max_quantity)) return t("mTrade.maxQuantity", { value: contract.max_quantity });
-    if (refPrice && dec.isDecimal(refPrice) && dec.lt(dec.mul(refPrice, quantity), contract.min_notional))
-      return t("mTrade.minNotional", { value: contract.min_notional });
+    if (refPrice && dec.isDecimal(refPrice) && dec.lt(math.orderNotional(quantity, refPrice), contract.min_notional))
+      return t("mTrade.minNotional", { value: contract.min_notional, asset: math.notionalUnit });
     if (tab === "close" && dec.gt(quantity, maxClose(a.side))) return t("mTrade.overClose");
     if (tab === "open" && !a.reduceOnly && dec.isDecimal(riskMark || "x")) {
-      const r = checkRiskLimit(contract.risk_tiers, leverage, riskMark, exposure(a.side), quantity);
-      if (!r.ok) return t("mTrade.overRisk", { leverage, cap: formatAmount(r.cap, 0), notional: formatAmount(r.notional, 2) });
+      const r = math.checkRisk(leverage, riskMark, exposure(a.side), quantity);
+      if (!r.ok) {
+        return t("mTrade.overRisk", {
+          leverage, cap: formatAmount(r.cap, math.inverse ? undefined : 0), notional: formatAmount(r.notional, math.amountDecimals), asset: math.settle,
+        });
+      }
     }
     return null;
   };
@@ -151,7 +159,7 @@ export function FuturesOrderForm({
       onPlaced?.();
     } catch (e) {
       const short = e instanceof ApiError && (e.code === "DERIV_INSUFFICIENT_MARGIN" || e.code === "LEDGER_INSUFFICIENT_BALANCE");
-      toast.error(errorText(e), short ? { action: { label: t("nav.transfer"), onClick: () => navigate(routes.transfer) } } : undefined);
+      toast.error(errorText(e), short ? { action: { label: t("nav.transfer"), onClick: () => navigate(transferTo) } } : undefined);
     } finally {
       setSubmitting(false);
     }
@@ -261,7 +269,7 @@ export function FuturesOrderForm({
         size="lg"
         aria-label={t("common.amount")}
         prefix={<span className="text-xs text-fg-3">{t("common.amount")}</span>}
-        unit={contract.base_asset}
+        unit={unit}
         value={quantity}
         onValueChange={(q) => {
           setQuantity(q);
@@ -272,6 +280,11 @@ export function FuturesOrderForm({
         align="right"
         snap
       />
+      {math.inverse && (
+        <p data-testid="contracts-value" className="-mt-1.5 text-right text-xs tabular-nums text-fg-3">
+          ≈ {formatAmount(math.worth(quantity || "0", refPrice), math.amountDecimals)} {math.settle} · {formatAmount(usdValue(quantity || "0", contract.contract_size), 0)} USD
+        </p>
+      )}
       <Slider
         value={pct}
         onValueChange={setPercent}
@@ -289,10 +302,17 @@ export function FuturesOrderForm({
         <Checkbox checked={reduceOnly} onCheckedChange={setReduceOnly} label={t("mTrade.reduceOnly")} className="text-xs" />
       )}
       <div className="flex flex-col gap-1 text-xs">
+        {/* The settlement asset's FUTURES account (design 2026-10-06 §2.6: a coin-margined contract's is its coin's). */}
+        <Row label={t("mTrade.walletBalance")}>
+          {formatAmount(account.data?.wallet_balance ?? "0", math.amountDecimals)} {math.settle}
+        </Row>
+        <Row label={t("mTrade.marginBalance")}>
+          {formatAmount(account.data?.margin_balance ?? "0", math.amountDecimals)} {math.settle}
+        </Row>
         <Row label={t("common.available")}>
           <span className="flex items-center gap-1">
-            {formatAmount(available, 2)} {contract.quote_asset}
-            <Link to={routes.transfer} aria-label={t("nav.transfer")} className="text-brand">
+            {formatAmount(available, math.amountDecimals)} {math.settle}
+            <Link to={transferTo} aria-label={t("nav.transfer")} className="text-brand">
               <ArrowRightLeft size={12} />
             </Link>
           </span>
@@ -300,19 +320,19 @@ export function FuturesOrderForm({
         {tab === "open" ? (
           <>
             <Row label={t("mTrade.maxOpenLong")}>
-              {formatAmount(maxOpen.BUY, qtyDecimals)} {contract.base_asset}
+              {formatAmount(maxOpen.BUY, qtyDecimals)} {unit}
             </Row>
             <Row label={t("mTrade.maxOpenShort")}>
-              {formatAmount(maxOpen.SELL, qtyDecimals)} {contract.base_asset}
+              {formatAmount(maxOpen.SELL, qtyDecimals)} {unit}
             </Row>
             <Row label={t("mTrade.cost")}>
-              {formatAmount(cost, 2)} {contract.quote_asset}
+              {formatAmount(cost, math.amountDecimals)} {math.settle}
             </Row>
           </>
         ) : (
           <>
-            <Row label={t("mTrade.longPosition")}>{formatAmount(maxClose("SELL"), qtyDecimals)} {contract.base_asset}</Row>
-            <Row label={t("mTrade.shortPosition")}>{formatAmount(maxClose("BUY"), qtyDecimals)} {contract.base_asset}</Row>
+            <Row label={t("mTrade.longPosition")}>{formatAmount(maxClose("SELL"), qtyDecimals)} {unit}</Row>
+            <Row label={t("mTrade.shortPosition")}>{formatAmount(maxClose("BUY"), qtyDecimals)} {unit}</Row>
           </>
         )}
       </div>
@@ -342,10 +362,10 @@ export function FuturesOrderForm({
           const cap = maxNotional(contract.risk_tiers, l);
           if (dec.sign(cap) <= 0) return null;
           // A leverage whose cap a position already exceeds is refused (DERIV_RISK_LIMIT_EXCEEDED).
-          const held = dec.isDecimal(riskMark || "x") ? list.reduce((m, p) => dec.max(m, dec.mul(dec.abs(p.quantity), riskMark)), "0") : "0";
+          const held = dec.isDecimal(riskMark || "x") ? list.reduce((m, p) => dec.max(m, math.worth(p.quantity, riskMark)), "0") : "0";
           return dec.gt(held, cap)
-            ? t("mTrade.tierOver", { held: formatAmount(held, 2) })
-            : t("mTrade.tierInfo", { value: formatAmount(cap, 0) });
+            ? t("mTrade.tierOver", { held: formatAmount(held, math.amountDecimals), asset: math.settle })
+            : t("mTrade.tierInfo", { value: formatAmount(cap, math.inverse ? undefined : 0), asset: math.settle });
         }}
       />
       <Dialog
@@ -370,7 +390,10 @@ export function FuturesOrderForm({
                 { label: t("mTrade.sideType"), value: `${t(`codes.${pending.side}`)} · ${t(`codes.${pending.type}`)}${pending.reduce_only ? ` · ${t("mTrade.reduceOnly")}` : ""}` },
                 { label: t("mTrade.marginAndLeverage"), value: `${t(`codes.${marginMode}`)} · ${leverage}x` },
                 ...(pending.price ? [{ label: t("common.price"), value: `${formatPrice(pending.price, priceDecimals)} ${contract.quote_asset}` }] : []),
-                { label: t("common.amount"), value: `${formatAmount(pending.quantity, qtyDecimals)} ${contract.base_asset}` },
+                { label: t("common.amount"), value: `${formatAmount(pending.quantity, qtyDecimals)} ${unit}` },
+                ...(math.inverse
+                  ? [{ label: t("mTrade.value"), value: `≈ ${formatAmount(usdValue(pending.quantity, contract.contract_size), 0)} USD` }]
+                  : []),
               ]}
             />
             <Checkbox checked={skipNext} onCheckedChange={setSkipNext} label={t("mTrade.dontAsk")} />

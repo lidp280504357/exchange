@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { derivativesApi, marketApi, unwrap } from "../api/client";
 import type { components } from "../api/gen/derivatives";
 import type { components as MarketComponents } from "../api/gen/market";
@@ -6,6 +7,8 @@ import { useChannel } from "../market/hooks";
 import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
 import { channels, type MarkData, type MarketPush } from "../ws/types";
+import { contractMath, type ContractMath, type ContractTerms } from "./coinMargined";
+import { assetDecimals, useAssets } from "./pairs";
 
 // Perpetual contracts for the futures terminal (api/openapi/derivatives.yaml).
 // Every query lives under the "derivatives" root: position, risk, futures
@@ -45,7 +48,7 @@ export type NewConditionalOrder = {
 };
 
 export const dk = {
-  account: ["derivatives", "account"] as const,
+  account: (asset = "USDT") => ["derivatives", "account", asset] as const,
   settings: (symbol: string) => ["derivatives", "settings", symbol] as const,
   positions: (symbol: string) => ["derivatives", "positions", symbol] as const,
   openOrders: (symbol: string) => ["derivatives", "orders", symbol, "ACTIVE"] as const,
@@ -59,9 +62,28 @@ function useSignedIn() {
   return useSession(selectSignedIn);
 }
 
-/** useFuturesAccount is the caller's FUTURES account at the mark prices. */
-export function useFuturesAccount() {
-  return useQuery({ queryKey: dk.account, queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account")), enabled: useSignedIn(), staleTime: 30_000 });
+/**
+ * useFuturesAccount is the caller's FUTURES account of a settlement asset
+ * at the mark prices: USDT's, or the coin's of a coin-margined contract.
+ */
+export function useFuturesAccount(asset = "USDT") {
+  return useQuery({
+    queryKey: dk.account(asset),
+    queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account", { params: { query: { asset: asset === "USDT" ? undefined : asset } } })),
+    enabled: useSignedIn() && asset !== "",
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * useContractMath is a contract's order arithmetic (./coinMargined) at its
+ * settlement asset's decimals: a coin-margined contract's margin and fees
+ * round to the coin's.
+ */
+export function useContractMath(c: ContractTerms): ContractMath {
+  const assets = useAssets();
+  const decimals = assetDecimals(assets.data?.assets, c.settle_asset || c.quote_asset);
+  return useMemo(() => contractMath(c, decimals), [c, decimals]);
 }
 
 /** useContractSettings is the caller's position mode, margin mode and leverage on a contract. */

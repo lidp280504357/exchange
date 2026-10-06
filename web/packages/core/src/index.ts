@@ -30,3 +30,4 @@ export * from "./trading/prefs";
 export * from "./trading/seed";
 export * from "./trading/derivatives";
 export * from "./trading/futuresMath";
+export * from "./trading/coinMargined";

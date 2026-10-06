@@ -1,5 +1,5 @@
 import {
-  cancelContractOrder, dec, enumLabel, errorText, formatAmount, formatPrice, isActive, routes, selectSignedIn, useContractOpenOrders,
+  cancelContractOrder, dec, enumLabel, errorText, formatAmount, formatPrice, isActive, isInverse, routes, selectSignedIn, useContractOpenOrders,
   useContractOrderHistory, useSession, type Contract, type ContractOrder,
 } from "@exchange/core";
 import { Button, EmptyState, ErrorState, Skeleton, Tabs, TimeText, cn, toast } from "@exchange/ui";
@@ -63,7 +63,10 @@ function Card({ o, contract, action }: { o: ContractOrder; contract: Contract; a
           <div className="tabular-nums text-fg-1">{o.type === "MARKET" ? t("codes.MARKET") : formatPrice(o.price, pd)}</div>
         </div>
         <div>
-          <div className="text-fg-3">{t("common.amount")}</div>
+          <div className="text-fg-3">
+            {t("common.amount")}
+            {isInverse(contract) && ` (${t("mTrade.contractsUnit")})`}
+          </div>
           <div className="tabular-nums text-fg-1">{formatAmount(o.quantity, qd)}</div>
         </div>
         <div className="text-right">

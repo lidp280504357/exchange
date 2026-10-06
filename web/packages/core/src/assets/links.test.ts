@@ -32,4 +32,15 @@ describe("contractFor", () => {
     expect(contractFor("USDT", contracts)).toBe("BTC-USDT-PERP");
     expect(contractFor("SOL", contracts)).toBeNull();
   });
+
+  it("takes a coin's FUTURES account to the contract settled in it", () => {
+    const listed = [
+      { symbol: "BTC-USDT-PERP", base_asset: "BTC", quote_asset: "USDT", status: "TRADING", settle_asset: "USDT" },
+      { symbol: "BTC-USD-PERP", base_asset: "BTC", quote_asset: "USD", status: "TRADING", settle_asset: "BTC" },
+      { symbol: "ETH-USDT-PERP", base_asset: "ETH", quote_asset: "USDT", status: "TRADING", settle_asset: "USDT" },
+    ];
+    expect(contractFor("BTC", listed)).toBe("BTC-USD-PERP");
+    expect(contractFor("USDT", listed)).toBe("BTC-USDT-PERP");
+    expect(contractFor("ETH", listed)).toBe("ETH-USDT-PERP");
+  });
 });

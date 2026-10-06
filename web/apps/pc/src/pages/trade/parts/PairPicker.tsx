@@ -49,6 +49,17 @@ export function PairPicker({
     query,
   );
   const toggle = (symbol: string) => favorites.toggle(symbol).catch((e: unknown) => toast.error(errorText(e)));
+  // The contracts group by margin: USDT-margined ones quote in USDT, coin-margined ones in USD (design 2026-10-06 §2.6).
+  const groupLabel = (g: string) =>
+    g === "all"
+      ? t("common.all")
+      : g === "fav"
+        ? t("market.favorites")
+        : kind === "futures" && g === "USDT"
+          ? t("pc.usdtMargined")
+          : kind === "futures" && g === "USD"
+            ? t("pc.coinMargined")
+            : g;
 
   const pick = (symbol: string) => {
     setOpen(false);
@@ -109,7 +120,7 @@ export function PairPicker({
               setGroup(g);
               setActive(0);
             }}
-            items={groups.map((g) => ({ value: g, label: g === "all" ? t("common.all") : g === "fav" ? t("market.favorites") : g }))}
+            items={groups.map((g) => ({ value: g, label: groupLabel(g) }))}
           />
         )}
       </div>
