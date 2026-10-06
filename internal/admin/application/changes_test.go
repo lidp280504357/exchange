@@ -29,8 +29,11 @@ type docCatalog struct {
 	down, lost          bool
 	refuse, unavailable string
 	// beforeMove sets a symbol's status just before a move of it (a
-	// change in between the round's read and the move).
+	// change in between the last read and the move); onList runs at the
+	// start of the nth List.
 	beforeMove map[string]string
+	lists      int
+	onList     func(n int)
 }
 
 var entityKeys = map[string]struct{ section, key string }{
@@ -64,6 +67,10 @@ func (c *docCatalog) Export(context.Context) (json.RawMessage, error) {
 // List lists the contracts as instrument-service's listing has them (a
 // coin's changes read them there).
 func (c *docCatalog) List(context.Context) (json.RawMessage, error) {
+	c.lists++
+	if c.onList != nil {
+		c.onList(c.lists)
+	}
 	if c.down {
 		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is down")
 	}

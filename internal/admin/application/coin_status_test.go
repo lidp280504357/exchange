@@ -123,7 +123,7 @@ func TestCloseAndReopenACoinsContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ = h.store.Changes().Get(ctx, res.Change.ID)
-	if got.Status != domain.ChangeFailed || got.Result != "COMMON_CONFLICT: 1 of 2 did not move: BTC-USD-PERP: CANCEL_ONLY → TRADING "+
+	if got.Status != domain.ChangeFailed || got.Result != "COMMON_CONFLICT: 1 of 2 not moved as confirmed: BTC-USD-PERP: CANCEL_ONLY → TRADING "+
 		"failed: INSTRUMENT_STATUS_TRANSITION_INVALID: no such move; BTC-USDT-PERP: CANCEL_ONLY → TRADING (in effect already)" {
 		t.Fatalf("partly %+v", got)
 	}
@@ -184,9 +184,9 @@ func TestACoinsChangeFailingAfterARound(t *testing.T) {
 	}
 }
 
-// A contract whose status changes between a round's read and its move
-// (a move instrument-service allows) is moved, the result and its audit
-// saying from where (review FD, A68 ②).
+// A contract whose status changes between its last read and its move (a
+// move instrument-service allows) is moved, but not as confirmed: the
+// change fails, the result and the audit saying from where (review FD ②).
 func TestACoinsContractChangedWhileMoving(t *testing.T) {
 	h, catalog, boss, _, _ := changeRigOf(t, coinDoc)
 	ctx := context.Background()
@@ -204,15 +204,48 @@ func TestACoinsContractChangedWhileMoving(t *testing.T) {
 		t.Fatalf("due %d %v", n, err)
 	}
 	got, _ := h.store.Changes().Get(ctx, res.Change.ID)
-	if got.Status != domain.ChangeApplied ||
-		got.Result != "BTC-USD-PERP: HALT → CANCEL_ONLY; BTC-USDT-PERP: HALT → CANCEL_ONLY (TRADING when confirmed)" {
-		t.Fatalf("applied %+v", got)
+	if got.Status != domain.ChangeFailed || got.Result != "COMMON_CONFLICT: 1 of 2 not moved as confirmed: "+
+		"BTC-USD-PERP: HALT → CANCEL_ONLY; BTC-USDT-PERP: moved from HALT, not TRADING as confirmed (CANCEL_ONLY now)" {
+		t.Fatalf("not as confirmed %+v", got)
 	}
 	for _, e := range h.store.audits {
 		if e.GetTarget() == "contract:BTC-USDT-PERP" && e.GetDetails() !=
 			`{"change_id":"`+res.Change.ID+`","coin":"BTC","from":"HALT","to":"CANCEL_ONLY"}` {
 			t.Fatalf("audited %s", e.GetDetails())
 		}
+	}
+}
+
+// A contract changed after the round's first read and before its own
+// read is not moved; the others are, and the change fails (review FD ②).
+func TestACoinsContractChangedBeforeItsMove(t *testing.T) {
+	h, catalog, boss, _, _ := changeRigOf(t, coinDoc)
+	ctx := context.Background()
+	prev, err := h.svc.PreviewCoinStatus(ctx, boss, "BTC", "CANCEL_ONLY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.svc.SetCoinStatus(ctx, boss, "BTC", "CANCEL_ONLY", "winding BTC down", prev.Confirmation.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The round reads the contracts once, then each again before its move:
+	// BTC-USDT-PERP is halted by hand after BTC-USD-PERP's read.
+	catalog.lists = 0
+	catalog.onList = func(n int) {
+		if n == 2 {
+			_, _ = catalog.setStatus("CONTRACT", "BTC-USDT-PERP", "HALT")
+		}
+	}
+	h.now = h.now.Add(5 * time.Minute)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 {
+		t.Fatalf("due %d %v", n, err)
+	}
+	got, _ := h.store.Changes().Get(ctx, res.Change.ID)
+	if got.Status != domain.ChangeFailed || got.Result != "COMMON_CONFLICT: 1 of 2 not moved as confirmed: "+
+		"BTC-USD-PERP: HALT → CANCEL_ONLY; BTC-USDT-PERP: not moved (HALT now)" ||
+		catalog.items["CONTRACT"]["BTC-USDT-PERP"]["status"] != "HALT" {
+		t.Fatalf("changed before its move %+v", got)
 	}
 }
 

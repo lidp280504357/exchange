@@ -323,20 +323,20 @@ cancel_coin_changes() {
     as ADMIN POST "/admin/v1/instruments/changes/$id/cancel" '{"reason":"e2e cleanup"}' >/dev/null
   done
 }
-# An admin-service without the route answers 405, or 404 "no such
-# endpoint" (review FD, A68 ③); any other answer is checked.
-as OPERATOR POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"CANCEL_ONLY"}'
-if [[ $STATUS == 405 ]] || [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
-  echo "skip a coin's contracts at once: this admin-service is from before A63"
+# Skipped only where BTC has no contracts (review FD ③); any other
+# answer is checked.
+as ADMIN POST /admin/v1/derivatives/coins/btc/status/preview '{"to":"CANCEL_ONLY"}'
+if [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no contracts of BTC" ]]; then
+  echo "skip a coin's contracts at once: BTC has no contracts here"
 else
-  expect 403 ADMIN_FORBIDDEN "an OPERATOR closes no coin"
-  as ADMIN POST /admin/v1/derivatives/coins/btc/status/preview '{"to":"CANCEL_ONLY"}'
   expect 200 - "ADMIN previews closing BTC"
   check '([.contracts[].symbol] | index("BTC-USDT-PERP") != null and index("BTC-USD-PERP") != null)
     and .coin == "BTC" and .to == "CANCEL_ONLY" and all(.contracts[]; (.from == "TRADING" or .from == "HALT") and .to == "CANCEL_ONLY")
     and (.confirmation.token | length) > 40 and .delay_seconds == 60' \
     "both margin types (trading or halted), one confirmation, waiting a minute"
   BTC_CLOSE=$(jq -r .confirmation.token <<<"$BODY")
+  as OPERATOR POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"CANCEL_ONLY"}'
+  expect 403 ADMIN_FORBIDDEN "an OPERATOR closes no coin"
   as ADMIN POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"TRADING"}'
   expect 409 INSTRUMENT_STATUS_TRANSITION_INVALID "none closed to reopen"
   as ADMIN POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"DELISTED"}'

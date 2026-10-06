@@ -184,11 +184,15 @@ func (s *Service) SetCoinStatus(ctx context.Context, p Principal, coin, to, reas
 // when one of them is no longer where it was confirmed (the change fails:
 // preview again), and the result says which are where they go (moved by
 // an earlier round of this change, or otherwise) and which are not (review
-// EY ①); one found where it goes is in effect already. Each move is
-// audited as a contract's status move (admin.instruments.contract_status).
-// A move failing for a moment waits for the next round, which finds those
-// moved in effect; one that will not pass is reported in the result with
-// how each of the others went.
+// EY ①); one found where it goes is in effect already. Each contract's
+// status is read again just before its move: one changed since the round
+// began is not moved, and one whose move turns out to have started
+// elsewhere (changed in between, a move instrument-service allowed) is
+// counted as not moved as confirmed (review FD ②); either fails the
+// change. Each move is audited as a contract's status move
+// (admin.instruments.contract_status). A move failing for a moment waits
+// for the next round, which finds those moved in effect; one that will not
+// pass is reported in the result with how each of the others went.
 func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange) (result string, attempted bool, err error) {
 	var pl coinPayload
 	if err := json.Unmarshal(c.Payload, &pl); err != nil || len(pl.Contracts) == 0 {
@@ -215,6 +219,17 @@ func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange
 			lines = append(lines, line+inEffect)
 			continue
 		}
+		switch cur, err := s.contractStatus(ctx, m.Symbol); {
+		case err != nil:
+			return "", attempted, err
+		case cur == m.To:
+			lines = append(lines, line+inEffect)
+			continue
+		case cur != m.From:
+			failed++
+			lines = append(lines, notMoved(m.Symbol, cur))
+			continue
+		}
 		attempted = true
 		was, err := s.moveStatus(ctx, domain.ChangeContractStatus, m.Symbol, m.To, c.Reason, c.RequestedByEmail)
 		if err != nil {
@@ -225,20 +240,47 @@ func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange
 			lines = append(lines, line+" failed: "+err.Error())
 			continue
 		}
-		// Moved from another status than the round read (changed in
-		// between, a move instrument-service allowed): said so (review
-		// FD, A68 ②).
 		if was != "" && was != m.From {
-			m.From, line = was, fmt.Sprintf("%s: %s → %s (%s when confirmed)", m.Symbol, was, m.To, m.From)
+			// Changed between the read and the move: moved, but not as
+			// confirmed; audited from where it was.
+			failed++
+			lines = append(lines, fmt.Sprintf("%s: moved from %s, not %s as confirmed (%s now)", m.Symbol, was, m.From, m.To))
+			m.From = was
+			s.auditCoinMove(ctx, c, m)
+			continue
 		}
 		s.auditCoinMove(ctx, c, m)
 		lines = append(lines, line)
 	}
 	result = strings.Join(lines, "; ")
 	if failed > 0 {
-		return "", attempted, apperr.New(apperr.KindConflict, apperr.CodeConflict, fmt.Sprintf("%d of %d did not move: %s", failed, len(lines), result))
+		return "", attempted, apperr.New(apperr.KindConflict, apperr.CodeConflict,
+			fmt.Sprintf("%d of %d not moved as confirmed: %s", failed, len(lines), result))
 	}
 	return result, attempted, nil
+}
+
+// contractStatus reads one contract's status now ("" when it is no longer
+// listed).
+func (s *Service) contractStatus(ctx context.Context, symbol string) (string, error) {
+	contracts, err := s.listedContracts(ctx)
+	if err != nil {
+		return "", apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the contracts cannot be read")
+	}
+	for _, c := range contracts {
+		if c.Symbol == symbol {
+			return c.Status, nil
+		}
+	}
+	return "", nil
+}
+
+// notMoved says a contract was not moved, and where it is.
+func notMoved(symbol, cur string) string {
+	if cur == "" {
+		return symbol + ": not moved (no longer listed)"
+	}
+	return fmt.Sprintf("%s: not moved (%s now)", symbol, cur)
 }
 
 // movedElsewhere is the first of a change's contracts that is neither
@@ -262,10 +304,8 @@ func whereEach(moves []CoinContractMove, now map[string]string) string {
 			lines = append(lines, fmt.Sprintf("%s: %s → %s%s", m.Symbol, m.From, m.To, inEffect))
 		case m.From:
 			lines = append(lines, m.Symbol+": not moved")
-		case "":
-			lines = append(lines, m.Symbol+": not moved (no longer listed)")
 		default:
-			lines = append(lines, fmt.Sprintf("%s: not moved (%s now)", m.Symbol, cur))
+			lines = append(lines, notMoved(m.Symbol, cur))
 		}
 	}
 	return strings.Join(lines, "; ")
