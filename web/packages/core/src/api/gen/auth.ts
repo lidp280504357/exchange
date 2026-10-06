@@ -471,8 +471,9 @@ export interface components {
             captcha_token: string;
             device_id: components["schemas"]["DeviceId"];
             /**
-             * @description Language of the message; defaults to Accept-Language, then zh-CN.
+             * @description Language of the message; defaults to Accept-Language, then zh-CN. zh-TW, zh-HK and zh-Hant get Traditional Chinese.
              * @example zh-CN
+             * @example zh-TW
              * @example en
              */
             language?: string;

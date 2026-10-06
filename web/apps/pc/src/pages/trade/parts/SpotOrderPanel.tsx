@@ -148,7 +148,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
     void send(order);
   };
 
-  // 12 px insets in every account, as the futures panel's (B120).
+  // The futures panel's padding in every account (B120).
   return (
     <div id={ORDER_FORM_ID} className={cn("flex flex-col gap-3 p-3", className)}>
       {signedIn && marginOpen && (support.cross || support.isolated) && (

@@ -170,8 +170,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
+                     * @description The language of mails and notices; en, zh-TW (and zh-HK, zh-Hant) for Traditional Chinese, Simplified Chinese otherwise.
                      * @example en
                      * @example zh-CN
+                     * @example zh-TW
                      */
                     language?: string;
                     /** @example Asia/Singapore */

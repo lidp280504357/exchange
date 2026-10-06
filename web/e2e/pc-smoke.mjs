@@ -318,8 +318,8 @@ try {
     // The spot terminal trades from the cross account once chosen above
     // the order form, its borrowable amount and margin level under the
     // form; back to spot afterwards. The bar and the form keep the panel's
-    // 12 px insets on both sides in each account (B120: the spot form was
-    // flush with the panel's edges).
+    // padding (p-3, as the futures panel's) on both sides in each account
+    // (B120: the spot form was flush with the panel's edges).
     await go("/trade/BTC-USDT");
     await page.waitForSelector('[data-testid="margin-bar"]', { visible: true, timeout: 20000 });
     const insets = () =>
@@ -330,9 +330,10 @@ try {
         const right = left + panel.clientWidth;
         const of = (el) => {
           const r = el.getBoundingClientRect();
-          return [Math.round(r.left - left), Math.round(right - r.right)];
+          return [r.left - left, right - r.right].map((v) => Math.round(v * 10) / 10);
         };
         return {
+          padding: parseFloat(getComputedStyle(panel).paddingLeft),
           bar: of(document.querySelector('[data-testid="margin-bar"] > :first-child')),
           side: of(document.querySelector("#order-form form > :first-child")),
           submit: of(document.querySelector('#order-form button[type="submit"]')),
@@ -346,12 +347,14 @@ try {
     await shot("5b-margin-cross");
     await clickButton("现货", '[data-testid="margin-bar"]');
     await page.waitForSelector('[data-testid="margin-info"]', { hidden: true, timeout: 10000 });
-    for (const [state, m] of [["spot", spotInsets], ["cross", crossInsets]]) {
-      for (const [part, [l, r]] of Object.entries(m)) {
-        if (l !== 12 || r !== 12) throw new Error(`the ${part} of the ${state} order form is ${l} px from the left and ${r} px from the right, not 12: ${JSON.stringify({ spotInsets, crossInsets })}`);
+    for (const [state, { padding, ...parts }] of [["spot", spotInsets], ["cross", crossInsets]]) {
+      for (const [part, [l, r]] of Object.entries(parts)) {
+        if (padding < 8 || Math.abs(l - padding) > 0.6 || Math.abs(r - padding) > 0.6) {
+          throw new Error(`the ${part} of the ${state} order form is ${l} px from the left and ${r} px from the right, not the panel's ${padding} px: ${JSON.stringify({ spotInsets, crossInsets })}`);
+        }
       }
     }
-    ok("the spot terminal switches its order form to the cross margin account and back, 12 px from both edges in each, the margin level and borrowable amount under the form");
+    ok(`the spot terminal switches its order form to the cross margin account and back, ${spotInsets.padding} px from both edges in each, the margin level and borrowable amount under the form`);
   }
   await shot("5b-margin");
 

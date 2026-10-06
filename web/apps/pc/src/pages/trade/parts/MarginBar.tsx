@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
  * one row of its leverage, the order's side effect and the transfer,
  * borrow and repay dialogs. What it may borrow, an isolated account's
  * liquidation price and its margin level go under the form, beside the
- * available balance (MarginInfo). The panel's 12 px insets hold in every
+ * available balance (MarginInfo). The panel's padding (p-3) holds in every
  * account; the divider under the bar runs to the panel's edges.
  */
 export function MarginBar({
