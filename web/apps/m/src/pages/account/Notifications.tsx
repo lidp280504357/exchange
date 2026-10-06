@@ -1,10 +1,10 @@
 import { errorText, routes } from "@exchange/core";
 import {
-  filterNotices, markRead, noticeCategory, noticeKeys, noticeLink, useNotifications, type Notice, type NoticeCategory,
+  filterNotices, markRead, noticeCategory, noticeKeys, noticeLink, noticeRisk, useNotifications, type Notice, type NoticeCategory,
 } from "@exchange/core/user/notifications";
 import { Badge, Button, EmptyState, ErrorState, Skeleton, SkeletonLines, Spinner, TimeText, cn, listItem, toast, type BadgeTone } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, CheckCheck, ChevronRight, Megaphone, ShieldAlert, Wallet } from "lucide-react";
+import { Check, CheckCheck, ChevronRight, Megaphone, ShieldAlert, TriangleAlert, Wallet } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,6 +29,9 @@ const categoryTone: Record<NoticeCategory, { icon: string; badge: BadgeTone }> =
   assets: { icon: "bg-info/10 text-info", badge: "info" },
   system: { icon: "bg-brand-soft text-brand", badge: "brand" },
 };
+
+/** The icon tone of a margin warning or liquidation (core noticeRisk), over its category's. */
+const riskTone = { warn: "bg-warn/10 text-warn", danger: "bg-danger/10 text-danger" } as const;
 
 /**
  * Notifications (design §7.2 我的 → 通知): the inbox in categories (pill
@@ -178,6 +181,7 @@ function NoticeCard({ notice: n, index, onOpen, onRead }: { notice: Notice; inde
   const { t } = useTranslation();
   const category = noticeCategory(n.type);
   const tone = categoryTone[category];
+  const risk = noticeRisk(n.type);
   const link = noticeLink(n);
   return (
     <motion.li
@@ -189,8 +193,8 @@ function NoticeCard({ notice: n, index, onOpen, onRead }: { notice: Notice; inde
     >
       {!n.read && <span aria-hidden className="absolute inset-y-4 left-0 w-0.5 rounded-full bg-brand" />}
       <button type="button" onClick={onOpen} className="flex w-full gap-3 p-4 text-left transition-colors active:bg-bg-2">
-        <span aria-hidden className={cn("grid size-10 shrink-0 place-items-center rounded-full", tone.icon)}>
-          {categoryIcon[category]}
+        <span aria-hidden className={cn("grid size-10 shrink-0 place-items-center rounded-full", risk ? riskTone[risk] : tone.icon)}>
+          {risk ? <TriangleAlert size={18} /> : categoryIcon[category]}
         </span>
         <span className="block min-w-0 flex-1">
           <span className="flex items-start gap-2">

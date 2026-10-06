@@ -4,13 +4,16 @@ import { useMarginAccounts, useMarginAssets, useMarginOpen } from "@exchange/cor
 import { hasDebt, isEmpty, type MarginAccount, type MarginBalance } from "@exchange/core/margin/math";
 import { AmountText, Badge, Button, CoinIcon, EmptyState, ErrorState, MarginLevel, cn } from "@exchange/ui";
 import { ArrowLeftRight, HandCoins, Undo2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { usePageHeader } from "../../layout/header";
 import { Appear, CardSkeleton, PRESS, RETRY, Section, TextButton } from "./parts/bits";
-import { MarginSheet } from "./parts/MarginSheet";
 import { shownDecimals, useAssetMeta, type AssetMeta } from "./parts/meta";
 import { Notice, reasonText } from "./parts/Notice";
+
+// The transfer, borrow and repay sheet loads when first opened: its form
+// (fields, selects, number inputs) is not on the page's first screen (B108).
+const MarginSheet = lazy(() => import("./parts/MarginSheet").then((m) => ({ default: m.MarginSheet })));
 
 type Act = (kind: MarginActionKind, init?: MarginFormInit) => void;
 
@@ -85,7 +88,11 @@ export default function Margin() {
         </>
       )}
       <Rates />
-      {sheet && <MarginSheet key={`${sheet.kind}:${JSON.stringify(sheet.init)}`} kind={sheet.kind} init={sheet.init} onClose={() => setSheet(null)} />}
+      {sheet && (
+        <Suspense fallback={null}>
+          <MarginSheet key={`${sheet.kind}:${JSON.stringify(sheet.init)}`} kind={sheet.kind} init={sheet.init} onClose={() => setSheet(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }

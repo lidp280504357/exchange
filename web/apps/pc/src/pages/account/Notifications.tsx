@@ -1,12 +1,12 @@
 import { errorText, routes } from "@exchange/core";
 import {
-  filterNotices, markRead, noticeCategory, noticeLink, useNotifications, type Notice, type NoticeCategory,
+  filterNotices, markRead, noticeCategory, noticeLink, noticeRisk, useNotifications, type Notice, type NoticeCategory,
 } from "@exchange/core/user/notifications";
 import {
   Badge, Button, EmptyState, ErrorState, Skeleton, SkeletonLines, Switch, Tabs, TimeText, cn, listItem, toast, type BadgeTone,
 } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CheckCheck, Megaphone, ShieldAlert, Wallet } from "lucide-react";
+import { ArrowRight, CheckCheck, Megaphone, ShieldAlert, TriangleAlert, Wallet } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,6 +26,9 @@ const categoryTone: Record<NoticeCategory, { icon: string; badge: BadgeTone }> =
   assets: { icon: "bg-info/10 text-info", badge: "info" },
   system: { icon: "bg-brand-soft text-brand", badge: "brand" },
 };
+
+/** The icon tone of a margin warning or liquidation (core noticeRisk), over its category's. */
+const riskTone = { warn: "bg-warn/10 text-warn", danger: "bg-danger/10 text-danger" } as const;
 
 /**
  * Notifications (design §6.2 账户): the inbox in categories (security,
@@ -145,6 +148,7 @@ function NoticeRow({ notice: n, index, onOpen, onRead }: { notice: Notice; index
   const { t } = useTranslation();
   const category = noticeCategory(n.type);
   const tone = categoryTone[category];
+  const risk = noticeRisk(n.type);
   const link = noticeLink(n);
   return (
     <motion.li
@@ -158,7 +162,9 @@ function NoticeRow({ notice: n, index, onOpen, onRead }: { notice: Notice; index
       )}
     >
       {!n.read && <span aria-hidden className="absolute inset-y-4 left-0 w-0.5 rounded-full bg-brand" />}
-      <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", tone.icon)}>{categoryIcon[category]}</span>
+      <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", risk ? riskTone[risk] : tone.icon)}>
+        {risk ? <TriangleAlert size={18} /> : categoryIcon[category]}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <button

@@ -106,16 +106,13 @@ export function useMarginOpen() {
 
 /**
  * useIsolatedLeverage maps each pair that takes isolated margin accounts
- * to its leverage while margin trading is open to the caller: the market
- * lists' "10x" tags (margin design §7). Empty otherwise.
+ * to its leverage, from the public terms (GET /v1/margin/pairs): the
+ * market lists' "10x" tags (margin design §7), shown to every visitor as
+ * Binance does, signed in or not (B108; review CX left it to launch).
  */
 export function useIsolatedLeverage(): ReadonlyMap<string, number> {
-  const { open } = useMarginOpen();
-  const pairs = useMarginPairs(open);
-  return useMemo(
-    () => new Map(open ? (pairs.data?.items ?? []).filter((p) => p.isolated).map((p) => [p.symbol, p.leverage] as const) : []),
-    [open, pairs.data],
-  );
+  const pairs = useMarginPairs();
+  return useMemo(() => new Map((pairs.data?.items ?? []).filter((p) => p.isolated).map((p) => [p.symbol, p.leverage] as const)), [pairs.data]);
 }
 
 /**

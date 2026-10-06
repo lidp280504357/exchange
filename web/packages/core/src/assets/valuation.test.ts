@@ -87,6 +87,9 @@ describe("accountShare", () => {
     expect(accountShare("100", ["100", "0", "-20"])).toBe("1");
     expect(accountShare("-20", ["100", "0", "-20"])).toBeNull();
     expect(accountShare("0", ["0", "0", "0"])).toBeNull();
+    // Rounded to four places, half up.
+    expect(accountShare("1", ["1", "1", "1"])).toBe("0.3333");
+    expect(accountShare("2", ["1", "2"])).toBe("0.6667");
   });
 });
 

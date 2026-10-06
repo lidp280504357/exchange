@@ -19,12 +19,15 @@ import {
 } from "@exchange/ui";
 import { ArrowLeftRight, HandCoins, Plus, Undo2 } from "lucide-react";
 import { motion } from "motion/react";
-import { useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AssetsLayout, Card } from "./parts/AssetsLayout";
-import { MarginDialog } from "./parts/MarginDialog";
 import { shownDecimals, useAssetMeta, type AssetMeta } from "./parts/meta";
 import { Notice, reasonText } from "./parts/Notice";
+
+// The transfer, borrow and repay dialog loads when first opened: its form
+// (fields, selects, number inputs) is not on the page's first screen (B108).
+const MarginDialog = lazy(() => import("./parts/MarginDialog").then((m) => ({ default: m.MarginDialog })));
 
 type Act = (kind: MarginActionKind, init?: MarginFormInit) => void;
 
@@ -122,7 +125,11 @@ export default function Margin() {
           </Card>
         </motion.div>
       </div>
-      {dialog && <MarginDialog key={`${dialog.kind}:${JSON.stringify(dialog.init)}`} kind={dialog.kind} init={dialog.init} onClose={() => setDialog(null)} />}
+      {dialog && (
+        <Suspense fallback={null}>
+          <MarginDialog key={`${dialog.kind}:${JSON.stringify(dialog.init)}`} kind={dialog.kind} init={dialog.init} onClose={() => setDialog(null)} />
+        </Suspense>
+      )}
     </AssetsLayout>
   );
 }

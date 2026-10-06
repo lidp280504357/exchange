@@ -1,7 +1,7 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { routes } from "../routes";
-import { filterNotices, noticeCategory, noticeKeys, noticeLink, readInPages, type Notice, type NoticePage } from "./notifications";
+import { filterNotices, noticeCategory, noticeKeys, noticeLink, noticeRisk, readInPages, type Notice, type NoticePage } from "./notifications";
 
 const notice = (id: string, type: string, read = false): Notice => ({ id, type, title: type, body: "", data: {}, read, created_at: "2026-09-30T10:00:00Z" });
 
@@ -61,5 +61,14 @@ describe("notifications", () => {
     const all = readInPages(pages(), "all")!;
     expect(all.pages.every((p) => p.unread_count === 0 && p.items.every((n) => n.read))).toBe(true);
     expect(readInPages(undefined, "all")).toBeUndefined();
+  });
+});
+
+describe("noticeRisk", () => {
+  it("warns of a margin level under the warning line and marks a liquidation a danger", () => {
+    expect(noticeRisk("MARGIN_WARNED")).toBe("warn");
+    expect(noticeRisk("MARGIN_LIQUIDATING")).toBe("danger");
+    expect(noticeRisk("MARGIN_LIQUIDATED")).toBe("danger");
+    expect(noticeRisk("DEPOSIT_CREDITED")).toBeNull();
   });
 });

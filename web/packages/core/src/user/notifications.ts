@@ -152,6 +152,17 @@ export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, str
   }
 }
 
+/**
+ * noticeRisk is how urgent a margin notice is (margin design §4.5): a fall
+ * under the warning level warns; a liquidation, starting or done, is a
+ * danger. Other notices have none (null).
+ */
+export function noticeRisk(type: string): "warn" | "danger" | null {
+  if (type === "MARGIN_WARNED") return "warn";
+  if (type === "MARGIN_LIQUIDATING" || type === "MARGIN_LIQUIDATED") return "danger";
+  return null;
+}
+
 /** filterNotices keeps a category's notices ("all" keeps every one), optionally only the unread. */
 export function filterNotices(items: readonly Notice[], category: NoticeCategory | "all", unreadOnly = false): Notice[] {
   return items.filter((n) => (category === "all" || noticeCategory(n.type) === category) && (!unreadOnly || !n.read));
