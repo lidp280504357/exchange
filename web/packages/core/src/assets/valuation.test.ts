@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertValue, dayChange, distribution, isSmall, referenceChange, referencePrice, valuePortfolio, type Tickers } from "./valuation";
+import { accountShare, convertValue, dayChange, distribution, isSmall, referenceChange, referencePrice, valuePortfolio, type Tickers } from "./valuation";
 
 const tickers: Tickers = new Map([
   ["BTC-USDT", { last: "63214.5" }],
@@ -78,6 +78,15 @@ describe("valuePortfolio", () => {
     expect(p.unpriced).toEqual(["DOGE", "SHIB"]);
     // A coin held and owed alike is not unpriced.
     expect(valuePortfolio([], prices, [{ balances: [{ asset: "SHIB", net: "0" }] }]).unpriced).toEqual([]);
+  });
+});
+
+describe("accountShare", () => {
+  it("shares what the accounts hold, an account owing more than it holds taking none", () => {
+    expect(accountShare("750", ["750", "250", "0"])).toBe("0.75");
+    expect(accountShare("100", ["100", "0", "-20"])).toBe("1");
+    expect(accountShare("-20", ["100", "0", "-20"])).toBeNull();
+    expect(accountShare("0", ["0", "0", "0"])).toBeNull();
   });
 });
 

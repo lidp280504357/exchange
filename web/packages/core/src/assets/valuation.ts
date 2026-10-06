@@ -184,6 +184,17 @@ export function valuePortfolio(
 }
 
 /**
+ * accountShare is an account's share of what the accounts hold, as a ratio
+ * ("0.25"): of the sum of the parts above zero (a margin net below zero,
+ * more owed than held, takes none, as on the mobile "me" card's split bar);
+ * null for a part not above zero or when nothing is held (B107).
+ */
+export function accountShare(part: string, parts: readonly string[]): string | null {
+  const base = parts.reduce((s, v) => (dec.sign(v) > 0 ? dec.add(s, v) : s), "0");
+  return dec.sign(part) > 0 && dec.sign(base) > 0 ? dec.div(part, base, 4, "half") : null;
+}
+
+/**
  * isSmall reports whether a row hides under "hide small balances": an
  * empty balance, or one valued below the threshold. An unpriced balance
  * is never small (its worth is unknown).

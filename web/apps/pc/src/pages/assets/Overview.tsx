@@ -1,6 +1,7 @@
 import { dec, errorText, formatPercent, routes, useSettings } from "@exchange/core";
 import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
 import {
+  accountShare,
   convertValue,
   distribution,
   isSmall,
@@ -149,7 +150,11 @@ function TotalCard({
   const set = useSettings((s) => s.set);
   const shown = dec.round(total, 2, "down");
   const inBtc = convertValue(total, btcPrice, 8);
-  const share = (part: string) => (dec.sign(total) > 0 ? formatPercent(dec.div(part, total, 4, "half"), 2, false) : null);
+  const parts = [spot, futures, margin ?? "0"];
+  const share = (part: string) => {
+    const r = accountShare(part, parts);
+    return r === null ? null : formatPercent(r, 2, false);
+  };
 
   return (
     <section className="relative h-full overflow-hidden rounded-3 border border-line-1 bg-bg-1 p-5">
