@@ -52,17 +52,9 @@ func (s *Service) Positions(ctx context.Context, userID, symbol string) ([]Posit
 		if p.Flat() {
 			continue
 		}
-		c, err := s.Instruments.Contract(ctx, p.Symbol)
+		v, err := s.View(ctx, p)
 		if err != nil {
 			return nil, err
-		}
-		v := PositionView{Position: p, Entry: p.EntryPrice(c), Settle: c.Settle(), ContractSize: c.ContractSize}
-		if m, _ := s.Marks.Mark(p.Symbol); m.Price.IsPositive() {
-			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(c, m.Price), p.MaintenanceMargin(c, m.Price)
-			v.Value = p.Notional(c, m.Price)
-		}
-		if p.MarginMode == domain.Isolated {
-			v.LiquidationPrice = p.LiquidationPrice(c)
 		}
 		out = append(out, v)
 	}
@@ -72,6 +64,24 @@ func (s *Service) Positions(ctx context.Context, userID, symbol string) ([]Posit
 		}
 	}
 	return out, nil
+}
+
+// View is a position at the mark price, its isolated liquidation price
+// estimated (a cross one's needs the whole account: Positions).
+func (s *Service) View(ctx context.Context, p domain.Position) (PositionView, error) {
+	c, err := s.Instruments.Contract(ctx, p.Symbol)
+	if err != nil {
+		return PositionView{}, err
+	}
+	v := PositionView{Position: p, Entry: p.EntryPrice(c), Settle: c.Settle(), ContractSize: c.ContractSize}
+	if m, _ := s.Marks.Mark(p.Symbol); m.Price.IsPositive() {
+		v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(c, m.Price), p.MaintenanceMargin(c, m.Price)
+		v.Value = p.Notional(c, m.Price)
+	}
+	if p.MarginMode == domain.Isolated && !p.Flat() {
+		v.LiquidationPrice = p.LiquidationPrice(c)
+	}
+	return v, nil
 }
 
 // crossLiquidation sets the liquidation price estimates of the cross

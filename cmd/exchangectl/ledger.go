@@ -386,7 +386,8 @@ func (h houseOnly) Check(_ context.Context, userID, _ string) (bool, string, err
 func ledgerHouseMargin(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("ledger house-margin", flag.ContinueOnError)
 	fs.SetOutput(out)
-	amount := fs.String("amount", "", "USDT to add to HOUSE's futures account")
+	asset := fs.String("asset", "USDT", "the FUTURES account's asset: USDT, or a coin-margined contract's coin (BTC, ETH, ASTRA)")
+	amount := fs.String("amount", "", "amount to add to HOUSE's futures account of the asset")
 	reason := fs.String("reason", "", "why (required, goes to the audit log)")
 	key := fs.String("key", "", "idempotency key; repeat it to retry safely (default: a new one)")
 	if err := fs.Parse(args); err != nil {
@@ -410,14 +411,15 @@ func ledgerHouseMargin(ctx context.Context, svc *application.Service, args []str
 	if *key == "" {
 		*key = uuid.NewString()
 	}
-	res, err := svc.Adjust(ctx, *key+":credit", house, "USDT", d, actor(), *reason)
+	code := strings.ToUpper(strings.TrimSpace(*asset))
+	res, err := svc.Adjust(ctx, *key+":credit", house, code, d, actor(), *reason)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "credited HOUSE's SPOT: journal %s (replayed %v)\n", res.JournalID, res.Replayed)
 	svc.Eligibility = houseOnly(house)
 	t, err := svc.Transfer(ctx, application.TransferInput{
-		UserID: house, IdemKey: *key + ":move", Asset: "USDT", Amount: d, From: domain.AccountSpot, To: domain.AccountFutures,
+		UserID: house, IdemKey: *key + ":move", Asset: code, Amount: d, From: domain.AccountSpot, To: domain.AccountFutures,
 	})
 	if err != nil {
 		return err

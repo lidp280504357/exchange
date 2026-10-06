@@ -225,9 +225,10 @@ func reload(ctx context.Context, r ports.Repos, p domain.Position) (domain.Posit
 }
 
 // takeOver hands positions to the liquidation engine: their orders are
-// canceled (every order of the user in the cross margin mode for cross
-// positions, the position's own for an isolated one) and each is marked
-// liquidating, which refuses the user's orders on it.
+// canceled (every cross order of the user on contracts of the same
+// settlement asset for cross positions, the position's own for an
+// isolated one) and each is marked liquidating, which refuses the user's
+// orders on it.
 func (s *Service) takeOver(ctx context.Context, positions []domain.Position, contracts map[string]domain.Contract,
 	marks map[string]decimal.Decimal, balance, maintenance decimal.Decimal,
 ) error {
@@ -250,8 +251,16 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 			}
 			for _, o := range active {
 				mine := o.Symbol == cur.Symbol && (o.PositionSide == cur.Side || cur.Side == domain.SideBoth)
-				if cur.MarginMode == domain.Cross {
-					mine = o.MarginMode == domain.Cross
+				if cur.MarginMode == domain.Cross && o.MarginMode == domain.Cross {
+					// The cross account in liquidation is the one of the
+					// position's settlement asset (coin-M design §2.3).
+					oc, err := s.Instruments.Contract(ctx, o.Symbol)
+					if err != nil {
+						return err
+					}
+					mine = oc.Settle() == contracts[cur.Symbol].Settle()
+				} else if cur.MarginMode == domain.Cross {
+					mine = false
 				}
 				if !mine || o.Kind != domain.KindUser || o.CancelRequested {
 					continue

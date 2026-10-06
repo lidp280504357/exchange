@@ -5,6 +5,7 @@ package instruments
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -24,6 +25,10 @@ type Client struct {
 	mu       sync.Mutex
 	cache    map[string]cached
 	decimals map[string]int32
+	// list is every contract as last listed, for TTL too: the account
+	// endpoint the sites poll checks the settlement asset against it.
+	list   []domain.Contract
+	listAt time.Time
 }
 
 // followed reports whether the index pair follows a reference market.
@@ -84,6 +89,13 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Contract, 
 // Contracts lists every contract, the coin-margined ones too (the list
 // leaves them out unless asked, design 2026-10-06 §2.5).
 func (c *Client) Contracts(ctx context.Context) ([]domain.Contract, error) {
+	c.mu.Lock()
+	if c.list != nil && time.Since(c.listAt) < c.ttl {
+		out := slices.Clone(c.list)
+		c.mu.Unlock()
+		return out, nil
+	}
+	c.mu.Unlock()
 	resp, err := c.c.ListContracts(ctx, &instrumentv1.ListContractsRequest{MarginType: "ALL"})
 	if err != nil {
 		return nil, err
@@ -96,6 +108,9 @@ func (c *Client) Contracts(ctx context.Context) ([]domain.Contract, error) {
 		}
 		out = append(out, ct)
 	}
+	c.mu.Lock()
+	c.list, c.listAt = slices.Clone(out), time.Now()
+	c.mu.Unlock()
 	return out, nil
 }
 

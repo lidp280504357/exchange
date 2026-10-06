@@ -35,11 +35,13 @@ type CheckResult struct {
 	Mismatches []Mismatch
 }
 
-// Reconciler checks invariant 6 against the ledger. It holds the service's
-// fill lock while it reads, so no fill is half booked meanwhile.
+// Reconciler checks invariant 6 against the ledger, for every settlement
+// asset of the listed contracts (USDT, and the coins of the coin-margined
+// ones). It holds the service's fill lock while it reads, so no fill is
+// half booked meanwhile.
 type Reconciler struct {
 	Svc *Service
-	// Asset is the settlement asset of the contracts.
+	// Asset is checked even while no listed contract settles in it (USDT).
 	Asset string
 }
 
@@ -72,7 +74,13 @@ func (rc *Reconciler) Run(ctx context.Context) ([]CheckResult, error) {
 		symbols = append(symbols, symbol)
 	}
 	slices.Sort(symbols)
-	net := decimal.Zero
+	nets := map[string]decimal.Decimal{} // by settlement asset
+	if rc.Asset != "" {
+		nets[rc.Asset] = decimal.Zero
+	}
+	for _, c := range listed {
+		nets[c.Settle()] = decimal.Zero
+	}
 	for _, symbol := range symbols {
 		t := totals[symbol]
 		if !t.NetQty.IsZero() {
@@ -81,22 +89,32 @@ func (rc *Reconciler) Run(ctx context.Context) ([]CheckResult, error) {
 		c, ok := contracts[symbol]
 		switch {
 		case !ok:
-			return nil, fmt.Errorf("positions on %s, which instrument-service does not list", symbol)
-		case c.Settle() != rc.Asset:
+			// Not listed (delisted with positions, or a listing gap): its
+			// costs cannot be put to an asset, which the check reports.
+			out[1].Mismatches = append(out[1].Mismatches, Mismatch{
+				Key: symbol, Detail: "positions on a contract instrument-service does not list; signed costs " + t.NetCost.String(),
+			})
 		case c.Inverse():
-			net = net.Sub(t.NetCost)
+			nets[c.Settle()] = nets[c.Settle()].Sub(t.NetCost)
 		default:
-			net = net.Add(t.NetCost)
+			nets[c.Settle()] = nets[c.Settle()].Add(t.NetCost)
 		}
 	}
-	clearing, err := s.Ledger.PnLClearing(ctx, rc.Asset)
-	if err != nil {
-		return nil, err
+	assets := make([]string, 0, len(nets))
+	for asset := range nets {
+		assets = append(assets, asset)
 	}
-	if sum := clearing.Add(net); !sum.IsZero() {
-		out[1].Mismatches = append(out[1].Mismatches, Mismatch{
-			Key: rc.Asset, Detail: fmt.Sprintf("PNL_CLEARING %s + the positions' signed costs %s = %s", clearing, net, sum),
-		})
+	slices.Sort(assets)
+	for _, asset := range assets {
+		clearing, err := s.Ledger.PnLClearing(ctx, asset)
+		if err != nil {
+			return nil, err
+		}
+		if sum := clearing.Add(nets[asset]); !sum.IsZero() {
+			out[1].Mismatches = append(out[1].Mismatches, Mismatch{
+				Key: asset, Detail: fmt.Sprintf("PNL_CLEARING %s + the positions' signed costs %s = %s", clearing, nets[asset], sum),
+			})
+		}
 	}
 	pending, err := r.Pending().Due(ctx, 100)
 	if err != nil {

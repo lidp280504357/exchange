@@ -62,8 +62,8 @@ func (s *Service) CrossMargin(ctx context.Context, userID, asset string, debit d
 			continue
 		}
 		c, ok := byContract[p.Symbol]
-		if ok && c.Status == "DELISTED" {
-			continue
+		if ok && (c.Status == "DELISTED" || c.Settle() != asset) {
+			continue // delisted, or another cross account's (coin-M §2.3)
 		}
 		if !ok {
 			out.Unmeasured = true
@@ -92,7 +92,11 @@ func (s *Service) CrossMargin(ctx context.Context, userID, asset string, debit d
 	if err != nil {
 		return CrossMargin{}, err
 	}
-	orders, err := s.Store.Read().Orders().Unreleased(ctx, userID)
+	unreleased, err := s.Store.Read().Orders().Unreleased(ctx, userID)
+	if err != nil {
+		return CrossMargin{}, err
+	}
+	orders, err := s.settledIn(ctx, unreleased, asset)
 	if err != nil {
 		return CrossMargin{}, err
 	}

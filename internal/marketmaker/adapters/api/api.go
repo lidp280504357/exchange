@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/shopspring/decimal"
 
@@ -49,14 +50,25 @@ func (c *Client) get(ctx context.Context, url string, out any) error {
 }
 
 type instrumentRow struct {
-	Symbol          string `json:"symbol"`
-	BaseAsset       string `json:"base_asset"`
-	QuoteAsset      string `json:"quote_asset"`
-	IndexSymbol     string `json:"index_symbol"`
-	TickSize        string `json:"tick_size"`
-	LotSize         string `json:"lot_size"`
-	Status          string `json:"status"`
-	ReferenceSymbol string `json:"reference_symbol"`
+	Symbol          string  `json:"symbol"`
+	BaseAsset       string  `json:"base_asset"`
+	QuoteAsset      string  `json:"quote_asset"`
+	IndexSymbol     string  `json:"index_symbol"`
+	TickSize        string  `json:"tick_size"`
+	LotSize         string  `json:"lot_size"`
+	Status          string  `json:"status"`
+	ReferenceSymbol *string `json:"reference_symbol"`
+	// A contract's settlement asset and, coin-margined, its face value.
+	SettleAsset  string `json:"settle_asset"`
+	ContractSize string `json:"contract_size"`
+}
+
+// reference is the row's reference symbol, "" when it has none.
+func (r instrumentRow) reference() string {
+	if r.ReferenceSymbol == nil {
+		return ""
+	}
+	return *r.ReferenceSymbol
 }
 
 func (r instrumentRow) spec(contract bool) (domain.Spec, bool) {
@@ -65,12 +77,26 @@ func (r instrumentRow) spec(contract bool) (domain.Spec, bool) {
 	if err1 != nil || err2 != nil || !tick.IsPositive() || !lot.IsPositive() {
 		return domain.Spec{}, false
 	}
-	return domain.Spec{Symbol: r.Symbol, Base: r.BaseAsset, Quote: r.QuoteAsset, TickSize: tick, LotSize: lot, Contract: contract}, true
+	s := domain.Spec{Symbol: r.Symbol, Base: r.BaseAsset, Quote: r.QuoteAsset, TickSize: tick, LotSize: lot, Contract: contract}
+	if contract {
+		s.Settle = r.SettleAsset
+		if s.Settle == "" {
+			s.Settle = r.QuoteAsset // a contract from before the coin-margined ones
+		}
+		if r.ContractSize != "" {
+			size, err := decimal.NewFromString(r.ContractSize)
+			if err != nil || size.IsNegative() {
+				return domain.Spec{}, false
+			}
+			s.ContractSize = size
+		}
+	}
+	return s, true
 }
 
 // Specs lists the pairs that follow a reference market, those not
-// TRADING marked Halted, and the TRADING contracts whose index pair does
-// (they follow the reference market's perpetual of the same symbol).
+// TRADING marked Halted, and the TRADING contracts, of both margin types,
+// that follow one (their reference_symbol: Binance's perpetual).
 func (c *Client) Specs(ctx context.Context) ([]domain.Spec, error) {
 	var pairs struct {
 		Pairs []instrumentRow `json:"pairs"`
@@ -81,23 +107,21 @@ func (c *Client) Specs(ctx context.Context) ([]domain.Spec, error) {
 	var contracts struct {
 		Contracts []instrumentRow `json:"contracts"`
 	}
-	if err := c.get(ctx, c.Instrument+"/v1/market/contracts", &contracts); err != nil {
+	if err := c.get(ctx, c.Instrument+"/v1/market/contracts?margin_type=ALL", &contracts); err != nil {
 		return nil, fmt.Errorf("contracts: %w", err)
 	}
-	followed := map[string]bool{}
 	var out []domain.Spec
 	for _, p := range pairs.Pairs {
-		if p.ReferenceSymbol == "" {
+		if p.reference() == "" {
 			continue
 		}
-		followed[p.Symbol] = true
 		if s, ok := p.spec(false); ok {
 			s.Halted = p.Status != "TRADING"
 			out = append(out, s)
 		}
 	}
 	for _, k := range contracts.Contracts {
-		if s, ok := k.spec(true); ok && k.Status == "TRADING" && followed[k.IndexSymbol] {
+		if s, ok := k.spec(true); ok && k.Status == "TRADING" && k.reference() != "" {
 			out = append(out, s)
 		}
 	}
@@ -125,51 +149,66 @@ func (c *Client) Backed(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// Contracts returns HOUSE's FUTURES account: its net position on each
-// contract (long positive); what its positions are worth together, each
-// at its mark price (at its entry price before the contract's first mark
-// price); and its equity, the account's margin balance.
-func (c *Client) Contracts(ctx context.Context) (domain.ContractAccount, error) {
+// Contracts returns HOUSE's FUTURES accounts in assets: its net position
+// on each contract (long positive; contracts of a coin-margined one); by
+// settlement asset what its positions are worth together in USDT, each at
+// its mark price (value_usd, the contracts' face value of a coin-margined
+// one; the entry price before a linear contract's first mark price); and
+// each account's equity, its margin balance in the asset.
+func (c *Client) Contracts(ctx context.Context, assets []string) (domain.ContractAccount, error) {
 	var body struct {
 		Positions []struct {
-			Symbol     string  `json:"symbol"`
-			Quantity   string  `json:"quantity"`
-			EntryPrice string  `json:"entry_price"`
-			Notional   *string `json:"notional"`
+			Symbol      string  `json:"symbol"`
+			Quantity    string  `json:"quantity"`
+			EntryPrice  string  `json:"entry_price"`
+			Notional    *string `json:"notional"`
+			SettleAsset string  `json:"settle_asset"`
+			ValueUSD    *string `json:"value_usd"`
 		} `json:"positions"`
 	}
 	if err := c.get(ctx, c.Derivatives+"/v1/derivatives/positions", &body); err != nil {
 		return domain.ContractAccount{}, fmt.Errorf("positions: %w", err)
 	}
-	a := domain.ContractAccount{Positions: map[string]decimal.Decimal{}}
+	a := domain.ContractAccount{
+		Positions: map[string]decimal.Decimal{}, Exposure: map[string]decimal.Decimal{}, Equity: map[string]decimal.Decimal{},
+	}
 	for _, p := range body.Positions {
 		q, err := decimal.NewFromString(p.Quantity)
 		if err != nil {
 			return domain.ContractAccount{}, fmt.Errorf("position of %s: bad quantity %q", p.Symbol, p.Quantity)
 		}
 		a.Positions[p.Symbol] = a.Positions[p.Symbol].Add(q)
+		settle := p.SettleAsset
+		if settle == "" {
+			settle = domain.Valuation
+		}
 		var worth decimal.Decimal
-		if p.Notional != nil {
+		switch {
+		case p.ValueUSD != nil:
+			worth, err = decimal.NewFromString(*p.ValueUSD)
+		case p.Notional != nil:
 			worth, err = decimal.NewFromString(*p.Notional)
-		} else {
+		default:
 			worth, err = decimal.NewFromString(p.EntryPrice)
 			worth = worth.Mul(q)
 		}
 		if err != nil {
-			return domain.ContractAccount{}, fmt.Errorf("position of %s: bad notional or entry price", p.Symbol)
+			return domain.ContractAccount{}, fmt.Errorf("position of %s: bad value, notional or entry price", p.Symbol)
 		}
-		a.Exposure = a.Exposure.Add(worth.Abs())
+		a.Exposure[settle] = a.Exposure[settle].Add(worth.Abs())
 	}
-	var acct struct {
-		MarginBalance string `json:"margin_balance"`
+	for _, asset := range assets {
+		var acct struct {
+			MarginBalance string `json:"margin_balance"`
+		}
+		if err := c.get(ctx, c.Derivatives+"/v1/derivatives/account?"+url.Values{"asset": {asset}}.Encode(), &acct); err != nil {
+			return domain.ContractAccount{}, fmt.Errorf("%s account: %w", asset, err)
+		}
+		equity, err := decimal.NewFromString(acct.MarginBalance)
+		if err != nil {
+			return domain.ContractAccount{}, fmt.Errorf("%s account: bad margin balance %q", asset, acct.MarginBalance)
+		}
+		a.Equity[asset] = equity
 	}
-	if err := c.get(ctx, c.Derivatives+"/v1/derivatives/account", &acct); err != nil {
-		return domain.ContractAccount{}, fmt.Errorf("account: %w", err)
-	}
-	equity, err := decimal.NewFromString(acct.MarginBalance)
-	if err != nil {
-		return domain.ContractAccount{}, fmt.Errorf("account: bad margin balance %q", acct.MarginBalance)
-	}
-	a.Equity = equity
 	return a, nil
 }

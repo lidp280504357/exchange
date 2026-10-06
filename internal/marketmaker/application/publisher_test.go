@@ -38,7 +38,7 @@ type fakeHouse struct {
 }
 
 func (h fakeHouse) Holdings(context.Context) (domain.Holdings, error) { return h.holdings, nil }
-func (h fakeHouse) Contracts(context.Context) (domain.ContractAccount, error) {
+func (h fakeHouse) Contracts(context.Context, []string) (domain.ContractAccount, error) {
 	return *h.contracts, nil
 }
 
@@ -106,7 +106,8 @@ func newRig(t *testing.T) (*Publisher, *records, *onFlags, *time.Time) {
 	t.Helper()
 	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	rigContracts = domain.ContractAccount{
-		Positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")}, Exposure: d("25000"), Equity: d("1000000"),
+		Positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")},
+		Exposure:  map[string]decimal.Decimal{"USDT": d("25000")}, Equity: map[string]decimal.Decimal{"USDT": d("1000000")},
 	}
 	house := fakeHouse{
 		holdings:  domain.Holdings{"BTC": d("0.4"), "USDT": d("500000")},
@@ -262,7 +263,7 @@ func TestContractsGoToTheirEngineWithTheirRooms(t *testing.T) {
 	}
 	// A loss leaves HOUSE 2,000 of equity: ten times that is less than its
 	// positions are worth, so it only reduces them.
-	rigContracts.Equity = d("2000")
+	rigContracts.Equity["USDT"] = d("2000")
 	*now = now.Add(2 * time.Second) // the holdings are due again, and so is the heartbeat
 	p.refresh(ctx)
 	_ = p.publish(ctx, p.round())
@@ -279,7 +280,8 @@ func TestTheContractsShareTheRoom(t *testing.T) {
 	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	// Ten times 2,600 of equity less 25,000 of positions: 1,000 to grow by.
 	account := domain.ContractAccount{
-		Positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")}, Exposure: d("25000"), Equity: d("2600"),
+		Positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")},
+		Exposure:  map[string]decimal.Decimal{"USDT": d("25000")}, Equity: map[string]decimal.Decimal{"USDT": d("2600")},
 	}
 	ethPerp := domain.Spec{Symbol: "ETH-USDT-PERP", Base: "ETH", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.001"), Contract: true}
 	rec := &records{}
@@ -304,7 +306,7 @@ func TestTheContractsShareTheRoom(t *testing.T) {
 	}
 	// 60 left: a half is less than BTC's lot of 50, so BTC's share is one
 	// lot rather than nothing; ETH's lot is 2.50, its share the half.
-	account.Equity = d("2506")
+	account.Equity["USDT"] = d("2506")
 	now = now.Add(3 * time.Second)
 	p.refresh(ctx)
 	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT-PERP", Sequence: 2, Reference: true, Bids: levels("49999.9", "5"), Asks: levels("50000.1", "5")})
@@ -515,5 +517,48 @@ func TestAFailedReadOfTheSpecsIsTriedAgainLater(t *testing.T) {
 	p.refresh(ctx)
 	if specs.reads != 3 {
 		t.Fatalf("tried again after specsRetry: %d reads", specs.reads)
+	}
+}
+
+// A coin-margined contract (coin-margined design 2026-10-06 §2.3): HOUSE
+// quotes it in contracts against its BTC account, the equity valued at
+// BTC-USDT's mid; its levels are worth at most 20,000 USD each (200
+// contracts of 100 USD).
+func TestHouseQuotesACoinMarginedContractInContracts(t *testing.T) {
+	now := time.Date(2026, 10, 6, 8, 0, 0, 0, time.UTC)
+	coin := domain.Spec{
+		Symbol: "BTC-USD-PERP", Base: "BTC", Quote: "USD", TickSize: d("0.1"), LotSize: d("1"), Contract: true, Settle: "BTC",
+		ContractSize: d("100"),
+	}
+	// 0.5 BTC of equity at 50,000 is 25,000, ten times 250,000; 300
+	// contracts short are worth 30,000: 220,000 USD (2,200 contracts) of
+	// room. The cap is 100,000 USD either way: 1,000 contracts.
+	account := domain.ContractAccount{
+		Positions: map[string]decimal.Decimal{"BTC-USD-PERP": d("-300")},
+		Exposure:  map[string]decimal.Decimal{"BTC": d("30000")}, Equity: map[string]decimal.Decimal{"BTC": d("0.5"), "USDT": d("0")},
+	}
+	rec := &records{}
+	cfg := DefaultConfig()
+	cfg.HouseUser = "house"
+	p := New(cfg, specList{btcSpec, coin}, fakeHouse{holdings: domain.Holdings{"USDT": d("500000")}, contracts: &account},
+		&onFlags{}, rec, event.NewFactory("market-maker", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
+	p.refresh(ctx)
+	if got := p.settleAssets(); len(got) != 2 || got[1] != "BTC" {
+		t.Fatalf("the accounts read: %v", got)
+	}
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 1, Reference: true, Bids: levels("49999.99", "1"), Asks: levels("50000.01", "1")})
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USD-PERP", Sequence: 1, Reference: true, Bids: levels("49999.9", "4500"), Asks: levels("50000.1", "4500")})
+	_ = p.publish(ctx, p.round())
+	_, books := rec.take(t)
+	var book *orderv1.ReferenceBookUpdate
+	for _, b := range books {
+		if b.GetSymbol() == "BTC-USD-PERP" {
+			book = b
+		}
+	}
+	if book == nil || book.GetBuyRoom() != "1300" || book.GetSellRoom() != "700" || len(book.GetBids()) != 1 || book.GetBids()[0].GetQuantity() != "200" {
+		t.Fatalf("the coin-margined book %v", book)
 	}
 }

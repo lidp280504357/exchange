@@ -90,6 +90,8 @@ func NewConditional(id string, req ConditionalRequest, c Contract, pos Position,
 			fmt.Sprintf("a limit order needs a price, a multiple of the tick size %s", c.TickSize))
 	case req.OrderType == Market && !req.Price.IsZero():
 		return Conditional{}, apperr.Invalid("a market order has no price")
+	case c.Inverse() && !req.Qty.IsInteger():
+		return Conditional{}, ErrContractsNotInteger
 	case req.Qty.IsNegative() || (!req.Qty.IsZero() && !req.Qty.Mod(c.LotSize).IsZero()):
 		return Conditional{}, apperr.New(apperr.KindInvalid, "INSTRUMENT_PRECISION",
 			fmt.Sprintf("quantity must be a multiple of the lot size %s, or empty to close the whole position", c.LotSize))

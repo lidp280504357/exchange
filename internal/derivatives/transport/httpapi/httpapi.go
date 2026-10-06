@@ -261,7 +261,12 @@ func (h *Handler) margin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, toPositionJSON(application.PositionView{Position: p}))
+	v, err := h.Svc.View(r.Context(), p) // closed meanwhile: as it was
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toPositionJSON(v))
 }
 
 type orderJSON struct {
@@ -633,7 +638,11 @@ func (h *Handler) crossMargin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	m, err := h.Svc.CrossMargin(r.Context(), chi.URLParam(r, "id"), h.Asset, debit)
+	asset := strings.ToUpper(r.URL.Query().Get("asset"))
+	if asset == "" {
+		asset = h.Asset
+	}
+	m, err := h.Svc.CrossMargin(r.Context(), chi.URLParam(r, "id"), asset, debit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

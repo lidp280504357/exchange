@@ -24,10 +24,11 @@ type House interface {
 	// Holdings returns its spot inventory: the available balance of each
 	// asset's MARKET_MAKER system account.
 	Holdings(ctx context.Context) (domain.Holdings, error)
-	// Contracts returns its FUTURES account: its net position on each
-	// contract, what its positions are worth at the mark prices and its
+	// Contracts returns its FUTURES accounts in assets (USDT and the
+	// coin-margined contracts' coins): its net position on each contract,
+	// and by asset what its positions are worth at the mark prices and its
 	// equity.
-	Contracts(ctx context.Context) (domain.ContractAccount, error)
+	Contracts(ctx context.Context, assets []string) (domain.ContractAccount, error)
 }
 
 // Flags answers feature-flag checks.

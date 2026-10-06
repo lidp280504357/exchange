@@ -88,7 +88,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 
 `scripts/ops/house.sh seed` 会一次调好测试服的三种资产（2026-10-02 起 5,000,000 USDT、11.74 BTC、370.4 ETH，配合测试服放大的 HOUSE 上限，见 [market-maker.md](market-maker.md#配置)）与 HOUSE 的合约保证金。
 
-HOUSE 在合约上是普通用户（`HOUSE_USER_ID`），保证金在它的 `FUTURES` 账户。`exchangectl ledger house-margin` 先把模拟资金调入 HOUSE 的 `SPOT`（同 `ledger adjust`，键 `<key>:credit`），再划转到 `FUTURES`（键 `<key>:move`；划转的资格检查只放行 HOUSE 自己）。读环境变量 `HOUSE_USER_ID`，需要 `ledger.manual_adjustment`：
+HOUSE 在合约上是普通用户（`HOUSE_USER_ID`），保证金在它的 `FUTURES` 账户。`exchangectl ledger house-margin` 先把模拟资金调入 HOUSE 的 `SPOT`（同 `ledger adjust`，键 `<key>:credit`），再划转到 `FUTURES`（键 `<key>:move`；划转的资格检查只放行 HOUSE 自己）。`--asset` 缺省 USDT；币本位合约按币结算，HOUSE 的 BTC、ETH 账户用 `--asset BTC`/`ETH` 注资（币本位设计 2026-10-06 §2.3）。读环境变量 `HOUSE_USER_ID`，需要 `ledger.manual_adjustment`：
 
 ```bash
 ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl ledger house-margin --amount 1900000 --reason "HOUSE contract margin" --key seed-house-margin-v2

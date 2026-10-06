@@ -132,8 +132,9 @@ func TestContractRoomsCapTheNetPosition(t *testing.T) {
 func TestContractRoomsKeepWithinHouseEquity(t *testing.T) {
 	perp := Spec{Symbol: "BTC-USDT-PERP", Base: "BTC", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.001"), Contract: true}
 	caps := Caps{Contract: d("1000000"), ContractLeverage: d("10")}
-	acct := ContractAccount{Equity: d("20000"), Exposure: d("175000")} // 25,000 of room
-	room := ContractRoom(acct, caps)
+	usdt := map[string]decimal.Decimal{"USDT": d("20000")}
+	acct := ContractAccount{Equity: usdt, Exposure: map[string]decimal.Decimal{"USDT": d("175000")}} // 25,000 of room
+	room := ContractRoom(acct, "USDT", d("1"), caps)
 	if !room.Equal(d("25000")) {
 		t.Fatalf("room %s", room)
 	}
@@ -143,20 +144,52 @@ func TestContractRoomsKeepWithinHouseEquity(t *testing.T) {
 		t.Fatalf("buy %s sell %s", buy, sell)
 	}
 	// Over its leverage after a loss: it only reduces.
-	acct.Equity = d("15000")
-	room = ContractRoom(acct, caps)
+	usdt["USDT"] = d("15000")
+	room = ContractRoom(acct, "USDT", d("1"), caps)
 	buy, sell = ContractRooms(perp, d("-0.5"), d("50000"), room, caps)
 	if !room.IsZero() || buy.String() != "0.5" || !sell.IsZero() {
 		t.Fatalf("over its leverage: room %s buy %s sell %s", room, buy, sell)
 	}
 	// No equity at all: the same.
-	acct.Equity = d("-100")
-	if room = ContractRoom(acct, caps); !room.IsZero() {
+	usdt["USDT"] = d("-100")
+	if room = ContractRoom(acct, "USDT", d("1"), caps); !room.IsZero() {
 		t.Fatalf("no equity: room %s", room)
 	}
 	// A zero ContractLeverage leaves no room.
-	if room = ContractRoom(ContractAccount{Equity: d("1000000")}, Caps{}); !room.IsZero() {
+	if room = ContractRoom(ContractAccount{Equity: map[string]decimal.Decimal{"USDT": d("1000000")}}, "USDT", d("1"), Caps{}); !room.IsZero() {
 		t.Fatalf("no leverage: room %s", room)
+	}
+}
+
+// A coin-margined contract (coin-margined design 2026-10-06 §2.3): its
+// room is its coin's account's, the equity valued at the coin's price, and
+// its quantities are contracts valued at their face value: 100 USD each.
+func TestCoinMarginedRooms(t *testing.T) {
+	perp := Spec{
+		Symbol: "BTC-USD-PERP", Base: "BTC", Quote: "USD", TickSize: d("0.1"), LotSize: d("1"), Contract: true, Settle: "BTC",
+		ContractSize: d("100"),
+	}
+	caps := Caps{Contract: d("100000"), ContractLeverage: d("10")}
+	// 0.5 BTC at 50,000: 25,000 of equity, 250,000 at 10x; 200,000 in
+	// positions leaves 50,000 of room. The USDT account's is apart.
+	acct := ContractAccount{
+		Equity:   map[string]decimal.Decimal{"BTC": d("0.5"), "USDT": d("0")},
+		Exposure: map[string]decimal.Decimal{"BTC": d("200000")},
+	}
+	room := ContractRoom(acct, "BTC", d("50000"), caps)
+	if !room.Equal(d("50000")) || !ContractRoom(acct, "USDT", d("1"), caps).IsZero() || !ContractRoom(acct, "BTC", d("0"), caps).IsZero() {
+		t.Fatalf("room %s", room)
+	}
+	// Short 300 contracts (30,000 USD): the cap is 1,000 contracts either
+	// way; buying closes 300 and grows a long by 500 (the room's worth).
+	buy, sell := ContractRooms(perp, d("-300"), d("50000"), room, caps)
+	if buy.String() != "800" || sell.String() != "500" {
+		t.Fatalf("buy %s sell %s", buy, sell)
+	}
+	// A level offers at most 20,000 USD: 200 contracts.
+	levels := Levels([]Level{{Price: d("50000.05"), Quantity: d("4500")}}, true, perp, d("20000"), 5)
+	if len(levels) != 1 || levels[0].Quantity.String() != "200" || levels[0].Price.String() != "50000" {
+		t.Fatalf("levels %+v", levels)
 	}
 }
 

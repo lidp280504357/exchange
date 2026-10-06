@@ -20,6 +20,12 @@
 - 发空簿（撤走 HOUSE 的流动性）的情况：开关 `market.house_liquidity` 不允许该交易对、`market.reference_feed` 关闭、参考盘口 3 秒没有消息或漏了增量（等下一个快照）、HOUSE 的余额与仓位 10 秒没读到；交易对或合约离开 `TRADING`（暂停、只撤单、下架）：market-maker 跟着 `instrument.events` 的状态变更，收到状态变更的下一轮就发空簿并把它移出列表（测试服实测：改状态的命令返回后 276 毫秒 HOUSE 撤出，恢复 `TRADING` 后 258 毫秒重新报价，含 outbox 转发的 200 毫秒），不等 30 秒一次的规格读取（需求 §761 暂停时撤报价；用户的挂单按 §630 保留，只是没有 HOUSE 可成交，2026-10-03 起），重新 `TRADING` 时立即重读规格。引擎自己也会丢弃比订单早 5 秒以上的参考簿（`RefMaxAge`，时间都在命令里，重放结果一致）。
 - 库存每秒从账本 gRPC（`MARKET_MAKER` 各资产的可用余额）与 derivatives-service 内网接口（HOUSE 账户的仓位与合约账户）读一次；交易对与合约规格每 30 秒从 instrument-service 读一次。
 
+## 币本位合约（币本位设计 2026-10-06 §2.3，批次 G1）
+
+- 报价的合约读 instrument-service 的全部合约（`/v1/market/contracts?margin_type=ALL`），`TRADING` 且有 `reference_symbol` 的才报（平台币的两个永续没有）。币本位合约的盘口是币安 COIN-M 的（数量是张），HOUSE 按张报价：每档最多值 20,000 美元（BTC 200 张、ETH 2,000 张），`HOUSE_CONTRACT_CAP` 按美元名义（张 × 面值）折成张。
+- 额度按结算资产分开：每个币本位账户（HOUSE 的 BTC、ETH FUTURES）的仓位合计（美元）最多是该账户权益（币，按该币的 USDT 交易对参考盘口中间价折成美元）的 `HOUSE_CONTRACT_LEVERAGE` 倍，超出时该方向不再报价；同一结算资产的合约平分剩余额度。没有该币价格时没有额度。USDT 账户与 U 本位合约照旧。
+- HOUSE 的 BTC、ETH 是可充提资产，不能为负：亏损超过账户余额时账本由同一资产的保险基金补，基金不够时整笔拒绝。测试服由 `scripts/ops/house.sh seed` 注资（HOUSE 币本位保证金 BTC 6、ETH 200，约各 50 万美元；保险基金 BTC +2、ETH +40、ASTRA 100,000），`exchangectl ledger house-margin --asset BTC --amount …` 可补。
+
 ## 引擎怎么用参考簿
 
 详见 [matching.md](matching.md#house-的参考簿adr-0015)。要点：
@@ -38,8 +44,10 @@
 | `market_house_room{symbol,side}` | 最近一次发出的可买、可卖数量（基础资产） |
 | `market_house_updates_total{kind}` | 发出的参考簿（`levels`/`empty`） |
 | `market_house_publish_failures_total` | 发布失败的轮次（下一轮重发） |
-| `market_house_contract_equity_usdt` | HOUSE 的合约权益（FUTURES `margin_balance`，按标记价）；第一次读到之前是 NaN（不触发告警） |
-| `market_house_contract_exposure_usdt` | HOUSE 全部合约仓位按标记价的合计价值 |
+| `market_house_contract_equity_usdt` | HOUSE 的 USDT 合约权益（USDT 的 FUTURES `margin_balance`，按标记价）；第一次读到之前是 NaN（不触发告警） |
+| `market_house_contract_exposure_usdt` | HOUSE 全部 U 本位合约仓位按标记价的合计价值 |
+| `market_house_coin_contract_equity{asset}` | HOUSE 币本位账户的权益（该币的 FUTURES `margin_balance`），以币计 |
+| `market_house_coin_contract_exposure_usdt{asset}` | HOUSE 在该币结算的合约仓位的合计美元价值（张数 × 面值） |
 | `market_house_contract_max_leverage` | 配置的 `HOUSE_CONTRACT_LEVERAGE` |
 
 告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HouseContractOverLeveraged`（合约仓位合计超过权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟：只能减仓，用 `exchangectl ledger house-margin` 补保证金）、`HouseContractEquityGone`（合约权益不大于 0，critical：之后的亏损由保险基金承担）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -140,22 +141,53 @@ func derivativesFunding(ctx context.Context, db *pg.DB, args []string, out io.Wr
 	return nil
 }
 
-// derivativesReconcile checks invariant 6 from both schemas: per contract
-// the long and short quantities match, and PNL_CLEARING + long cost −
-// short cost = 0. Fills in flight show as a passing difference.
+// derivativesReconcile checks invariant 6 from the schemas: per contract
+// the long and short quantities match, and per settlement asset
+// PNL_CLEARING + the positions' signed costs = 0 (an inverse contract's with
+// the other sign). Fills in flight show as a passing difference.
 func derivativesReconcile(ctx context.Context, cfg settings, db *pg.DB, out io.Writer) error {
 	ledgerDB, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 1}, "ledger")
 	if err != nil {
 		return err
 	}
 	defer ledgerDB.Close()
+	instrumentDB, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 1}, "instrument")
+	if err != nil {
+		return err
+	}
+	defer instrumentDB.Close()
+	// Each contract's settlement asset, and whether it is coin-margined:
+	// an inverse contract's costs move the other way (coin-margined design
+	// 2026-10-06 §2.2).
+	type kind struct {
+		settle  string
+		inverse bool
+	}
+	kinds := map[string]kind{}
+	nets := map[string]decimal.Decimal{"USDT": decimal.Zero}
+	krows, err := instrumentDB.Query(ctx, `SELECT symbol, settle_asset, margin_type = 'COIN' FROM contracts`)
+	if err != nil {
+		return err
+	}
+	for krows.Next() {
+		var symbol string
+		var k kind
+		if err := krows.Scan(&symbol, &k.settle, &k.inverse); err != nil {
+			krows.Close()
+			return err
+		}
+		kinds[symbol], nets[k.settle] = k, decimal.Zero
+	}
+	krows.Close()
+	if err := krows.Err(); err != nil {
+		return err
+	}
 	broken := 0
 	rows, err := db.Query(ctx, `SELECT symbol, sum(quantity), sum(CASE WHEN quantity > 0 THEN entry_cost ELSE -entry_cost END)
 		FROM positions GROUP BY symbol ORDER BY symbol`)
 	if err != nil {
 		return err
 	}
-	net := decimal.Zero
 	for rows.Next() {
 		var symbol string
 		var qty, cost decimal.Decimal
@@ -163,32 +195,47 @@ func derivativesReconcile(ctx context.Context, cfg settings, db *pg.DB, out io.W
 			rows.Close()
 			return err
 		}
-		fmt.Fprintf(out, "%-16s long − short %s, long cost − short cost %s\n", symbol, qty, cost)
+		k, ok := kinds[symbol]
+		if !ok {
+			rows.Close()
+			return fmt.Errorf("positions on %s, which is not a listed contract", symbol)
+		}
+		fmt.Fprintf(out, "%-16s long − short %s, long cost − short cost %s %s\n", symbol, qty, cost, k.settle)
 		if !qty.IsZero() {
 			broken++
 		}
-		net = net.Add(cost)
+		if k.inverse {
+			cost = cost.Neg()
+		}
+		nets[k.settle] = nets[k.settle].Add(cost)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	clearing := decimal.Zero
-	err = ledgerDB.QueryRow(ctx, `SELECT coalesce(sum(available), 0) FROM accounts WHERE account_type = 'PNL_CLEARING' AND asset = 'USDT'`).
-		Scan(&clearing)
-	if err != nil {
-		return err
+	assets := make([]string, 0, len(nets))
+	for asset := range nets {
+		assets = append(assets, asset)
 	}
-	sum := clearing.Add(net)
-	fmt.Fprintf(out, "PNL_CLEARING %s + long cost − short cost %s = %s (invariant 6: 0)\n", clearing, net, sum)
+	slices.Sort(assets)
+	for _, asset := range assets {
+		clearing := decimal.Zero
+		err = ledgerDB.QueryRow(ctx, `SELECT coalesce(sum(available), 0) FROM accounts WHERE account_type = 'PNL_CLEARING' AND asset = $1`, asset).
+			Scan(&clearing)
+		if err != nil {
+			return err
+		}
+		sum := clearing.Add(nets[asset])
+		fmt.Fprintf(out, "%s: PNL_CLEARING %s + the positions' signed costs %s = %s (invariant 6: 0)\n", asset, clearing, nets[asset], sum)
+		if !sum.IsZero() {
+			broken++
+		}
+	}
 	var pending int
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM pending_settlements`).Scan(&pending); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "settlements waiting on the ledger: %d\n", pending)
-	if !sum.IsZero() {
-		broken++
-	}
 	if broken > 0 || pending > 0 {
 		return fmt.Errorf("%d derivatives mismatches, %d parked settlements", broken, pending)
 	}

@@ -7,9 +7,11 @@
 #                               about half the pair cap each, so HOUSE can
 #                               sell and buy about 1,000,000 USDT of them),
 #                               and 2,000,000 USDT of contract margin in its
-#                               FUTURES account (HOUSE_USER_ID); audited
-#                               adjustments, needs ledger.manual_adjustment.
-#                               Idempotent.
+#                               FUTURES account (HOUSE_USER_ID), 6 BTC and 200
+#                               ETH in its coin-margined ones, and the
+#                               insurance fund's BTC, ETH and ASTRA rows;
+#                               audited adjustments, needs
+#                               ledger.manual_adjustment. Idempotent.
 #   scripts/ops/house.sh flags  public books and charts from Binance everywhere
 #                               (market.reference_depth, market.reference_kline)
 #                               and HOUSE on every pair listed now that follows
@@ -55,16 +57,33 @@ seed)
     ctl ledger-service ledger house-margin --amount "$amount" \
       --reason "HOUSE contract margin: every contract trades against HOUSE (ADR-0015)" --key "seed-house-margin-$version"
   done
+  # The coin-margined contracts settle in their coin (coin-margined design
+  # 2026-10-06 §2.3): HOUSE's BTC and ETH FUTURES accounts, each about
+  # 500,000 USD (ten times that is HOUSE_CONTRACT_CAP), and the insurance
+  # fund's rows of the three coins (the coordinator's 20:45 decision 7:
+  # BTC +2 and ETH +40 on what margin trading put there, ASTRA 10% of a
+  # coin-margined contract's 1,000,000 USD).
+  for spec in "BTC 6 v1" "ETH 200 v1"; do
+    read -r asset amount version <<<"$spec"
+    ctl ledger-service ledger house-margin --asset "$asset" --amount "$amount" \
+      --reason "HOUSE coin-margined contract margin (ADR-0015)" --key "seed-house-margin-$asset-$version"
+  done
+  for spec in "BTC 2 v1" "ETH 40 v1" "ASTRA 100000 v1"; do
+    read -r asset amount version <<<"$spec"
+    ctl ledger-service ledger insurance-fund --asset "$asset" --amount "$amount" \
+      --reason "insurance fund of the coin-margined contracts" --key "seed-insurance-coinm-$asset-$version"
+  done
   ;;
 flags)
-  # The pairs as listed now, not test.json: one listed from the console
-  # (LINK-BTC) keeps HOUSE when it follows a reference market. Pairs with
-  # their own market (the platform coin), and the contracts on them, have
-  # no HOUSE.
+  # The pairs and contracts as listed now, not test.json: one listed from
+  # the console (LINK-BTC) keeps HOUSE when it follows a reference market.
+  # Pairs with their own market (the platform coin), and contracts without
+  # a Binance perpetual (its two), have no HOUSE; the coin-margined
+  # contracts are listed on request (margin_type=ALL).
   pairs="$(curl -fsS "$API/v1/market/pairs")"
-  contracts="$(curl -fsS "$API/v1/market/contracts")"
+  contracts="$(curl -fsS "$API/v1/market/contracts?margin_type=ALL")"
   allow="$(jq -rn --argjson p "$pairs" --argjson c "$contracts" '[$p.pairs[] | select((.reference_symbol // "") != "") | .symbol] as $followed |
-    [$followed[], ($c.contracts[] | select(.index_symbol as $i | $followed | index($i)) | .symbol)] | join(",")')"
+    [$followed[], ($c.contracts[] | select((.reference_symbol // "") != "") | .symbol)] | join(",")')"
   [ -n "$allow" ] || { echo "no followed pair listed: nothing changed" >&2; exit 1; }
   ctl user-service flags set market.reference_depth --on --reason "Binance books on every followed symbol (ADR-0010)"
   ctl user-service flags set market.reference_kline --on --deny-symbols "" --reason "Binance charts on every pair, ETH-BTC included"

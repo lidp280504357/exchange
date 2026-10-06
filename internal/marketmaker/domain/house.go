@@ -21,9 +21,31 @@ type Spec struct {
 	TickSize decimal.Decimal
 	LotSize  decimal.Decimal
 	Contract bool
+	// Settle is a contract's settlement asset: USDT for a linear one, the
+	// base of a coin-margined one, whose quantities are whole contracts of
+	// ContractSize USD (coin-margined design 2026-10-06 §2).
+	Settle       string
+	ContractSize decimal.Decimal
 	// Halted: the pair is not TRADING; HOUSE does not quote it, but its
 	// reference market still prices its base asset.
 	Halted bool
+}
+
+// SettleAsset is a contract's settlement asset, USDT when not told.
+func (s Spec) SettleAsset() string {
+	if s.Settle == "" {
+		return Valuation
+	}
+	return s.Settle
+}
+
+// UnitValue is what one unit of the spec's quantity is worth in USDT at
+// price: the price itself, or a coin-margined contract's face value.
+func (s Spec) UnitValue(price decimal.Decimal) decimal.Decimal {
+	if s.ContractSize.IsPositive() {
+		return s.ContractSize
+	}
+	return price
 }
 
 // Valuation is the asset HOUSE's limits and prices are in.
@@ -69,7 +91,7 @@ func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n int) 
 	for _, l := range out {
 		q := l.Quantity
 		if levelCap.IsPositive() {
-			q = decimal.Min(q, levelCap.Div(l.Price))
+			q = decimal.Min(q, levelCap.Div(spec.UnitValue(l.Price)))
 		}
 		if q = floor(q, spec.LotSize); q.IsPositive() {
 			kept = append(kept, Level{Price: l.Price, Quantity: q})
@@ -150,33 +172,43 @@ func LevelCap(spec Spec, caps Caps, prices map[string]decimal.Decimal) (decimal.
 	return caps.Level.Div(qp), true
 }
 
-// ContractAccount is HOUSE's FUTURES account as its rooms need it: its net
-// position on each contract (long positive), what its positions are worth
-// together at the mark prices, and its equity (wallet balance and
-// unrealized PnL).
+// ContractAccount is HOUSE's FUTURES accounts as its rooms need them: its
+// net position on each contract (long positive; contracts of a
+// coin-margined one), and by settlement asset what its positions there
+// are worth together at the mark prices, in USDT, and that account's
+// equity (wallet balance and unrealized PnL), in the asset.
 type ContractAccount struct {
 	Positions map[string]decimal.Decimal
-	Exposure  decimal.Decimal
-	Equity    decimal.Decimal
+	Exposure  map[string]decimal.Decimal
+	Equity    map[string]decimal.Decimal
 }
 
-// ContractRoom is how much, in USDT, HOUSE's contract positions together
-// may still grow: up to ContractLeverage times its equity. HOUSE is never
-// liquidated (ADR-0015), so this is what keeps its losses within what it
-// can pay; with no equity left it only reduces positions.
-func ContractRoom(a ContractAccount, caps Caps) decimal.Decimal {
-	return positive(a.Equity.Mul(caps.ContractLeverage).Sub(a.Exposure))
+// ContractRoom is how much, in USDT, HOUSE's contract positions settled
+// in asset may still grow: up to ContractLeverage times that account's
+// equity, valued at price (the asset's USDT price, 1 for USDT; zero room
+// without one). HOUSE is never liquidated (ADR-0015), so this is what keeps
+// its losses within what each account can pay (coin-margined design
+// 2026-10-06 §2.3: a coin-margined contract's against the coin's
+// account); with no equity left it only reduces positions.
+func ContractRoom(a ContractAccount, asset string, price decimal.Decimal, caps Caps) decimal.Decimal {
+	if !price.IsPositive() {
+		return decimal.Zero
+	}
+	return positive(a.Equity[asset].Mul(price).Mul(caps.ContractLeverage).Sub(a.Exposure[asset]))
 }
 
 // ContractRooms works out how much of a contract HOUSE may still buy and
 // sell: its net position (long positive) may be worth at most Contract
 // either way, and what grows it beyond zero takes from room, the USDT
-// that all its contract positions may still grow by (ContractRoom).
+// that its contract positions of that settlement asset may still grow by
+// (ContractRoom). A coin-margined contract's are in contracts, valued at
+// their face value.
 func ContractRooms(spec Spec, position, price, room decimal.Decimal, caps Caps) (buy, sell decimal.Decimal) {
 	if !price.IsPositive() {
 		return decimal.Zero, decimal.Zero
 	}
-	limit, grow := caps.Contract.Div(price), room.Div(price)
+	unit := spec.UnitValue(price)
+	limit, grow := caps.Contract.Div(unit), room.Div(unit)
 	buy = decimal.Min(positive(limit.Sub(position)), positive(position.Neg()).Add(grow))
 	sell = decimal.Min(positive(limit.Add(position)), positive(position).Add(grow))
 	return floor(buy, spec.LotSize), floor(sell, spec.LotSize)
