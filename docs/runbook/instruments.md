@@ -14,7 +14,7 @@
 
 金额一律 `NUMERIC(38,18)` 与十进制字符串（ADR-0008）；超精度直接拒绝，不做舍入。每次变更版本号加一，并在 `config_history` 追加一行（值、操作者、原因），同事务经 outbox 发 `instrument.events`（`AssetUpserted`、`NetworkUpserted`、`TradingPairUpserted`、`TradingPairStatusChanged`、`ContractUpserted`、`ContractStatusChanged`、`FeeScheduleChanged`）。变更立即生效；预定生效时间留到管理后台（阶段 2）。
 
-交易对状态（附录 B）：`PREPARE → TRADING ↔ HALT`；`TRADING/HALT → CANCEL_ONLY → DELISTED`，其他变更返回 409 `INSTRUMENT_STATUS_TRANSITION_INVALID`。
+交易对状态（附录 B）：`PREPARE → TRADING ↔ HALT`；`TRADING/HALT → CANCEL_ONLY → DELISTED`，`CANCEL_ONLY → TRADING`（下架前可重新开放，后台按币种关闭合约后再打开用它；`DELISTED` 不可逆；B122，币本位设计 2026-10-06 §3.5），合约同一张表，其他变更返回 409 `INSTRUMENT_STATUS_TRANSITION_INVALID`。
 
 ## 声明式同步（幂等）
 
