@@ -474,6 +474,8 @@ func approvalExpiry(a domain.Approval) (at time.Time, ok bool) {
 		return a.CreatedAt.Add(welcomeApprovalTTL), true
 	case marginKind(a.Kind):
 		return a.CreatedAt.Add(marginApprovalTTL), true
+	case a.Kind == domain.KindHouseCaps:
+		return a.CreatedAt.Add(houseCapsApprovalTTL), true
 	}
 	return time.Time{}, false
 }

@@ -1,5 +1,5 @@
 import { dec, errorText } from "@exchange/core";
-import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
+import { adminApi, adminData, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, cn, DataTable, ErrorState, Input, Segmented, Skeleton, Stat, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 
@@ -9,6 +9,7 @@ import { Num, TimeText } from "../kit/format";
 import { Card, Page } from "../kit/Page";
 import { cents, coinMargined, useQuantityUnit } from "../kit/settle";
 import { SignedChart } from "../kit/SignedChart";
+import { HouseCapsCard } from "./house/caps";
 import { useInstrumentConfig } from "./instruments/config";
 
 type House = AdminSchemas["House"];
@@ -58,13 +59,14 @@ type AssetFilter = "all" | "backed" | "internal";
 
 /**
  * HOUSE (ADR-0013, ADR-0015), redone in C6: its inventory and results at
- * a glance (totals, 30 days of results, where it is exposed), then its
+ * a glance (totals, 30 days of results, where it is exposed), its caps at
+ * run time with a change asked of a second administrator (A69), then its
  * inventory valued at the last prices (withdrawable assets, internal ones
  * below zero once sold), what it traded per pair with the result at those
  * prices, and its net position on every contract (0 where it is flat);
  * refreshed every 30 seconds.
  */
-export default function HousePage() {
+export default function HousePage({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const q = useQuery({ queryKey: ["admin", "house"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/house")), refetchInterval: 30_000 });
   // The contracts page's query: every contract, so flat ones show too.
@@ -106,6 +108,7 @@ export default function HousePage() {
           <Exposure assets={h?.assets} />
         </Card>
       </div>
+      <HouseCapsCard admin={admin} />
       <Assets assets={h?.assets} loading={q.isPending} />
       <Pairs pairs={h?.pairs} loading={q.isPending} />
       <Card title={t("admin.house.contracts")} extra={contractsQ.data && <span className="text-xs text-fg-3">{t("admin.house.positionsCount", { open, all: contracts.length })}</span>}>

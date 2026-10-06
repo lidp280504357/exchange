@@ -597,6 +597,62 @@ fund_grew() {
 }
 eventually 20 "the fund holds 1 USDT more" fund_grew
 
+echo "== HOUSE's caps changed by two administrators (A69; market-maker C45)"
+as AUDITOR GET /admin/v1/house/caps ""
+if [[ $STATUS == 503 ]] || [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
+  echo "skip HOUSE's caps: market-maker keeps none yet, or this admin-service is from before A69 ($STATUS)"
+elif [[ $(jq -r '.pending.id // ""' <<<"$BODY") != "" ]]; then
+  echo "skip HOUSE's caps: a request waits already ($(jq -r .pending.id <<<"$BODY"))"
+else
+  expect 200 - "every administrator reads HOUSE's caps"
+  check '(.caps | (.level | test("^[0-9.]+$")) and (.symbol | test("^[0-9.]+$")) and (.total | test("^[0-9.]+$"))
+    and (.contract | test("^[0-9.]+$")) and (.safety | test("^[0-9.]+$")) and (.contract_leverage | test("^[0-9.]+$")) and .version >= 1)
+    and (.changes | type) == "array" and .pending == null
+    and ((.initial | type) == "object" and (.initial.contract_leverage | test("^[0-9.]+$")) or (.initial == null and (.changes | length) == 10))' \
+    "the six caps with their version, the latest changes and the first version's, nothing waiting"
+  CAPS_V=$(jq -r .caps.version <<<"$BODY")
+  SAFETY=$(jq -r .caps.safety <<<"$BODY")
+  NEW_SAFETY=$(jq -nr --arg s "$SAFETY" '($s | tonumber) + 1 | tostring')
+  caps_body() { jq -nc --arg s "$1" --argjson v "$2" --arg r "$3" '{caps: {safety: $s}, version: $v, reason: $r}'; }
+  as OPERATOR POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$CAPS_V" "e2e")"
+  expect 403 ADMIN_FORBIDDEN "an OPERATOR asks for no caps"
+  as FINANCE POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$((CAPS_V - 1))" "e2e reads an old version")"
+  expect 409 HOUSE_CAPS_VERSION "a stale version"
+  # Each cap within its range (user 06:0x): refused before anything is asked.
+  for bad in '{"contract_leverage":"126"}' '{"contract_leverage":"0.5"}' '{"symbol":"0"}' '{"safety":"0"}' '{"level":"-1"}' \
+    '{"total":"1000000000000000.01"}'; do
+    as FINANCE POST /admin/v1/house/caps "$(jq -nc --argjson c "$bad" --argjson v "$CAPS_V" '{caps: $c, version: $v, reason: "e2e out of range"}')"
+    expect 400 COMMON_INVALID_ARGUMENT "out of its range: $bad"
+  done
+  as FINANCE POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$CAPS_V" "e2e raises the safety margin by 1 USDT")"
+  expect 202 - "FINANCE asks"
+  check '.kind == "HOUSE_CAPS" and .status == "PENDING" and .mode == "TWO_PERSON" and .payload.changed == "safety"' \
+    "a request for a second administrator, whatever the approval mode"
+  CAPS_REQ=$(jq -r .id <<<"$BODY")
+  at_exit "as ADMIN POST /admin/v1/approvals/$CAPS_REQ/decide '{\"approve\":false,\"reason\":\"e2e cleanup\"}' >/dev/null"
+  as AUDITOR GET /admin/v1/house/caps ""
+  check ".pending.id == \"$CAPS_REQ\"" "the request shown as waiting"
+  as FINANCE POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$CAPS_V" "e2e asks twice")"
+  expect 409 ADMIN_HOUSE_CAPS_PENDING "one request at a time"
+  as FINANCE POST "/admin/v1/approvals/$CAPS_REQ/decide" '{"approve":true,"reason":"my own"}'
+  expect 403 ADMIN_SELF_APPROVAL "not by the requester"
+  as ADMIN POST "/admin/v1/approvals/$CAPS_REQ/decide" '{"approve":true,"reason":"checked by e2e"}'
+  expect 200 - "ADMIN approves"
+  check ".status == \"EXECUTED\" and .result == \"caps version $((CAPS_V + 1))\"" "market-maker takes it"
+  as AUDITOR GET /admin/v1/house/caps ""
+  check ".caps.version == $((CAPS_V + 1)) and (.caps.safety | tonumber) == ($NEW_SAFETY | tonumber) and .caps.updated_by == \"$EMAIL_FINANCE\"
+    and .changes[0].approval_id == \"$CAPS_REQ\" and .changes[0].approver == \"$EMAIL_ADMIN\" and .changes[0].signed_by == \"admin\"
+    and .pending == null" \
+    "read back: the new safety margin in the requester's name, the approver in the history"
+  # Put back as it was, the same way.
+  as FINANCE POST /admin/v1/house/caps "$(caps_body "$SAFETY" "$((CAPS_V + 1))" "e2e puts the safety margin back")"
+  expect 202 - "FINANCE asks to put it back"
+  CAPS_BACK=$(jq -r .id <<<"$BODY")
+  as ADMIN POST "/admin/v1/approvals/$CAPS_BACK/decide" '{"approve":true,"reason":"e2e cleanup"}'
+  expect 200 - "approved"
+  check '.status == "EXECUTED"' "the safety margin as it was"
+fi
+
 echo "== reports from the ClickHouse read models"
 as AUDITOR GET "/admin/v1/reports/trading?days=30" ""
 expect 200 - "trading report"

@@ -283,6 +283,10 @@ const (
 	// KindMarginLiquidate liquidates a margin account by hand, whatever its
 	// margin level: margin-service's liquidation with the approval's ID.
 	KindMarginLiquidate = "MARGIN_LIQUIDATE"
+	// KindHouseCaps changes HOUSE's runtime caps (market-maker, review
+	// C45): always a second administrator's, as of the version read (user
+	// 2026-10-07, A69).
+	KindHouseCaps = "HOUSE_CAPS"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"

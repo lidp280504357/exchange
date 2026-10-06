@@ -435,10 +435,31 @@ try {
   // Every contract has a row, flat or not.
   await waitText("各合约净头寸");
   await waitText("ETH-USDT-PERP");
+  // HOUSE's caps (A69): the six of them, each with its purpose and what
+  // lowering or raising it does (user 06:0x); the request dialog lists a
+  // change from and to with what it does, then is closed, nothing asked (a
+  // request may wait already: then no button).
+  await page.waitForSelector("[data-testid=house-caps] [data-testid=house-cap-contract_leverage]", { timeout: 20000 });
+  await waitText("每个盘口每一档最多报出的数量");
+  await waitText("极端行情下合约权益可能被打穿");
+  if (await page.$("[data-testid=house-caps-request]")) {
+    await page.click("[data-testid=house-caps-request]");
+    await page.waitForSelector('[role=dialog] input[aria-label="safety"]');
+    const safety = await page.$eval('[role=dialog] input[aria-label="safety"]', (el) => el.value);
+    await page.$eval('[role=dialog] input[aria-label="safety"]', (el) => el.select());
+    await page.type('[role=dialog] input[aria-label="safety"]', String(Number(safety) + 1));
+    await page.waitForFunction(
+      () => /安全边际[\s\S]*调高：可报的数量减少/.test(document.querySelector("[data-testid=house-caps-preview]")?.textContent ?? ""),
+      { timeout: 10000 },
+    );
+    await t.shot("3c-house-caps");
+    await clickButton("取消", "[role=dialog]");
+    await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  }
   await go("/risk");
   await waitText("market.house_liquidity");
   await t.shot("3b-house");
-  ok("futures, every user's positions and the liquidation log, HOUSE (results, exposure, inventory, pairs, every contract's net position), and the flags");
+  ok("futures, every user's positions and the liquidation log, HOUSE (results, exposure, inventory, pairs, every contract's net position, its caps with what each does and a change's preview), and the flags");
 
   // 9. Ledger: the reconciliation; audit; reports.
   await go("/ledger");

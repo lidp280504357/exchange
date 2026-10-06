@@ -67,10 +67,11 @@ type Service struct {
 	// nil values only USDT.
 	Prices ports.MarketPrices
 	// HouseBook reads HOUSE's book; Probe the services' readiness; Reconciler
-	// the ledger's reconciliation runs.
-	HouseBook  HouseDeps
-	Probe      ports.Health
-	Reconciler ports.Reconciler
+	// the ledger's reconciliation runs. MarketMaker keeps HOUSE's caps.
+	HouseBook   HouseDeps
+	MarketMaker ports.MarketMaker
+	Probe       ports.Health
+	Reconciler  ports.Reconciler
 	// Content is notification-service's announcements, help articles and
 	// in-app messages.
 	Content ports.Content

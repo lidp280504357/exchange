@@ -4228,14 +4228,18 @@ paths:
         raise (WELCOME_CREDIT) needs settings.write and lapses a day after
         it was asked for, the same way; so do margin terms (MARGIN_PARAMS,
         instruments.trading) and a margin liquidation by hand
-        (MARGIN_LIQUIDATE, derivatives.write). A change (SIM_EVENT,
-        SIM_PARAMS, WELCOME_CREDIT, MARGIN_PARAMS, MARGIN_LIQUIDATE) is not
-        marked attempted: when its service cannot be reached, or the welcome
+        (MARGIN_LIQUIDATE, derivatives.write); HOUSE's caps (HOUSE_CAPS,
+        ledger.adjust.approve) lapse a day after they were asked for too. A
+        change (SIM_EVENT, SIM_PARAMS, WELCOME_CREDIT, MARGIN_PARAMS,
+        MARGIN_LIQUIDATE, HOUSE_CAPS) is not marked attempted: when its service cannot be reached, or the welcome
         credits or margin terms changed and cannot be read again, the
         answer is 503 COMMON_UNAVAILABLE with details.approval_id, the
         request stays PENDING as it was and can be approved again (or
         rejected); margin terms found set as asked at the next version by
-        the request's requester are that earlier attempt's.
+        the request's requester are that earlier attempt's, and so are
+        HOUSE's caps whose history names the request. HOUSE's caps changed
+        are audited as admin.house.caps_changed, cap by cap, before and
+        after.
       tags: [ledger]
       security:
         - session: []
@@ -5051,6 +5055,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/House'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/house/caps:
+    get:
+      operationId: getHouseCaps
+      summary: HOUSE's caps at run time, the request that waits to change them and the latest changes
+      description: |
+        What market-maker quotes within (review C45; user 2026-10-07, A69):
+        a level's, a pair's and all spot positions' caps, a contract's
+        position cap and the backed inventory kept back (USDT), and the
+        contracts' leverage on HOUSE's contract equity (a multiple), with
+        their version; the HOUSE_CAPS request that waits (null for none),
+        market-maker's latest changes, newest first, and the caps of the
+        first version (the deployment's, from market-maker's environment).
+        503 while market-maker cannot be read. Needs reports.read.
+      tags: [reports]
+      responses:
+        '200':
+          description: The caps.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseCapsView'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: requestHouseCaps
+      summary: Ask a second administrator to change HOUSE's caps
+      description: |
+        The caps given that differ from those of the version read, each
+        within its range (user 2026-10-07 06:0x, review C47) - level zero or
+        more (zero: a level is not capped), symbol, total, contract and
+        safety above zero, every USDT cap at most 1e15, contract_leverage
+        from 1 to 125 - become a
+        HOUSE_CAPS request that always waits for a second administrator,
+        whatever the approval mode: 202 with it. 409 HOUSE_CAPS_VERSION when
+        the caps moved since version was read (details version, the one
+        now); 409 ADMIN_HOUSE_CAPS_PENDING while another request waits
+        (details approval_id); 400 for an unknown cap, a bad value or
+        nothing that changes. Needs ledger.adjust.request (as HOUSE's fund
+        operations); audited as admin.house.caps_requested.
+      tags: [reports, ledger]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseCapsRequest'
+      responses:
+        '202':
+          description: The request, waiting for a second administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/health:
@@ -7165,6 +7227,122 @@ components:
         updated_at:
           type: [string, 'null']
           format: date-time
+    HouseCaps:
+      description: HOUSE's caps as market-maker keeps them (review C45), decimal strings.
+      type: object
+      required: [level, symbol, total, contract, safety, contract_leverage, version, updated_by, updated_at]
+      properties:
+        level:
+          description: A book level's quantity, USDT; zero or more, zero for no cap.
+          $ref: '#/components/schemas/Decimal'
+        symbol:
+          description: An asset's holding (a pair's position), USDT; above zero.
+          $ref: '#/components/schemas/Decimal'
+        total:
+          description: All holdings but USDT together, USDT; above zero.
+          $ref: '#/components/schemas/Decimal'
+        contract:
+          description: A contract's net position, USDT; above zero.
+          $ref: '#/components/schemas/Decimal'
+        safety:
+          description: The backed inventory kept back and the quote asset kept when buying, USDT; above zero.
+          $ref: '#/components/schemas/Decimal'
+        contract_leverage:
+          description: All contract positions of a settlement asset together at most this many times HOUSE's contract equity in it; 1 to 125.
+          $ref: '#/components/schemas/Decimal'
+        version:
+          type: integer
+          format: int64
+        updated_by:
+          type: string
+          description: The requester of the last change; environment for the deployment's defaults.
+        updated_at:
+          type: string
+          format: date-time
+    HouseCapsChange:
+      type: object
+      required: [version, caps, previous, actor, approver, approval_id, reason, signed_by, at]
+      properties:
+        version:
+          type: integer
+          format: int64
+        caps:
+          type: object
+          description: The six caps after the change.
+          additionalProperties:
+            type: string
+        previous:
+          description: The caps before (null for the first version).
+          oneOf:
+            - type: object
+              additionalProperties:
+                type: string
+            - type: 'null'
+        actor:
+          type: string
+        approver:
+          type: string
+        approval_id:
+          type: string
+        reason:
+          type: string
+        signed_by:
+          type: string
+          description: The key that signed the change (review C47) - admin for the console's, ops for exchangectl's (no approver); empty for the first version and before C47.
+        at:
+          type: string
+          format: date-time
+    HouseCapsView:
+      type: object
+      required: [caps, pending, changes, initial]
+      properties:
+        caps:
+          $ref: '#/components/schemas/HouseCaps'
+        pending:
+          description: The HOUSE_CAPS request that waits; null for none.
+          oneOf:
+            - $ref: '#/components/schemas/Approval'
+            - type: 'null'
+        changes:
+          type: array
+          description: market-maker's latest changes of the caps (at most 10), newest first; empty when they cannot be read.
+          items:
+            $ref: '#/components/schemas/HouseCapsChange'
+        initial:
+          description: The six caps of the first version, from market-maker's environment; null when it is not among the latest 100 changes or they cannot be read.
+          oneOf:
+            - type: object
+              additionalProperties:
+                type: string
+            - type: 'null'
+    HouseCapsRequest:
+      type: object
+      required: [caps, version, reason]
+      properties:
+        caps:
+          type: object
+          description: The caps to change by name, decimal strings (the others stay as they are).
+          properties:
+            level:
+              type: string
+            symbol:
+              type: string
+            total:
+              type: string
+            contract:
+              type: string
+            safety:
+              type: string
+            contract_leverage:
+              type: string
+          additionalProperties: false
+        version:
+          type: integer
+          format: int64
+          description: The caps' version read.
+        reason:
+          type: string
+          minLength: 3
     PlatformAppAdmin:
       description: >-
         One platform's download as the console sets it (design 2026-10-07, App download page): what the sites show
@@ -9258,7 +9436,7 @@ components:
         kind:
           type: string
           enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT, DEPOSIT_ASSIGN, WELCOME_CREDIT,
-            MARGIN_PARAMS, MARGIN_LIQUIDATE]
+            MARGIN_PARAMS, MARGIN_LIQUIDATE, HOUSE_CAPS]
         payload:
           type: object
           description: |
@@ -9275,7 +9453,10 @@ components:
             they replace, as JSON), changed (the fields, comma-separated), expected_version and actor (the requester, in
             whose name margin-service sets them); the result names the version set. For MARGIN_LIQUIDATE user_id, account
             (MARGIN_CROSS or MARGIN_ISOLATED:<symbol>), and the account when asked: status, margin_level (empty without
-            debts), total_asset, total_liability; actor; the result names the liquidation.
+            debts), total_asset, total_liability; actor; the result names the liquidation. For HOUSE_CAPS (A69) caps and
+            previous (the caps that change, asked for and replaced, as JSON by name: level, symbol, total, contract, safety,
+            contract_leverage), changed (their names, comma-separated), expected_version and actor (the requester, in whose
+            name market-maker sets them); the result names the version set.
           additionalProperties:
             type: string
         reason:

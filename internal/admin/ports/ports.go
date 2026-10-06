@@ -1035,6 +1035,32 @@ type Reports interface {
 	Holdings(ctx context.Context, asset string, bots []string, top int) (Holdings, error)
 }
 
+// MarketMaker is market-maker's internal API (review C45): HOUSE's caps at
+// run time - a level's, a pair's and all spot positions', a contract's
+// position (USDT), the backed inventory kept back (USDT) and the contracts'
+// leverage on HOUSE's contract equity - as decimal strings with their
+// version.
+type MarketMaker interface {
+	HouseCaps(ctx context.Context) (json.RawMessage, error)
+	// SetHouseCaps changes the caps given, of the version read
+	// (HOUSE_CAPS_VERSION, 409, when it moved).
+	SetHouseCaps(ctx context.Context, w HouseCapsWrite) (json.RawMessage, error)
+	// HouseCapsChanges lists the latest changes, newest first.
+	HouseCapsChanges(ctx context.Context, limit int) (json.RawMessage, error)
+}
+
+// HouseCapsWrite is a change of HOUSE's caps: the caps that change, by
+// their names (level, symbol, total, contract, safety, contract_leverage),
+// of Version, asked by Actor and approved by Approver in ApprovalID.
+type HouseCapsWrite struct {
+	Caps       map[string]string
+	Version    int64
+	Actor      string
+	Approver   string
+	ApprovalID string
+	Reason     string
+}
+
 // Margin is margin-service's internal API for the console
 // (/internal/margin/* on its HTTP port, the compose network only; margin
 // design 2026-10-06 §8, C5). The answers pass through as it renders them,

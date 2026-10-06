@@ -400,6 +400,8 @@ services:
       LEDGER_SERVICE_URL: http://ledger-service:8085
       # Margin trading's terms and accounts (/internal/margin, E5).
       MARGIN_SERVICE_URL: http://margin-service:8099
+      # HOUSE's caps at run time (/internal/house/caps, C45; A69).
+      MARKET_MAKER_URL: http://market-maker:8091
       # The test server only: the e2e's changes of trading parameters wait
       # a minute; without it an ADMIN cannot set less than 10 minutes.
       ADMIN_CHANGE_DELAY_FLOOR: 60s

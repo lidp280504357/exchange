@@ -7,6 +7,7 @@ import { EnumBadge, EnumText } from "../../kit/enums";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
+import { HouseCapsChange } from "../house/caps";
 import { MintShares, pct, SimRequestNow, useEventText, type SimEvent } from "../sim/common";
 
 const right: DataColumnMeta = { align: "right" };
@@ -249,6 +250,7 @@ function Payload({ a }: { a: Approval }) {
   if (a.kind === "WELCOME_CREDIT") return <WelcomeChange a={a} />;
   if (a.kind === "MARGIN_PARAMS") return <MarginChange a={a} />;
   if (a.kind === "MARGIN_LIQUIDATE") return <MarginLiquidation a={a} />;
+  if (a.kind === "HOUSE_CAPS") return <HouseCapsChange a={a} />;
   return (
     <span className="inline-flex items-center gap-2">
       {p.user_id && <UserCell id={p.user_id} />}
@@ -331,6 +333,8 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
         <MarginChange a={a} />
       ) : a.kind === "MARGIN_LIQUIDATE" ? (
         <MarginLiquidation a={a} />
+      ) : a.kind === "HOUSE_CAPS" ? (
+        <HouseCapsChange a={a} />
       ) : (
         <Num value={p.amount} unit={p.asset} signed />
       )}

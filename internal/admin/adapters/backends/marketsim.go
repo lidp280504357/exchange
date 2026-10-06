@@ -94,6 +94,12 @@ func (m MarketSim) UpdateParams(ctx context.Context, params json.RawMessage, act
 // signed sends a write with the console's signature over exactly the bytes
 // it sends.
 func (m MarketSim) signed(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
+	return m.REST.signed(ctx, m.Signer, method, m.Base+path, body, "market-sim unreachable")
+}
+
+// signed sends a request with signer's signature over exactly the body's
+// bytes it sends; unreachable says which service could not be reached.
+func (r REST) signed(ctx context.Context, signer svcsign.Client, method, url string, body any, unreachable string) (json.RawMessage, error) {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
@@ -101,18 +107,17 @@ func (m MarketSim) signed(ctx context.Context, method, path string, body any) (j
 		return nil, err
 	}
 	payload := bytes.TrimRight(b.Bytes(), "\n")
-	req, err := http.NewRequestWithContext(ctx, method, m.Base+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	signer := m.Signer
 	if signer.HTTP == nil {
-		signer.HTTP = m.Client
+		signer.HTTP = r.Client
 	}
 	resp, err := signer.Do(req, payload)
 	if err != nil {
-		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "market-sim unreachable")
+		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, unreachable)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))

@@ -80,18 +80,22 @@ var fundActions = map[string]struct{ requested, approved, rejected, executed, fa
 		"admin.margin.liquidation_requested", "admin.margin.liquidation_approved", "admin.margin.liquidation_rejected",
 		"admin.margin.liquidation_started", "admin.margin.liquidation_failed", "admin.margin.liquidation_unfinished",
 	},
+	domain.KindHouseCaps: {
+		"admin.house.caps_requested", "admin.house.caps_approved", "admin.house.caps_rejected",
+		"admin.house.caps_changed", "admin.house.caps_failed", "admin.house.caps_unfinished",
+	},
 }
 
 // simKind reports whether an approval is a simulated market's change.
 func simKind(kind string) bool { return kind == domain.KindSimEvent || kind == domain.KindSimParams }
 
 // changeKind reports whether an approval sets something rather than books
-// it: a simulated market's change, the welcome credits, margin terms and a
-// margin liquidation (margin-service starts one per approval). Its attempt
-// is not marked (the service refuses it twice), a failure leaves it as it
-// was.
+// it: a simulated market's change, the welcome credits, margin terms, a
+// margin liquidation (margin-service starts one per approval) and HOUSE's
+// caps. Its attempt is not marked (the service refuses it twice), a
+// failure leaves it as it was.
 func changeKind(kind string) bool {
-	return simKind(kind) || kind == domain.KindWelcomeCredit || marginKind(kind)
+	return simKind(kind) || kind == domain.KindWelcomeCredit || marginKind(kind) || kind == domain.KindHouseCaps
 }
 
 // fundTarget is the audit target of an operation.
@@ -105,6 +109,8 @@ func fundTarget(a domain.Approval) string {
 		return platformTarget
 	case a.Kind == domain.KindMarginParams:
 		return "margin:" + a.Payload["target"]
+	case a.Kind == domain.KindHouseCaps:
+		return houseCapsTarget
 	}
 	return "user:" + a.Payload["user_id"]
 }
@@ -531,6 +537,13 @@ func fundDetails(a domain.Approval) string {
 			"expected_version": a.Payload["expected_version"], "mode": a.Mode, "escalation": a.Escalation, "status": a.Status, "result": a.Result,
 		})
 		return string(d)
+	case domain.KindHouseCaps:
+		d, _ := json.Marshal(map[string]any{
+			"approval_id": a.ID, "caps": json.RawMessage(orEmptyObject(a.Payload["caps"])),
+			"previous": json.RawMessage(orEmptyObject(a.Payload["previous"])), "changed": a.Payload["changed"],
+			"expected_version": a.Payload["expected_version"], "mode": a.Mode, "status": a.Status, "result": a.Result,
+		})
+		return string(d)
 	case domain.KindMarginLiquidate:
 		d, _ := json.Marshal(map[string]any{
 			"approval_id": a.ID, "user_id": a.Payload["user_id"], "account": a.Payload["account"], "account_status": a.Payload["status"],
@@ -773,6 +786,8 @@ func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) 
 			run = s.executeMarginParams
 		case domain.KindMarginLiquidate:
 			run = s.executeMarginLiquidate
+		case domain.KindHouseCaps:
+			run = s.executeHouseCaps
 		}
 		result, err := run(ctx, *a, p)
 		if err != nil {

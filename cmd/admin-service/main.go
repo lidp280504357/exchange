@@ -84,10 +84,18 @@ type settings struct {
 	// trading's terms and accounts under /internal/margin, on the compose
 	// network only (margin design 2026-10-06 §8, E5).
 	MarginURL string `koanf:"margin_service_url"`
+	// MarketMakerURL is market-maker's internal API (MARKET_MAKER_URL):
+	// HOUSE's caps at run time (review C45, A69), on the compose network
+	// only.
+	MarketMakerURL string `koanf:"market_maker_url"`
 	// SimSecret signs the console's changes to the simulated market with
 	// the key "admin" (SIM_ADMIN_API_SECRET, in sim/admin.env only);
 	// without it the market is read-only here.
 	SimSecret string `koanf:"sim_admin_api_secret"`
+	// HouseCapsSecret signs the console's changes of HOUSE's caps with the
+	// key "admin" (HOUSE_CAPS_ADMIN_API_SECRET, in house/admin.env only;
+	// review C47); without it the caps are read-only here.
+	HouseCapsSecret string `koanf:"house_caps_admin_api_secret"`
 	// SecretKey seals the administrators' authenticator secrets
 	// (ADMIN_SECRET_KEY, base64 of 32 bytes; in apps.env only).
 	SecretKey string `koanf:"admin_secret_key"`
@@ -151,7 +159,8 @@ func setup(ctx context.Context, a *app.App) error {
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
 		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098", InstrumentURL: "http://localhost:8084",
-		LedgerURL: "http://localhost:8085", MarginURL: "http://localhost:8099", PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
+		LedgerURL: "http://localhost:8085", MarginURL: "http://localhost:8099", MarketMakerURL: "http://localhost:8091", PasswordHashConcurrency: 2,
+		HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -212,6 +221,15 @@ func setup(ctx context.Context, a *app.App) error {
 	default:
 		sim.Signer = svcsign.Client{KeyID: "admin", Secret: []byte(cfg.SimSecret), HTTP: rest.Client}
 	}
+	marketMaker := backends.MarketMaker{REST: rest, Base: cfg.MarketMakerURL}
+	switch err := svcsign.CheckSecret(cfg.HouseCapsSecret); {
+	case cfg.HouseCapsSecret == "":
+		a.Logger().Warn("no HOUSE_CAPS_ADMIN_API_SECRET: HOUSE's caps are read-only in the console")
+	case err != nil:
+		return fmt.Errorf("HOUSE_CAPS_ADMIN_API_SECRET: %w", err)
+	default:
+		marketMaker.Signer = svcsign.Client{KeyID: "admin", Secret: []byte(cfg.HouseCapsSecret), HTTP: rest.Client}
+	}
 	ledgerClient := ledgerv1.NewLedgerServiceClient(clients["ledger"])
 	authClient := authv1.NewAuthServiceClient(clients["auth"])
 	users := backends.Users{Auth: authClient, User: userv1.NewUserServiceClient(clients["user"]), Ledger: ledgerClient}
@@ -249,6 +267,7 @@ func setup(ctx context.Context, a *app.App) error {
 		SimBots:          sim,
 		Sim:              sim,
 		Margin:           backends.Margin{REST: rest, Base: cfg.MarginURL},
+		MarketMaker:      marketMaker,
 		MarginReports:    backends.Reports{Conn: ch},
 		Log:              a.Logger(),
 		Now:              time.Now,

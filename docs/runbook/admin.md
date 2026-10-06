@@ -294,6 +294,18 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 - `GET /admin/v1/house`：HOUSE 的账（ADR-0013、0015）。库存是账本 `MARKET_MAKER` 各资产余额，按 USDT 交易对的最新价估值（可充提资产在前，站内资产卖出后为负）；各交易对的成交来自读模型 `trades` 的 `house_side`（买入、卖出、付出与收到），盈亏 = 净持有 × 现价 + 净收入；合约仓位是 `HOUSE_USER_ID` 在 derivatives-service 的持仓（admin-service 从 `apps.env` 读 `HOUSE_USER_ID`）。读不到的部分记在 `partial`。
 - 页面（每 30 秒刷新）：四个合计（库存估值与资产数、可充提、站内（可为负）、按现价的交易盈亏与有成交的交易对数）；「近 30 日盈亏」（报表 `house-pnl` 按日：现货、合约、资金费的柱子与累计线，缺价格的交易对列出）；「敞口」（库存按现价折成 USDT、绝对值最大的 10 个，向右为持有、向左为卖出后为负，可充提的标点）；「库存」（按估值大小排序，按全部/可充提/站内与代码筛选，没有价格的标出）；「各交易对」（按盈亏大小排序，按代码筛选）；「各合约净头寸」（每个合约都列，无仓位为 0，方向多/空/无仓位，有仓位的在前，显示几个合约有仓位）。
+- **额度**（用户 2026-10-07 决定，A69；06:0x 补充每项说明；market-maker 的运行时额度见 [market-maker.md](market-maker.md) 的「运行时额度」，C45/C47）：「额度」卡逐项显示 HOUSE 报价时用的六项——名称与接口名、单位、当前值、首次默认（第 1 版，即 market-maker 第一次启动时部署环境变量给的值；不在最近 100 次修改里时显示为未知）、允许范围、用途、调低与调高的影响：
+
+  | 项 | 单位与范围 | 用途 | 调低 | 调高 |
+  |---|---|---|---|---|
+  | 每档上限 `level` | USDT，≥ 0，0 = 不限 | 每个盘口每一档最多报出的数量 | 大单要吃多档、分多次成交 | 价格突刺时单笔成交的损失更大 |
+  | 单资产上限 `symbol` | USDT，> 0 | HOUSE 持有某一资产的市值上限（站内资产可为负，按绝对值），超过后所有交易对停止买入该资产 | 热门币很快买满、停止买入 | 库存风险集中在少数资产上 |
+  | 总上限 `total` | USDT，> 0 | 除 USDT 外全部持仓的合计市值上限 | 全站更早停止买入 | 整体库存风险上升 |
+  | 单合约上限 `contract` | USDT，> 0 | 每个合约净头寸的名义价值上限，到达后该方向只减仓 | 用户开仓被拒或只部分成交 | 单个合约的方向性风险增大 |
+  | 安全边际 `safety` | USDT，> 0 | 可充提（背书）资产保留不卖的市值与买入时保留的报价资产余额 | 可卖出的背书资产更多，接近 0 时可能卖光 | 可报的数量减少 |
+  | 合约杠杆上限 `contract_leverage` | 倍，1–125 | HOUSE 在每种结算币上的全部合约暴露不超过该币合约账户权益 × 倍数 | 报价量缩小，超限只报减仓方向 | 极端行情下合约权益可能被打穿 |
+
+  USDT 金额都不超过 1e15。卡上还有版本、最近一次修改人（「部署默认值」即 `environment`）与时间、待批准的修改、market-maker 记的最近 10 次修改（逐项旧值 → 新值及影响、申请人/批准人、原因；用 `ops` 键经 exchangectl 改的标「运维命令」，没有经过后台审批）与「全部记录」（审计日志按目标 `house:caps` 筛选）。测试服现值：前四项各 500,000,000、安全边际 1,000、杠杆 10。接口 `GET /admin/v1/house/caps`（`reports.read`；经 admin-service 读 market-maker 的 `GET /internal/house/caps` 与 `…/changes?limit=100`，`MARKET_MAKER_URL=http://market-maker:8091`；`initial` 为第 1 版）。修改：`POST /admin/v1/house/caps`（`{caps: {只填要改的}, version: 读到的版本, reason}`，`ledger.adjust.request`，与 HOUSE 资金操作相同；只收与现值不同的项，超出上表范围 400）建一条审批 `HOUSE_CAPS`（迁移 admin 00016），申请框逐项列出旧值 → 新值及其影响；**无论审批模式都要另一位管理员**（`ledger.adjust.approve`，申请人不能批自己的），同时只能有一条待批（409 `ADMIN_HOUSE_CAPS_PENDING`），读到的版本已旧 409 `HOUSE_CAPS_VERSION`；一天未决即过期。批准后 admin-service 以申请人的名义、带批准人与审批 ID 调 market-maker 的 `PUT /internal/house/caps`，下一轮报价（250 毫秒内）生效；按申请时的版本，期间有人改过则审批失败（结果为 `HOUSE_CAPS_VERSION`，重读后重新申请）；答复丢失时按 market-maker 修改历史里的审批 ID 认定已生效。审计 `admin.house.caps_requested`、`caps_approved`/`caps_rejected` 与逐项前后值的 `admin.house.caps_changed`；审批页逐项显示前后值与影响。签名（C47）：admin-service 用 `HOUSE_CAPS_ADMIN_API_SECRET`（服务器 `infra/house/admin.env`，部署脚本生成并挂给 market-maker 与 admin-service）以键 `admin` 签名 PUT（svcsign，与 market-sim 相同；只有这把键能带批准人）；没有这个变量时启动日志告警，额度在后台只读：批准时答 503、审批留在待批，补上变量重启后再批准。
 
 ## 市场
 
@@ -375,7 +387,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **杠杆强平**（`/margin/liquidations`）：读模型 `margin_liquidations`（按 `liquidation_id` 合并开始与完成两条事件，`anyLast` 跳过空值），近 1/7/30/90 天，按类型、交易对、触发方式、用户筛选，游标分页。只见到完成事件的行没有开始的字段，ClickHouse 00010 之前的行没有触发方式与审批号，页面显示「—」。
 - **利息报表**（`/margin/interest`）：按天、周或月与资产：计息与已还（账本 `ledger_entries` 的全仓/逐仓利息行：计息使其减少、还款使其增加）、期末未还（加上期初以前的累计）、平均本金与小时利率、计息账户数（`margin_interest` 的逐小时计息），折合 USDT 按该资产 USDT 交易对在桶内最后一笔成交价（没有则为空，USDT 按 1）。
 - **上线检查清单**：`margin` 项（见「上线检查清单」的表）——开关关着为达标；开着时要求 `margin.liquidation` 也开着，且 `margin.enabled` 与 `margin.auto_borrow` 都不对所有人全局打开。测试服三个杠杆开关自 2026-10-06 13:25 起对所有人打开，所以这一项在测试服为未达标；上线前三个开关回到按用户或地区的规则。
-- **审批页**：`MARGIN_PARAMS` 显示对象与每个改动字段的前后值，`MARGIN_LIQUIDATE` 显示用户、账户与申请时的风险率、负债；决定分别要 `instruments.trading` 与 `derivatives.write`；一天后标「已过期」。
+- **审批页**：`MARGIN_PARAMS` 显示对象与每个改动字段的前后值，`MARGIN_LIQUIDATE` 显示用户、账户与申请时的风险率、负债；决定分别要 `instruments.trading` 与 `derivatives.write`；一天后标「已过期」。（`HOUSE_CAPS` 见「HOUSE 敞口」的额度一条。）
 - **审计**：立即生效的 `admin.margin.asset_changed`、`admin.margin.pair_changed`（对象 `margin:asset:<资产>`、`margin:pair:<交易对>`）；申请与决定 `admin.margin.params_requested/approved/rejected/failed`（对象 `margin:<目标>`，目标为 `asset:<资产>`、`pair:<交易对>` 或 `cross`）与 `admin.margin.liquidation_requested/approved/rejected/failed`（对象 `user:<id>`）；冻结与解冻见上。
 
 ## 风控

@@ -2694,14 +2694,18 @@ export interface paths {
          *     raise (WELCOME_CREDIT) needs settings.write and lapses a day after
          *     it was asked for, the same way; so do margin terms (MARGIN_PARAMS,
          *     instruments.trading) and a margin liquidation by hand
-         *     (MARGIN_LIQUIDATE, derivatives.write). A change (SIM_EVENT,
-         *     SIM_PARAMS, WELCOME_CREDIT, MARGIN_PARAMS, MARGIN_LIQUIDATE) is not
-         *     marked attempted: when its service cannot be reached, or the welcome
+         *     (MARGIN_LIQUIDATE, derivatives.write); HOUSE's caps (HOUSE_CAPS,
+         *     ledger.adjust.approve) lapse a day after they were asked for too. A
+         *     change (SIM_EVENT, SIM_PARAMS, WELCOME_CREDIT, MARGIN_PARAMS,
+         *     MARGIN_LIQUIDATE, HOUSE_CAPS) is not marked attempted: when its service cannot be reached, or the welcome
          *     credits or margin terms changed and cannot be read again, the
          *     answer is 503 COMMON_UNAVAILABLE with details.approval_id, the
          *     request stays PENDING as it was and can be approved again (or
          *     rejected); margin terms found set as asked at the next version by
-         *     the request's requester are that earlier attempt's.
+         *     the request's requester are that earlier attempt's, and so are
+         *     HOUSE's caps whose history names the request. HOUSE's caps changed
+         *     are audited as admin.house.caps_changed, cap by cap, before and
+         *     after.
          */
         post: operations["decideApproval"];
         delete?: never;
@@ -3239,6 +3243,48 @@ export interface paths {
         get: operations["getHouse"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/house/caps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * HOUSE's caps at run time, the request that waits to change them and the latest changes
+         * @description What market-maker quotes within (review C45; user 2026-10-07, A69):
+         *     a level's, a pair's and all spot positions' caps, a contract's
+         *     position cap and the backed inventory kept back (USDT), and the
+         *     contracts' leverage on HOUSE's contract equity (a multiple), with
+         *     their version; the HOUSE_CAPS request that waits (null for none),
+         *     market-maker's latest changes, newest first, and the caps of the
+         *     first version (the deployment's, from market-maker's environment).
+         *     503 while market-maker cannot be read. Needs reports.read.
+         */
+        get: operations["getHouseCaps"];
+        put?: never;
+        /**
+         * Ask a second administrator to change HOUSE's caps
+         * @description The caps given that differ from those of the version read, each
+         *     within its range (user 2026-10-07 06:0x, review C47) - level zero or
+         *     more (zero: a level is not capped), symbol, total, contract and
+         *     safety above zero, every USDT cap at most 1e15, contract_leverage
+         *     from 1 to 125 - become a
+         *     HOUSE_CAPS request that always waits for a second administrator,
+         *     whatever the approval mode: 202 with it. 409 HOUSE_CAPS_VERSION when
+         *     the caps moved since version was read (details version, the one
+         *     now); 409 ADMIN_HOUSE_CAPS_PENDING while another request waits
+         *     (details approval_id); 400 for an unknown cap, a bad value or
+         *     nothing that changes. Needs ledger.adjust.request (as HOUSE's fund
+         *     operations); audited as admin.house.caps_requested.
+         */
+        post: operations["requestHouseCaps"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4462,6 +4508,75 @@ export interface components {
             /** Format: date-time */
             updated_at: string | null;
         };
+        /** @description HOUSE's caps as market-maker keeps them (review C45), decimal strings. */
+        HouseCaps: {
+            /** @description A book level's quantity, USDT; zero or more, zero for no cap. */
+            level: components["schemas"]["Decimal"];
+            /** @description An asset's holding (a pair's position), USDT; above zero. */
+            symbol: components["schemas"]["Decimal"];
+            /** @description All holdings but USDT together, USDT; above zero. */
+            total: components["schemas"]["Decimal"];
+            /** @description A contract's net position, USDT; above zero. */
+            contract: components["schemas"]["Decimal"];
+            /** @description The backed inventory kept back and the quote asset kept when buying, USDT; above zero. */
+            safety: components["schemas"]["Decimal"];
+            /** @description All contract positions of a settlement asset together at most this many times HOUSE's contract equity in it; 1 to 125. */
+            contract_leverage: components["schemas"]["Decimal"];
+            /** Format: int64 */
+            version: number;
+            /** @description The requester of the last change; environment for the deployment's defaults. */
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        HouseCapsChange: {
+            /** Format: int64 */
+            version: number;
+            /** @description The six caps after the change. */
+            caps: {
+                [key: string]: string;
+            };
+            /** @description The caps before (null for the first version). */
+            previous: {
+                [key: string]: string;
+            } | null;
+            actor: string;
+            approver: string;
+            approval_id: string;
+            reason: string;
+            /** @description The key that signed the change (review C47) - admin for the console's, ops for exchangectl's (no approver); empty for the first version and before C47. */
+            signed_by: string;
+            /** Format: date-time */
+            at: string;
+        };
+        HouseCapsView: {
+            caps: components["schemas"]["HouseCaps"];
+            /** @description The HOUSE_CAPS request that waits; null for none. */
+            pending: components["schemas"]["Approval"] | null;
+            /** @description market-maker's latest changes of the caps (at most 10), newest first; empty when they cannot be read. */
+            changes: components["schemas"]["HouseCapsChange"][];
+            /** @description The six caps of the first version, from market-maker's environment; null when it is not among the latest 100 changes or they cannot be read. */
+            initial: {
+                [key: string]: string;
+            } | null;
+        };
+        HouseCapsRequest: {
+            /** @description The caps to change by name, decimal strings (the others stay as they are). */
+            caps: {
+                level?: string;
+                symbol?: string;
+                total?: string;
+                contract?: string;
+                safety?: string;
+                contract_leverage?: string;
+            };
+            /**
+             * Format: int64
+             * @description The caps' version read.
+             */
+            version: number;
+            reason: string;
+        };
         /** @description One platform's download as the console sets it (design 2026-10-07, App download page): what the sites show is public (null while OFF, disabled or incomplete; as api/openapi/platform.yaml's AppDownload). */
         PlatformAppAdmin: {
             /** @enum {string} */
@@ -5653,7 +5768,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN" | "WELCOME_CREDIT" | "MARGIN_PARAMS" | "MARGIN_LIQUIDATE";
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN" | "WELCOME_CREDIT" | "MARGIN_PARAMS" | "MARGIN_LIQUIDATE" | "HOUSE_CAPS";
             /**
              * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
              *     asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
@@ -5668,7 +5783,10 @@ export interface components {
              *     they replace, as JSON), changed (the fields, comma-separated), expected_version and actor (the requester, in
              *     whose name margin-service sets them); the result names the version set. For MARGIN_LIQUIDATE user_id, account
              *     (MARGIN_CROSS or MARGIN_ISOLATED:<symbol>), and the account when asked: status, margin_level (empty without
-             *     debts), total_asset, total_liability; actor; the result names the liquidation.
+             *     debts), total_asset, total_liability; actor; the result names the liquidation. For HOUSE_CAPS (A69) caps and
+             *     previous (the caps that change, asked for and replaced, as JSON by name: level, symbol, total, contract, safety,
+             *     contract_leverage), changed (their names, comma-separated), expected_version and actor (the requester, in whose
+             *     name market-maker sets them); the result names the version set.
              */
             payload: {
                 [key: string]: string;
@@ -10847,6 +10965,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["House"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getHouseCaps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caps. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HouseCapsView"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    requestHouseCaps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HouseCapsRequest"];
+            };
+        };
+        responses: {
+            /** @description The request, waiting for a second administrator. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
                 };
             };
             default: components["responses"]["Error"];
