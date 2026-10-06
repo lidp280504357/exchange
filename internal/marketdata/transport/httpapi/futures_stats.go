@@ -16,15 +16,17 @@ import (
 	"github.com/skill/exchange/internal/platform/httpx"
 )
 
-// FuturesData serves the contracts' data panel (design 2026-10-06 §3.3):
-// a contract's statistics from the reference market, and every
-// contract's prices, funding rate, open interest and 24 hours at a
-// glance. No sign-in needed.
+// FuturesData serves the contracts' data panel (design 2026-10-06 §3.3,
+// api/openapi/market.yaml): a contract's statistics and recent
+// liquidations from the reference market, and every contract's prices,
+// funding rate, open interest and 24 hours at a glance. No sign-in
+// needed.
 type FuturesData struct {
-	// Stats is the reference market's statistics and open interest
-	// (application.FuturesStats).
+	// Stats is the reference market's statistics, open interest and
+	// liquidations (application.FuturesStats).
 	Stats interface {
 		Series(ctx context.Context, symbol, metric, period string, limit int) ([]ports.FuturesStat, error)
+		Liquidations(ctx context.Context, symbol string, limit int) ([]ports.Liquidation, error)
 		Market(symbol string) (m ports.FuturesMarket, known, followed bool)
 		OpenInterestNow(symbol string) (application.OpenInterest, bool)
 	}
@@ -35,7 +37,8 @@ type FuturesData struct {
 	Tickers interface {
 		All(ctx context.Context) ([]domain.Ticker, error)
 	}
-	Listed ports.Instruments
+	// Contracts lists the contracts of both margin types.
+	Contracts ports.FuturesContracts
 }
 
 // Routes mounts the endpoints on r; the static overview wins over
@@ -43,15 +46,30 @@ type FuturesData struct {
 func (h *FuturesData) Routes(r chi.Router) {
 	r.Get("/v1/market/futures/overview", h.overview)
 	r.Get("/v1/market/{symbol}/futures-data", h.series)
+	r.Get("/v1/market/{symbol}/liquidations", h.liquidations)
 }
 
-// contract returns a listed contract (not delisted), or false.
+// contract reports whether symbol is a listed contract (not delisted).
 func (h *FuturesData) contract(ctx context.Context, symbol string) (bool, error) {
-	list, err := h.Listed.Contracts(ctx)
+	list, err := h.Contracts.FuturesContracts(ctx)
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(list, func(c ports.Contract) bool { return c.Symbol == symbol }), nil
+	return slices.ContainsFunc(list, func(c ports.FuturesContract) bool { return c.Symbol == symbol }), nil
+}
+
+// listedContract writes 404 for a symbol that is no listed contract.
+func (h *FuturesData) listedContract(w http.ResponseWriter, r *http.Request, symbol string) bool {
+	ok, err := h.contract(r.Context(), symbol)
+	switch {
+	case err != nil:
+		httpx.WriteError(w, r, err)
+		return false
+	case !ok:
+		httpx.WriteError(w, r, ErrUnknownContract)
+		return false
+	}
+	return true
 }
 
 type statPointJSON struct {
@@ -64,13 +82,7 @@ type statPointJSON struct {
 // oldest first; a funding rate takes no period.
 func (h *FuturesData) series(w http.ResponseWriter, r *http.Request) {
 	s := symbol(r)
-	ok, err := h.contract(r.Context(), s)
-	switch {
-	case err != nil:
-		httpx.WriteError(w, r, err)
-		return
-	case !ok:
-		httpx.WriteError(w, r, ErrUnknownContract)
+	if !h.listedContract(w, r, s) {
 		return
 	}
 	q := r.URL.Query()
@@ -103,6 +115,46 @@ func (h *FuturesData) series(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": s, "metric": metric, "period": shownPeriod, "points": out})
 }
 
+// liquidationJSON is market.yaml's Liquidation, as the channel
+// liquidations:{symbol} pushes it.
+type liquidationJSON struct {
+	Symbol       string `json:"symbol"`
+	PositionSide string `json:"position_side"`
+	Price        string `json:"price"`
+	AveragePrice string `json:"average_price"`
+	Quantity     string `json:"quantity"`
+	ValueUSD     string `json:"value_usd"`
+	TradedAt     string `json:"traded_at"`
+}
+
+// liquidations answers GET /v1/market/{symbol}/liquidations?limit=: the
+// latest limit (50 by default, 100 at most) of the last day, newest
+// first.
+func (h *FuturesData) liquidations(w http.ResponseWriter, r *http.Request) {
+	s := symbol(r)
+	if !h.listedContract(w, r, s) {
+		return
+	}
+	n := limit(r)
+	if n <= 0 {
+		n = 50
+	}
+	list, err := h.Stats.Liquidations(r.Context(), s, n)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]liquidationJSON, 0, len(list))
+	for _, l := range list {
+		out = append(out, liquidationJSON{
+			Symbol: l.Symbol, PositionSide: l.PositionSide, Price: l.Price.String(), AveragePrice: l.AvgPrice.String(),
+			Quantity: l.Quantity.String(), ValueUSD: l.ValueUSD.String(), TradedAt: l.At.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	w.Header().Set("Cache-Control", "public, max-age=5")
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": s, "liquidations": out})
+}
+
 // overviewJSON is one contract at a glance: null where not known (a
 // contract the reference market does not trade has no open interest).
 type overviewJSON struct {
@@ -123,9 +175,9 @@ type overviewJSON struct {
 }
 
 // overview answers GET /v1/market/futures/overview: every contract that
-// is not delisted, by symbol.
+// is not delisted, of both margin types, by symbol.
 func (h *FuturesData) overview(w http.ResponseWriter, r *http.Request) {
-	contracts, err := h.Listed.Contracts(r.Context())
+	contracts, err := h.Contracts.FuturesContracts(r.Context())
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

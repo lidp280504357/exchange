@@ -88,4 +88,36 @@ func TestFuturesStats(t *testing.T) {
 	if n, err := repo.Purge(ctx, "", t0); err != nil || n != 1 {
 		t.Fatalf("purged %d funding rates, %v", n, err)
 	}
+
+	// The recent liquidations, newest first; one stored again is kept.
+	liq := func(symbol, side string, at time.Time, qty string) ports.Liquidation {
+		return ports.Liquidation{
+			Symbol: symbol, PositionSide: side, Price: d("86000.1"), AvgPrice: d("86010"), Quantity: d(qty),
+			ValueUSD: d(qty).Mul(d("86010")), At: at,
+		}
+	}
+	list := []ports.Liquidation{
+		liq("BTC-USDT-PERP", "LONG", t0, "0.014"), liq("BTC-USDT-PERP", "SHORT", t0, "0.5"),
+		liq("BTC-USDT-PERP", "LONG", t0.Add(time.Second), "1"), liq("BTC-USD-PERP", "SHORT", t0, "3"),
+	}
+	if err := repo.AddLiquidations(ctx, list); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddLiquidations(ctx, []ports.Liquidation{liq("BTC-USDT-PERP", "LONG", t0, "9")}); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := repo.RecentLiquidations(ctx, "BTC-USDT-PERP", 2)
+	if err != nil || len(recent) != 2 || !recent[0].At.Equal(t0.Add(time.Second)) || recent[1].PositionSide != "LONG" ||
+		recent[1].Quantity.String() != "0.014" || recent[1].ValueUSD.String() != "1204.14" || recent[1].AvgPrice.String() != "86010" {
+		t.Fatalf("recent liquidations %+v, %v", recent, err)
+	}
+	if err := repo.AddLiquidations(ctx, []ports.Liquidation{liq("BTC-USDT-PERP", "BOTH", t0, "1")}); err == nil {
+		t.Fatal("a liquidation of no position side was stored")
+	}
+	if n, err := repo.PurgeLiquidations(ctx, t0.Add(time.Second)); err != nil || n != 3 {
+		t.Fatalf("purged %d liquidations, %v", n, err)
+	}
+	if left, _ := repo.RecentLiquidations(ctx, "BTC-USDT-PERP", 10); len(left) != 1 {
+		t.Fatalf("left %+v", left)
+	}
 }

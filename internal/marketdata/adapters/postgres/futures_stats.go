@@ -88,3 +88,53 @@ func (r *FuturesStats) Purge(ctx context.Context, period string, before time.Tim
 	}
 	return tag.RowsAffected(), nil
 }
+
+// AddLiquidations stores liquidations; one stored already is kept.
+func (r *FuturesStats) AddLiquidations(ctx context.Context, list []ports.Liquidation) error {
+	if len(list) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, l := range list {
+		batch.Queue(`INSERT INTO futures_liquidations (symbol, traded_at, position_side, price, average_price, quantity, value_usd)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
+			l.Symbol, l.At, l.PositionSide, l.Price, l.AvgPrice, l.Quantity, l.ValueUSD)
+	}
+	if err := r.q.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("add liquidations: %w", err)
+	}
+	return nil
+}
+
+// RecentLiquidations returns a contract's latest limit liquidations,
+// newest first.
+func (r *FuturesStats) RecentLiquidations(ctx context.Context, symbol string, limit int) ([]ports.Liquidation, error) {
+	rows, err := r.q.Query(ctx, `SELECT traded_at, position_side, price, average_price, quantity, value_usd
+		FROM futures_liquidations WHERE symbol = $1 ORDER BY traded_at DESC, position_side LIMIT $2`, symbol, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent liquidations: %w", err)
+	}
+	defer rows.Close()
+	out := []ports.Liquidation{}
+	for rows.Next() {
+		l := ports.Liquidation{Symbol: symbol}
+		if err := rows.Scan(&l.At, &l.PositionSide, &l.Price, &l.AvgPrice, &l.Quantity, &l.ValueUSD); err != nil {
+			return nil, fmt.Errorf("recent liquidations: %w", err)
+		}
+		l.At = l.At.UTC()
+		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("recent liquidations: %w", err)
+	}
+	return out, nil
+}
+
+// PurgeLiquidations deletes the liquidations older than before.
+func (r *FuturesStats) PurgeLiquidations(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := r.q.Exec(ctx, `DELETE FROM futures_liquidations WHERE traded_at < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("purge liquidations: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

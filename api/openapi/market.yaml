@@ -494,10 +494,12 @@ paths:
         settled funding rates; a series keeps the 500 latest points, none
         older than 30 days. The latest limit points, oldest first, each
         with the values of its metric (FuturesDataPoint). A contract the
-        reference market does not trade has none (an empty list); a
-        symbol that is no listed contract is 404 COMMON_NOT_FOUND.
-        market.futures_data turns the reading on; off, what is stored is
-        still served. Batch G3b.
+        reference market does not trade (the platform coin's) is 404
+        MARKET_NO_FUTURES_DATA (coordinator 2026-10-06 20:45; until the
+        service has read the contracts after a start, it serves what is
+        stored instead); a symbol that is no listed contract is 404
+        COMMON_NOT_FOUND. market.futures_data turns the reading on; off,
+        what is stored is still served. Batch G3b.
       tags: [market]
       parameters:
         - $ref: '#/components/parameters/Symbol'
@@ -541,6 +543,46 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FuturesDataPoint'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/liquidations:
+    get:
+      operationId: listLiquidations
+      summary: A contract's recent liquidations on Binance, newest first
+      description: |
+        The reference market's liquidation orders on the Binance contract
+        the contract follows from the last day, as Binance streams them
+        (the latest of a contract within a second, not all of them):
+        what the channel liquidations:{symbol} pushed (design 2026-10-06
+        §3.3, coordinator 20:45). The same 404s as futures-data:
+        MARKET_NO_FUTURES_DATA for a contract the reference market does not
+        trade, COMMON_NOT_FOUND for a symbol that is no listed contract.
+        Batch G3b.
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: The liquidations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, liquidations]
+                properties:
+                  symbol:
+                    type: string
+                  liquidations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Liquidation'
         default:
           $ref: './common.yaml#/components/responses/Error'
   /v1/market/{symbol}/candles:
@@ -868,7 +910,8 @@ components:
         A liquidation order of the reference market on a contract (design
         2026-10-06 §3.3), pushed on the public WebSocket channel
         liquidations:{symbol} as Binance streams them (the latest of a
-        contract within a second, not all of them). Batch G3b.
+        contract within a second, not all of them) and listed by GET
+        /v1/market/{symbol}/liquidations for a day. Batch G3b.
       required: [symbol, position_side, price, average_price, quantity, value_usd, traded_at]
       properties:
         symbol:

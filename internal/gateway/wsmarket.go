@@ -42,7 +42,7 @@ func publicChannel(ch string) bool {
 	switch {
 	case len(parts) == 2 && (parts[0] == "ticker" || parts[0] == "depth" || parts[0] == "trades"):
 		return symbolRE.MatchString(parts[1])
-	case len(parts) == 2 && (parts[0] == "mark-price" || parts[0] == "funding"):
+	case len(parts) == 2 && (parts[0] == "mark-price" || parts[0] == "funding" || parts[0] == "liquidations"):
 		return contractRE.MatchString(parts[1])
 	case len(parts) == 3 && parts[0] == "candles":
 		return symbolRE.MatchString(parts[1]) && slices.Contains(intervals, parts[2])

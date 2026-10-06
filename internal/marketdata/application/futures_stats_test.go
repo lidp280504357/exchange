@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,16 +14,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/shopspring/decimal"
+	"google.golang.org/protobuf/proto"
 
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	"github.com/skill/exchange/internal/marketdata/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 type futuresFlag struct{ on atomic.Bool }
 
 func (f *futuresFlag) Enabled(key string, _ flags.Subject) bool {
-	return key == KeyFuturesData && f.on.Load()
+	return key == flags.KeyFuturesData && f.on.Load()
 }
 
 // statsCall is one Stats request the fake source answered.
@@ -39,12 +45,17 @@ type fakeFutures struct {
 	answer    func(c statsCall) ([]ports.FuturesStat, error)
 	calls     []statsCall
 	perpReads int
+	// perpErr fails a margin's perpetuals.
+	perpErr map[bool]error
 }
 
 func (f *fakeFutures) Perpetuals(_ context.Context, cm bool) ([]ports.Perpetual, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.perpReads++
+	if err := f.perpErr[cm]; err != nil {
+		return nil, err
+	}
 	return f.perps[cm], nil
 }
 
@@ -72,6 +83,9 @@ type memStats struct {
 	mu     sync.Mutex
 	points map[string][]ports.FuturesStat // by symbol, metric and period
 	purged map[string]time.Time
+	liqs   []ports.Liquidation
+	// liqsPurged is the last cutoff of the liquidations.
+	liqsPurged time.Time
 }
 
 func newMemStats() *memStats {
@@ -117,6 +131,63 @@ func (m *memStats) Purge(_ context.Context, period string, before time.Time) (in
 	return 0, nil
 }
 
+func (m *memStats) AddLiquidations(_ context.Context, list []ports.Liquidation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, l := range list {
+		if !slices.ContainsFunc(m.liqs, func(x ports.Liquidation) bool {
+			return x.Symbol == l.Symbol && x.At.Equal(l.At) && x.PositionSide == l.PositionSide
+		}) {
+			m.liqs = append(m.liqs, l)
+		}
+	}
+	return nil
+}
+
+func (m *memStats) RecentLiquidations(_ context.Context, symbol string, limit int) ([]ports.Liquidation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []ports.Liquidation
+	for _, l := range m.liqs {
+		if l.Symbol == symbol {
+			out = append(out, l)
+		}
+	}
+	slices.SortFunc(out, func(a, b ports.Liquidation) int { return b.At.Compare(a.At) })
+	return out[:min(limit, len(out))], nil
+}
+
+func (m *memStats) PurgeLiquidations(_ context.Context, before time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.liqsPurged = before
+	return 0, nil
+}
+
+// futuresList is the listing of both margin types.
+type futuresList []ports.FuturesContract
+
+func (l futuresList) FuturesContracts(context.Context) ([]ports.FuturesContract, error) {
+	return l, nil
+}
+
+// recordPub keeps what was published; err fails the next publish.
+type recordPub struct {
+	mu   sync.Mutex
+	recs []kafka.Record
+	err  error
+}
+
+func (p *recordPub) Publish(_ context.Context, recs ...kafka.Record) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.err != nil {
+		return p.err
+	}
+	p.recs = append(p.recs, recs...)
+	return nil
+}
+
 var futuresT0 = time.Date(2026, 10, 6, 11, 10, 54, 0, time.UTC)
 
 // counted is a counter's value.
@@ -138,8 +209,15 @@ func newTestFutures(t *testing.T) (*FuturesStats, *fakeFutures, *memStats, *futu
 	repo := newMemStats()
 	fl := &futuresFlag{}
 	fl.on.Store(true)
-	contracts := contractList{{Symbol: "BTC-USDT-PERP"}, {Symbol: "1000PEPE-USDT-PERP"}, {Symbol: "ASTRA-USDT-PERP"}, {Symbol: "BTC-USD-PERP"}}
-	s := NewFuturesStats(src, repo, contracts, fl, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	contracts := futuresList{
+		{Symbol: "BTC-USDT-PERP", ReferenceSymbol: "BTCUSDT"},
+		{Symbol: "1000PEPE-USDT-PERP", ReferenceSymbol: "1000PEPEUSDT"},
+		{Symbol: "ASTRA-USDT-PERP"},
+		{Symbol: "OLD-USDT-PERP", ReferenceSymbol: "OLDUSDT"},
+		{Symbol: "BTC-USD-PERP", CoinMargined: true, ReferenceSymbol: "BTCUSD_PERP", ContractSize: decimal.NewFromInt(100)},
+	}
+	s := NewFuturesStats(src, repo, contracts, fl, &recordPub{}, event.NewFactory("market-data-service", "test"),
+		slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	s.now = func() time.Time { return futuresT0 }
 	return s, src, repo, fl
 }
@@ -170,6 +248,9 @@ func TestFuturesStatsFollowsTheSourcesPerpetuals(t *testing.T) {
 	if _, known, followed := s.Market("ASTRA-USDT-PERP"); !known || followed {
 		t.Fatal("the platform coin's perpetual is not the source's")
 	}
+	if _, _, followed := s.Market("OLD-USDT-PERP"); followed {
+		t.Fatal("a contract whose Binance contract is no longer traded is followed")
+	}
 	if _, err := s.Series(context.Background(), "ASTRA-USDT-PERP", ports.MetricOpenInterest, "5m", 30); !apperr.Is(err, "MARKET_NO_FUTURES_DATA") {
 		t.Fatalf("the platform coin's perpetual: %v", err)
 	}
@@ -180,7 +261,7 @@ func TestFuturesStatsFollowsTheSourcesPerpetuals(t *testing.T) {
 	// The contracts are read again after 10 minutes, the source's
 	// perpetuals (a megabyte) after an hour.
 	src := s.src.(*fakeFutures)
-	s.instruments = contractList{{Symbol: "BTC-USDT-PERP"}}
+	s.contracts = futuresList{{Symbol: "BTC-USDT-PERP", ReferenceSymbol: "BTCUSDT"}}
 	for _, tc := range []struct {
 		after time.Duration
 		reads int
@@ -379,38 +460,157 @@ func TestFuturesStatsPagesThroughAGap(t *testing.T) {
 }
 
 func TestFuturesStatsRelaysLiquidations(t *testing.T) {
-	s, _, _, fl := newTestFutures(t)
+	s, _, repo, fl := newTestFutures(t)
 	ctx := context.Background()
 	if err := s.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var got []Liquidation
-	s.OnLiquidation(func(_ context.Context, l Liquidation) { got = append(got, l) })
+	pub := s.pub.(*recordPub)
 	d := decimal.RequireFromString
 	at := time.UnixMilli(1568014460893).UTC()
-	s.relay(ctx, false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "SELL", Price: d("9910"), AvgPrice: d("9912"), Filled: d("0.014"), At: at})
-	s.relay(ctx, true, ports.ForcedOrder{Remote: "BTCUSD_PERP", Side: "BUY", Price: d("9425.5"), AvgPrice: d("9496.5"), Filled: d("3"), At: at})
+	s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "SELL", Price: d("9910"), AvgPrice: d("9912"), Filled: d("0.014"), At: at})
+	s.relay(true, ports.ForcedOrder{Remote: "BTCUSD_PERP", Side: "BUY", Price: d("9425.5"), AvgPrice: d("9496.5"), Filled: d("3"), At: at})
 	// Not ours: ETH's COIN-M contract, a quarterly one, a USDⓈ-M symbol on
 	// the COIN-M stream.
-	s.relay(ctx, true, ports.ForcedOrder{Remote: "ETHUSD_PERP", Side: "SELL", Filled: d("1")})
-	s.relay(ctx, true, ports.ForcedOrder{Remote: "BTCUSD_261225", Side: "SELL", Filled: d("1")})
-	s.relay(ctx, true, ports.ForcedOrder{Remote: "BTCUSDT", Side: "SELL", Filled: d("1")})
-	if len(got) != 2 {
-		t.Fatalf("relayed %+v", got)
+	s.relay(true, ports.ForcedOrder{Remote: "ETHUSD_PERP", Side: "SELL", Filled: d("1")})
+	s.relay(true, ports.ForcedOrder{Remote: "BTCUSD_261225", Side: "SELL", Filled: d("1")})
+	s.relay(true, ports.ForcedOrder{Remote: "BTCUSDT", Side: "SELL", Filled: d("1")})
+	fl.on.Store(false)
+	s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "SELL", Filled: d("1"), At: at.Add(time.Second)})
+	fl.on.Store(true)
+	if err := s.flush(ctx); err != nil {
+		t.Fatal(err)
 	}
-	if l := got[0]; l.Symbol != "BTC-USDT-PERP" || l.PositionSide != "LONG" || l.Quantity.String() != "0.014" || l.ValueUSD.String() != "138.768" || !l.At.Equal(at) {
+	if len(repo.liqs) != 2 || len(pub.recs) != 2 {
+		t.Fatalf("stored %+v, published %d", repo.liqs, len(pub.recs))
+	}
+	if l := repo.liqs[0]; l.Symbol != "BTC-USDT-PERP" || l.PositionSide != "LONG" || l.Quantity.String() != "0.014" ||
+		l.ValueUSD.String() != "138.768" || !l.At.Equal(at) {
 		t.Fatalf("a USDⓈ-M long liquidated: %+v", l)
 	}
-	if l := got[1]; l.Symbol != "BTC-USD-PERP" || l.PositionSide != "SHORT" || l.Quantity.String() != "3" || l.ValueUSD.String() != "300" {
+	if l := repo.liqs[1]; l.Symbol != "BTC-USD-PERP" || l.PositionSide != "SHORT" || l.Quantity.String() != "3" || l.ValueUSD.String() != "300" {
 		t.Fatalf("a COIN-M short liquidated, 3 contracts of 100 USD: %+v", l)
 	}
-	fl.on.Store(false)
-	s.relay(ctx, false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "SELL", Filled: d("1")})
-	if len(got) != 2 {
-		t.Fatal("relayed while off")
+	rec := pub.recs[1]
+	var env eventv1.Envelope
+	if err := proto.Unmarshal(rec.Envelope, &env); err != nil {
+		t.Fatal(err)
 	}
-	if v := counted(t, s.liquidations.WithLabelValues("coinm")); v != 1 {
-		t.Fatalf("COIN-M liquidations counted: %v", v)
+	var occurred marketv1.LiquidationOccurred
+	if err := env.GetPayload().UnmarshalTo(&occurred); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Topic != event.TopicMarketLiquidations || rec.Key != "BTC-USD-PERP" || occurred.GetPositionSide() != "SHORT" ||
+		occurred.GetAveragePrice() != "9496.5" || occurred.GetQuantity() != "3" || occurred.GetValueUsd() != "300" ||
+		!occurred.GetTradedAt().AsTime().Equal(at) {
+		t.Fatalf("published %s %s %+v", rec.Topic, rec.Key, &occurred)
+	}
+	if v := counted(t, s.liquidations.WithLabelValues("coinm", "relayed")); v != 1 {
+		t.Fatalf("COIN-M liquidations relayed: %v", v)
+	}
+	// Nothing queued: nothing to do.
+	if err := s.flush(ctx); err != nil || len(pub.recs) != 2 {
+		t.Fatalf("an empty flush: %v, %d published", err, len(pub.recs))
+	}
+	// A failed publish is counted; the liquidations are dropped.
+	pub.err = errors.New("redpanda down")
+	s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "BUY", Price: d("1"), AvgPrice: d("1"), Filled: d("1"), At: at.Add(time.Minute)})
+	if err := s.flush(ctx); err == nil {
+		t.Fatal("a failed publish was not reported")
+	}
+	if v := counted(t, s.liquidations.WithLabelValues("usdm", "failed")); v != 1 {
+		t.Fatalf("failed: %v", v)
+	}
+	// A full queue drops the rest.
+	pub.err = nil
+	for i := range liquidationsQueue + 3 {
+		s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "BUY", Price: d("1"), AvgPrice: d("1"), Filled: d("1"), At: at.Add(time.Duration(i) * time.Millisecond)})
+	}
+	if v := counted(t, s.liquidations.WithLabelValues("usdm", "dropped")); v != 3 {
+		t.Fatalf("dropped: %v", v)
+	}
+	if err := s.flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// The recent ones of a contract, newest first, at most 100; the
+	// platform coin's perpetual has none.
+	list, err := s.Liquidations(ctx, "BTC-USDT-PERP", 1000)
+	if err != nil || len(list) != LiquidationsShown || !list[0].At.After(list[1].At) {
+		t.Fatalf("%d liquidations, %v", len(list), err)
+	}
+	if _, err := s.Liquidations(ctx, "ASTRA-USDT-PERP", 10); !apperr.Is(err, "MARKET_NO_FUTURES_DATA") {
+		t.Fatalf("the platform coin's perpetual: %v", err)
+	}
+}
+
+func TestFuturesStatsListingSurvivesOneMarginFailing(t *testing.T) {
+	s, src, _, _ := newTestFutures(t)
+	ctx := context.Background()
+	// Never read: the listing fails as a whole.
+	src.perpErr = map[bool]error{true: errors.New("dapi down")}
+	if err := s.Refresh(ctx); err == nil {
+		t.Fatal("a listing without COIN-M's perpetuals ever read passed")
+	}
+	if _, known, _ := s.Market("BTC-USDT-PERP"); known {
+		t.Fatal("known after a failed first listing")
+	}
+	src.perpErr = nil
+	if err := s.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// An hour on COIN-M fails again: its perpetuals from before stand in,
+	// USDⓈ-M's are read anew.
+	src.perpErr = map[bool]error{true: errors.New("dapi down")}
+	src.perps[false] = src.perps[false][:1] // 1000PEPEUSDT stopped trading
+	s.now = func() time.Time { return futuresT0.Add(61 * time.Minute) }
+	if err := s.Refresh(ctx); err == nil || !strings.Contains(err.Error(), "kept from before") {
+		t.Fatalf("a partly failed listing: %v", err)
+	}
+	if _, _, ok := s.Market("BTC-USD-PERP"); !ok {
+		t.Fatal("BTC-USD-PERP dropped while dapi was down")
+	}
+	if _, _, ok := s.Market("1000PEPE-USDT-PERP"); ok {
+		t.Fatal("USDⓈ-M's perpetuals were not read anew")
+	}
+}
+
+func TestFuturesStatsSpreadsTheLongPeriods(t *testing.T) {
+	for _, tc := range []struct {
+		period string
+		window time.Duration
+	}{{"5m", 0}, {"15m", 0}, {"1h", 15 * time.Minute}, {"4h", 30 * time.Minute}, {"1d", 30 * time.Minute}} {
+		offsets := map[time.Duration]bool{}
+		for _, symbol := range []string{"BTC-USDT-PERP", "ETH-USDT-PERP", "SOL-USDT-PERP", "BTC-USD-PERP", "XRP-USDT-PERP"} {
+			o := spread(ports.MetricOpenInterest, symbol, tc.period)
+			if o < 0 || (tc.window == 0 && o != 0) || (tc.window > 0 && o >= tc.window) {
+				t.Fatalf("%s %s: offset %s", symbol, tc.period, o)
+			}
+			if o != spread(ports.MetricOpenInterest, symbol, tc.period) {
+				t.Fatal("the offset changes")
+			}
+			offsets[o] = true
+		}
+		if tc.window > 0 && len(offsets) < 3 {
+			t.Fatalf("%s: offsets %v", tc.period, offsets)
+		}
+	}
+	// A read of an hourly series is due at its next point plus its offset.
+	s, src, _, _ := newTestFutures(t)
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	btc, _, _ := s.Market("BTC-USDT-PERP")
+	hour := futuresT0.Truncate(time.Hour)
+	src.answer = func(c statsCall) ([]ports.FuturesStat, error) {
+		return []ports.FuturesStat{{Symbol: c.symbol, Metric: c.metric, Period: c.period, At: hour, Values: map[string]decimal.Decimal{"x": decimal.Zero}}}, nil
+	}
+	se := &series{market: btc, period: "1h", loaded: true}
+	if err := s.read(context.Background(), ports.MetricLongShortAccount, se); err != nil {
+		t.Fatal(err)
+	}
+	if want := hour.Add(time.Hour + futuresPublished + spread(ports.MetricLongShortAccount, "BTC-USDT-PERP", "1h")); !se.due.Equal(want) {
+		t.Fatalf("due %v, want %v", se.due, want)
 	}
 }
 
@@ -425,6 +625,9 @@ func TestFuturesStatsPurgesByPeriod(t *testing.T) {
 		if got := repo.purged[period]; !got.Equal(futuresT0.Add(-kept)) {
 			t.Errorf("period %q purged before %v, want %v", period, got, futuresT0.Add(-kept))
 		}
+	}
+	if !repo.liqsPurged.Equal(futuresT0.Add(-24 * time.Hour)) {
+		t.Errorf("liquidations purged before %v", repo.liqsPurged)
 	}
 }
 

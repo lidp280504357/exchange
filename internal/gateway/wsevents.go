@@ -26,10 +26,13 @@ import (
 // platform's, ADR-0015); trade.events only feeds the users' "fills".
 // margin.accounts has the margin accounts as they stand (the "margin"
 // channel's ACCOUNT pushes), margin.events their warnings and liquidations.
+// market.liquidations has the reference market's liquidations on the
+// contracts (the public "liquidations:" channels).
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.trades", "market.candle.events",
 	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.market.depth",
 	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events", "margin.events", "margin.accounts",
+	"market.liquidations",
 }
 
 type balanceData struct {
@@ -429,6 +432,9 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 			return err
 		}
 		if ok, err := marginOf(h, p); ok {
+			return err
+		}
+		if ok, err := liquidationsOf(h, p); ok {
 			return err
 		}
 		if wd, ok := withdrawalOf(p); ok {

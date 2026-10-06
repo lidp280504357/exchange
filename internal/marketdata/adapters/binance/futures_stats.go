@@ -24,12 +24,13 @@ import (
 // whose statistics are by pair.
 
 // Request pacing of the futures statistics, apart from Source's queue: a
-// futures/data endpoint allows 1000 requests per 5 minutes per IP (not
-// said to be shared between endpoints), the funding rates 500 together
-// with fundingInfo, which the marks read too; openInterest and
+// futures/data endpoint allows 1000 requests per 5 minutes per IP, and
+// since Binance does not say whether its endpoints share them, the six
+// share one budget a host (review EK ③); the funding rates allow 500
+// together with fundingInfo, which the marks read too; openInterest and
 // exchangeInfo weigh 1 of the 2400 a minute.
 const (
-	statsGap        = 375 * time.Millisecond // 800 per 5 minutes an endpoint
+	statsGap        = 333 * time.Millisecond // 900 per 5 minutes a host
 	fundingGap      = 1500 * time.Millisecond
 	openInterestGap = 100 * time.Millisecond
 	infoGap         = time.Second
@@ -115,12 +116,13 @@ func (p *pacer) wait(ctx context.Context, host, lane string, gap time.Duration) 
 	return nil
 }
 
-// backOff holds the host's requests until its Retry-After has passed
-// (HTTP 429 over a limit, 418 once banned for ignoring it).
-func (p *pacer) backOff(host string, resp *http.Response) {
+// backOff holds the host's requests until its Retry-After has passed,
+// else for fallback: HTTP 429 over a limit, 418 once banned for ignoring
+// it, 403 refused by its firewall, 451 from a region it does not serve.
+func (p *pacer) backOff(host string, resp *http.Response, fallback time.Duration) {
 	secs, err := strconv.Atoi(resp.Header.Get("Retry-After"))
 	if err != nil || secs <= 0 {
-		secs = 60
+		secs = int(fallback / time.Second)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -136,10 +138,14 @@ type apiError struct {
 }
 
 // get fetches a REST path of the USDⓈ-M or COIN-M host into out, at the
-// lane's pace.
+// lane's pace: the endpoint's, or the host's futures/data one.
 func (f *Futures) get(ctx context.Context, coinMargined bool, path string, gap time.Duration, q url.Values, out any) error {
 	host := f.at(coinMargined).rest
-	if err := f.pace.wait(ctx, host, host+path, gap); err != nil {
+	lane := host + path
+	if strings.HasPrefix(path, "/futures/data/") {
+		lane = host + "/futures/data"
+	}
+	if err := f.pace.wait(ctx, host, lane, gap); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, host+path+"?"+q.Encode(), nil)
@@ -153,9 +159,12 @@ func (f *Futures) get(ctx context.Context, coinMargined bool, path string, gap t
 	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
-	case http.StatusTooManyRequests, http.StatusTeapot:
-		f.pace.backOff(host, resp)
+	case http.StatusTooManyRequests, http.StatusTeapot, http.StatusForbidden:
+		f.pace.backOff(host, resp, time.Minute)
 		return fmt.Errorf("binance %s: HTTP %d, backing off", path, resp.StatusCode)
+	case http.StatusUnavailableForLegalReasons:
+		f.pace.backOff(host, resp, 10*time.Minute)
+		return fmt.Errorf("binance %s: HTTP 451 (region), backing off", path)
 	default:
 		var e apiError
 		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Code != 0 {
@@ -330,6 +339,11 @@ func (f *Futures) Stats(ctx context.Context, m ports.FuturesMarket, metric, peri
 		s.Symbol, s.Metric = m.Symbol, metric
 		if metric != ports.MetricFunding {
 			s.Period = period
+		}
+		// COIN-M values its open interest in the base asset: in USD it is
+		// the contracts' face value.
+		if oi, ok := s.Values["open_interest"]; ok && metric == ports.MetricOpenInterest && m.CoinMargined && m.ContractSize.IsPositive() {
+			s.Values["open_interest_value"] = oi.Mul(m.ContractSize)
 		}
 		out = append(out, s)
 	}

@@ -488,6 +488,30 @@ tests:
               summary: "the reference book of SOL-USDT is out of sync or unchanged for 30 seconds; HOUSE offers nothing there"
               runbook: docs/runbook/market-data.md
 
+  # Binance's futures statistics: USDⓈ-M reads succeed until 10m, then
+  # only fail; COIN-M reads keep succeeding beside a few failures.
+  - interval: 1m
+    input_series:
+      - series: 'market_futures_stats_requests_total{job="market-data-service", instance="m", margin="usdm", metric="basis", result="ok"}'
+        values: '0+10x10 100x40'
+      - series: 'market_futures_stats_requests_total{job="market-data-service", instance="m", margin="usdm", metric="basis", result="error"}'
+        values: '0x10 1+2x40'
+      - series: 'market_futures_stats_requests_total{job="market-data-service", instance="m", margin="coinm", metric="basis", result="ok"}'
+        values: '0+10x50'
+      - series: 'market_futures_stats_requests_total{job="market-data-service", instance="m", margin="coinm", metric="basis", result="error"}'
+        values: '0+1x50'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: FuturesDataFailing
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: FuturesDataFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-data-service, margin: usdm}
+            exp_annotations:
+              summary: "every read of Binance's futures statistics (usdm) has failed for 15 minutes (rate limit, network or Binance); the contracts' data panel stops updating"
+              runbook: docs/runbook/market-data.md
+
   - interval: 1m
     input_series:
       - series: 'wallet_custody_callbacks_rejected_total{job="wallet-service", instance="w"}'

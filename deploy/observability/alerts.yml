@@ -318,6 +318,17 @@ groups:
           summary: "{{ $labels.symbol }} follows the reference market's mark price (market.reference_mark) but it has been stale for 10 seconds: the self-computed prices stand in, trading goes on"
           runbook: docs/runbook/market-data.md
 
+      # The contracts' data panel (design 2026-10-06 §3.3): display only.
+      - alert: FuturesDataFailing
+        expr: >-
+          sum by (job, margin) (increase(market_futures_stats_requests_total{result="error"}[15m])) > 0
+          unless sum by (job, margin) (increase(market_futures_stats_requests_total{result="ok"}[15m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "every read of Binance's futures statistics ({{ $labels.margin }}) has failed for 15 minutes (rate limit, network or Binance); the contracts' data panel stops updating"
+          runbook: docs/runbook/market-data.md
+
       - alert: WalletScanLagging
         expr: max by (network) (wallet_scan_lag_blocks) > 50
         for: 10m

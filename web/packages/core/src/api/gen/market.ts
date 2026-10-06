@@ -324,12 +324,41 @@ export interface paths {
          *     settled funding rates; a series keeps the 500 latest points, none
          *     older than 30 days. The latest limit points, oldest first, each
          *     with the values of its metric (FuturesDataPoint). A contract the
-         *     reference market does not trade has none (an empty list); a
-         *     symbol that is no listed contract is 404 COMMON_NOT_FOUND.
-         *     market.futures_data turns the reading on; off, what is stored is
-         *     still served. Batch G3b.
+         *     reference market does not trade (the platform coin's) is 404
+         *     MARKET_NO_FUTURES_DATA (coordinator 2026-10-06 20:45; until the
+         *     service has read the contracts after a start, it serves what is
+         *     stored instead); a symbol that is no listed contract is 404
+         *     COMMON_NOT_FOUND. market.futures_data turns the reading on; off,
+         *     what is stored is still served. Batch G3b.
          */
         get: operations["getFuturesData"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/liquidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A contract's recent liquidations on Binance, newest first
+         * @description The reference market's liquidation orders on the Binance contract
+         *     the contract follows from the last day, as Binance streams them
+         *     (the latest of a contract within a second, not all of them):
+         *     what the channel liquidations:{symbol} pushed (design 2026-10-06
+         *     §3.3, coordinator 20:45). The same 404s as futures-data:
+         *     MARKET_NO_FUTURES_DATA for a contract the reference market does not
+         *     trade, COMMON_NOT_FOUND for a symbol that is no listed contract.
+         *     Batch G3b.
+         */
+        get: operations["listLiquidations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -533,7 +562,8 @@ export interface components {
          * @description A liquidation order of the reference market on a contract (design
          *     2026-10-06 §3.3), pushed on the public WebSocket channel
          *     liquidations:{symbol} as Binance streams them (the latest of a
-         *     contract within a second, not all of them). Batch G3b.
+         *     contract within a second, not all of them) and listed by GET
+         *     /v1/market/{symbol}/liquidations for a day. Batch G3b.
          */
         Liquidation: {
             symbol: string;
@@ -1175,6 +1205,35 @@ export interface operations {
                         /** @description Null for funding. */
                         period: string | null;
                         points: components["schemas"]["FuturesDataPoint"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listLiquidations: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A listed pair or contract (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The liquidations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        liquidations: components["schemas"]["Liquidation"][];
                     };
                 };
             };

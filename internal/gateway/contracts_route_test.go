@@ -26,18 +26,20 @@ func TestContractRoutes(t *testing.T) {
 		Ledger: stub("ledger"), Market: stub("market"),
 	})
 	for path, want := range map[string]string{
-		"/v1/market/contracts":               "instrument",
-		"/v1/market/contracts/BTC-USDT-PERP": "instrument",
-		"/v1/market/pairs/BTC-USDT":          "instrument",
-		"/v1/market/assets/ASTRA/logo":       "instrument",
-		"/v1/market/BTC-USDT/depth":          "market",
-		"/v1/market/summary":                 "market",
-		"/v1/market/sparklines":              "market",
-		"/v1/market/tickers":                 "market",
-		"/v1/announcements":                  "notification",
-		"/v1/announcements/new-pairs":        "notification",
-		"/v1/help":                           "notification",
-		"/v1/help/deposit-guide":             "notification",
+		"/v1/market/contracts":                 "instrument",
+		"/v1/market/contracts/BTC-USDT-PERP":   "instrument",
+		"/v1/market/pairs/BTC-USDT":            "instrument",
+		"/v1/market/assets/ASTRA/logo":         "instrument",
+		"/v1/market/BTC-USDT/depth":            "market",
+		"/v1/market/summary":                   "market",
+		"/v1/market/sparklines":                "market",
+		"/v1/market/tickers":                   "market",
+		"/v1/market/futures/overview":          "market",
+		"/v1/market/BTC-USD-PERP/liquidations": "market",
+		"/v1/announcements":                    "notification",
+		"/v1/announcements/new-pairs":          "notification",
+		"/v1/help":                             "notification",
+		"/v1/help/deposit-guide":               "notification",
 	} {
 		got = ""
 		rec := httptest.NewRecorder()

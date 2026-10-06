@@ -57,6 +57,11 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := bootstrap.BatchConsumer(ctx, a, cfg.Kafka, "analytics-consumer", analytics.Topics, ingestor.Store); err != nil {
 		return err
 	}
+	// The reference market's liquidations (design 2026-10-06 §3.3) into
+	// futures_liquidations alone.
+	if err := bootstrap.BatchConsumer(ctx, a, cfg.Kafka, analytics.LiquidationsGroup, analytics.LiquidationTopics, ingestor.StoreLiquidations); err != nil {
+		return err
+	}
 	// Events stored before the read models existed are projected once.
 	a.Add("read model backfill", app.Loop(func(ctx context.Context) error {
 		for {

@@ -25,6 +25,26 @@ const (
 	MetricFunding = "funding"
 )
 
+// FuturesContract is what the statistics need of a listed contract, of
+// either margin type.
+type FuturesContract struct {
+	Symbol string
+	// CoinMargined is an inverse contract (margin_type COIN).
+	CoinMargined bool
+	// ReferenceSymbol is the Binance contract it follows (BTCUSDT,
+	// BTCUSD_PERP); empty when none does (the platform coin's).
+	ReferenceSymbol string
+	// ContractSize is an inverse contract's face value in USD, zero for a
+	// linear one.
+	ContractSize decimal.Decimal
+}
+
+// FuturesContracts lists the contracts that are not delisted, linear and
+// inverse.
+type FuturesContracts interface {
+	FuturesContracts(ctx context.Context) ([]FuturesContract, error)
+}
+
 // FuturesMarket is a platform contract as the reference market trades it.
 type FuturesMarket struct {
 	// Symbol is the platform's contract, e.g. BTC-USD-PERP.
@@ -49,15 +69,33 @@ type FuturesStat struct {
 	// At is the source's time of the point: a snapshot's, or the start of
 	// the period a volume was traded in.
 	At time.Time
-	// Values by name: open_interest and open_interest_value (base asset
-	// and USDT for a USDⓈ-M contract, contracts and the base asset for a
-	// COIN-M one); long_short_ratio, long and short; buy_vol, sell_vol and
-	// buy_sell_ratio; basis, basis_rate, futures_price and index_price;
-	// funding_rate and mark_price.
+	// Values by name (api/openapi/market.yaml FuturesDataPoint):
+	// open_interest (base asset, or contracts of a COIN-M contract) and
+	// open_interest_value (USD); long_short_ratio, long and short;
+	// buy_vol, sell_vol and buy_sell_ratio; basis, basis_rate,
+	// futures_price and index_price; funding_rate and mark_price.
 	Values map[string]decimal.Decimal
 }
 
-// FuturesStatsRepo stores the statistics.
+// Liquidation is a liquidation order of the reference market on a
+// platform contract (market.v1.LiquidationOccurred).
+type Liquidation struct {
+	Symbol string
+	// PositionSide is the side of the position closed: LONG when the
+	// liquidation order sold.
+	PositionSide string
+	Price        decimal.Decimal
+	AvgPrice     decimal.Decimal
+	// Quantity is filled: in the base asset, or in contracts of a COIN-M
+	// contract.
+	Quantity decimal.Decimal
+	// ValueUSD is the average price times the quantity, or the contracts
+	// times their face value.
+	ValueUSD decimal.Decimal
+	At       time.Time
+}
+
+// FuturesStatsRepo stores the statistics and the recent liquidations.
 type FuturesStatsRepo interface {
 	// Upsert writes points, replacing stored ones.
 	Upsert(ctx context.Context, stats []FuturesStat) error
@@ -68,6 +106,13 @@ type FuturesStatsRepo interface {
 	// Purge deletes the points of a period (empty: the funding rates)
 	// older than before.
 	Purge(ctx context.Context, period string, before time.Time) (int64, error)
+	// AddLiquidations stores liquidations; one stored already is kept.
+	AddLiquidations(ctx context.Context, list []Liquidation) error
+	// RecentLiquidations returns a contract's latest limit liquidations,
+	// newest first.
+	RecentLiquidations(ctx context.Context, symbol string, limit int) ([]Liquidation, error)
+	// PurgeLiquidations deletes the liquidations older than before.
+	PurgeLiquidations(ctx context.Context, before time.Time) (int64, error)
 }
 
 // ForcedOrder is a liquidation order of the reference market, as its

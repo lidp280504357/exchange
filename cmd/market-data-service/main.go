@@ -205,7 +205,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}, time.Duration(cfg.MarkSourceStaleSeconds)*time.Second)
 	a.Add("contract prices", app.Loop(marks.Run))
 	// The contracts' data panel (design 2026-10-06 §3.3).
-	futures, err := futuresData(a, db, listed, flagClient)
+	futures, futuresContracts, err := futuresData(a, db, instrumentv1.NewInstrumentServiceClient(instrumentConn), flagClient, prod, events)
 	if err != nil {
 		return err
 	}
@@ -249,6 +249,6 @@ func setup(ctx context.Context, a *app.App) error {
 		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks,
 		Platform: platform, Listed: src, Now: time.Now,
 	}).Routes(r)
-	(&httpapi.FuturesData{Stats: futures, Marks: marks, Tickers: tickers, Listed: listed}).Routes(r)
+	(&httpapi.FuturesData{Stats: futures, Marks: marks, Tickers: tickers, Contracts: futuresContracts}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

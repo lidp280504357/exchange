@@ -62,6 +62,11 @@ const (
 	// stored flat (a minute without a trade of a symbol charting the
 	// platform's trades), through its outbox, for analytics' candles_1m.
 	TopicMarketCandleFlats = "market.candle.flats"
+	// TopicMarketLiquidations carries the reference market's liquidation
+	// orders on the contracts that follow it (LiquidationOccurred, design
+	// 2026-10-06 §3.3), keyed by contract, from market-data-service: kept
+	// a day, for the public channel liquidations: and ClickHouse.
+	TopicMarketLiquidations = "market.liquidations"
 	// The perpetual contracts' matching shard (implementation plan §7.3
 	// task 2): the same engine with its own commands, reference books,
 	// order and trade events and depth, keyed by symbol.

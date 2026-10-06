@@ -41,6 +41,18 @@ func (f *statsFake) Series(_ context.Context, symbol, metric, period string, lim
 	}}[:min(limit, 1)], nil
 }
 
+func (f *statsFake) Liquidations(_ context.Context, symbol string, limit int) ([]ports.Liquidation, error) {
+	f.asked = append(f.asked, symbol+" liquidations")
+	if symbol == "ASTRA-USDT-PERP" {
+		return nil, application.ErrNoFuturesData
+	}
+	d := decimal.RequireFromString
+	return []ports.Liquidation{{
+		Symbol: symbol, PositionSide: "LONG", Price: d("9910"), AvgPrice: d("9912"), Quantity: d("0.014"), ValueUSD: d("138.768"),
+		At: time.UnixMilli(1568014460893).UTC(),
+	}}[:min(limit, 1)], nil
+}
+
 func (f *statsFake) Market(symbol string) (ports.FuturesMarket, bool, bool) {
 	m, ok := f.markets[symbol]
 	return m, true, ok
@@ -62,19 +74,10 @@ type tickersFake []domain.Ticker
 
 func (t tickersFake) All(context.Context) ([]domain.Ticker, error) { return t, nil }
 
-type contractsFake []ports.Contract
+type contractsFake []ports.FuturesContract
 
-func (c contractsFake) Listed(context.Context, string) (bool, error)        { return true, nil }
-func (c contractsFake) Symbols(context.Context) ([]string, error)           { return nil, nil }
-func (c contractsFake) Contracts(context.Context) ([]ports.Contract, error) { return c, nil }
-func (c contractsFake) Pairs(context.Context) ([]ports.Pair, error)         { return nil, nil }
-func (c contractsFake) Ranks(context.Context) (map[string]int32, error)     { return nil, nil }
-func (c contractsFake) SetPairStatus(context.Context, string, string, string) (string, error) {
-	return "", nil
-}
-
-func (c contractsFake) SetContractStatus(context.Context, string, string, string) (string, error) {
-	return "", nil
+func (c contractsFake) FuturesContracts(context.Context) ([]ports.FuturesContract, error) {
+	return c, nil
 }
 
 func futuresRouter() (*chi.Mux, *statsFake) {
@@ -96,7 +99,11 @@ func futuresRouter() (*chi.Mux, *statsFake) {
 			"ASTRA-USDT-PERP": {Symbol: "ASTRA-USDT-PERP", Mark: d("0.25"), Index: d("0.25"), FundingRate: d("0"), NextFunding: next},
 		},
 		Tickers: tickersFake{{Symbol: btc.Symbol, Open: d("85000"), Change: d("0.01176"), QuoteVolume: d("123456789.5")}},
-		Listed:  contractsFake{{Symbol: "BTC-USDT-PERP"}, {Symbol: "ASTRA-USDT-PERP"}, {Symbol: "BTC-USD-PERP"}},
+		Contracts: contractsFake{
+			{Symbol: "BTC-USDT-PERP", ReferenceSymbol: "BTCUSDT"},
+			{Symbol: "ASTRA-USDT-PERP"},
+			{Symbol: "BTC-USD-PERP", CoinMargined: true, ReferenceSymbol: "BTCUSD_PERP", ContractSize: d("100")},
+		},
 	}
 	r := chi.NewRouter()
 	h.Routes(r)
@@ -136,7 +143,11 @@ func TestFuturesDataSeries(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"period":null`) || !strings.Contains(rec.Body.String(), `"time":"2026-10-06T00:00:00.003Z"`) {
 		t.Fatalf("funding: %s", rec.Body)
 	}
-	if got := stats.asked; len(got) != 3 || got[1] != "BTC-USDT-PERP basis 5m" {
+	// A coin-margined contract is listed too.
+	if rec := get(r, "/v1/market/BTC-USD-PERP/futures-data?metric=open_interest"); rec.Code != http.StatusOK {
+		t.Fatalf("a coin-margined contract: %d %s", rec.Code, rec.Body)
+	}
+	if got := stats.asked; len(got) != 4 || got[1] != "BTC-USDT-PERP basis 5m" {
 		t.Fatalf("asked %v", got)
 	}
 	if rec := get(r, "/v1/market/ETH-USDT-PERP/futures-data?metric=basis"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "COMMON_NOT_FOUND") {
@@ -186,5 +197,27 @@ func TestFuturesDataOverview(t *testing.T) {
 	astra := by["ASTRA-USDT-PERP"]
 	if astra.FuturesData || astra.OpenInterest != nil || str(astra.MarkPrice) != "0.25" || str(astra.FundingRate) != "0" {
 		t.Fatalf("the platform coin's perpetual: %+v", astra)
+	}
+}
+
+func TestFuturesDataLiquidations(t *testing.T) {
+	r, stats := futuresRouter()
+	rec := get(r, "/v1/market/BTC-USDT-PERP/liquidations")
+	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "public, max-age=5" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	want := `{"liquidations":[{"symbol":"BTC-USDT-PERP","position_side":"LONG","price":"9910","average_price":"9912",` +
+		`"quantity":"0.014","value_usd":"138.768","traded_at":"2019-09-09T07:34:20.893Z"}],"symbol":"BTC-USDT-PERP"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Fatalf("liquidations:\n%s\nwant\n%s", got, want)
+	}
+	if rec := get(r, "/v1/market/ASTRA-USDT-PERP/liquidations"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "MARKET_NO_FUTURES_DATA") {
+		t.Fatalf("the platform coin's perpetual: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get(r, "/v1/market/ETH-USDT-PERP/liquidations"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "COMMON_NOT_FOUND") {
+		t.Fatalf("a contract that is not listed: %d %s", rec.Code, rec.Body)
+	}
+	if len(stats.asked) != 2 {
+		t.Fatalf("asked %v", stats.asked)
 	}
 }

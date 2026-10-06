@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"slices"
 	"strings"
@@ -11,22 +13,23 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	"github.com/skill/exchange/internal/marketdata/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // The contracts' data panel (design 2026-10-06 §3.3): the reference
 // market's statistics of the contracts it trades, read while
 // market.futures_data is on, each series as its periods end; the open
-// interest now, every minute; and its liquidation orders as they come.
-// A series keeps the 500 points a chart may ask for, none older than 30
-// days.
-
-// KeyFuturesData turns the reading on (global); off, the stored
-// statistics are still served.
-const KeyFuturesData = "market.futures_data"
+// interest now, every minute; and its liquidation orders as they come,
+// stored for a day and published on market.liquidations. A series keeps
+// the 500 points a chart may ask for, none older than 30 days.
 
 // FuturesMetrics are the statistics with periods, FuturesPeriods their
 // periods.
@@ -41,9 +44,12 @@ var (
 const (
 	// FuturesPoints is the most points a series keeps and serves.
 	FuturesPoints = 500
+	// LiquidationsShown is the most recent liquidations served.
+	LiquidationsShown = 100
 	// futuresKept is the oldest a point may be (the source keeps 30
-	// days).
-	futuresKept = 30 * 24 * time.Hour
+	// days), liquidationsKept the oldest liquidation.
+	futuresKept      = 30 * 24 * time.Hour
+	liquidationsKept = 24 * time.Hour
 	// futuresListing is how often the contracts are read, and
 	// futuresPerpetuals the source's perpetuals (USDⓈ-M's exchangeInfo
 	// is a megabyte).
@@ -65,6 +71,11 @@ const (
 	futuresFundingAt = 90 * time.Second
 	// futuresWarnEvery spaces a lane's warnings about failed reads.
 	futuresWarnEvery = 10 * time.Minute
+	// liquidationsQueue is how many liquidations wait to be stored and
+	// published (more are dropped and counted), liquidationsFlush how
+	// often they go.
+	liquidationsQueue = 1000
+	liquidationsFlush = time.Second
 )
 
 // ErrNoFuturesData answers for a contract the reference market does not
@@ -104,33 +115,17 @@ type OpenInterest struct {
 	At       time.Time
 }
 
-// Liquidation is a liquidation of the reference market, in the
-// platform's contract.
-type Liquidation struct {
-	Symbol string
-	// PositionSide is the side of the position closed: LONG when the
-	// liquidation order sold.
-	PositionSide string
-	Price        decimal.Decimal
-	AvgPrice     decimal.Decimal
-	// Quantity is filled: in the base asset (USDⓈ-M) or in contracts
-	// (COIN-M).
-	Quantity decimal.Decimal
-	// ValueUSD is the average price times the quantity, or the contracts
-	// times their face value.
-	ValueUSD decimal.Decimal
-	At       time.Time
-}
-
 // FuturesStats reads and keeps the reference market's statistics of the
 // contracts.
 type FuturesStats struct {
-	src         ports.FuturesSource
-	repo        ports.FuturesStatsRepo
-	instruments ports.Instruments
-	flags       Flags
-	log         *slog.Logger
-	now         func() time.Time
+	src       ports.FuturesSource
+	repo      ports.FuturesStatsRepo
+	contracts ports.FuturesContracts
+	flags     Flags
+	pub       kafka.Publisher
+	events    *event.Factory
+	log       *slog.Logger
+	now       func() time.Time
 	// sleep waits for d or until ctx ends (tests replace it).
 	sleep func(ctx context.Context, d time.Duration)
 
@@ -147,22 +142,24 @@ type FuturesStats struct {
 	perps    map[bool]map[string]ports.Perpetual
 	perpsAt  time.Time
 	interest map[string]OpenInterest
-	onLiq    func(context.Context, Liquidation)
+	// liqs are the liquidations waiting to be stored and published.
+	liqs chan queuedLiquidation
 
 	requests     *prometheus.CounterVec
 	points       *prometheus.CounterVec
 	liquidations *prometheus.CounterVec
 }
 
-// NewFuturesStats returns the statistics of the contracts instruments
-// lists, read from src into repo while fl turns them on; register its
-// metrics with reg.
-func NewFuturesStats(src ports.FuturesSource, repo ports.FuturesStatsRepo, instruments ports.Instruments, fl Flags,
-	log *slog.Logger, reg prometheus.Registerer,
+// NewFuturesStats returns the statistics of the contracts the listing
+// has, read from src into repo while fl turns them on, the liquidations
+// published with pub; register its metrics with reg.
+func NewFuturesStats(src ports.FuturesSource, repo ports.FuturesStatsRepo, contracts ports.FuturesContracts, fl Flags,
+	pub kafka.Publisher, events *event.Factory, log *slog.Logger, reg prometheus.Registerer,
 ) *FuturesStats {
 	s := &FuturesStats{
-		src: src, repo: repo, instruments: instruments, flags: fl, log: log, now: time.Now, sleep: sleepCtx,
+		src: src, repo: repo, contracts: contracts, flags: fl, pub: pub, events: events, log: log, now: time.Now, sleep: sleepCtx,
 		markets: map[string]ports.FuturesMarket{}, remotes: map[string]ports.FuturesMarket{}, interest: map[string]OpenInterest{},
+		liqs: make(chan queuedLiquidation, liquidationsQueue),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_futures_stats_requests_total", Help: "Reads of the reference market's futures statistics, by margin, metric and result.",
 		}, []string{"margin", "metric", "result"}),
@@ -170,16 +167,13 @@ func NewFuturesStats(src ports.FuturesSource, repo ports.FuturesStatsRepo, instr
 			Name: "market_futures_stats_points_total", Help: "Points of the reference market's futures statistics stored, by metric.",
 		}, []string{"metric"}),
 		liquidations: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "market_futures_liquidations_total", Help: "Liquidation orders of the reference market relayed, by margin.",
-		}, []string{"margin"}),
+			Name: "market_futures_liquidations_total",
+			Help: "Liquidation orders of the reference market on the platform's contracts, by margin and result (relayed, dropped, failed).",
+		}, []string{"margin", "result"}),
 	}
 	reg.MustRegister(s.requests, s.points, s.liquidations)
 	return s
 }
-
-// OnLiquidation sets where the liquidations go; without it they are
-// only counted.
-func (s *FuturesStats) OnLiquidation(fn func(context.Context, Liquidation)) { s.onLiq = fn }
 
 func sleepCtx(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
@@ -197,10 +191,11 @@ func marginName(coinMargined bool) string {
 	return "usdm"
 }
 
-func (s *FuturesStats) on() bool { return s.flags.Enabled(KeyFuturesData, flags.Subject{}) }
+func (s *FuturesStats) on() bool { return s.flags.Enabled(flags.KeyFuturesData, flags.Subject{}) }
 
 // Run reads the statistics, the open interest and the liquidations of
-// both margins, and purges old points, until ctx ends.
+// both margins, stores and publishes the liquidations, and purges old
+// rows, until ctx ends.
 func (s *FuturesStats) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	start := func(fn func(context.Context)) {
@@ -208,6 +203,7 @@ func (s *FuturesStats) Run(ctx context.Context) error {
 	}
 	start(s.listing)
 	start(s.purging)
+	start(s.flushing)
 	for _, cm := range []bool{false, true} {
 		for _, metric := range append(slices.Clone(FuturesMetrics), ports.MetricFunding) {
 			start(func(ctx context.Context) { s.lane(ctx, cm, metric) })
@@ -221,10 +217,14 @@ func (s *FuturesStats) Run(ctx context.Context) error {
 
 // listing reads the followed contracts while reading is on.
 func (s *FuturesStats) listing(ctx context.Context) {
+	var warned time.Time
 	for ctx.Err() == nil {
 		if s.on() {
 			if err := s.Refresh(ctx); err != nil && ctx.Err() == nil {
-				s.log.WarnContext(ctx, "futures statistics: listing failed", "error", err)
+				if s.now().Sub(warned) >= futuresWarnEvery {
+					s.log.WarnContext(ctx, "futures statistics: listing failed", "error", err)
+					warned = s.now()
+				}
 				s.sleep(ctx, futuresRetry)
 				continue
 			}
@@ -235,31 +235,36 @@ func (s *FuturesStats) listing(ctx context.Context) {
 
 // Refresh reads the contracts when the last listing is older than
 // futuresListing, and the source's perpetuals when theirs is older than
-// futuresPerpetuals: a contract is followed when the source trades it
-// (BTC-USDT-PERP as BTCUSDT, BTC-USD-PERP as BTCUSD_PERP; delisted ones
-// are not listed, closed ones are followed).
+// futuresPerpetuals: a contract is followed when the source trades the
+// contract its reference_symbol names (BTCUSDT, BTCUSD_PERP; delisted
+// contracts are not listed, closed ones are followed). A margin whose
+// perpetuals cannot be read keeps the ones read before (review EK ④);
+// the listing fails only while one was never read.
 func (s *FuturesStats) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	now := s.now()
 	fresh := s.listed && now.Sub(s.listedAt) < futuresListing
-	perps := s.perps
-	if now.Sub(s.perpsAt) >= futuresPerpetuals {
-		perps = nil
-	}
+	old, stale := s.perps, now.Sub(s.perpsAt) >= futuresPerpetuals
 	s.mu.Unlock()
 	if fresh {
 		return nil
 	}
-	contracts, err := s.instruments.Contracts(ctx)
+	contracts, err := s.contracts.FuturesContracts(ctx)
 	if err != nil {
 		return err
 	}
-	if perps == nil {
+	perps := old
+	var failed error
+	if stale {
 		perps = map[bool]map[string]ports.Perpetual{}
 		for _, cm := range []bool{false, true} {
 			list, err := s.src.Perpetuals(ctx, cm)
 			if err != nil {
-				return err
+				if old[cm] == nil {
+					return err
+				}
+				perps[cm], failed = old[cm], err
+				continue
 			}
 			perps[cm] = map[string]ports.Perpetual{}
 			for _, p := range list {
@@ -267,23 +272,30 @@ func (s *FuturesStats) Refresh(ctx context.Context) error {
 			}
 		}
 		s.mu.Lock()
-		s.perps, s.perpsAt = perps, now
+		s.perps = perps
+		if failed == nil {
+			s.perpsAt = now
+		}
 		s.mu.Unlock()
 	}
 	markets, remotes := map[string]ports.FuturesMarket{}, map[string]ports.FuturesMarket{}
 	for _, c := range contracts {
-		cm, remote, ok := remoteContract(c.Symbol)
-		if !ok {
+		p, traded := perps[c.CoinMargined][c.ReferenceSymbol]
+		if c.ReferenceSymbol == "" || !traded {
 			continue
 		}
-		if p, traded := perps[cm][remote]; traded {
-			m := ports.FuturesMarket{Symbol: c.Symbol, CoinMargined: cm, Remote: remote, Pair: p.Pair, ContractSize: p.ContractSize}
-			markets[c.Symbol], remotes[remoteKey(cm, remote)] = m, m
+		m := ports.FuturesMarket{Symbol: c.Symbol, CoinMargined: c.CoinMargined, Remote: c.ReferenceSymbol, Pair: p.Pair, ContractSize: c.ContractSize}
+		if c.CoinMargined && !m.ContractSize.IsPositive() {
+			m.ContractSize = p.ContractSize
 		}
+		markets[c.Symbol], remotes[remoteKey(c.CoinMargined, c.ReferenceSymbol)] = m, m
 	}
 	s.mu.Lock()
 	s.markets, s.remotes, s.listed, s.listedAt = markets, remotes, true, now
 	s.mu.Unlock()
+	if failed != nil {
+		return fmt.Errorf("perpetuals kept from before: %w", failed)
+	}
 	return nil
 }
 
@@ -291,10 +303,11 @@ func remoteKey(coinMargined bool, remote string) string {
 	return marginName(coinMargined) + " " + remote
 }
 
-// remoteContract is the source's perpetual of a platform contract:
-// <BASE>-USDT-PERP is USDⓈ-M <BASE>USDT, <BASE>-USD-PERP COIN-M
+// remoteContract is the source's perpetual of a platform contract by its
+// code: <BASE>-USDT-PERP is USDⓈ-M <BASE>USDT, <BASE>-USD-PERP COIN-M
 // <BASE>USD_PERP (the platform's codes follow the source's, 1000PEPE
-// included).
+// included). The mark feed (markfeed.go) follows contracts by it; the
+// statistics use the contracts' reference_symbol.
 func remoteContract(symbol string) (coinMargined bool, remote string, ok bool) {
 	if base, found := strings.CutSuffix(symbol, "-USDT-PERP"); found && base != "" {
 		return false, base + "USDT", true
@@ -457,12 +470,27 @@ func (s *FuturesStats) nextDue(metric string, se *series, before time.Time, n, l
 	if bucketed(metric) {
 		nextAt = nextAt.Add(d)
 	}
-	if due := nextAt.Add(futuresPublished); n > 0 || due.After(now) {
+	if due := nextAt.Add(futuresPublished + spread(metric, se.market.Symbol, se.period)); n > 0 || due.After(now) {
 		return due, 0
 	}
 	// Nothing new, though the next point is late: wait longer each time.
 	retry := backoff(se)
 	return now.Add(retry), retry
+}
+
+// spread staggers the series of an hour or longer over the first quarter
+// of their period (half an hour at most), each by its own offset, so that
+// the hours, and above all UTC midnight when every period ends, do not
+// ask for all of them at once (review EK ③).
+func spread(metric, symbol, period string) time.Duration {
+	d, _ := PeriodLength(period)
+	window := min(d/4, 30*time.Minute)
+	if d < time.Hour || window <= 0 {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(metric + " " + symbol + " " + period))
+	return time.Duration(h.Sum32()%uint32(window/time.Second)) * time.Second //nolint:gosec // window is at most half an hour
 }
 
 // backoff doubles a series' wait from futuresRetry, up to futuresRetryMax
@@ -514,7 +542,7 @@ func (s *FuturesStats) OpenInterestNow(symbol string) (OpenInterest, bool) {
 	return oi, ok
 }
 
-// forcedOrders relays the liquidation orders of the followed contracts.
+// forcedOrders follows the liquidation orders of a margin's contracts.
 func (s *FuturesStats) forcedOrders(ctx context.Context, coinMargined bool) {
 	wait := time.Second
 	for ctx.Err() == nil {
@@ -523,7 +551,7 @@ func (s *FuturesStats) forcedOrders(ctx context.Context, coinMargined bool) {
 			continue
 		}
 		opened := s.now()
-		err := s.src.ForcedOrders(ctx, coinMargined, func(o ports.ForcedOrder) { s.relay(ctx, coinMargined, o) })
+		err := s.src.ForcedOrders(ctx, coinMargined, func(o ports.ForcedOrder) { s.relay(coinMargined, o) })
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -541,8 +569,9 @@ func (s *FuturesStats) forcedOrders(ctx context.Context, coinMargined bool) {
 	}
 }
 
-// relay hands on a liquidation order of a followed contract.
-func (s *FuturesStats) relay(ctx context.Context, coinMargined bool, o ports.ForcedOrder) {
+// relay queues a liquidation order of a followed contract, in the
+// platform's contract, to be stored and published.
+func (s *FuturesStats) relay(coinMargined bool, o ports.ForcedOrder) {
 	if !s.on() {
 		return
 	}
@@ -552,7 +581,7 @@ func (s *FuturesStats) relay(ctx context.Context, coinMargined bool, o ports.For
 	if !found {
 		return
 	}
-	l := Liquidation{Symbol: m.Symbol, PositionSide: "SHORT", Price: o.Price, AvgPrice: o.AvgPrice, Quantity: o.Filled, At: o.At}
+	l := ports.Liquidation{Symbol: m.Symbol, PositionSide: "SHORT", Price: o.Price, AvgPrice: o.AvgPrice, Quantity: o.Filled, At: o.At}
 	if o.Side == "SELL" {
 		l.PositionSide = "LONG"
 	}
@@ -564,13 +593,90 @@ func (s *FuturesStats) relay(ctx context.Context, coinMargined bool, o ports.For
 	if coinMargined {
 		l.ValueUSD = m.ContractSize.Mul(o.Filled)
 	}
-	s.liquidations.WithLabelValues(marginName(coinMargined)).Inc()
-	if s.onLiq != nil {
-		s.onLiq(ctx, l)
+	select {
+	case s.liqs <- queuedLiquidation{l: l, coinMargined: coinMargined}:
+	default:
+		s.liquidations.WithLabelValues(marginName(coinMargined), "dropped").Inc()
 	}
 }
 
-// purging deletes old points every hour.
+// queuedLiquidation is a liquidation waiting to be stored and published,
+// with its contract's margin for the metrics.
+type queuedLiquidation struct {
+	l            ports.Liquidation
+	coinMargined bool
+}
+
+// flushing stores and publishes the queued liquidations every second.
+func (s *FuturesStats) flushing(ctx context.Context) {
+	var warned time.Time
+	for ctx.Err() == nil {
+		s.sleep(ctx, liquidationsFlush)
+		if err := s.flush(ctx); err != nil && ctx.Err() == nil && s.now().Sub(warned) >= futuresWarnEvery {
+			s.log.WarnContext(ctx, "futures statistics: liquidations not stored or published", "error", err)
+			warned = s.now()
+		}
+	}
+}
+
+// flush stores the queued liquidations and publishes them on
+// market.liquidations, keyed by contract; ones that fail are counted and
+// dropped (display data, the next ones follow).
+func (s *FuturesStats) flush(ctx context.Context) error {
+	var queued []queuedLiquidation
+drain:
+	for len(queued) < liquidationsQueue {
+		select {
+		case q := <-s.liqs:
+			queued = append(queued, q)
+		default:
+			break drain
+		}
+	}
+	if len(queued) == 0 {
+		return nil
+	}
+	list := make([]ports.Liquidation, 0, len(queued))
+	for _, q := range queued {
+		list = append(list, q.l)
+	}
+	count := func(result string) {
+		for _, q := range queued {
+			s.liquidations.WithLabelValues(marginName(q.coinMargined), result).Inc()
+		}
+	}
+	err := s.repo.AddLiquidations(ctx, list)
+	if err == nil {
+		err = s.publish(ctx, list)
+	}
+	if err != nil {
+		count("failed")
+		return err
+	}
+	count("relayed")
+	return nil
+}
+
+func (s *FuturesStats) publish(ctx context.Context, list []ports.Liquidation) error {
+	recs := make([]kafka.Record, 0, len(list))
+	for _, l := range list {
+		env, err := s.events.New(ctx, &marketv1.LiquidationOccurred{
+			Symbol: l.Symbol, PositionSide: l.PositionSide, Price: l.Price.String(), AveragePrice: l.AvgPrice.String(),
+			Quantity: l.Quantity.String(), ValueUsd: l.ValueUSD.String(), TradedAt: timestamppb.New(l.At),
+		}, "symbol", l.Symbol)
+		if err != nil {
+			return err
+		}
+		raw, err := proto.Marshal(env)
+		if err != nil {
+			return fmt.Errorf("liquidation %s: %w", l.Symbol, err)
+		}
+		recs = append(recs, kafka.Record{Topic: event.TopicMarketLiquidations, Key: l.Symbol, EventType: env.GetEventType(), Envelope: raw})
+	}
+	return s.pub.Publish(ctx, recs...)
+}
+
+// purging deletes old points and liquidations every hour.
 func (s *FuturesStats) purging(ctx context.Context) {
 	for ctx.Err() == nil {
 		s.Purge(ctx)
@@ -578,7 +684,8 @@ func (s *FuturesStats) purging(ctx context.Context) {
 	}
 }
 
-// Purge deletes the points older than their period keeps.
+// Purge deletes the points older than their period keeps, and the
+// liquidations older than a day.
 func (s *FuturesStats) Purge(ctx context.Context) {
 	now := s.now()
 	for _, p := range append(slices.Clone(FuturesPeriods), "") {
@@ -593,13 +700,29 @@ func (s *FuturesStats) Purge(ctx context.Context) {
 			s.log.InfoContext(ctx, "futures statistics purged", "period", p, "points", n)
 		}
 	}
+	if n, err := s.repo.PurgeLiquidations(ctx, now.Add(-liquidationsKept)); err != nil {
+		if ctx.Err() == nil {
+			s.log.WarnContext(ctx, "futures statistics: liquidations purge failed", "error", err)
+		}
+	} else if n > 0 {
+		s.log.InfoContext(ctx, "futures liquidations purged", "liquidations", n)
+	}
+}
+
+// followed answers ErrNoFuturesData for a contract known not to be the
+// reference market's; until the listing was read, every contract may be.
+func (s *FuturesStats) followed(symbol string) error {
+	if _, known, followed := s.Market(symbol); known && !followed {
+		return ErrNoFuturesData
+	}
+	return nil
 }
 
 // Series returns up to limit latest points of a contract's statistic,
 // oldest first: what is stored, also while reading is off.
 func (s *FuturesStats) Series(ctx context.Context, symbol, metric, period string, limit int) ([]ports.FuturesStat, error) {
-	if _, known, followed := s.Market(symbol); known && !followed {
-		return nil, ErrNoFuturesData
+	if err := s.followed(symbol); err != nil {
+		return nil, err
 	}
 	switch {
 	case metric == ports.MetricFunding:
@@ -611,4 +734,13 @@ func (s *FuturesStats) Series(ctx context.Context, symbol, metric, period string
 		return nil, apperr.Invalid("period must be one of 5m, 15m, 1h, 4h, 1d")
 	}
 	return s.repo.Recent(ctx, symbol, metric, period, max(1, min(limit, FuturesPoints)))
+}
+
+// Liquidations returns up to limit (at most LiquidationsShown) of a
+// contract's latest liquidations from the last day, newest first.
+func (s *FuturesStats) Liquidations(ctx context.Context, symbol string, limit int) ([]ports.Liquidation, error) {
+	if err := s.followed(symbol); err != nil {
+		return nil, err
+	}
+	return s.repo.RecentLiquidations(ctx, symbol, max(1, min(limit, LiquidationsShown)))
 }

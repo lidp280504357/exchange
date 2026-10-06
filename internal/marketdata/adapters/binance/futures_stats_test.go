@@ -165,8 +165,10 @@ func TestFuturesStatsCoinM(t *testing.T) {
 		t.Fatalf("COIN-M ratios by pair alone: %v", q)
 	}
 	oi, err := f.Stats(ctx, btcCoinM, ports.MetricOpenInterest, "5m", time.Time{}, 30)
-	if err != nil || len(oi) != 1 || oi[0].Values["open_interest"].String() != "2909783" || oi[0].Values["open_interest_value"].String() != "3377.42432722" {
-		t.Fatalf("COIN-M open interest in contracts and BTC: %+v, %v", oi, err)
+	// Binance values it in BTC (3377.42432722); the panel in USD, the
+	// contracts' face value.
+	if err != nil || len(oi) != 1 || oi[0].Values["open_interest"].String() != "2909783" || oi[0].Values["open_interest_value"].String() != "290978300" {
+		t.Fatalf("COIN-M open interest in contracts and USD: %+v, %v", oi, err)
 	}
 	funding, err := f.Stats(ctx, btcCoinM, ports.MetricFunding, "", time.Time{}, 100)
 	if err != nil || len(funding) != 1 || funding[0].Values["funding_rate"].String() != "0.00005307" {
@@ -239,6 +241,58 @@ func TestFuturesBackOff(t *testing.T) {
 	defer cancel()
 	if err := f.pace.wait(ctx, "http://coinm.invalid", "http://coinm.invalid/dapi/v1/openInterest", 0); err != nil {
 		t.Fatalf("the COIN-M host waited for the USDⓈ-M one's back-off: %v", err)
+	}
+}
+
+func TestFuturesRefusalsHoldTheHost(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		held   time.Duration
+	}{{http.StatusForbidden, time.Minute}, {http.StatusUnavailableForLegalReasons, 10 * time.Minute}} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(tc.status) }))
+		f := NewFutures(srv.URL, "", srv.URL, "", srv.Client())
+		now := time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC)
+		f.pace.now = func() time.Time { return now }
+		if _, _, err := f.OpenInterest(context.Background(), btcPerp); err == nil || !strings.Contains(err.Error(), "backing off") {
+			t.Fatalf("HTTP %d: %v", tc.status, err)
+		}
+		if got := f.pace.hold[srv.URL]; !got.Equal(now.Add(tc.held)) {
+			t.Fatalf("HTTP %d holds the host until %v, want %s on", tc.status, got, tc.held)
+		}
+		srv.Close()
+	}
+}
+
+// The six futures/data endpoints of a host share one budget: Binance does
+// not say whether its limit is per endpoint (review EK ③).
+func TestFuturesStatsShareAHostBudget(t *testing.T) {
+	f, seen := futuresServer(t, map[string]string{
+		"/futures/data/openInterestHist":            `[]`,
+		"/futures/data/globalLongShortAccountRatio": `[]`,
+		"/futures/data/basis":                       `[]`,
+		"/fapi/v1/openInterest":                     `{"symbol":"BTCUSDT","openInterest":"1","time":1}`,
+	})
+	f.pace.unpaced = false
+	ctx := context.Background()
+	start := time.Now()
+	for _, metric := range []string{ports.MetricOpenInterest, ports.MetricLongShortAccount, ports.MetricBasis} {
+		if _, err := f.Stats(ctx, btcPerp, metric, "5m", time.Time{}, 30); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if took := time.Since(start); took < 2*statsGap-50*time.Millisecond {
+		t.Fatalf("three endpoints' requests took %s, want two gaps of %s", took, statsGap)
+	}
+	// Another lane is not held by them.
+	start = time.Now()
+	if _, _, err := f.OpenInterest(ctx, btcPerp); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > statsGap/2 {
+		t.Fatalf("the open interest waited %s behind the statistics", took)
+	}
+	if len(*seen) != 4 {
+		t.Fatalf("%d requests", len(*seen))
 	}
 }
 
