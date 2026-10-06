@@ -497,6 +497,28 @@ tests:
               summary: "HOUSE's positions settled in BTC are worth 260000 USD, more than HOUSE_CONTRACT_LEVERAGE times that account's equity: it only reduces them until the account is topped up"
               runbook: docs/runbook/market-maker.md
 
+  # HOUSE's BTC positions with no USD value (no BTC price): unwatched,
+  # alerted after 10 minutes; ETH's account is valued.
+  - interval: 1m
+    input_series:
+      - series: 'market_house_coin_contract_exposure_usdt{job="market-maker", instance="a", asset="BTC"}'
+        values: '30000x14'
+      - series: 'market_house_coin_contract_exposure_usdt{job="market-maker", instance="a", asset="ETH"}'
+        values: '1000x14'
+      - series: 'market_house_coin_contract_equity_usdt{job="market-maker", instance="a", asset="ETH"}'
+        values: '500000x14'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HouseCoinContractUnpriced
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: HouseCoinContractUnpriced
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-maker, asset: BTC}
+            exp_annotations:
+              summary: "HOUSE holds positions settled in BTC but the coin has no reference price: HOUSE offers nothing more there and its leverage there goes unwatched"
+              runbook: docs/runbook/market-maker.md
+
   - interval: 1m
     input_series:
       - series: 'market_house_coin_contract_equity{job="market-maker", instance="a", asset="BTC"}'

@@ -253,7 +253,38 @@ func (b *Books) regroup(ctx context.Context, running []*runningGroup, followed m
 			rest[symbol] = ref
 		}
 	}
-	added := groups(rest, b.first)
+	// The symbols left over first fill the group of their market with the
+	// most room, which starts over with them (that group only): listings
+	// one by one do not leave a trail of small connections (review EX,
+	// C42).
+	var added []bookGroup
+	for _, market := range []string{ports.MarketSpot, ports.MarketUSDM, ports.MarketCoinM} {
+		for {
+			var left []ports.Reference
+			for _, ref := range rest {
+				if ref.Market == market {
+					left = append(left, ref)
+				}
+			}
+			at := roomiest(kept, market)
+			if len(left) == 0 || at < 0 {
+				break
+			}
+			g := kept[at]
+			kept = slices.Delete(kept, at, at+1)
+			stopGroups([]*runningGroup{g})
+			stopped = append(stopped, g)
+			refs := slices.Clone(g.group.refs)
+			order(left, b.first)
+			for _, ref := range left[:min(len(left), bookStreamsPerConn-len(refs))] {
+				refs = append(refs, ref)
+				delete(rest, ref.Symbol)
+			}
+			order(refs, b.first)
+			added = append(added, bookGroup{market: market, refs: refs})
+		}
+	}
+	added = append(added, groups(rest, b.first)...)
 	if len(running) > 0 && (len(stopped) > 0 || len(added) > 0) {
 		b.log.InfoContext(ctx, "reference books: followed symbols changed", "kept", len(kept), "stopped", len(stopped), "started", len(added))
 	}
@@ -267,6 +298,18 @@ func (b *Books) regroup(ctx context.Context, running []*runningGroup, followed m
 		kept = append(kept, r)
 	}
 	return kept
+}
+
+// roomiest is the index of the running group of market with the most room
+// left, -1 when none has any.
+func roomiest(gs []*runningGroup, market string) int {
+	at, room := -1, 0
+	for i, g := range gs {
+		if g.group.market == market && bookStreamsPerConn-len(g.group.refs) > room {
+			at, room = i, bookStreamsPerConn-len(g.group.refs)
+		}
+	}
+	return at
 }
 
 // follow reads the followed symbols and makes sure each has a book.
@@ -318,27 +361,33 @@ func groups(m map[string]ports.Reference, first map[string]bool) []bookGroup {
 	for _, ref := range m {
 		byMarket[ref.Market] = append(byMarket[ref.Market], ref)
 	}
-	leads := func(r ports.Reference) bool {
-		base, _, _ := strings.Cut(r.Symbol, "-")
-		return first[base]
-	}
 	var out []bookGroup
 	for _, market := range []string{ports.MarketSpot, ports.MarketUSDM, ports.MarketCoinM} {
 		refs := byMarket[market]
-		slices.SortFunc(refs, func(x, y ports.Reference) int {
-			if lx, ly := leads(x), leads(y); lx != ly {
-				if lx {
-					return -1
-				}
-				return 1
-			}
-			return strings.Compare(x.Symbol, y.Symbol)
-		})
+		order(refs, first)
 		for chunk := range slices.Chunk(refs, bookStreamsPerConn) {
 			out = append(out, bookGroup{market: market, refs: chunk})
 		}
 	}
 	return out
+}
+
+// order sorts refs as a group loads them: the first base assets' symbols,
+// then the others, each in symbol order.
+func order(refs []ports.Reference, first map[string]bool) {
+	leads := func(r ports.Reference) bool {
+		base, _, _ := strings.Cut(r.Symbol, "-")
+		return first[base]
+	}
+	slices.SortFunc(refs, func(x, y ports.Reference) int {
+		if lx, ly := leads(x), leads(y); lx != ly {
+			if lx {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(x.Symbol, y.Symbol)
+	})
 }
 
 // connection keeps one stream connection up until ctx ends, with backoff
@@ -447,9 +496,13 @@ func (b *Books) loader(ctx context.Context, refs map[string]ports.Reference, res
 	// Let the stream buffer a few updates first: a snapshot must not be
 	// older than the first update (spot).
 	sleep(ctx, time.Second)
-	for loaded := 0; ; loaded++ {
-		if loaded == initial && then != nil {
+	// tried: the symbols whose first snapshot was asked for; a symbol sent
+	// again after a gap does not count twice (review EX, C42).
+	tried := map[string]bool{}
+	for {
+		if then != nil && len(tried) >= initial {
 			then()
+			then = nil
 		}
 		var symbol string
 		select {
@@ -457,6 +510,7 @@ func (b *Books) loader(ctx context.Context, refs map[string]ports.Reference, res
 			return
 		case symbol = <-resync:
 		}
+		tried[symbol] = true
 		ref, ok := refs[symbol]
 		if !ok {
 			continue

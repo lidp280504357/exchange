@@ -252,6 +252,9 @@ services:
       # The prices are also the contracts' index sources: Binance alone,
       # so one source is enough here (§11.7 asks for 2).
       INDEX_MIN_SOURCES: "1"
+      # The perpetuals whose books follow depth updates every 100 ms, by
+      # base asset; the others' every 500 ms (coin-margined design §3.4).
+      BINANCE_FAST_DEPTH: "BTC,ETH"
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

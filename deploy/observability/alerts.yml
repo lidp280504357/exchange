@@ -250,6 +250,18 @@ groups:
           summary: "HOUSE's positions settled in {{ $labels.asset }} are worth {{ $value }} USD, more than HOUSE_CONTRACT_LEVERAGE times that account's equity: it only reduces them until the account is topped up"
           runbook: docs/runbook/market-maker.md
 
+      # Without the coin's reference price the account has no USD value:
+      # the check above would stay silent (review EX, C42).
+      - alert: HouseCoinContractUnpriced
+        expr: |
+          max by (job, asset) (market_house_coin_contract_exposure_usdt) > 0
+            unless on (job, asset) max by (job, asset) (market_house_coin_contract_equity_usdt)
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "HOUSE holds positions settled in {{ $labels.asset }} but the coin has no reference price: HOUSE offers nothing more there and its leverage there goes unwatched"
+          runbook: docs/runbook/market-maker.md
+
       - alert: HouseCoinContractEquityGone
         expr: max by (job, asset) (market_house_coin_contract_equity) <= 0
         for: 1m

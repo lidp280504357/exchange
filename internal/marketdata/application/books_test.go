@@ -2,8 +2,10 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -214,61 +216,95 @@ func TestTheEnginesBookIsRelayedWhereTheReferenceIsNotShown(t *testing.T) {
 	}
 }
 
-// A listing gets a connection of its own; a delisting or a changed
-// reference restarts only the group it was in, the other books going on
-// (review ET ②: every group restarting reloaded every snapshot at once).
+// Only the groups a change touches start over (review ET ②: every group
+// restarting reloaded every snapshot at once): a listing joins the group
+// of its market with room (which restarts with it) or gets a group of its
+// own; a delisting or a changed reference restarts the group it was in,
+// whose other symbols fill another group with room (review EX, C42).
 func TestOnlyTheChangedGroupsRestart(t *testing.T) {
 	b, src, _, _ := newBooksRig(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	one := decimal.NewFromInt(1)
-	btc := ports.Reference{Symbol: "BTC-USDT", Remote: "BTCUSDT", Multiplier: one}
-	eth := ports.Reference{Symbol: "ETH-USDT", Remote: "ETHUSDT", Multiplier: one}
-	opened := func(want ...string) {
+	spot := func(i int) ports.Reference {
+		s := fmt.Sprintf("S%02d-USDT", i)
+		return ports.Reference{Symbol: s, Remote: s, Multiplier: one}
+	}
+	btc := ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: one, Market: ports.MarketUSDM}
+	eth := ports.Reference{Symbol: "ETH-USDT-PERP", Remote: "ETHUSDT", Multiplier: one, Market: ports.MarketUSDM}
+	// opened takes the n connections opened next, as sorted symbol lists,
+	// and checks that no other opens.
+	opened := func(n int) []string {
 		t.Helper()
 		var got []string
-		select {
-		case refs := <-src.opened:
-			for _, r := range refs {
-				got = append(got, r.Symbol)
+		for range n {
+			select {
+			case refs := <-src.opened:
+				var names []string
+				for _, r := range refs {
+					names = append(names, r.Symbol)
+				}
+				got = append(got, strings.Join(names, " "))
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%d of %d connections opened: %v", len(got), n, got)
 			}
-		case <-time.After(5 * time.Second):
 		}
-		if !slices.Equal(got, want) {
-			t.Fatalf("opened %v, want %v", got, want)
-		}
-	}
-	nothingOpened := func() {
-		t.Helper()
 		select {
 		case refs := <-src.opened:
-			t.Fatalf("opened %v", refs)
+			t.Fatalf("another connection opened: %v (after %v)", refs, got)
 		case <-time.After(100 * time.Millisecond):
 		}
+		slices.Sort(got)
+		return got
 	}
-	regroup := func(running []*runningGroup, refs ...ports.Reference) []*runningGroup {
+	names := func(from, to int, but ...int) string {
+		var out []string
+		for i := from; i <= to; i++ {
+			if !slices.Contains(but, i) {
+				out = append(out, spot(i).Symbol)
+			}
+		}
+		return strings.Join(out, " ")
+	}
+	regroup := func(running []*runningGroup, refs []ports.Reference) []*runningGroup {
 		m := map[string]ports.Reference{}
 		for _, r := range refs {
 			m[r.Symbol] = r
 		}
 		return b.regroup(ctx, running, b.track(m))
 	}
-	running := regroup(nil, btc)
-	opened("BTC-USDT")
-	running = regroup(running, btc, eth) // ETH listed: a group of its own
-	opened("ETH-USDT")
-	nothingOpened()
-	running = regroup(running, eth) // BTC delisted: its group goes
-	nothingOpened()
-	if len(running) != 1 || running[0].group.refs[0].Symbol != "ETH-USDT" {
-		t.Fatalf("running %+v", running)
+	var refs []ports.Reference
+	for i := range bookStreamsPerConn {
+		refs = append(refs, spot(i))
 	}
-	thousand := eth
-	thousand.Multiplier = decimal.NewFromInt(1000)
-	running = regroup(running, thousand) // ETH's reference changed: its group restarts
-	opened("ETH-USDT")
-	if len(running) != 1 || !running[0].group.refs[0].Multiplier.Equal(thousand.Multiplier) {
-		t.Fatalf("running %+v", running)
+	refs = append(refs, btc)
+	running := regroup(nil, refs) // 25 spot pairs (a full group) and BTC's perpetual
+	if got := opened(2); !slices.Equal(got, []string{"BTC-USDT-PERP", names(0, 24)}) {
+		t.Fatalf("at the start: %v", got)
+	}
+	refs = append(refs, eth) // ETH's perpetual joins BTC's group; the spot one goes on
+	running = regroup(running, refs)
+	if got := opened(1); !slices.Equal(got, []string{"BTC-USDT-PERP ETH-USDT-PERP"}) {
+		t.Fatalf("ETH listed: %v", got)
+	}
+	refs = append(refs, spot(25)) // the spot group is full: a group of its own
+	running = regroup(running, refs)
+	if got := opened(1); !slices.Equal(got, []string{spot(25).Symbol}) || len(running) != 3 {
+		t.Fatalf("S25 listed: %v, %d running", got, len(running))
+	}
+	refs = slices.DeleteFunc(refs, func(r ports.Reference) bool { return r.Symbol == spot(3).Symbol })
+	running = regroup(running, refs) // S03 delisted: its group's 24 others join S25's
+	if got := opened(1); !slices.Equal(got, []string{names(0, 25, 3)}) || len(running) != 2 {
+		t.Fatalf("S03 delisted: %v, %d running", got, len(running))
+	}
+	for i, r := range refs {
+		if r.Symbol == eth.Symbol {
+			refs[i].Multiplier = decimal.NewFromInt(1000)
+		}
+	}
+	running = regroup(running, refs) // ETH's reference changed: its group restarts
+	if got := opened(1); !slices.Equal(got, []string{"BTC-USDT-PERP ETH-USDT-PERP"}) || len(running) != 2 {
+		t.Fatalf("ETH remapped: %v, %d running", got, len(running))
 	}
 	stopGroups(running)
 }

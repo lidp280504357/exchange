@@ -51,7 +51,7 @@
 | `market_house_coin_contract_exposure_usdt{asset}` | HOUSE 在该币结算的合约仓位的合计美元价值（张数 × 面值） |
 | `market_house_contract_max_leverage` | 配置的 `HOUSE_CONTRACT_LEVERAGE` |
 
-告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HouseContractOverLeveraged`（合约仓位合计超过权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟：只能减仓，用 `exchangectl ledger house-margin` 补保证金）、`HouseContractEquityGone`（合约权益不大于 0，critical：之后的亏损由保险基金承担）；币本位账户按币各有一对：`HouseCoinContractOverLeveraged{asset}`（该币结算的仓位美元价值超过该账户美元权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟，用 `house-margin --asset` 补）、`HouseCoinContractEquityGone{asset}`（该币账户权益不大于 0，critical：亏损由该币的保险基金补，基金不够时结算被拒）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
+告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HouseContractOverLeveraged`（合约仓位合计超过权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟：只能减仓，用 `exchangectl ledger house-margin` 补保证金）、`HouseContractEquityGone`（合约权益不大于 0，critical：之后的亏损由保险基金承担）；币本位账户按币各有一对：`HouseCoinContractOverLeveraged{asset}`（该币结算的仓位美元价值超过该账户美元权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟，用 `house-margin --asset` 补）、`HouseCoinContractEquityGone{asset}`（该币账户权益不大于 0，critical：亏损由该币的保险基金补，基金不够时结算被拒）、`HouseCoinContractUnpriced{asset}`（有该币结算的仓位、该币却没有参考价 10 分钟：HOUSE 在那里不再报价，杠杆也没人看着）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
 
 日志：`house liquidity not published`、`house liquidity: HOUSE's holdings not read`、`house liquidity idle: set HOUSE_USER_ID`（没配 HOUSE 账户时服务空转）。
 

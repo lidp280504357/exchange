@@ -13,8 +13,9 @@ import (
 // requests a minute: 6000 on spot, 2400 on each futures market. Source
 // keeps its own requests to 80% of the spot limit and half of a futures
 // one (the futures statistics, Futures, read the futures hosts at their
-// own pace) and holds a host once Binance reports the IP at three
-// quarters of its limit (X-MBX-USED-WEIGHT-1M), until the next minute.
+// own pace) and holds a host once Binance reports the IP at 90% of its
+// limit (X-MBX-USED-WEIGHT-1M), until the next minute: above either
+// budget, so Source's own requests alone never hold it (review EX, C42).
 // Without it, the books' snapshots and trades loaded at once after a
 // restart went past the futures' limit, which Binance answers with 429 and
 // then a ban (418).
@@ -77,9 +78,9 @@ func (h *hostWeight) take(now time.Time, w int) {
 }
 
 // observe takes Binance's count of the IP's weight in the current minute:
-// at three quarters of the limit the host waits for the next minute.
+// at 90% of the limit the host waits for the next minute.
 func (h *hostWeight) observe(now time.Time, used int) {
-	if used*4 < h.limit*3 {
+	if used*10 < h.limit*9 {
 		return
 	}
 	if next := now.Truncate(time.Minute).Add(time.Minute + time.Second); next.After(h.hold) {

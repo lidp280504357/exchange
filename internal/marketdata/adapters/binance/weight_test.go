@@ -77,15 +77,21 @@ func TestHostWeight(t *testing.T) {
 	if d := h.delay(t0.Add(3*time.Minute), 1500); d != 0 {
 		t.Fatalf("a 1500 alone: %s", d)
 	}
-	// Binance counts 1799 of 2400: nothing changes; 1800: held until a
-	// second past the next minute (01:04:01).
+	// Binance counts 2159 of 2400: nothing changes; 2160 (90%): held until
+	// a second past the next minute (01:04:01). A budget of 50% or 80% is
+	// under it: Source's own requests never hold a host.
 	now := t0.Add(3 * time.Minute)
-	h.observe(now, 1799)
+	h.observe(now, 2159)
 	if d := h.delay(now, 1); d != 0 {
-		t.Fatalf("under three quarters: %s", d)
+		t.Fatalf("under 90%%: %s", d)
 	}
-	h.observe(now, 1800)
+	h.observe(now, 2160)
 	if d := h.delay(now, 1); d != 51*time.Second {
-		t.Fatalf("at three quarters: %s", d)
+		t.Fatalf("at 90%%: %s", d)
+	}
+	spot := newHostWeight(spotWeightLimit, 80)
+	spot.observe(now, spot.budget)
+	if d := spot.delay(now, 1); d != 0 {
+		t.Fatalf("spot at its own budget: %s", d)
 	}
 }
