@@ -124,7 +124,10 @@ function text(blocks: readonly Block[]): string {
     .join(" ");
 }
 
-const SITE_PATHS = /^\/(markets|trade\/[A-Z-]+|futures\/[A-Z-]+|coin\/[A-Z0-9]+|assets(\/(deposit|withdraw|transfer|history|margin))?|account\/(security|settings|sessions)|notifications|announcements|help|login|register|reset|docs\/)$/;
+// A coin's own funds pages may name it (/assets/transfer?asset=BTC: the
+// coin-margined contracts' margin, design 2026-10-06 §2.6).
+const SITE_PATHS =
+  /^\/(markets|trade\/[A-Z-]+|futures\/[A-Z-]+|coin\/[A-Z0-9]+|assets(\/(deposit|withdraw|transfer|history|margin)(\?asset=[A-Z0-9]+)?)?|account\/(security|settings|sessions)|notifications|announcements|help|login|register|reset|docs\/)$/;
 
 // What live pages must not say (design 2026-10-04 §4.4; the launch drill
 // checks the same on the sites).

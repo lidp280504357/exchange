@@ -118,10 +118,10 @@ export const NOTICE_CATEGORIES: readonly NoticeCategory[] = ["security", "assets
 
 const SECURITY = new Set(["NEW_DEVICE_LOGIN", "IDENTITY_CHANGED", "PASSWORD_CHANGED", "ACCOUNT_LOCKED", "TOTP_CHANGED"]);
 
-/** noticeCategory groups a notice type: sign-ins and security settings, deposits, withdrawals and margin accounts, the rest. */
+/** noticeCategory groups a notice type: sign-ins and security settings, deposits, withdrawals, margin accounts and contract positions, the rest. */
 export function noticeCategory(type: string): NoticeCategory {
   if (SECURITY.has(type)) return "security";
-  if (type.startsWith("DEPOSIT_") || type.startsWith("WITHDRAWAL_") || type.startsWith("MARGIN_")) return "assets";
+  if (["DEPOSIT_", "WITHDRAWAL_", "MARGIN_", "CONTRACT_"].some((p) => type.startsWith(p))) return "assets";
   return "system";
 }
 
@@ -148,18 +148,22 @@ export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, str
       if (n.type.startsWith("WITHDRAWAL_")) return routes.withdraw;
       // Margin warnings and liquidations (margin design 2026-10-06 §4.5).
       if (n.type.startsWith("MARGIN_")) return routes.margin;
+      // A contract position's warning, liquidation or auto-deleveraging:
+      // its contract's terminal; a cross account's warning names none.
+      if (n.type.startsWith("CONTRACT_")) return n.data?.symbol ? routes.futures(n.data.symbol) : routes.assets;
       return null;
   }
 }
 
 /**
- * noticeRisk is how urgent a margin notice is (margin design §4.5): a fall
- * under the warning level warns; a liquidation, starting or done, is a
- * danger. Other notices have none (null).
+ * noticeRisk is how urgent a margin or contract notice is (margin design
+ * §4.5): a fall under the warning level warns; a liquidation, starting or
+ * done, and an auto-deleveraging are a danger. Other notices have none
+ * (null).
  */
 export function noticeRisk(type: string): "warn" | "danger" | null {
-  if (type === "MARGIN_WARNED") return "warn";
-  if (type === "MARGIN_LIQUIDATING" || type === "MARGIN_LIQUIDATED") return "danger";
+  if (type === "MARGIN_WARNED" || type === "CONTRACT_LIQUIDATION_WARNED") return "warn";
+  if (["MARGIN_LIQUIDATING", "MARGIN_LIQUIDATED", "CONTRACT_LIQUIDATING", "CONTRACT_ADL"].includes(type)) return "danger";
   return null;
 }
 

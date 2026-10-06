@@ -26,6 +26,7 @@ describe("notifications", () => {
     expect(noticeCategory("DEPOSIT_UNCLAIMED")).toBe("assets");
     expect(noticeCategory("WITHDRAWAL_FAILED")).toBe("assets");
     expect(noticeCategory("MARGIN_LIQUIDATED")).toBe("assets");
+    expect(noticeCategory("CONTRACT_ADL")).toBe("assets");
     expect(noticeCategory("STATUS_CHANGED")).toBe("system");
     expect(noticeCategory("SOMETHING_NEW")).toBe("system");
   });
@@ -37,6 +38,8 @@ describe("notifications", () => {
     expect(noticeLink({ type: "WITHDRAWAL_REJECTED" })).toBe(routes.withdraw);
     expect(noticeLink({ type: "WELCOME" })).toBe(routes.assets);
     expect(noticeLink({ type: "MARGIN_WARNED" })).toBe(routes.margin);
+    expect(noticeLink({ type: "CONTRACT_LIQUIDATING", data: { symbol: "BTC-USD-PERP" } })).toBe(routes.futures("BTC-USD-PERP"));
+    expect(noticeLink({ type: "CONTRACT_LIQUIDATION_WARNED", data: { cross: "true", symbol: "" } })).toBe(routes.assets);
     expect(noticeLink({ type: "STATUS_CHANGED" })).toBeNull();
     expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "/announcements/maintenance" } })).toBe("/announcements/maintenance");
     expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "https://evil.example.com" } })).toBeNull();
@@ -69,6 +72,9 @@ describe("noticeRisk", () => {
     expect(noticeRisk("MARGIN_WARNED")).toBe("warn");
     expect(noticeRisk("MARGIN_LIQUIDATING")).toBe("danger");
     expect(noticeRisk("MARGIN_LIQUIDATED")).toBe("danger");
+    expect(noticeRisk("CONTRACT_LIQUIDATION_WARNED")).toBe("warn");
+    expect(noticeRisk("CONTRACT_LIQUIDATING")).toBe("danger");
+    expect(noticeRisk("CONTRACT_ADL")).toBe("danger");
     expect(noticeRisk("DEPOSIT_CREDITED")).toBeNull();
   });
 });
