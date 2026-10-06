@@ -9,7 +9,13 @@
 // brackets its site publishes once, at generation time, and keeps
 // everything else in the file:
 //
-//	go run deploy/instruments/gen-contracts.go [-file deploy/instruments/test.json] [-fapi https://fapi.binance.com] [-dapi https://dapi.binance.com] [-web https://www.binance.com]
+//	go run deploy/instruments/gen-contracts.go [-file deploy/instruments/test.json] [-snapshot deploy/instruments/binance-contracts.json] [-offline] [-status PREPARE|TRADING] [-fapi https://fapi.binance.com] [-dapi https://dapi.binance.com] [-web https://www.binance.com]
+//
+// A run keeps what it read in -snapshot: the entries of the symbols the
+// file's coins could list, as Binance wrote them, one a line; -offline
+// replays the snapshot instead of reading Binance, to check a listing
+// against its inputs or to regenerate it under changed rules (review EW,
+// B126).
 //
 // Rules:
 //   - a coin's contracts are the perpetuals trading on <BASE>USDT (USDⓈ-M;
@@ -31,10 +37,12 @@
 //     value in contracts (as BTC's and ETH's);
 //   - funding every 8 hours on the platform's grid, interest 0.01%, a cap
 //     of 0.75%, the perp fee tier;
-//   - new contracts are listed PREPARE (apply never changes a status):
-//     they open once HOUSE quotes the whole list and the reference streams
-//     are grouped (the contract backend's part of G1c); a listed contract
-//     keeps its whole entry (operators may have changed it in the console).
+//   - new contracts are listed PREPARE (-status TRADING lists them open;
+//     apply never changes a listed contract's status): they open in
+//     batches once HOUSE is seeded for them and the reference streams
+//     carry them (the contract backend's part of G1c, instruments
+//     runbook); a listed contract keeps its whole entry (operators may
+//     have changed it in the console).
 package main
 
 import (
@@ -94,6 +102,17 @@ type bracket struct {
 	MaxLeverage int     `json:"maxOpenPosLeverage"`
 }
 
+// snapshot is what a run reads from Binance, kept to the symbols the
+// file's coins could list: the entries of the two exchangeInfo answers and
+// of the risk brackets of the site, each as Binance wrote it.
+type snapshot struct {
+	TakenAt         string            `json:"taken_at"`
+	Linear          []json.RawMessage `json:"fapi_exchange_info"`
+	Inverse         []json.RawMessage `json:"dapi_exchange_info"`
+	LinearBrackets  []json.RawMessage `json:"future_brackets"`
+	InverseBrackets []json.RawMessage `json:"delivery_brackets"`
+}
+
 func get(url string, out any) error {
 	c := &http.Client{Timeout: 30 * time.Second}
 	resp, err := c.Get(url)
@@ -107,16 +126,81 @@ func get(url string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// perpetuals are a market's trading perpetuals by symbol.
-func perpetuals(url string) map[string]remote {
+// exchangeInfo is the entries of a market's exchangeInfo, one a symbol.
+func exchangeInfo(url string) []json.RawMessage {
 	var info struct {
-		Symbols []remote `json:"symbols"`
+		Symbols []json.RawMessage `json:"symbols"`
 	}
 	if err := get(url, &info); err != nil {
 		log.Fatalf("exchange info: %v", err)
 	}
+	if len(info.Symbols) == 0 {
+		log.Fatalf("exchange info %s: no symbols", url)
+	}
+	return info.Symbols
+}
+
+// siteBrackets is the entries of the risk brackets Binance's site
+// publishes for a market, one a symbol. Its answers carry their own code:
+// a refusal is an HTTP 200 without brackets, which would skip every
+// contract quietly (review EW, B126).
+func siteBrackets(url string) []json.RawMessage {
+	var body struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Brackets []json.RawMessage `json:"brackets"`
+		} `json:"data"`
+	}
+	if err := get(url, &body); err != nil {
+		log.Fatalf("brackets: %v", err)
+	}
+	if body.Code != "000000" {
+		log.Fatalf("brackets %s: code %q: %s", url, body.Code, body.Message)
+	}
+	if len(body.Data.Brackets) == 0 {
+		log.Fatalf("brackets %s: none", url)
+	}
+	return body.Data.Brackets
+}
+
+// symbolOf is the symbol an entry of Binance's is about.
+func symbolOf(entry json.RawMessage) string {
+	var v struct {
+		Symbol string `json:"symbol"`
+	}
+	if err := json.Unmarshal(entry, &v); err != nil || v.Symbol == "" {
+		log.Fatalf("an entry without a symbol: %.80s", entry)
+	}
+	return v.Symbol
+}
+
+// keep is the entries about symbols, compacted and sorted by symbol.
+func keep(entries []json.RawMessage, symbols map[string]bool) []json.RawMessage {
+	var out []json.RawMessage
+	for _, e := range entries {
+		if !symbols[symbolOf(e)] {
+			continue
+		}
+		var b bytes.Buffer
+		if err := json.Compact(&b, e); err != nil {
+			log.Fatal(err)
+		}
+		out = append(out, b.Bytes())
+	}
+	slices.SortFunc(out, func(a, b json.RawMessage) int { return strings.Compare(symbolOf(a), symbolOf(b)) })
+	return out
+}
+
+// perpetuals are the trading perpetuals among a market's entries, by
+// symbol.
+func perpetuals(entries []json.RawMessage) map[string]remote {
 	out := map[string]remote{}
-	for _, s := range info.Symbols {
+	for _, e := range entries {
+		var s remote
+		if err := json.Unmarshal(e, &s); err != nil {
+			log.Fatalf("exchange info %s: %v", symbolOf(e), err)
+		}
 		if s.ContractType == "PERPETUAL" && (s.Status == "TRADING" || s.ContractStatus == "TRADING") {
 			out[s.Symbol] = s
 		}
@@ -124,26 +208,44 @@ func perpetuals(url string) map[string]remote {
 	return out
 }
 
-// brackets are a market's risk brackets by symbol, as Binance's site
-// publishes them.
-func brackets(url string) map[string][]bracket {
-	var body struct {
-		Code string `json:"code"`
-		Data struct {
-			Brackets []struct {
-				Symbol       string    `json:"symbol"`
-				RiskBrackets []bracket `json:"riskBrackets"`
-			} `json:"brackets"`
-		} `json:"data"`
-	}
-	if err := get(url, &body); err != nil {
-		log.Fatalf("brackets: %v", err)
-	}
+// brackets are the risk brackets among the site's entries, by symbol.
+func brackets(entries []json.RawMessage) map[string][]bracket {
 	out := map[string][]bracket{}
-	for _, b := range body.Data.Brackets {
+	for _, e := range entries {
+		var b struct {
+			Symbol       string    `json:"symbol"`
+			RiskBrackets []bracket `json:"riskBrackets"`
+		}
+		if err := json.Unmarshal(e, &b); err != nil {
+			log.Fatalf("brackets %s: %v", symbolOf(e), err)
+		}
 		out[b.Symbol] = b.RiskBrackets
 	}
 	return out
+}
+
+// writeSnapshot keeps s at path, an entry a line.
+func writeSnapshot(path string, s snapshot) {
+	lines := func(in []json.RawMessage) []string {
+		out := make([]string, len(in))
+		for i, e := range in {
+			out[i] = string(e)
+		}
+		return out
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "{\n  \"taken_at\": %q,\n", s.TakenAt)
+	writeList(&buf, "fapi_exchange_info", lines(s.Linear), false)
+	writeList(&buf, "dapi_exchange_info", lines(s.Inverse), false)
+	writeList(&buf, "future_brackets", lines(s.LinearBrackets), false)
+	writeList(&buf, "delivery_brackets", lines(s.InverseBrackets), true)
+	buf.WriteString("}\n")
+	if !json.Valid(buf.Bytes()) {
+		log.Fatalf("the snapshot does not parse")
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func main() {
@@ -151,12 +253,13 @@ func main() {
 	fapi := flag.String("fapi", "https://fapi.binance.com", "Binance USDⓈ-M REST base URL")
 	dapi := flag.String("dapi", "https://dapi.binance.com", "Binance COIN-M REST base URL")
 	web := flag.String("web", "https://www.binance.com", "Binance's site, for the public risk brackets")
+	snap := flag.String("snapshot", "deploy/instruments/binance-contracts.json", "what the run read from Binance (written, or read with -offline)")
+	offline := flag.Bool("offline", false, "replay -snapshot instead of reading Binance")
+	status := flag.String("status", "PREPARE", "status of the contracts new to the file: PREPARE, or TRADING to list them open")
 	flag.Parse()
-
-	linear := perpetuals(*fapi + "/fapi/v1/exchangeInfo")
-	inverse := perpetuals(*dapi + "/dapi/v1/exchangeInfo")
-	linearTiers := brackets(*web + "/bapi/futures/v1/friendly/future/common/brackets")
-	inverseTiers := brackets(*web + "/bapi/futures/v1/friendly/delivery/common/brackets")
+	if *status != "PREPARE" && *status != "TRADING" {
+		log.Fatalf("-status %s: PREPARE or TRADING", *status)
+	}
 
 	raw, err := os.ReadFile(*file)
 	if err != nil {
@@ -180,6 +283,41 @@ func main() {
 		listed[c["symbol"].(string)] = true
 	}
 
+	// The symbols the file's coins could list (the rules above).
+	wanted := map[string]bool{}
+	for _, p := range doc.Pairs {
+		base, quote := p["base_asset"].(string), p["quote_asset"].(string)
+		if quote != "USDT" || base == "ASTRA" {
+			continue
+		}
+		wanted[base+"USDT"] = true
+		if !strings.HasPrefix(base, "1000") {
+			wanted[base+"USD_PERP"] = true
+		}
+	}
+	var in snapshot
+	if *offline {
+		b, err := os.ReadFile(*snap)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := json.Unmarshal(b, &in); err != nil {
+			log.Fatalf("%s: %v", *snap, err)
+		}
+		log.Printf("replaying %s, taken at %s", *snap, in.TakenAt)
+	} else {
+		in = snapshot{
+			TakenAt:         time.Now().UTC().Format(time.RFC3339),
+			Linear:          keep(exchangeInfo(*fapi+"/fapi/v1/exchangeInfo"), wanted),
+			Inverse:         keep(exchangeInfo(*dapi+"/dapi/v1/exchangeInfo"), wanted),
+			LinearBrackets:  keep(siteBrackets(*web+"/bapi/futures/v1/friendly/future/common/brackets"), wanted),
+			InverseBrackets: keep(siteBrackets(*web+"/bapi/futures/v1/friendly/delivery/common/brackets"), wanted),
+		}
+		writeSnapshot(*snap, in)
+	}
+	linear, inverse := perpetuals(in.Linear), perpetuals(in.Inverse)
+	linearTiers, inverseTiers := brackets(in.LinearBrackets), brackets(in.InverseBrackets)
+
 	contracts := slices.Clone(doc.Contracts)
 	added := 0
 	for _, p := range doc.Pairs {
@@ -189,6 +327,7 @@ func main() {
 		}
 		if r, ok := linear[base+"USDT"]; ok && r.QuoteAsset == "USDT" && r.MarginAsset == "USDT" {
 			if c := contract(r, base, decimal.Zero, decimalsOf[base], linearTiers[r.Symbol]); c != nil && !listed[c["symbol"].(string)] {
+				c["status"] = *status
 				contracts, added = append(contracts, c), added+1
 			}
 		} else {
@@ -200,6 +339,7 @@ func main() {
 		if r, ok := inverse[base+"USD_PERP"]; ok && r.MarginAsset == base && r.ContractSize > 0 {
 			size := decimal.NewFromFloat(r.ContractSize)
 			if c := contract(r, base, size, decimalsOf[base], inverseTiers[r.Symbol]); c != nil && !listed[c["symbol"].(string)] {
+				c["status"] = *status
 				contracts, added = append(contracts, c), added+1
 			}
 		}
