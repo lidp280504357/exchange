@@ -11,9 +11,10 @@ import (
 
 // The reference market's liquidation orders on the platform's contracts
 // (design 2026-10-06 §3.3): market.liquidations' LiquidationOccurred into
-// futures_liquidations (migrations/clickhouse/00011_coin_margined.sql),
-// kept 7 days. Derived market data with a consumer group of its own
-// (LiquidationsGroup): not in the events table, nothing to backfill.
+// futures_liquidations (migrations/clickhouse/00012_futures_liquidations.sql,
+// the event's shape), kept 7 days. Derived market data with a consumer
+// group of its own (LiquidationsGroup): not in the events table, nothing
+// to backfill.
 
 // LiquidationsGroup consumes LiquidationTopics.
 const LiquidationsGroup = "analytics-liquidations"
@@ -21,12 +22,10 @@ const LiquidationsGroup = "analytics-liquidations"
 // LiquidationTopics feed futures_liquidations.
 var LiquidationTopics = []string{event.TopicMarketLiquidations}
 
-// insertFuturesLiquidations writes the table drafted with a liquidation
-// order's fields: side is the side of the position closed (LONG, SHORT),
-// quantity and filled_quantity are both what filled, status is FILLED
-// (the event carries what filled alone).
-const insertFuturesLiquidations = `INSERT INTO futures_liquidations (symbol, side, price, average_price, quantity, filled_quantity,
-	value_usd, status, traded_at)`
+// insertFuturesLiquidations writes the event's fields: the side of the
+// position closed (LONG, SHORT) and the quantity filled.
+const insertFuturesLiquidations = `INSERT INTO futures_liquidations (symbol, position_side, price, average_price, quantity, value_usd,
+	traded_at)`
 
 // StoreLiquidations writes a batch of LiquidationOccurred; malformed ones
 // are counted and skipped. The table is a ReplacingMergeTree keyed by the
@@ -73,5 +72,5 @@ func liquidationRow(d kafka.Delivery) ([]any, error) {
 			return nil, err
 		}
 	}
-	return []any{l.GetSymbol(), side, price, avg, qty, qty, value, "FILLED", l.GetTradedAt().AsTime().UTC()}, nil
+	return []any{l.GetSymbol(), side, price, avg, qty, value, l.GetTradedAt().AsTime().UTC()}, nil
 }

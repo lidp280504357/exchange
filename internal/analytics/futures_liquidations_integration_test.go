@@ -61,14 +61,14 @@ func TestFuturesLiquidations(t *testing.T) {
 	if rows != 2 {
 		t.Fatalf("%d rows", rows)
 	}
-	var side, status string
-	var qty, filled, value decimal.Decimal
+	var side string
+	var avg, qty, value decimal.Decimal
 	var traded time.Time
-	if err := conn.QueryRow(ctx, `SELECT side, quantity, filled_quantity, value_usd, status, traded_at FROM futures_liquidations FINAL
-		WHERE symbol = ? ORDER BY traded_at LIMIT 1`, symbol).Scan(&side, &qty, &filled, &value, &status, &traded); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT position_side, average_price, quantity, value_usd, traded_at FROM futures_liquidations FINAL
+		WHERE symbol = ? ORDER BY traded_at LIMIT 1`, symbol).Scan(&side, &avg, &qty, &value, &traded); err != nil {
 		t.Fatal(err)
 	}
-	if side != "LONG" || qty.String() != "0.014" || !filled.Equal(qty) || value.String() != "1204.14" || status != "FILLED" || !traded.Equal(at) {
-		t.Fatalf("row: %s %s %s %s %s %s", side, qty, filled, value, status, traded)
+	if side != "LONG" || avg.String() != "86010" || qty.String() != "0.014" || value.String() != "1204.14" || !traded.Equal(at) {
+		t.Fatalf("row: %s %s %s %s %s", side, avg, qty, value, traded)
 	}
 }

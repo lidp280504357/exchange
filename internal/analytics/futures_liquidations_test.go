@@ -24,7 +24,7 @@ func TestLiquidationRows(t *testing.T) {
 	}
 	want := []any{
 		"BTC-USD-PERP", "SHORT", decimal.RequireFromString("9425.5"), decimal.RequireFromString("9496.5"),
-		decimal.NewFromInt(3), decimal.NewFromInt(3), decimal.NewFromInt(300), "FILLED", at,
+		decimal.NewFromInt(3), decimal.NewFromInt(300), at,
 	}
 	if len(row) != len(want) {
 		t.Fatalf("row %v", row)
