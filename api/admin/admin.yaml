@@ -3449,6 +3449,238 @@ paths:
                 $ref: '#/components/schemas/PlatformProfileAdmin'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps:
+    get:
+      operationId: listPlatformApps
+      summary: The apps to download (Android, iOS) as the console sets them
+      description: |
+        Design 2026-10-07 (App download page) §2.3: each platform's mode
+        (OFF, LINK, FILE), link, version notes and switch, its current app
+        and the files kept on the server, what the sites show now, its
+        version and who changed it last. instrument-service keeps the
+        settings; the files are on the server's disk, nginx serves them
+        under /downloads/ on the three sites. Every administrator reads
+        them. Batch H0.
+      tags: [platform]
+      responses:
+        '200':
+          description: Both platforms, Android first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [apps]
+                properties:
+                  apps:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlatformAppAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps/{platform}:
+    parameters:
+      - $ref: '#/components/parameters/AppPlatform'
+    put:
+      operationId: updatePlatformApp
+      summary: Set a platform's download - off, a link or its uploaded app - with its notes and switch
+      description: |
+        expected_version is the version read: 409 INSTRUMENT_PLATFORM_CHANGED
+        when someone saved, uploaded or deleted in between. LINK needs an
+        https link; FILE needs a current app (completing an upload sets FILE
+        by itself). The sites show the change within a minute. One ADMIN
+        (settings.write) alone; audited as admin.platform.app_updated with
+        the fields that changed, before and after.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PlatformAppWrite'
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The platform as saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAppAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps/{platform}/uploads:
+    parameters:
+      - $ref: '#/components/parameters/AppPlatform'
+    post:
+      operationId: startAppUpload
+      summary: Start uploading an app or iOS's configuration profile, in parts
+      description: |
+        The file goes up in parts of part_size (10 MiB, the last one
+        smaller), so that no request passes Cloudflare's 100 MB (§1.2 #5):
+        PUT each part (any order, again to resume), then complete. The
+        platform and kind fix the extension: ANDROID APP .apk, IOS APP .ipa,
+        IOS MOBILECONFIG .mobileconfig; at most 500 MB, a .mobileconfig
+        1 MB. An upload not completed within 24 hours is dropped with its
+        parts. settings.write.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppUploadStart'
+      responses:
+        '201':
+          description: The upload, waiting for its parts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppUpload'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps/{platform}/uploads/{upload_id}:
+    parameters:
+      - $ref: '#/components/parameters/AppPlatform'
+      - $ref: '#/components/parameters/AppUploadID'
+    get:
+      operationId: getAppUpload
+      summary: An upload with the parts received (to resume one)
+      description: settings.write; 404 once completed, dropped or expired.
+      tags: [platform]
+      responses:
+        '200':
+          description: The upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppUpload'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: dropAppUpload
+      summary: Drop an upload and its parts
+      description: settings.write.
+      tags: [platform]
+      responses:
+        '204':
+          description: Dropped.
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps/{platform}/uploads/{upload_id}/parts/{n}:
+    parameters:
+      - $ref: '#/components/parameters/AppPlatform'
+      - $ref: '#/components/parameters/AppUploadID'
+      - name: n
+        in: path
+        required: true
+        description: The part, from 1 to parts.
+        schema:
+          type: integer
+          minimum: 1
+    put:
+      operationId: putAppUploadPart
+      summary: Send one part of an upload
+      description: |
+        Exactly part_size bytes, the last part the rest (400
+        COMMON_INVALID_ARGUMENT otherwise, or for a part number out of
+        range); a part sent again replaces it. nginx lets this route take
+        16 MB (client_max_body_size), the console's other routes less.
+        settings.write.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: The upload with the part received.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppUpload'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps/{platform}/uploads/{upload_id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/AppPlatform'
+      - $ref: '#/components/parameters/AppUploadID'
+    post:
+      operationId: completeAppUpload
+      summary: Put an upload's parts together, check the package and make it the platform's app
+      description: |
+        Joins the parts and checks the size and SHA-256 given at the start,
+        then the package: an .apk is a zip holding AndroidManifest.xml
+        (package, versionName, versionCode, minSdkVersion read from it), an
+        .ipa a zip holding Payload/<name>.app/Info.plist (CFBundleIdentifier,
+        CFBundleShortVersionString, CFBundleVersion, MinimumOSVersion), a
+        .mobileconfig a property list, signed or not, of PayloadType
+        Configuration. Stored under a new name (its file_id) in
+        /downloads/android/ or /downloads/ios/; an .ipa gets a manifest.plist
+        beside it naming https://<the profile's domain> (else the console's
+        own site), for the over-the-air install - upload again after
+        changing the domain. An app becomes the platform's current one and
+        the mode FILE (enabled stays as it is; the files before it are kept
+        until deleted); a .mobileconfig becomes iOS's configuration profile,
+        replacing the one before, which is deleted. 409
+        PLATFORM_APP_UPLOAD_INCOMPLETE while a part is missing (details
+        missing, the part numbers); 422 PLATFORM_APP_FILE_INVALID when the
+        size, the SHA-256 or the package does not hold (details reason).
+        settings.write; audited as admin.platform.app_file_uploaded with the
+        platform, kind, name, size, SHA-256 and what the package says.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The platform with its new file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAppAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/apps/{platform}/files/{file_id}:
+    parameters:
+      - $ref: '#/components/parameters/AppPlatform'
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: deleteAppFile
+      summary: Delete an uploaded file from the server
+      description: |
+        Deletes the file (an .ipa with its manifest.plist) from the disk and
+        the platform's list. The current app deleted, the platform goes back
+        to its link (LINK) when it has one, else OFF (§1.2 #7); iOS's
+        configuration profile deleted, mobileconfig_url goes. settings.write;
+        audited as admin.platform.app_file_deleted with the platform, kind,
+        name, size and SHA-256.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The platform without the file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAppAdmin'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/platform/welcome-credits:
     get:
       operationId: getWelcomeCredits
@@ -5884,6 +6116,20 @@ components:
       schema:
         type: string
         format: uuid
+    AppPlatform:
+      name: platform
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [ANDROID, IOS]
+    AppUploadID:
+      name: upload_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     MarginAccountKey:
       name: account
       in: path
@@ -6919,6 +7165,168 @@ components:
         updated_at:
           type: [string, 'null']
           format: date-time
+    PlatformAppAdmin:
+      description: >-
+        One platform's download as the console sets it (design 2026-10-07, App download page): what the sites show
+        is public (null while OFF, disabled or incomplete; as api/openapi/platform.yaml's AppDownload).
+      type: object
+      required: [platform, mode, link_url, enabled, notes, current, mobileconfig, files, public, version, updated_at, updated_by]
+      properties:
+        platform:
+          type: string
+          enum: [ANDROID, IOS]
+        mode:
+          type: string
+          enum: [OFF, LINK, FILE]
+        link_url:
+          type: string
+          description: An https link (an app store, TestFlight, another page); kept while the mode is FILE or OFF; empty for none.
+        enabled:
+          type: boolean
+        notes:
+          description: The version notes the download page shows.
+          $ref: '#/components/schemas/PlatformTexts'
+        current:
+          description: The app the FILE mode serves; null for none.
+          oneOf:
+            - $ref: '#/components/schemas/AppFile'
+            - type: 'null'
+        mobileconfig:
+          description: iOS's optional configuration profile; null for none (always null on Android).
+          oneOf:
+            - $ref: '#/components/schemas/AppFile'
+            - type: 'null'
+        files:
+          type: array
+          description: Every file kept on the server for the platform, newest first (the current app and configuration profile among them).
+          items:
+            $ref: '#/components/schemas/AppFile'
+        public:
+          description: What GET /v1/platform/apps answers for the platform now.
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        version:
+          type: integer
+          format: int64
+          description: Goes up with every change (a setting, an upload, a deletion); PUT brings it back as expected_version.
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+    AppFile:
+      description: A file uploaded in the console, as the server keeps it.
+      type: object
+      required: [file_id, kind, name, size, sha256, url, manifest_url, package, version, build, min_os, uploaded_at, uploaded_by]
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [APP, MOBILECONFIG]
+        name:
+          type: string
+          description: The file's name when uploaded (it is stored as <file_id>.<extension>).
+        size:
+          type: integer
+          format: int64
+        sha256:
+          type: string
+        url:
+          type: string
+          description: Where the sites serve it, https://<domain>/downloads/<android|ios>/<file_id>.<extension>.
+        manifest_url:
+          type: [string, 'null']
+          description: An .ipa's manifest.plist for the over-the-air install; null otherwise.
+        package:
+          type: [string, 'null']
+          description: The Android package or the iOS bundle identifier (null for a .mobileconfig).
+        version:
+          type: [string, 'null']
+        build:
+          type: [string, 'null']
+        min_os:
+          type: [string, 'null']
+        uploaded_at:
+          type: string
+          format: date-time
+        uploaded_by:
+          type: string
+    PlatformAppWrite:
+      type: object
+      required: [mode, link_url, notes, enabled, expected_version]
+      properties:
+        mode:
+          type: string
+          enum: [OFF, LINK, FILE]
+        link_url:
+          type: string
+          description: https only, at most 500 characters; empty for none (a LINK needs one).
+        notes:
+          $ref: '#/components/schemas/PlatformTexts'
+        enabled:
+          type: boolean
+        expected_version:
+          type: integer
+          format: int64
+    AppUploadStart:
+      type: object
+      required: [kind, name, size, sha256]
+      properties:
+        kind:
+          type: string
+          enum: [APP, MOBILECONFIG]
+          description: MOBILECONFIG on IOS only.
+        name:
+          type: string
+          description: The file's name, ending .apk, .ipa or .mobileconfig as the platform and kind say; at most 200 characters.
+        size:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 524288000
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+    AppUpload:
+      type: object
+      required: [upload_id, platform, kind, name, size, sha256, part_size, parts, received, expires_at, started_by]
+      properties:
+        upload_id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [ANDROID, IOS]
+        kind:
+          type: string
+          enum: [APP, MOBILECONFIG]
+        name:
+          type: string
+        size:
+          type: integer
+          format: int64
+        sha256:
+          type: string
+        part_size:
+          type: integer
+          description: 10485760 (10 MiB); every part but the last has exactly this many bytes.
+        parts:
+          type: integer
+        received:
+          type: array
+          description: The part numbers received, ascending.
+          items:
+            type: integer
+        expires_at:
+          type: string
+          format: date-time
+          description: Dropped with its parts if not completed by then (24 hours after its start).
+        started_by:
+          type: string
     PlatformProfileAdmin:
       description: The platform's profile (as api/openapi/platform.yaml's PlatformProfile) and who last changed it.
       type: object

@@ -2110,6 +2110,212 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/platform/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The apps to download (Android, iOS) as the console sets them
+         * @description Design 2026-10-07 (App download page) §2.3: each platform's mode
+         *     (OFF, LINK, FILE), link, version notes and switch, its current app
+         *     and the files kept on the server, what the sites show now, its
+         *     version and who changed it last. instrument-service keeps the
+         *     settings; the files are on the server's disk, nginx serves them
+         *     under /downloads/ on the three sites. Every administrator reads
+         *     them. Batch H0.
+         */
+        get: operations["listPlatformApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/apps/{platform}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a platform's download - off, a link or its uploaded app - with its notes and switch
+         * @description expected_version is the version read: 409 INSTRUMENT_PLATFORM_CHANGED
+         *     when someone saved, uploaded or deleted in between. LINK needs an
+         *     https link; FILE needs a current app (completing an upload sets FILE
+         *     by itself). The sites show the change within a minute. One ADMIN
+         *     (settings.write) alone; audited as admin.platform.app_updated with
+         *     the fields that changed, before and after.
+         */
+        put: operations["updatePlatformApp"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/apps/{platform}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start uploading an app or iOS's configuration profile, in parts
+         * @description The file goes up in parts of part_size (10 MiB, the last one
+         *     smaller), so that no request passes Cloudflare's 100 MB (§1.2 #5):
+         *     PUT each part (any order, again to resume), then complete. The
+         *     platform and kind fix the extension: ANDROID APP .apk, IOS APP .ipa,
+         *     IOS MOBILECONFIG .mobileconfig; at most 500 MB, a .mobileconfig
+         *     1 MB. An upload not completed within 24 hours is dropped with its
+         *     parts. settings.write.
+         */
+        post: operations["startAppUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/apps/{platform}/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * An upload with the parts received (to resume one)
+         * @description settings.write; 404 once completed, dropped or expired.
+         */
+        get: operations["getAppUpload"];
+        put?: never;
+        post?: never;
+        /**
+         * Drop an upload and its parts
+         * @description settings.write.
+         */
+        delete: operations["dropAppUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/apps/{platform}/uploads/{upload_id}/parts/{n}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+                /** @description The part, from 1 to parts. */
+                n: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Send one part of an upload
+         * @description Exactly part_size bytes, the last part the rest (400
+         *     COMMON_INVALID_ARGUMENT otherwise, or for a part number out of
+         *     range); a part sent again replaces it. nginx lets this route take
+         *     16 MB (client_max_body_size), the console's other routes less.
+         *     settings.write.
+         */
+        put: operations["putAppUploadPart"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/apps/{platform}/uploads/{upload_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put an upload's parts together, check the package and make it the platform's app
+         * @description Joins the parts and checks the size and SHA-256 given at the start,
+         *     then the package: an .apk is a zip holding AndroidManifest.xml
+         *     (package, versionName, versionCode, minSdkVersion read from it), an
+         *     .ipa a zip holding Payload/<name>.app/Info.plist (CFBundleIdentifier,
+         *     CFBundleShortVersionString, CFBundleVersion, MinimumOSVersion), a
+         *     .mobileconfig a property list, signed or not, of PayloadType
+         *     Configuration. Stored under a new name (its file_id) in
+         *     /downloads/android/ or /downloads/ios/; an .ipa gets a manifest.plist
+         *     beside it naming https://<the profile's domain> (else the console's
+         *     own site), for the over-the-air install - upload again after
+         *     changing the domain. An app becomes the platform's current one and
+         *     the mode FILE (enabled stays as it is; the files before it are kept
+         *     until deleted); a .mobileconfig becomes iOS's configuration profile,
+         *     replacing the one before, which is deleted. 409
+         *     PLATFORM_APP_UPLOAD_INCOMPLETE while a part is missing (details
+         *     missing, the part numbers); 422 PLATFORM_APP_FILE_INVALID when the
+         *     size, the SHA-256 or the package does not hold (details reason).
+         *     settings.write; audited as admin.platform.app_file_uploaded with the
+         *     platform, kind, name, size, SHA-256 and what the package says.
+         */
+        post: operations["completeAppUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/apps/{platform}/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an uploaded file from the server
+         * @description Deletes the file (an .ipa with its manifest.plist) from the disk and
+         *     the platform's list. The current app deleted, the platform goes back
+         *     to its link (LINK) when it has one, else OFF (§1.2 #7); iOS's
+         *     configuration profile deleted, mobileconfig_url goes. settings.write;
+         *     audited as admin.platform.app_file_deleted with the platform, kind,
+         *     name, size and SHA-256.
+         */
+        delete: operations["deleteAppFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/platform/welcome-credits": {
         parameters: {
             query?: never;
@@ -4256,6 +4462,105 @@ export interface components {
             /** Format: date-time */
             updated_at: string | null;
         };
+        /** @description One platform's download as the console sets it (design 2026-10-07, App download page): what the sites show is public (null while OFF, disabled or incomplete; as api/openapi/platform.yaml's AppDownload). */
+        PlatformAppAdmin: {
+            /** @enum {string} */
+            platform: "ANDROID" | "IOS";
+            /** @enum {string} */
+            mode: "OFF" | "LINK" | "FILE";
+            /** @description An https link (an app store, TestFlight, another page); kept while the mode is FILE or OFF; empty for none. */
+            link_url: string;
+            enabled: boolean;
+            /** @description The version notes the download page shows. */
+            notes: components["schemas"]["PlatformTexts"];
+            /** @description The app the FILE mode serves; null for none. */
+            current: components["schemas"]["AppFile"] | null;
+            /** @description iOS's optional configuration profile; null for none (always null on Android). */
+            mobileconfig: components["schemas"]["AppFile"] | null;
+            /** @description Every file kept on the server for the platform, newest first (the current app and configuration profile among them). */
+            files: components["schemas"]["AppFile"][];
+            /** @description What GET /v1/platform/apps answers for the platform now. */
+            public: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Format: int64
+             * @description Goes up with every change (a setting, an upload, a deletion); PUT brings it back as expected_version.
+             */
+            version: number;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
+        };
+        /** @description A file uploaded in the console, as the server keeps it. */
+        AppFile: {
+            /** Format: uuid */
+            file_id: string;
+            /** @enum {string} */
+            kind: "APP" | "MOBILECONFIG";
+            /** @description The file's name when uploaded (it is stored as <file_id>.<extension>). */
+            name: string;
+            /** Format: int64 */
+            size: number;
+            sha256: string;
+            /** @description Where the sites serve it, https://<domain>/downloads/<android|ios>/<file_id>.<extension>. */
+            url: string;
+            /** @description An .ipa's manifest.plist for the over-the-air install; null otherwise. */
+            manifest_url: string | null;
+            /** @description The Android package or the iOS bundle identifier (null for a .mobileconfig). */
+            package: string | null;
+            version: string | null;
+            build: string | null;
+            min_os: string | null;
+            /** Format: date-time */
+            uploaded_at: string;
+            uploaded_by: string;
+        };
+        PlatformAppWrite: {
+            /** @enum {string} */
+            mode: "OFF" | "LINK" | "FILE";
+            /** @description https only, at most 500 characters; empty for none (a LINK needs one). */
+            link_url: string;
+            notes: components["schemas"]["PlatformTexts"];
+            enabled: boolean;
+            /** Format: int64 */
+            expected_version: number;
+        };
+        AppUploadStart: {
+            /**
+             * @description MOBILECONFIG on IOS only.
+             * @enum {string}
+             */
+            kind: "APP" | "MOBILECONFIG";
+            /** @description The file's name, ending .apk, .ipa or .mobileconfig as the platform and kind say; at most 200 characters. */
+            name: string;
+            /** Format: int64 */
+            size: number;
+            sha256: string;
+        };
+        AppUpload: {
+            /** Format: uuid */
+            upload_id: string;
+            /** @enum {string} */
+            platform: "ANDROID" | "IOS";
+            /** @enum {string} */
+            kind: "APP" | "MOBILECONFIG";
+            name: string;
+            /** Format: int64 */
+            size: number;
+            sha256: string;
+            /** @description 10485760 (10 MiB); every part but the last has exactly this many bytes. */
+            part_size: number;
+            parts: number;
+            /** @description The part numbers received, ascending. */
+            received: number[];
+            /**
+             * Format: date-time
+             * @description Dropped with its parts if not completed by then (24 hours after its start).
+             */
+            expires_at: string;
+            started_by: string;
+        };
         /** @description The platform's profile (as api/openapi/platform.yaml's PlatformProfile) and who last changed it. */
         PlatformProfileAdmin: {
             name: string;
@@ -6217,6 +6522,8 @@ export interface components {
         ChangeID: string;
         ArticleID: string;
         MarginUserID: string;
+        AppPlatform: "ANDROID" | "IOS";
+        AppUploadID: string;
         /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
         MarginAccountKey: string;
     };
@@ -9125,6 +9432,215 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformProfileAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listPlatformApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Both platforms, Android first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        apps: components["schemas"]["PlatformAppAdmin"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePlatformApp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAppWrite"] & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The platform as saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAppAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    startAppUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppUploadStart"];
+            };
+        };
+        responses: {
+            /** @description The upload, waiting for its parts. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppUpload"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAppUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The upload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppUpload"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    dropAppUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dropped. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    putAppUploadPart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+                /** @description The part, from 1 to parts. */
+                n: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description The upload with the part received. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppUpload"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    completeAppUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                upload_id: components["parameters"]["AppUploadID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The platform with its new file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAppAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteAppFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                platform: components["parameters"]["AppPlatform"];
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The platform without the file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAppAdmin"];
                 };
             };
             default: components["responses"]["Error"];

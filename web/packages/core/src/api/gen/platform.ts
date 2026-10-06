@@ -61,6 +61,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/platform/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The apps to download, Android's and iOS's
+         * @description Design 2026-10-07 (App download page) §2.2: each platform's app as
+         *     the console set it — a link (an app store, TestFlight, another
+         *     page) or a file uploaded in the console and served from
+         *     /downloads/ on each of the sites — while it is enabled and
+         *     complete; null otherwise (the sites leave the platform out, and
+         *     hide the download entries while both are null). Cacheable for a
+         *     minute; the ETag is the apps' version (If-None-Match answers 304
+         *     while it has not changed). Batch H0.
+         */
+        get: operations["getPlatformApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -147,6 +174,66 @@ export interface components {
              * @description Goes up with every change; the ETag and the image URLs carry it.
              */
             version: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PlatformApps: {
+            android: components["schemas"]["AppDownload"] | null;
+            ios: components["schemas"]["AppDownload"] | null;
+        };
+        /**
+         * @description One platform's app. A link (mode LINK) has no file facts (null);
+         *     an uploaded file (FILE) has them as read from the package when it
+         *     was uploaded. URLs are absolute: a file's on https://<the
+         *     profile's domain>/downloads/... (any of the three sites serves it).
+         */
+        AppDownload: {
+            /** @enum {string} */
+            mode: "LINK" | "FILE";
+            /**
+             * @description The link, or the file (an .apk to download; an .ipa, which iOS installs through install_url).
+             * @example https://astras.vip/downloads/android/0192a000-0000-7000-8000-000000000001.apk
+             */
+            url: string;
+            /** @description An uploaded iOS app's over-the-air install link, itms-services://?action=download-manifest&url=<its manifest.plist>; null otherwise (open url). */
+            install_url: string | null;
+            /**
+             * @description iOS: APP_STORE for a link (the App Store, TestFlight or another page), OTA for an uploaded .ipa (an enterprise or Ad Hoc signed app, installed with install_url); null on Android.
+             * @enum {string|null}
+             */
+            ios_install: "APP_STORE" | "OTA" | null;
+            /**
+             * @description The Android package name or the iOS bundle identifier of an uploaded file.
+             * @example vip.astras.app
+             */
+            package: string | null;
+            /**
+             * @description versionName (Android) or CFBundleShortVersionString (iOS) of an uploaded file.
+             * @example 1.2.0
+             */
+            version: string | null;
+            /**
+             * @description versionCode (Android) or CFBundleVersion (iOS) of an uploaded file.
+             * @example 42
+             */
+            build: string | null;
+            /**
+             * @description The lowest system it installs on (Android API level, iOS version) when the package says.
+             * @example 24
+             * @example 15.0
+             */
+            min_os: string | null;
+            /**
+             * Format: int64
+             * @description An uploaded file's size in bytes.
+             */
+            size: number | null;
+            /** @description An uploaded file's SHA-256, lowercase hex. */
+            sha256: string | null;
+            /** @description iOS only, optional - a configuration profile (.mobileconfig) uploaded beside the app, downloaded on its own. */
+            mobileconfig_url: string | null;
+            /** @description The version notes; empty for none. */
+            notes: components["schemas"]["Texts"];
             /** Format: date-time */
             updated_at: string;
         };
@@ -263,6 +350,37 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlatformApps: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The apps. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformApps"];
+                };
+            };
+            /** @description Not changed since the ETag sent. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

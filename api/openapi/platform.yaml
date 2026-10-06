@@ -6,7 +6,8 @@ info:
     The platform's profile, no sign-in (design 2026-10-04 §4.1): the
     exchange's name, logos, colours, footer, contact, test mode,
     registration and the welcome credits, as operators set them
-    in the admin console. The sites read it at start and every minute and
+    in the admin console; and the apps to download (design 2026-10-07,
+    App download page). The sites read it at start and every minute and
     fall back to their built-in defaults while it cannot be read, so going
     live is a change of settings, not a build. instrument-service keeps
     the profile; the welcome credits are the ledger's (ledger-service
@@ -100,6 +101,41 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/platform/apps:
+    get:
+      operationId: getPlatformApps
+      summary: The apps to download, Android's and iOS's
+      description: |
+        Design 2026-10-07 (App download page) §2.2: each platform's app as
+        the console set it — a link (an app store, TestFlight, another
+        page) or a file uploaded in the console and served from
+        /downloads/ on each of the sites — while it is enabled and
+        complete; null otherwise (the sites leave the platform out, and
+        hide the download entries while both are null). Cacheable for a
+        minute; the ETag is the apps' version (If-None-Match answers 304
+        while it has not changed). Batch H0.
+      tags: [platform]
+      security: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The apps.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformApps'
+        '304':
+          description: Not changed since the ETag sent.
         default:
           $ref: './common.yaml#/components/responses/Error'
 components:
@@ -254,6 +290,77 @@ components:
           type: integer
           format: int64
           description: Goes up with every change; the ETag and the image URLs carry it.
+        updated_at:
+          type: string
+          format: date-time
+    PlatformApps:
+      type: object
+      required: [android, ios]
+      properties:
+        android:
+          oneOf:
+            - $ref: '#/components/schemas/AppDownload'
+            - type: 'null'
+        ios:
+          oneOf:
+            - $ref: '#/components/schemas/AppDownload'
+            - type: 'null'
+    AppDownload:
+      description: |
+        One platform's app. A link (mode LINK) has no file facts (null);
+        an uploaded file (FILE) has them as read from the package when it
+        was uploaded. URLs are absolute: a file's on https://<the
+        profile's domain>/downloads/... (any of the three sites serves it).
+      type: object
+      required: [mode, url, install_url, ios_install, package, version, build, min_os, size, sha256, mobileconfig_url, notes, updated_at]
+      properties:
+        mode:
+          type: string
+          enum: [LINK, FILE]
+        url:
+          type: string
+          description: The link, or the file (an .apk to download; an .ipa, which iOS installs through install_url).
+          examples: ['https://astras.vip/downloads/android/0192a000-0000-7000-8000-000000000001.apk']
+        install_url:
+          type: [string, 'null']
+          description: >-
+            An uploaded iOS app's over-the-air install link,
+            itms-services://?action=download-manifest&url=<its manifest.plist>; null otherwise (open url).
+        ios_install:
+          type: [string, 'null']
+          enum: [APP_STORE, OTA, null]
+          description: >-
+            iOS: APP_STORE for a link (the App Store, TestFlight or another page), OTA for an uploaded .ipa (an enterprise
+            or Ad Hoc signed app, installed with install_url); null on Android.
+        package:
+          type: [string, 'null']
+          description: The Android package name or the iOS bundle identifier of an uploaded file.
+          examples: [vip.astras.app]
+        version:
+          type: [string, 'null']
+          description: versionName (Android) or CFBundleShortVersionString (iOS) of an uploaded file.
+          examples: [1.2.0]
+        build:
+          type: [string, 'null']
+          description: versionCode (Android) or CFBundleVersion (iOS) of an uploaded file.
+          examples: ['42']
+        min_os:
+          type: [string, 'null']
+          description: The lowest system it installs on (Android API level, iOS version) when the package says.
+          examples: ['24', '15.0']
+        size:
+          type: [integer, 'null']
+          format: int64
+          description: An uploaded file's size in bytes.
+        sha256:
+          type: [string, 'null']
+          description: An uploaded file's SHA-256, lowercase hex.
+        mobileconfig_url:
+          type: [string, 'null']
+          description: iOS only, optional - a configuration profile (.mobileconfig) uploaded beside the app, downloaded on its own.
+        notes:
+          description: The version notes; empty for none.
+          $ref: '#/components/schemas/Texts'
         updated_at:
           type: string
           format: date-time
