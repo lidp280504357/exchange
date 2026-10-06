@@ -19,4 +19,10 @@ describe("fetchContracts", () => {
     const list = await fetchContracts();
     expect(list.contracts.map((c) => c.symbol)).toEqual(["BTC-USDT-PERP", "ETH-USDT-PERP"]);
   });
+
+  it("asks for the coin-margined contracts too", async () => {
+    const get = vi.spyOn(marketApi, "GET").mockResolvedValue({ data: { contracts: [] }, response: new Response() } as never);
+    await fetchContracts();
+    expect(get).toHaveBeenCalledWith("/v1/market/contracts", { params: { query: { margin_type: "ALL" } } });
+  });
 });

@@ -72,13 +72,13 @@ export function assetDecimals(assets: AssetInfo[] | undefined, asset: string, fa
 }
 
 /**
- * fetchContracts lists the perpetual contracts the sites show: the listed
- * ones but those still PREPARE. Binance's perpetuals are listed PREPARE
- * and open in batches (design 2026-10-06 §3.4); until then the sites leave
- * them out (coordinator, review EY).
+ * fetchContracts lists the perpetual contracts the sites show: USDT- and
+ * coin-margined alike (design 2026-10-06 §2.6), but those still PREPARE.
+ * Binance's perpetuals are listed PREPARE and open in batches (§3.4);
+ * until then the sites leave them out (coordinator, review EY).
  */
 export async function fetchContracts() {
-  const list = await unwrap(marketApi.GET("/v1/market/contracts"));
+  const list = await unwrap(marketApi.GET("/v1/market/contracts", { params: { query: { margin_type: "ALL" } } }));
   return { ...list, contracts: list.contracts.filter((c) => c.status !== "PREPARE") };
 }
 

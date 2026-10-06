@@ -846,6 +846,84 @@ else await f.step("M7", M7, async () => {
   }
 });
 
+// --- G4: a coin-margined contract (design 2026-10-06 §2.6) ---------------------------------------
+
+// BTC-USD-PERP trades whole contracts of 100 USD, its margin and result in
+// BTC from BTC's own futures account. The account buys a little BTC with its
+// welcome funds, moves it to futures from the transfer page, switches from
+// BTC-USDT-PERP to the coin-margined kind at the top of the terminal, opens
+// one contract from the order sheet and closes it from its position card.
+const G4 =
+  "a coin-margined contract: BTC moves to its own futures account; the terminal switches to COIN-M; the sheet takes whole contracts with their BTC and USD worth; a 1-contract long shows in contracts with its value, and closes from its card";
+async function coinClosed() {
+  const c = await api(API, "GET", "/v1/market/contracts/BTC-USD-PERP");
+  if (c.status !== 200 || c.body.status !== "TRADING") return `BTC-USD-PERP is not trading (${c.status} ${c.body?.status ?? ""})`;
+  if (Number(await spotAvailable(API, await signInApi(API, user), "USDT")) < 45) return "the account has under 45 USDT (no welcome funds?)";
+  return "";
+}
+const noCoin = await coinClosed();
+if (noCoin) f.skip("G4", G4, noCoin);
+else await f.step("G4", G4, async () => {
+  const token = await signInApi(API, user);
+  const auth = { Authorization: `Bearer ${token}` };
+  const buy = await api(API, "POST", "/v1/orders", { symbol: "BTC-USDT", side: "BUY", type: "MARKET", quote_amount: "40" }, { ...auth, "Idempotency-Key": `mflows-g4-${run}` });
+  if (buy.status !== 202) throw new Error(`a market buy of 40 USDT of BTC: ${buy.status} ${JSON.stringify(buy.body)}`);
+  const until = Date.now() + 20_000;
+  while (Number(await spotAvailable(API, token, "BTC")) < 0.0003) {
+    if (Date.now() > until) throw new Error("under 0.0003 BTC on the spot account 20 s after the buy");
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const T = await signedInTab("coin-m");
+  try {
+    await nav(T, "/assets/transfer?asset=BTC");
+    await T.typeInto('form[data-testid="transfer-form"] input[inputmode="decimal"]', "0.0003");
+    await T.clickButton("确认划转");
+    await T.waitText("已划转");
+    // The kinds' switch at the top of the terminal goes to the same coin's other contract.
+    await nav(T, "/futures/BTC-USDT-PERP");
+    await T.clickButton("币本位", '[aria-label="合约类型"]');
+    await T.waitPath("/futures/BTC-USD-PERP", 15000);
+    // The new contract's terminal settles once its mark price is in (its bars re-render until then).
+    await T.page.waitForFunction(() => /标记价格\s*[\d,]+\.\d/.test(document.body.innerText), { timeout: 20000 });
+    await T.clickButton("开多");
+    await sheet(T);
+    const field = '[role=dialog] input[aria-label="数量"]';
+    await T.page.waitForSelector(field, { visible: true, timeout: 10000 });
+    await T.page.waitForFunction(
+      () => {
+        const text = document.querySelector("[role=dialog]")?.innerText ?? "";
+        const available = /可用\s*([\d.,]+) BTC/.exec(text);
+        return /钱包余额\s*[\d.,]+ BTC/.test(text) && available && Number(available[1].replace(/,/g, "")) >= 0.0002;
+      },
+      { timeout: 20000 },
+    );
+    const unit = await T.page.$eval(field, (el) => el.parentElement?.innerText ?? "");
+    if (!unit.includes("张")) throw new Error(`the quantity field's unit: "${unit}"`);
+    await T.clickTab("市价");
+    await T.typeInto(field, "1");
+    await T.page.waitForFunction(() => /≈ 0\.\d+ BTC · 100 USD/.test(document.querySelector('[role=dialog] [data-testid="contracts-value"]')?.innerText ?? ""), { timeout: 10000 });
+    await T.clickButton("开多", "[role=dialog]");
+    await T.page.waitForFunction(() => [...document.querySelectorAll("[role=dialog]")].some((d) => /1 张/.test(d.innerText) && /100 USD/.test(d.innerText) && d.innerText.includes("确认")), { timeout: 10000 });
+    await T.clickButton("确认", "[role=dialog]");
+    // The order sheet closes on the order's acceptance; the tabs take the press once it is gone.
+    await T.page.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 15000 });
+    await T.clickTab("仓位");
+    await T.page.waitForSelector('[data-testid="position-value"]', { visible: true, timeout: 30000 });
+    const card = await T.page.$eval('[data-testid="position-value"]', (el) => el.closest("article")?.innerText ?? "");
+    if (!/价值 0\.\d+ BTC · 100 USD/.test(card) || !/持仓数量 \(张\)/.test(card) || !/未实现盈亏 \(BTC\)/.test(card)) {
+      throw new Error(`the position card: ${card.replace(/\s+/g, " ")}`);
+    }
+    await T.page.evaluate(() =>
+      [...(document.querySelector('[data-testid="position-value"]')?.closest("article")?.querySelectorAll("button") ?? [])].find((b) => b.innerText.trim() === "平仓")?.click(),
+    );
+    await T.page.waitForSelector("[role=dialog]", { visible: true, timeout: 10000 });
+    await T.clickButton("平多", "[role=dialog]");
+    await T.page.waitForFunction(() => !document.querySelector('[data-testid="position-value"]'), { timeout: 30000 });
+  } finally {
+    await T.close();
+  }
+});
+
 // --- P8 from this side: the PC site on a phone that chose it ------------------------------------------------------
 
 const P8 = "切换到电脑版 on a phone keeps it on the PC site";

@@ -1045,6 +1045,73 @@ else await f.step("P9", P9, async () => {
   }
 });
 
+// --- G4: a coin-margined contract (design 2026-10-06 §2.6) ---------------------------------------
+
+// BTC-USD-PERP trades whole contracts of 100 USD, its margin and result in
+// BTC from BTC's own futures account. The account buys a little BTC with its
+// welcome funds, moves it to futures from the transfer page, opens one
+// contract at the market and closes it from its position card.
+const G4 =
+  "a coin-margined contract: BTC moves to its own futures account; BTC-USD-PERP takes whole contracts and shows their BTC and USD worth; a 1-contract long shows in contracts with its value, and closes from its card";
+const coinContract = await api(API, "GET", "/v1/market/contracts/BTC-USD-PERP");
+if (NO_FUNDS()) f.skip("G4", G4, NO_FUNDS());
+else if (coinContract.status !== 200 || coinContract.body.status !== "TRADING") {
+  f.skip("G4", G4, `BTC-USD-PERP is not trading (${coinContract.status} ${coinContract.body?.status ?? ""})`);
+} else await f.step("G4", G4, async () => {
+  const token = await signInApi(API, user);
+  const auth = { Authorization: `Bearer ${token}` };
+  const buy = await api(API, "POST", "/v1/orders", { symbol: "BTC-USDT", side: "BUY", type: "MARKET", quote_amount: "40" }, { ...auth, "Idempotency-Key": `pcflows-g4-${run}` });
+  if (buy.status !== 202) throw new Error(`a market buy of 40 USDT of BTC: ${buy.status} ${JSON.stringify(buy.body)}`);
+  const until = Date.now() + 20_000;
+  while (Number(await spotAvailable(API, token, "BTC")) < 0.0003) {
+    if (Date.now() > until) throw new Error("under 0.0003 BTC on the spot account 20 s after the buy");
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const T = await signedInTab("coin-m", 1440);
+  try {
+    await nav(T, "/assets/transfer?asset=BTC");
+    await T.typeInto('form[data-testid="transfer-form"] input[inputmode="decimal"]', "0.0003");
+    await T.clickButton("确认划转");
+    await T.waitText("已划转");
+    await nav(T, "/futures/BTC-USD-PERP");
+    const form = `#order-form`;
+    await T.page.waitForSelector(`${form} input[aria-label="数量"]`, { visible: true, timeout: 20000 });
+    // Whole contracts, BTC's futures account (the 0.0003 just moved).
+    await T.page.waitForFunction(
+      (sel) => {
+        const text = document.querySelector(sel)?.innerText ?? "";
+        const available = /可用\s*([\d.,]+) BTC/.exec(text);
+        return /钱包余额\s*[\d.,]+ BTC/.test(text) && available && Number(available[1].replace(/,/g, "")) >= 0.0002;
+      },
+      { timeout: 20000 },
+      form,
+    );
+    const unit = await T.page.$eval(`${form} input[aria-label="数量"]`, (el) => el.parentElement?.innerText ?? "");
+    if (!unit.includes("张")) throw new Error(`the quantity field's unit: "${unit}"`);
+    await T.clickTab("市价");
+    await T.typeInto(`${form} input[aria-label="数量"]`, "1");
+    await T.page.waitForFunction(() => /≈ 0\.\d+ BTC · 100 USD/.test(document.querySelector('[data-testid="contracts-value"]')?.innerText ?? ""), { timeout: 10000 });
+    await T.clickButton("开多", form);
+    await T.page.waitForSelector("[role=dialog]", { visible: true, timeout: 10000 });
+    const confirm = await T.page.$eval("[role=dialog]", (d) => d.innerText);
+    if (!/1 张/.test(confirm) || !/100 USD/.test(confirm)) throw new Error(`the confirmation: ${confirm.replace(/\s+/g, " ")}`);
+    await T.clickButton("确认", "[role=dialog]");
+    await T.page.waitForSelector('[data-testid="position-value"]', { visible: true, timeout: 30000 });
+    const card = await T.page.$eval('[data-testid="position-value"]', (el) => el.closest("article")?.innerText ?? "");
+    if (!/价值 0\.\d+ BTC · 100 USD/.test(card) || !/持仓数量 \(张\)/.test(card) || !/未实现盈亏 \(BTC\)/.test(card)) {
+      throw new Error(`the position card: ${card.replace(/\s+/g, " ")}`);
+    }
+    await T.page.evaluate(() =>
+      [...(document.querySelector('[data-testid="position-value"]')?.closest("article")?.querySelectorAll("button") ?? [])].find((b) => b.innerText.trim() === "平仓")?.click(),
+    );
+    await T.page.waitForSelector("[role=dialog]", { visible: true, timeout: 10000 });
+    await T.clickButton("平多", "[role=dialog]");
+    await T.page.waitForFunction(() => !document.querySelector('[data-testid="position-value"]'), { timeout: 30000 });
+  } finally {
+    await T.close();
+  }
+});
+
 // --- the account leaves nothing on the book -----------------------------------------------------
 
 // The order steps cancel their own: a step whose cancelling failed shows
