@@ -4,6 +4,7 @@ import { uiMessages } from "@exchange/ui";
 import { describe, expect, it } from "vitest";
 import { withAreas } from "../../i18n";
 import content from "../../i18n/content";
+import futures from "../../i18n/futures";
 import markets from "../../i18n/markets";
 import { SORT_OPTIONS } from "./logic";
 
@@ -11,7 +12,8 @@ import { SORT_OPTIONS } from "./logic";
 // pages: both languages have the same keys, and every key the pages (and
 // the components they use) name exists in both.
 
-const mine = withAreas(markets, content);
+// The futures category's groups, figures and orders come from the futures area (batch F3).
+const mine = withAreas(markets, content, futures);
 
 type Tree = Record<string, unknown>;
 

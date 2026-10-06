@@ -15,10 +15,12 @@ export default defineConfig({
     // The landing pages' chunks start with index.html (design §4.4).
     routePreload([
       ["^/$", ["src/pages/markets/Home.tsx", "src/i18n/markets.ts", "src/i18n/content.ts"]],
-      ["^/markets/?$", ["src/pages/markets/Markets.tsx", "src/i18n/markets.ts", "src/i18n/content.ts"]],
+      ["^/markets/?$", ["src/pages/markets/Markets.tsx", "src/i18n/markets.ts", "src/i18n/content.ts", "src/i18n/futures.ts"]],
       ["^/coin/", ["src/pages/markets/Coin.tsx", "src/i18n/markets.ts", "src/i18n/content.ts"]],
       ["^/trade/", ["src/pages/trade/SpotTerminal.tsx", "src/i18n/trade.ts"]],
-      ["^/futures/", ["src/pages/trade/FuturesTerminal.tsx", "src/i18n/trade.ts"]],
+      // Before the terminal's: /futures/data is the overview page (design 2026-10-06 §3.3).
+      ["^/futures/data/?$", ["src/pages/futures/FuturesData.tsx", "src/i18n/futures.ts"]],
+      ["^/futures/", ["src/pages/trade/FuturesTerminal.tsx", "src/i18n/trade.ts", "src/i18n/futures.ts"]],
       ["^/assets/?$", ["src/pages/assets/Overview.tsx", "src/i18n/assets.ts", "src/i18n/auth.ts"]],
     ]),
   ],

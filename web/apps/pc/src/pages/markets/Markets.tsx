@@ -1,4 +1,15 @@
-import { formatCompact, formatPercent, formatPrice, routes, selectSignedIn, useSession, useSettings, type TickerData } from "@exchange/core";
+import { dec, formatCompact, formatPercent, formatPrice, routes, selectSignedIn, useSession, useSettings, type TickerData } from "@exchange/core";
+import {
+  parseFuturesSort,
+  parseMarginGroup,
+  sortFuturesRows,
+  useFuturesMarketRows,
+  useOverviewOf,
+  type FuturesOverviewItem,
+  type FuturesSort,
+  type FuturesSortKey,
+  type MarginGroup,
+} from "@exchange/core/futures/index";
 import {
   categoryCount,
   categoryTags,
@@ -9,12 +20,10 @@ import {
   sortRows,
   staleSymbols,
   tagLabel,
-  useMarketRows,
   useMarketTickers,
   type MarketCategory,
   type MarketRow,
   type MarketSort,
-  type SortKey,
   type TickerOf,
 } from "@exchange/core/markets/index";
 import {
@@ -24,6 +33,7 @@ import {
   EmptyState,
   Input,
   PriceText,
+  Segmented,
   Skeleton,
   cn,
   createColumnHelper,
@@ -50,7 +60,8 @@ import { MarketName, SparkCell, tradePath, useFavoriteToggle } from "./parts";
 // scroll into view; the page scrolls the table (VIRTUAL_FROM). Category,
 // search and sort live in the URL, so links and the back button keep them.
 
-type Item = { row: MarketRow; t: TickerData | undefined; fav: boolean };
+/** A row of the table; ov: a contract's open interest and funding (the futures category, batch F3). */
+type Item = { row: MarketRow; t: TickerData | undefined; fav: boolean; ov?: FuturesOverviewItem };
 
 /**
  * Rows from which the table scrolls virtually, in a box of its own. Below
@@ -60,8 +71,9 @@ type Item = { row: MarketRow; t: TickerData | undefined; fav: boolean };
  */
 const VIRTUAL_FROM = 200;
 
-const SORT_COLUMN: Partial<Record<SortKey, string>> = { symbol: "coin", last: "last", change: "change", high: "highLow", turnover: "turnover" };
-const COLUMN_SORT: Record<string, SortKey> = { coin: "symbol", last: "last", change: "change", highLow: "high", turnover: "turnover" };
+const SORT_COLUMN: Partial<Record<FuturesSortKey, string>> = { symbol: "coin", last: "last", change: "change", high: "highLow", turnover: "turnover", oi: "oi", funding: "funding" };
+const COLUMN_SORT: Record<string, FuturesSortKey> = { coin: "symbol", last: "last", change: "change", highLow: "high", turnover: "turnover", oi: "oi", funding: "funding" };
+const RATE_TONE = { 1: "text-up", 0: "text-fg-2", [-1]: "text-down" } as const;
 
 export default function Markets() {
   const { t } = useTranslation();
@@ -71,7 +83,8 @@ export default function Markets() {
   const signedIn = useSession(selectSignedIn);
   const wide = useMediaQuery("(min-width: 1280px)");
   const [params, setParams] = useSearchParams();
-  const { rows, loading, error, refetch } = useMarketRows();
+  // Contracts of both margin types, once the terminal opens the coin-margined ones (design 2026-10-06 §3.4).
+  const { rows, loading, error, refetch, groupOf } = useFuturesMarketRows();
   const tickers = useMarketTickers();
   const fav = useFavoriteToggle();
   const [now] = useState(() => Date.now());
@@ -79,7 +92,11 @@ export default function Markets() {
   const category = parseCategory(params.get("cat"));
   const sortKey = params.get("sort");
   const sortDir = params.get("dir");
-  const sort = useMemo(() => parseSort(sortKey, sortDir), [sortKey, sortDir]);
+  // The futures category adds the open interest and funding columns, and its two groups (USDⓈ-M, COIN-M).
+  const futures = category === "futures";
+  const sort = useMemo<FuturesSort | null>(() => (futures ? parseFuturesSort(sortKey, sortDir) : parseSort(sortKey, sortDir)), [futures, sortKey, sortDir]);
+  const group = parseMarginGroup(params.get("margin"));
+  const overviewOf = useOverviewOf(futures);
   const [query, setQuery] = useState(() => params.get("q") ?? "");
 
   const setParam = useCallback(
@@ -126,11 +143,21 @@ export default function Markets() {
 
   const favorites = useMemo(() => new Set(fav.symbols), [fav.symbols]);
   const tickerOf: TickerOf = useCallback((s) => tickers.get(s), [tickers]);
-  const filtered = useMemo(() => filterRows(rows, { category, query, favorites, now }), [rows, category, query, favorites, now]);
+  const hasCoin = useMemo(() => rows.some((r) => r.kind === "perp" && groupOf(r.symbol) === "coin"), [rows, groupOf]);
+  const filtered = useMemo(() => {
+    const list = filterRows(rows, { category, query, favorites, now });
+    return futures && hasCoin ? list.filter((r) => groupOf(r.symbol) === group) : list;
+  }, [rows, category, query, favorites, now, futures, hasCoin, group, groupOf]);
   // New listings read newest first unless a column is chosen.
-  const order = useMemo<MarketSort | null>(() => sort ?? (category === "new" ? { key: "listed", desc: true } : null), [sort, category]);
-  const sorted = useMemo(() => sortRows(filtered, tickerOf, order), [filtered, tickerOf, order]);
-  const data = useMemo<Item[]>(() => sorted.map((row) => ({ row, t: tickers.get(row.symbol), fav: favorites.has(row.symbol) })), [sorted, tickers, favorites]);
+  const order = useMemo<FuturesSort | null>(() => sort ?? (category === "new" ? { key: "listed", desc: true } : null), [sort, category]);
+  const sorted = useMemo(
+    () => (futures ? sortFuturesRows(filtered, tickerOf, overviewOf, order) : sortRows(filtered, tickerOf, order as MarketSort | null)),
+    [futures, filtered, tickerOf, overviewOf, order],
+  );
+  const data = useMemo<Item[]>(
+    () => sorted.map((row) => ({ row, t: tickers.get(row.symbol), fav: favorites.has(row.symbol), ov: futures ? overviewOf(row.symbol) : undefined })),
+    [sorted, tickers, favorites, futures, overviewOf],
+  );
 
   const sorting: SortingState = sort && SORT_COLUMN[sort.key] ? [{ id: SORT_COLUMN[sort.key]!, desc: sort.desc }] : [];
   const onSortingChange = (next: SortingState) => {
@@ -176,7 +203,8 @@ export default function Markets() {
         meta: { align: "right", width: wide ? 116 : 104 },
       }),
     ];
-    if (wide) {
+    // The futures category gives the high and low's room to the open interest and funding columns.
+    if (wide && !futures) {
       list.push(
         col.accessor((it) => it.t?.high ?? null, {
           id: "highLow",
@@ -241,8 +269,33 @@ export default function Markets() {
         meta: { align: "right", width: wide ? 116 : 84 },
       }),
     );
-    return list;
-  }, [t, wide, locale, toggle]);
+    if (!futures) return list;
+    // The futures category's open interest and funding go before the 7-day line; below 1280 px
+    // they take the room of the line and of the button (a row is its own link).
+    list.splice(
+      list.findIndex((c) => c.id === "trend"),
+      0,
+      col.accessor((it) => it.ov?.open_interest_value ?? null, {
+        id: "oi",
+        header: () => <span title={t("pcFutures.list.oiHint")}>{t("pcFutures.list.oi")}</span>,
+        sortDescFirst: true,
+        cell: ({ row }) => <span className="tabular-nums text-fg-2">{formatCompact(row.original.ov?.open_interest_value, locale)}</span>,
+        meta: { align: "right", width: wide ? 120 : 88 },
+      }),
+      col.accessor((it) => it.ov?.funding_rate ?? null, {
+        id: "funding",
+        header: () => <span title={t("pcFutures.list.fundingHint")}>{t("pcFutures.list.funding")}</span>,
+        sortDescFirst: true,
+        cell: ({ row }) => {
+          const rate = row.original.ov?.funding_rate;
+          const sign = rate && dec.isDecimal(rate) ? dec.sign(rate) : 0;
+          return <span className={cn("tabular-nums", RATE_TONE[sign])}>{formatPercent(rate, 4)}</span>;
+        },
+        meta: { align: "right", width: wide ? 112 : 104 },
+      }),
+    );
+    return wide ? list : list.filter((c) => c.id !== "trend" && c.id !== "action");
+  }, [t, wide, locale, toggle, futures]);
 
   const tags = useMemo(() => categoryTags(rows), [rows]);
   const virtual = data.length >= VIRTUAL_FROM;
@@ -332,7 +385,25 @@ export default function Markets() {
               size="md"
               containerClassName="max-w-sm"
             />
-            <span className="ml-auto text-xs text-fg-3 tabular-nums">{!loading && t("pcMarkets.pairs", { count: data.length })}</span>
+            {futures && hasCoin && (
+              <Segmented
+                size="sm"
+                aria-label={t("market.futures")}
+                value={group}
+                onValueChange={(v) => setParam({ margin: (v as MarginGroup) === "coin" ? "coin" : null })}
+                items={[
+                  { value: "usdt", label: t("pcFutures.overview.groups.usdt") },
+                  { value: "coin", label: t("pcFutures.overview.groups.coin") },
+                ]}
+              />
+            )}
+            {futures && (
+              <Link to={routes.futuresData} className="ml-auto flex shrink-0 items-center gap-0.5 text-sm text-fg-3 transition-colors hover:text-brand">
+                {t("pcFutures.allData")}
+                <ChevronRight size={14} />
+              </Link>
+            )}
+            <span className={cn("text-xs text-fg-3 tabular-nums", !futures && "ml-auto")}>{!loading && t("pcMarkets.pairs", { count: data.length })}</span>
           </div>
           <DataTable
             aria-label={t("nav.markets")}

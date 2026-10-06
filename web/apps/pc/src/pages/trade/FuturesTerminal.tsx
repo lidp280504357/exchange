@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 import { BookPanel } from "./parts/BookPanel";
 import { ChartPanel } from "./parts/ChartPanel";
+import { FuturesCenter } from "./parts/FuturesCenter";
 import { FuturesOrderPanel } from "./parts/FuturesOrderPanel";
 import { FuturesPanel, type FuturesTab } from "./parts/FuturesPanel";
 import { FuturesTickerBar } from "./parts/FuturesTickerBar";
@@ -77,7 +78,9 @@ export default function FuturesTerminal() {
           markPrice={mark?.mark_price}
           onPick={onPick}
         />
-        <ChartPanel symbol={contract.symbol} priceDecimals={priceDecimals} qtyDecimals={qtyDecimals} base={qtyUnit} />
+        <FuturesCenter contract={contract}>
+          <ChartPanel className="min-h-0 flex-1" symbol={contract.symbol} priceDecimals={priceDecimals} qtyDecimals={qtyDecimals} base={qtyUnit} />
+        </FuturesCenter>
         <FuturesOrderPanel contract={contract} fill={fill} className="overflow-y-auto" />
       </div>
       <PanelResizer />

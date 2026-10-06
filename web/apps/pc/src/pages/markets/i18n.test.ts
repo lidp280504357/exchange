@@ -3,9 +3,11 @@ import { zhCN as coreZh } from "@exchange/core/i18n/zh-CN";
 import { describe, expect, it } from "vitest";
 import { withAreas } from "../../i18n";
 import content from "../../i18n/content";
+import futures from "../../i18n/futures";
 import markets from "../../i18n/markets";
 
-const pcMessages = withAreas(markets, content);
+// The futures category's columns and groups come from the futures area (batch F3).
+const pcMessages = withAreas(markets, content, futures);
 
 // The strings of the home, markets, coin, announcement and help pages:
 // both languages have the same keys, and every key the pages name exists.

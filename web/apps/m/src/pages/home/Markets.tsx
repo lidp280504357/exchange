@@ -1,4 +1,15 @@
-import { errorText, qk, selectSignedIn, useSession, type TickerData } from "@exchange/core";
+import { dec, enumLabel, errorText, formatCompact, formatPercent, qk, routes, selectSignedIn, useSession, useSettings, type TickerData } from "@exchange/core";
+import {
+  futuresKeys,
+  parseFuturesSort,
+  parseMarginGroup,
+  sortFuturesRows,
+  useFuturesMarketRows,
+  useOverviewOf,
+  type FuturesOverviewItem,
+  type FuturesSort,
+  type MarginGroup,
+} from "@exchange/core/futures/index";
 import {
   categoryTags,
   filterRows,
@@ -7,16 +18,15 @@ import {
   sortRows,
   staleSymbols,
   tagLabel,
-  useMarketRows,
   useMarketTickers,
   type MarketCategory,
   type MarketRow,
   type MarketSort,
   type TickerOf,
 } from "@exchange/core/markets/index";
-import { Button, ChangeBadge, EmptyState, ErrorState, Input, PriceText, Sheet, Skeleton, SkeletonLines, cn, listItem, useNow } from "@exchange/ui";
+import { Badge, Button, ChangeBadge, CoinIcon, EmptyState, ErrorState, Input, PriceText, Segmented, Sheet, Skeleton, SkeletonLines, Tag, cn, listItem, useNow } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDownUp, Check, Search, Star, TriangleAlert, X } from "lucide-react";
+import { ArrowDownUp, Check, ChevronRight, Search, Star, TriangleAlert, X } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,8 +37,8 @@ import { PullToRefresh } from "../../components/PullToRefresh";
 import { useLongPress } from "../../components/useLongPress";
 import { WindowList } from "../../components/WindowList";
 import { usePageHeader } from "../../layout/header";
-import { SORT_OPTIONS, categoryPills, sortOptionOf, sortParams } from "./logic";
-import { DaySpark, MarketName, tradePath, useFavoriteToggle } from "./parts";
+import { SORT_OPTIONS, categoryPills } from "./logic";
+import { DaySpark, MarketName, statusTone, tradePath, useFavoriteToggle } from "./parts";
 import { daySparkRoot } from "./spark";
 
 // The markets tab (design §7.2): a search box, category pills (all,
@@ -39,7 +49,20 @@ import { daySparkRoot } from "./spark";
 // the rows near the screen are rendered. Category, search and order live
 // in the address with the PC site's parameters (cat, q, sort, dir).
 
-type Item = { row: MarketRow; ticker: TickerData | undefined; fav: boolean };
+/** A row; ov: a contract's open interest and funding in the futures category (batch F3). */
+type Item = { row: MarketRow; ticker: TickerData | undefined; fav: boolean; ov?: FuturesOverviewItem };
+
+/** An order the sort sheet offers. */
+type SortChoice = { id: string; sort: FuturesSort | null };
+
+/** The futures category's orders besides the list's (core parseFuturesSort). */
+const FUTURES_SORTS: readonly SortChoice[] = [
+  { id: "oiDesc", sort: { key: "oi", desc: true } },
+  { id: "fundingDesc", sort: { key: "funding", desc: true } },
+  { id: "fundingAsc", sort: { key: "funding", desc: false } },
+];
+
+const RATE_TONE = { 1: "text-up", 0: "text-fg-2", [-1]: "text-down" } as const;
 
 /** Rows from which the list renders only what is near the screen. */
 const VIRTUAL_FROM = 50;
@@ -52,7 +75,8 @@ export default function Markets() {
   usePageHeader({ title: t("nav.markets") }, [t]);
   const signedIn = useSession(selectSignedIn);
   const [params, setParams] = useSearchParams();
-  const { rows, loading, error, refetch } = useMarketRows();
+  // Contracts of both margin types, once the terminal opens the coin-margined ones (design 2026-10-06 §3.4).
+  const { rows, loading, error, refetch, groupOf } = useFuturesMarketRows();
   const tickers = useMarketTickers();
   const fav = useFavoriteToggle();
   const qc = useQueryClient();
@@ -62,7 +86,11 @@ export default function Markets() {
   const category = parseCategory(params.get("cat"));
   const sortKey = params.get("sort");
   const sortDir = params.get("dir");
-  const sort = useMemo(() => parseSort(sortKey, sortDir), [sortKey, sortDir]);
+  // The futures category: its two groups (USDⓈ-M, COIN-M), its open interest and funding, and their orders.
+  const futures = category === "futures";
+  const sort = useMemo<FuturesSort | null>(() => (futures ? parseFuturesSort(sortKey, sortDir) : parseSort(sortKey, sortDir)), [futures, sortKey, sortDir]);
+  const group = parseMarginGroup(params.get("margin"));
+  const overviewOf = useOverviewOf(futures);
   const [query, setQuery] = useState(() => params.get("q") ?? "");
 
   const setParam = useCallback(
@@ -85,18 +113,28 @@ export default function Markets() {
     setParam({ q: v.trim() || null });
   };
   const changeCategory = (c: string) => setParam({ cat: c === "all" ? null : c });
-  const pickSort = (s: MarketSort | null) => {
-    setParam(sortParams(s));
+  const pickSort = (s: FuturesSort | null) => {
+    setParam(s ? { sort: s.key, dir: s.desc ? "desc" : "asc" } : { sort: null, dir: null });
     setSortOpen(false);
   };
 
   const favorites = useMemo(() => new Set(fav.symbols), [fav.symbols]);
   const tickerOf: TickerOf = useCallback((s) => tickers.get(s), [tickers]);
-  const filtered = useMemo(() => filterRows(rows, { category, query, favorites, now }), [rows, category, query, favorites, now]);
+  const hasCoin = useMemo(() => rows.some((r) => r.kind === "perp" && groupOf(r.symbol) === "coin"), [rows, groupOf]);
+  const filtered = useMemo(() => {
+    const list = filterRows(rows, { category, query, favorites, now });
+    return futures && hasCoin ? list.filter((r) => groupOf(r.symbol) === group) : list;
+  }, [rows, category, query, favorites, now, futures, hasCoin, group, groupOf]);
   // New listings read newest first unless an order is chosen.
-  const order = useMemo<MarketSort | null>(() => sort ?? (category === "new" ? { key: "listed", desc: true } : null), [sort, category]);
-  const sorted = useMemo(() => sortRows(filtered, tickerOf, order), [filtered, tickerOf, order]);
-  const items = useMemo<Item[]>(() => sorted.map((row) => ({ row, ticker: tickers.get(row.symbol), fav: favorites.has(row.symbol) })), [sorted, tickers, favorites]);
+  const order = useMemo<FuturesSort | null>(() => sort ?? (category === "new" ? { key: "listed", desc: true } : null), [sort, category]);
+  const sorted = useMemo(
+    () => (futures ? sortFuturesRows(filtered, tickerOf, overviewOf, order) : sortRows(filtered, tickerOf, order as MarketSort | null)),
+    [futures, filtered, tickerOf, overviewOf, order],
+  );
+  const items = useMemo<Item[]>(
+    () => sorted.map((row) => ({ row, ticker: tickers.get(row.symbol), fav: favorites.has(row.symbol), ov: futures ? overviewOf(row.symbol) : undefined })),
+    [sorted, tickers, favorites, futures, overviewOf],
+  );
 
   const tags = useMemo(() => categoryTags(rows).map((x) => x.tag), [rows]);
   const pills = useMemo(() => {
@@ -127,6 +165,7 @@ export default function Markets() {
         qc.refetchQueries({ queryKey: qk.pairs }),
         qc.refetchQueries({ queryKey: qk.contracts }),
         qc.refetchQueries({ queryKey: qk.tickers }),
+        qc.refetchQueries({ queryKey: futuresKeys.overview }),
         qc.refetchQueries({ queryKey: qk.favorites }),
         qc.invalidateQueries({ queryKey: daySparkRoot }),
       ]),
@@ -153,7 +192,9 @@ export default function Markets() {
   }, [loading]);
 
   const searching = query.trim() !== "";
-  const sortId = sortOptionOf(sort);
+  const sortOptions: readonly SortChoice[] = futures ? [...SORT_OPTIONS, ...FUTURES_SORTS] : SORT_OPTIONS;
+  const sortId = !sort ? "default" : (sortOptions.find((o) => o.sort && o.sort.key === sort.key && o.sort.desc === sort.desc)?.id ?? null);
+  const sortLabel = (id: string) => (FUTURES_SORTS.some((o) => o.id === id) ? t(`mFutures.list.sorts.${id}`) : t(`mMarkets.markets.sorts.${id}`));
   const browseAll = (
     <Button size="lg" variant="secondary" onClick={() => changeCategory("all")}>
       {t("mMarkets.markets.browseAll")}
@@ -189,7 +230,7 @@ export default function Markets() {
         items={items}
         rowHeight={ROW_HEIGHT}
         getKey={(it) => it.row.symbol}
-        renderRow={(it) => <MarketLine row={it.row} ticker={it.ticker} fav={it.fav} onStar={onStar} onPress={onPress} />}
+        renderRow={(it) => <MarketLine row={it.row} ticker={it.ticker} fav={it.fav} ov={it.ov} futures={futures} onStar={onStar} onPress={onPress} />}
       />
     );
   else
@@ -204,7 +245,7 @@ export default function Markets() {
             custom={i}
             style={{ height: ROW_HEIGHT }}
           >
-            <MarketLine row={it.row} ticker={it.ticker} fav={it.fav} onStar={onStar} onPress={onPress} />
+            <MarketLine row={it.row} ticker={it.ticker} fav={it.fav} ov={it.ov} futures={futures} onStar={onStar} onPress={onPress} />
           </motion.li>
         ))}
       </ul>
@@ -267,9 +308,32 @@ export default function Markets() {
 
           <StaleNotice rows={rows} tickerOf={tickerOf} />
 
+          {futures && (
+            <div className="flex items-center gap-3 px-4 pt-2">
+              {hasCoin && (
+                <Segmented
+                  size="md"
+                  className="min-w-0 flex-1"
+                  block
+                  aria-label={t("market.futures")}
+                  value={group}
+                  onValueChange={(v) => setParam({ margin: (v as MarginGroup) === "coin" ? "coin" : null })}
+                  items={[
+                    { value: "usdt", label: t("mFutures.overview.groups.usdt") },
+                    { value: "coin", label: t("mFutures.overview.groups.coin") },
+                  ]}
+                />
+              )}
+              <Link to={routes.futuresData} className="ml-auto flex min-h-tap shrink-0 items-center gap-0.5 text-sm text-fg-3 active:text-brand">
+                {t("mFutures.allData")}
+                <ChevronRight size={16} />
+              </Link>
+            </div>
+          )}
+
           <div className="flex h-9 items-center justify-between pl-11 pr-4 text-xs text-fg-3">
             <span className="truncate">
-              {sortId && sortId !== "default" ? <span className="text-brand">{t(`mMarkets.markets.sorts.${sortId}`)}</span> : t("mMarkets.markets.name")}
+              {sortId && sortId !== "default" ? <span className="text-brand">{sortLabel(sortId)}</span> : t("mMarkets.markets.name")}
               {!loading && ` · ${t("mMarkets.pairs", { count: items.length })}`}
             </span>
             <span className="shrink-0">{t("mMarkets.markets.priceChange")}</span>
@@ -278,7 +342,7 @@ export default function Markets() {
           {content}
         </div>
       </PullToRefresh>
-      <SortSheet open={sortOpen} onOpenChange={setSortOpen} current={sortId} onPick={pickSort} />
+      <SortSheet open={sortOpen} onOpenChange={setSortOpen} options={sortOptions} label={sortLabel} current={sortId} onPick={pickSort} />
     </>
   );
 }
@@ -287,13 +351,17 @@ type LineProps = {
   row: MarketRow;
   ticker: TickerData | undefined;
   fav: boolean;
+  /** The futures category: the line under the name has the funding rate and open interest (ov) instead of the coin's name. */
+  futures?: boolean;
+  ov?: FuturesOverviewItem;
   onStar: (symbol: string) => void;
   onPress: (symbol: string) => void;
 };
 
 /** MarketLine is one market: the star, then a link to its terminal that also takes a long press. */
-const MarketLine = memo(function MarketLine({ row, ticker, fav, onStar, onPress }: LineProps) {
+const MarketLine = memo(function MarketLine({ row, ticker, fav, futures, ov, onStar, onPress }: LineProps) {
   const { t } = useTranslation();
+  const locale = useSettings((s) => s.locale);
   const longPress = useLongPress(() => onPress(row.symbol));
   return (
     <div className="flex h-16 items-stretch">
@@ -308,10 +376,8 @@ const MarketLine = memo(function MarketLine({ row, ticker, fav, onStar, onPress 
         {...longPress}
         className="flex min-w-0 flex-1 select-none items-center gap-2 pr-4 transition-colors duration-[var(--t-fast)] active:bg-bg-1 [-webkit-touch-callout:none]"
       >
-        <div className="min-w-0 flex-1">
-          <MarketName row={row} size={28} />
-        </div>
-        <DaySpark symbol={row.symbol} width={48} height={24} />
+        <div className="min-w-0 flex-1">{futures ? <FuturesName row={row} ov={ov} locale={locale} /> : <MarketName row={row} size={28} />}</div>
+        {!futures && <DaySpark symbol={row.symbol} width={48} height={24} />}
         <div className="flex w-[88px] shrink-0 flex-col items-end gap-1">
           <PriceText value={ticker?.last} decimals={row.priceDecimals} className="max-w-full truncate text-base font-medium" />
           <ChangeBadge value={ticker?.change} />
@@ -320,6 +386,41 @@ const MarketLine = memo(function MarketLine({ row, ticker, fav, onStar, onPress 
     </div>
   );
 });
+
+/**
+ * FuturesName is a contract in the futures category: its icon, symbol,
+ * perpetual tag and status, and under them its funding rate and open
+ * interest instead of the coin's name.
+ */
+function FuturesName({ row, ov, locale }: { row: MarketRow; ov: FuturesOverviewItem | undefined; locale: string }) {
+  const { t } = useTranslation();
+  const code = `${row.base}${row.quote}`;
+  const rate = ov?.funding_rate;
+  const sign = rate && dec.isDecimal(rate) ? dec.sign(rate) : 0;
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <CoinIcon symbol={row.base} size={28} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+          <span className="min-w-0 truncate font-medium text-fg-1" title={code}>
+            {code}
+          </span>
+          <Tag tone="brand">{t("mMarkets.perp")}</Tag>
+          {row.status !== "TRADING" && <Badge tone={statusTone(row.status)}>{enumLabel(row.status)}</Badge>}
+        </div>
+        <div className="truncate text-xs text-fg-3">
+          {t("mFutures.list.rateShort")} <span className={cn("tabular-nums", RATE_TONE[sign])}>{formatPercent(rate, 4)}</span>
+          {ov?.open_interest_value && (
+            <>
+              {" · "}
+              {t("mFutures.list.oiShort")} <span className="tabular-nums text-fg-2">{formatCompact(ov.open_interest_value, locale)}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function RowsSkeleton() {
   return (
@@ -340,12 +441,21 @@ function RowsSkeleton() {
 }
 
 /** SortSheet offers the orders of the list in a bottom sheet (design §7.1: choices go in drawers). */
-function SortSheet({ open, onOpenChange, current, onPick }: { open: boolean; onOpenChange: (open: boolean) => void; current: string | null; onPick: (s: MarketSort | null) => void }) {
+function SortSheet({
+  open, onOpenChange, options, label, current, onPick,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  options: readonly SortChoice[];
+  label: (id: string) => string;
+  current: string | null;
+  onPick: (s: FuturesSort | null) => void;
+}) {
   const { t } = useTranslation();
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title={t("mMarkets.markets.sortTitle")}>
       <div role="radiogroup" aria-label={t("mMarkets.markets.sortTitle")} className="flex flex-col">
-        {SORT_OPTIONS.map((o) => {
+        {options.map((o) => {
           const on = current === o.id;
           return (
             <button
@@ -359,7 +469,7 @@ function SortSheet({ open, onOpenChange, current, onPick }: { open: boolean; onO
                 on ? "font-medium text-brand" : "text-fg-1",
               )}
             >
-              {t(`mMarkets.markets.sorts.${o.id}`)}
+              {label(o.id)}
               {on && <Check size={18} className="shrink-0" />}
             </button>
           );

@@ -7,6 +7,8 @@ export const routes = {
   markets: "/markets",
   trade: (symbol = ":symbol") => `/trade/${symbol}`,
   futures: (symbol = ":symbol") => `/futures/${symbol}`,
+  /** Every contract's futures data (design 2026-10-06 §3.3); a static path, so it wins over /futures/:symbol. */
+  futuresData: "/futures/data",
   coin: (symbol = ":symbol") => `/coin/${symbol}`,
   assets: "/assets",
   deposit: "/assets/deposit",

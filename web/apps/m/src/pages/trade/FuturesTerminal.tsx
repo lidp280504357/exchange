@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 import { usePageHeader } from "../../layout/header";
+import { FuturesDataTab } from "./parts/FuturesDataTab";
 import { FuturesOrderForm } from "./parts/FuturesOrderForm";
 import { FuturesOrders } from "./parts/FuturesOrders";
 import { FuturesPositions } from "./parts/FuturesPositions";
@@ -167,6 +168,7 @@ export default function FuturesTerminal() {
           },
           { value: "trades", label: t("mTrade.trades"), content: <TradesTab contract={contract} priceDecimals={pd} qtyDecimals={qd} /> },
           { value: "positions", label: t("mTrade.positions"), count: mine, content: <FuturesPositions symbol={contract.symbol} onTrade={trade} /> },
+          { value: "data", label: t("mFutures.tabs.data"), content: <FuturesDataTab contract={contract} active={tab === "data"} /> },
         ]}
       />
       <div className="mt-2 border-t border-line-1">
