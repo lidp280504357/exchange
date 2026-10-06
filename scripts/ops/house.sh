@@ -42,6 +42,14 @@
 #                               and flags first, so HOUSE quotes them. One
 #                               without a mark price yet stays PREPARE
 #                               (review FC, B128): orders need the mark.
+#   scripts/ops/house.sh follow-marks [N] [MAX_GAP]
+#                               the contracts trading now that follow
+#                               Binance and still compute their own mark
+#                               join market.reference_mark (the mark, index
+#                               and funding rate are Binance's; coin-margined
+#                               design §3.1), N of them (all without N),
+#                               each only while its mark stays within
+#                               MAX_GAP (default 0.001) of Binance's.
 #   scripts/ops/house.sh show   HOUSE's MARKET_MAKER balances.
 #
 # Internal assets need no inventory: HOUSE may sell them short (ADR-0013).
@@ -203,6 +211,75 @@ open-contracts)
   done
   [[ -z $unmarked ]] || echo "no mark price yet, left PREPARE:$unmarked" >&2
   echo "$opened contracts opened, $(jq '[.contracts[] | select(.status == "PREPARE" and (.reference_symbol // "") != "")] | length' <<<"$contracts") were PREPARE"
+  ;;
+follow-marks)
+  # A contract's mark jumps from its own to Binance's when it joins the
+  # flag's list, which may liquidate a position that close to its line
+  # (market-data.md, the coordinator's decision 10 of 2026-10-06: one
+  # contract at a time while the market is quiet). So a contract joins
+  # only while its own mark has stayed within MAX_GAP of Binance's over
+  # three readings 5 s apart, Binance's at most 2 s old at each; one that
+  # moved further waits for another run.
+  limit=${2:-0}
+  max=${3:-0.001}
+  [[ $limit =~ ^[0-9]+$ ]] || { echo "follow-marks N: a count" >&2; exit 2; }
+  [[ $max =~ ^0?\.[0-9]+$ ]] || { echo "follow-marks N MAX_GAP: a fraction such as 0.001" >&2; exit 2; }
+  # The list is set whole: a flag that could not be read must not become
+  # one of the new contracts alone.
+  err=$(mktemp)
+  if ! flag="$(ctl user-service flags show market.reference_mark 2>"$err")"; then
+    grep -q "is not set" "$err" || { cat "$err" >&2; exit 1; }
+    flag='{}'
+  fi
+  rm -f "$err"
+  jq -e 'type == "object"' <<<"$flag" >/dev/null || { echo "market.reference_mark: not a flag: $flag" >&2; exit 1; }
+  if jq -e '.enabled and .rules.symbols == null' <<<"$flag" >/dev/null; then
+    echo "market.reference_mark is on for every contract: nothing to add"
+    exit 0
+  fi
+  contracts="$(curl -fsS "$API/v1/market/contracts?margin_type=ALL")"
+  # readings prints "symbol gap age source" for each contract
+  # market-data-service watches, from its metrics ("-" for one it has not).
+  readings() {
+    ssh exchange "cd $INFRA && $COMPOSE exec -T market-data-service wget -qO- http://127.0.0.1:9090/metrics" |
+      awk '/^market_mark_(reference_gap|reference_age_seconds|source)\{symbol="/ {
+        name = $1; sub(/\{.*/, "", name)
+        sym = $1; sub(/^[^"]*"/, "", sym); sub(/".*/, "", sym)
+        v[sym, name] = $2; seen[sym] = 1
+      }
+      function dash(x) { return x == "" ? "-" : x }
+      END { for (s in seen) print s, dash(v[s, "market_mark_reference_gap"]), dash(v[s, "market_mark_reference_age_seconds"]), dash(v[s, "market_mark_source"]) }'
+  }
+  candidates=" $(jq -r --argjson f "$flag" '($f.rules.symbols.allow // []) as $on | .contracts[] |
+    select(.status == "TRADING" and (.reference_symbol // "") != "" and (.symbol | IN($on[]) | not)) | .symbol' <<<"$contracts" | tr '\n' ' ')"
+  for round in 1 2 3; do
+    ((round == 1)) || sleep 5
+    calm=" "
+    while read -r s gap age source; do
+      [[ $candidates == *" $s "* && $source == 0 && $gap != - && $age != - ]] || continue
+      awk -v g="$gap" -v a="$age" -v m="$max" 'BEGIN { if (g < 0) g = -g; exit !(a >= 0 && a <= 2 && g <= m) }' && calm="$calm$s "
+    done < <(readings)
+    candidates=$calm
+  done
+  add=$(tr ' ' '\n' <<<"$candidates" | sed '/^$/d' | sort)
+  ((limit == 0)) || add=$(head -n "$limit" <<<"$add")
+  waiting=$(jq -r --argjson f "$flag" --arg add "$add" '($f.rules.symbols.allow // []) as $on | ($add | split("\n")) as $new | .contracts[] |
+    select(.status == "TRADING" and (.reference_symbol // "") != "" and (.symbol | IN($on[], $new[]) | not)) | .symbol' <<<"$contracts" | tr '\n' ' ')
+  if [[ -z $add ]]; then
+    echo "no contract to add${waiting:+; waiting (moved past $max or no fresh mark from Binance): $waiting}"
+    exit 0
+  fi
+  allow=$(jq -r --argjson f "$flag" --arg add "$add" '[($f.rules.symbols.allow // [])[], ($add | split("\n"))[]] | unique | join(",")' <<<'{}')
+  ctl user-service flags set market.reference_mark --on --allow-symbols "$allow" \
+    --reason "the contracts' prices from Binance, $(wc -l <<<"$add" | tr -d ' ') within $max of their own (G1c)"
+  sleep 15
+  following=0
+  while read -r s _ _ source; do
+    if grep -qx "$s" <<<"$add"; then
+      if [[ $source == 1 ]]; then following=$((following + 1)); else echo "$s does not follow Binance yet" >&2; fi
+    fi
+  done < <(readings)
+  echo "$(wc -l <<<"$add" | tr -d ' ') contracts added, $following follow Binance now${waiting:+; waiting: $waiting}"
   ;;
 show)
   # shellcheck disable=SC2016 # expanded on the server
