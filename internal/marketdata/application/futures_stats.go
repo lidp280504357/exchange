@@ -44,9 +44,11 @@ const (
 	// futuresKept is the oldest a point may be (the source keeps 30
 	// days).
 	futuresKept = 30 * 24 * time.Hour
-	// futuresListing is how often the contracts and the source's
-	// perpetuals are read.
-	futuresListing = 10 * time.Minute
+	// futuresListing is how often the contracts are read, and
+	// futuresPerpetuals the source's perpetuals (USDⓈ-M's exchangeInfo
+	// is a megabyte).
+	futuresListing    = 10 * time.Minute
+	futuresPerpetuals = time.Hour
 	// futuresPublished is how long after its time a point is asked for:
 	// the source publishes within a minute.
 	futuresPublished = 70 * time.Second
@@ -88,12 +90,11 @@ func futuresRetention(period string) time.Duration {
 	return min(futuresKept, (FuturesPoints+1)*d)
 }
 
-// bucketed: a point of these metrics is the volume or the average over
-// the period that starts at its time, published once the period ends;
-// the others are snapshots at their time.
-func bucketed(metric string) bool {
-	return metric == ports.MetricTakerRatio || metric == ports.MetricBasis
-}
+// bucketed: a point of the taker volumes is the volume of the period
+// that starts at its time, published once the period ends; the others
+// are snapshots at their time (the basis too: its 1d point of a day is
+// out that morning).
+func bucketed(metric string) bool { return metric == ports.MetricTakerRatio }
 
 // OpenInterest is a contract's open interest now.
 type OpenInterest struct {
@@ -141,6 +142,10 @@ type FuturesStats struct {
 	remotes  map[string]ports.FuturesMarket
 	listed   bool
 	listedAt time.Time
+	// perps are the source's perpetuals by margin and symbol, as read at
+	// perpsAt.
+	perps    map[bool]map[string]ports.Perpetual
+	perpsAt  time.Time
 	interest map[string]OpenInterest
 	onLiq    func(context.Context, Liquidation)
 
@@ -228,13 +233,19 @@ func (s *FuturesStats) listing(ctx context.Context) {
 	}
 }
 
-// Refresh reads the contracts and the source's perpetuals when the last
-// listing is older than futuresListing: a contract is followed when the
-// source trades it (BTC-USDT-PERP as BTCUSDT, BTC-USD-PERP as
-// BTCUSD_PERP; delisted ones are not listed, closed ones are followed).
+// Refresh reads the contracts when the last listing is older than
+// futuresListing, and the source's perpetuals when theirs is older than
+// futuresPerpetuals: a contract is followed when the source trades it
+// (BTC-USDT-PERP as BTCUSDT, BTC-USD-PERP as BTCUSD_PERP; delisted ones
+// are not listed, closed ones are followed).
 func (s *FuturesStats) Refresh(ctx context.Context) error {
 	s.mu.Lock()
-	fresh := s.listed && s.now().Sub(s.listedAt) < futuresListing
+	now := s.now()
+	fresh := s.listed && now.Sub(s.listedAt) < futuresListing
+	perps := s.perps
+	if now.Sub(s.perpsAt) >= futuresPerpetuals {
+		perps = nil
+	}
 	s.mu.Unlock()
 	if fresh {
 		return nil
@@ -243,16 +254,21 @@ func (s *FuturesStats) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	perps := map[bool]map[string]ports.Perpetual{}
-	for _, cm := range []bool{false, true} {
-		list, err := s.src.Perpetuals(ctx, cm)
-		if err != nil {
-			return err
+	if perps == nil {
+		perps = map[bool]map[string]ports.Perpetual{}
+		for _, cm := range []bool{false, true} {
+			list, err := s.src.Perpetuals(ctx, cm)
+			if err != nil {
+				return err
+			}
+			perps[cm] = map[string]ports.Perpetual{}
+			for _, p := range list {
+				perps[cm][p.Remote] = p
+			}
 		}
-		perps[cm] = map[string]ports.Perpetual{}
-		for _, p := range list {
-			perps[cm][p.Remote] = p
-		}
+		s.mu.Lock()
+		s.perps, s.perpsAt = perps, now
+		s.mu.Unlock()
 	}
 	markets, remotes := map[string]ports.FuturesMarket{}, map[string]ports.FuturesMarket{}
 	for _, c := range contracts {
@@ -266,7 +282,7 @@ func (s *FuturesStats) Refresh(ctx context.Context) error {
 		}
 	}
 	s.mu.Lock()
-	s.markets, s.remotes, s.listed, s.listedAt = markets, remotes, true, s.now()
+	s.markets, s.remotes, s.listed, s.listedAt = markets, remotes, true, now
 	s.mu.Unlock()
 	return nil
 }

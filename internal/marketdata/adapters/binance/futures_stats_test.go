@@ -244,7 +244,7 @@ func TestFuturesBackOff(t *testing.T) {
 
 func TestForcedOrders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ws/!forceOrder@arr" {
+		if r.URL.Path != "/market/ws/!forceOrder@arr" {
 			http.Error(w, "bad stream", http.StatusBadRequest)
 			return
 		}
@@ -254,8 +254,9 @@ func TestForcedOrders(t *testing.T) {
 		}
 		defer func() { _ = conn.CloseNow() }()
 		for _, msg := range []string{
-			// The documented examples, USDⓈ-M and COIN-M.
-			`{"e":"forceOrder","E":1568014460893,"o":{"s":"BTCUSDT","S":"SELL","o":"LIMIT","f":"IOC","q":"0.014","p":"9910","ap":"9910","X":"FILLED","l":"0.014","z":"0.014","T":1568014460893}}`,
+			// The documented examples, USDⓈ-M (with the fields Binance
+			// sends since, 2026-10-06) and COIN-M.
+			`{"e":"forceOrder","E":1568014460893,"o":{"s":"BTCUSDT","S":"SELL","o":"LIMIT","f":"IOC","q":"0.014","p":"9910","ap":"9910","X":"FILLED","l":"0.014","z":"0.014","T":1568014460893,"ps":"BTCUSDT","st":1}}`,
 			`{"e":"forceOrder","E":1591154240950,"o":{"s":"BTCUSD_PERP","ps":"BTCUSD","S":"BUY","o":"LIMIT","f":"IOC","q":"3","p":"9425.5","ap":"9496.5","X":"FILLED","l":"1","z":"3","T":1591154240949}}`,
 			`{"e":"forceOrder","o":{"s":"ETHUSDT","S":"SELL","p":"bad","ap":"1","z":"1","T":1}}`,
 			`{"e":"forceOrder","o":{"s":"ETHUSDT","S":"SELL","p":"1","ap":"1","z":"0","T":1}}`,

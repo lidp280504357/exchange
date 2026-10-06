@@ -415,10 +415,13 @@ type forceOrderEvent struct {
 }
 
 // ForcedOrders follows the !forceOrder@arr stream of the USDⓈ-M or the
-// COIN-M market. Binance closes connections after 24 hours; the caller
-// reconnects.
+// COIN-M market. USDⓈ-M serves it under /market only (2026-10-06: its
+// /ws and /stream paths still upgrade but send nothing but depth);
+// COIN-M answers on both, with USDⓈ-M contracts in it too, which the
+// caller leaves out. Binance closes connections after 24 hours; the
+// caller reconnects.
 func (f *Futures) ForcedOrders(ctx context.Context, coinMargined bool, on func(ports.ForcedOrder)) error {
-	conn, resp, err := websocket.Dial(ctx, f.at(coinMargined).stream+"/ws/!forceOrder@arr", &websocket.DialOptions{HTTPClient: f.client})
+	conn, resp, err := websocket.Dial(ctx, f.at(coinMargined).stream+"/market/ws/!forceOrder@arr", &websocket.DialOptions{HTTPClient: f.client})
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}

@@ -36,11 +36,15 @@ type fakeFutures struct {
 	mu    sync.Mutex
 	perps map[bool][]ports.Perpetual
 	// answer gives a request's points.
-	answer func(c statsCall) ([]ports.FuturesStat, error)
-	calls  []statsCall
+	answer    func(c statsCall) ([]ports.FuturesStat, error)
+	calls     []statsCall
+	perpReads int
 }
 
 func (f *fakeFutures) Perpetuals(_ context.Context, cm bool) ([]ports.Perpetual, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.perpReads++
 	return f.perps[cm], nil
 }
 
@@ -172,6 +176,25 @@ func TestFuturesStatsFollowsTheSourcesPerpetuals(t *testing.T) {
 	if got := s.marketsOf(true); len(got) != 1 || got[0].Symbol != "BTC-USD-PERP" {
 		t.Fatalf("COIN-M markets: %+v (ETH's has no platform contract)", got)
 	}
+
+	// The contracts are read again after 10 minutes, the source's
+	// perpetuals (a megabyte) after an hour.
+	src := s.src.(*fakeFutures)
+	s.instruments = contractList{{Symbol: "BTC-USDT-PERP"}}
+	for _, tc := range []struct {
+		after time.Duration
+		reads int
+		pepe  bool
+	}{{5 * time.Minute, 2, true}, {11 * time.Minute, 2, false}, {61 * time.Minute, 4, false}} {
+		s.now = func() time.Time { return futuresT0.Add(tc.after) }
+		if err := s.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		_, _, pepe := s.Market("1000PEPE-USDT-PERP")
+		if src.perpReads != tc.reads || pepe != tc.pepe {
+			t.Fatalf("%s on: %d reads of the perpetuals, PEPE followed %v", tc.after, src.perpReads, pepe)
+		}
+	}
 }
 
 func TestFuturesStatsSeriesArguments(t *testing.T) {
@@ -247,6 +270,14 @@ func TestFuturesStatsReadsEachSeriesAsItsPeriodsEnd(t *testing.T) {
 	}
 	if !taker.due.Equal(latest.Add(10*time.Minute + futuresPublished)) {
 		t.Fatalf("taker due %v", taker.due)
+	}
+	// The basis is a snapshot like the open interest.
+	basis := &series{market: btc, period: "5m", due: futuresT0}
+	if err := s.read(ctx, ports.MetricBasis, basis); err != nil {
+		t.Fatal(err)
+	}
+	if !basis.due.Equal(latest.Add(5*time.Minute + futuresPublished)) {
+		t.Fatalf("basis due %v", basis.due)
 	}
 
 	// Read again before the point is out (a restart): from the stored
