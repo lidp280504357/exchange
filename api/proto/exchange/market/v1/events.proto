@@ -214,25 +214,23 @@ message FundingRateUpdated {
   string source = 10;
 }
 
-// LiquidationOccurred is a forced (liquidation) order of the reference
-// market on a contract that follows it, as Binance streams them (at most
-// one a second per contract, design 2026-10-06 §3.3), keyed by the
+// LiquidationOccurred is a liquidation order of the reference market on a
+// contract that follows it, as Binance streams them (the latest of a
+// contract within a second, design 2026-10-06 §3.3), keyed by the
 // contract (BTC-USDT-PERP), on market.liquidations.
 message LiquidationOccurred {
   string symbol = 1;
-  // The forced order's side: SIDE_SELL closed a long, SIDE_BUY a short.
-  exchange.order.v1.Side side = 2;
+  // The side of the position closed: LONG when the order sold, SHORT
+  // when it bought.
+  string position_side = 2;
   // The order's price and the average price of its fills.
   string price = 3;
   string average_price = 4;
-  // The order's quantity and what of it filled: in the base asset, or
-  // whole contracts of an inverse contract.
+  // What filled: in the base asset, or whole contracts of an inverse
+  // contract.
   string quantity = 5;
-  string filled_quantity = 6;
-  // filled_quantity x average_price, or the contracts' USD value
-  // (filled_quantity x contract_size) for an inverse contract.
-  string value_usd = 7;
-  // The order's status when streamed: FILLED or PARTIALLY_FILLED.
-  string status = 8;
-  google.protobuf.Timestamp traded_at = 9;
+  // average_price x quantity, or the contracts' USD value (quantity x
+  // contract_size) for an inverse contract.
+  string value_usd = 6;
+  google.protobuf.Timestamp traded_at = 7;
 }

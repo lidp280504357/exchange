@@ -121,7 +121,7 @@ var Known = map[string]string{
 	KeyMarginAutoBorrow:  "Orders on margin accounts with side_effect AUTO_BORROW borrow what the free balance lacks (design 2026-10-06 §5.1)",
 	KeyCoinM:             "Coin-margined perpetuals (BTC-USD-PERP and the others, settled in their base asset): orders, positions and the FUTURES accounts of BTC, ETH and ASTRA, by user or region (eligibility COIN_M_TRADE; design 2026-10-06 §2)",
 	KeyReferenceMark:     "Mark price, index price and funding rate from the Binance contract the contract follows instead of the platform's own computation, which stays the fallback when the stream stalls, per symbol (design 2026-10-06 §3.1)",
-	KeyFuturesData:       "The futures statistics from Binance (open interest, long and short ratios, taker volume, basis, funding history, liquidations) and the futures overview (design 2026-10-06 §3.3)",
+	KeyFuturesData:       "Reading the futures statistics from Binance (open interest, long and short ratios, taker volume, basis, funding history) and its liquidation stream; off, what is stored is still served (design 2026-10-06 §3.3)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

@@ -1200,28 +1200,26 @@ func (x *FundingRateUpdated) GetSource() string {
 	return ""
 }
 
-// LiquidationOccurred is a forced (liquidation) order of the reference
-// market on a contract that follows it, as Binance streams them (at most
-// one a second per contract, design 2026-10-06 §3.3), keyed by the
+// LiquidationOccurred is a liquidation order of the reference market on a
+// contract that follows it, as Binance streams them (the latest of a
+// contract within a second, design 2026-10-06 §3.3), keyed by the
 // contract (BTC-USDT-PERP), on market.liquidations.
 type LiquidationOccurred struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Symbol string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
-	// The forced order's side: SIDE_SELL closed a long, SIDE_BUY a short.
-	Side v1.Side `protobuf:"varint,2,opt,name=side,proto3,enum=exchange.order.v1.Side" json:"side,omitempty"`
+	// The side of the position closed: LONG when the order sold, SHORT
+	// when it bought.
+	PositionSide string `protobuf:"bytes,2,opt,name=position_side,json=positionSide,proto3" json:"position_side,omitempty"`
 	// The order's price and the average price of its fills.
 	Price        string `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
 	AveragePrice string `protobuf:"bytes,4,opt,name=average_price,json=averagePrice,proto3" json:"average_price,omitempty"`
-	// The order's quantity and what of it filled: in the base asset, or
-	// whole contracts of an inverse contract.
-	Quantity       string `protobuf:"bytes,5,opt,name=quantity,proto3" json:"quantity,omitempty"`
-	FilledQuantity string `protobuf:"bytes,6,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
-	// filled_quantity x average_price, or the contracts' USD value
-	// (filled_quantity x contract_size) for an inverse contract.
-	ValueUsd string `protobuf:"bytes,7,opt,name=value_usd,json=valueUsd,proto3" json:"value_usd,omitempty"`
-	// The order's status when streamed: FILLED or PARTIALLY_FILLED.
-	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
-	TradedAt      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=traded_at,json=tradedAt,proto3" json:"traded_at,omitempty"`
+	// What filled: in the base asset, or whole contracts of an inverse
+	// contract.
+	Quantity string `protobuf:"bytes,5,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	// average_price x quantity, or the contracts' USD value (quantity x
+	// contract_size) for an inverse contract.
+	ValueUsd      string                 `protobuf:"bytes,6,opt,name=value_usd,json=valueUsd,proto3" json:"value_usd,omitempty"`
+	TradedAt      *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=traded_at,json=tradedAt,proto3" json:"traded_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1263,11 +1261,11 @@ func (x *LiquidationOccurred) GetSymbol() string {
 	return ""
 }
 
-func (x *LiquidationOccurred) GetSide() v1.Side {
+func (x *LiquidationOccurred) GetPositionSide() string {
 	if x != nil {
-		return x.Side
+		return x.PositionSide
 	}
-	return v1.Side(0)
+	return ""
 }
 
 func (x *LiquidationOccurred) GetPrice() string {
@@ -1291,23 +1289,9 @@ func (x *LiquidationOccurred) GetQuantity() string {
 	return ""
 }
 
-func (x *LiquidationOccurred) GetFilledQuantity() string {
-	if x != nil {
-		return x.FilledQuantity
-	}
-	return ""
-}
-
 func (x *LiquidationOccurred) GetValueUsd() string {
 	if x != nil {
 		return x.ValueUsd
-	}
-	return ""
-}
-
-func (x *LiquidationOccurred) GetStatus() string {
-	if x != nil {
-		return x.Status
 	}
 	return ""
 }
@@ -1431,17 +1415,15 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\vindex_price\x18\t \x01(\tR\n" +
 	"indexPrice\x12\x16\n" +
 	"\x06source\x18\n" +
-	" \x01(\tR\x06source\"\xc8\x02\n" +
+	" \x01(\tR\x06source\"\xff\x01\n" +
 	"\x13LiquidationOccurred\x12\x16\n" +
-	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12+\n" +
-	"\x04side\x18\x02 \x01(\x0e2\x17.exchange.order.v1.SideR\x04side\x12\x14\n" +
+	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12#\n" +
+	"\rposition_side\x18\x02 \x01(\tR\fpositionSide\x12\x14\n" +
 	"\x05price\x18\x03 \x01(\tR\x05price\x12#\n" +
 	"\raverage_price\x18\x04 \x01(\tR\faveragePrice\x12\x1a\n" +
-	"\bquantity\x18\x05 \x01(\tR\bquantity\x12'\n" +
-	"\x0ffilled_quantity\x18\x06 \x01(\tR\x0efilledQuantity\x12\x1b\n" +
-	"\tvalue_usd\x18\a \x01(\tR\bvalueUsd\x12\x16\n" +
-	"\x06status\x18\b \x01(\tR\x06status\x127\n" +
-	"\ttraded_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\btradedAtB\xd1\x01\n" +
+	"\bquantity\x18\x05 \x01(\tR\bquantity\x12\x1b\n" +
+	"\tvalue_usd\x18\x06 \x01(\tR\bvalueUsd\x127\n" +
+	"\ttraded_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\btradedAtB\xd1\x01\n" +
 	"\x16com.exchange.market.v1B\vEventsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/market/v1;marketv1\xa2\x02\x03EMX\xaa\x02\x12Exchange.Market.V1\xca\x02\x12Exchange\\Market\\V1\xe2\x02\x1eExchange\\Market\\V1\\GPBMetadata\xea\x02\x14Exchange::Market::V1b\x06proto3"
 
 var (
@@ -1496,13 +1478,12 @@ var file_exchange_market_v1_events_proto_depIdxs = []int32{
 	11, // 16: exchange.market.v1.IndexPriceUpdated.components:type_name -> exchange.market.v1.IndexComponent
 	15, // 17: exchange.market.v1.IndexPriceUpdated.computed_at:type_name -> google.protobuf.Timestamp
 	15, // 18: exchange.market.v1.FundingRateUpdated.funding_time:type_name -> google.protobuf.Timestamp
-	16, // 19: exchange.market.v1.LiquidationOccurred.side:type_name -> exchange.order.v1.Side
-	15, // 20: exchange.market.v1.LiquidationOccurred.traded_at:type_name -> google.protobuf.Timestamp
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	15, // 19: exchange.market.v1.LiquidationOccurred.traded_at:type_name -> google.protobuf.Timestamp
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_exchange_market_v1_events_proto_init() }
