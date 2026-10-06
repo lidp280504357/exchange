@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { reportClose } from "./closeReport";
 import { EmptyList, focusOrderForm } from "./EmptyList";
 
 export type FuturesTab = "positions" | "open" | "tpsl" | "history" | "fills" | "funding";
@@ -229,11 +230,7 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
       setClosing(false);
       const rest = long ? r.left : dec.neg(r.left);
       const again = { label: t("pcTrade.continueClose"), onClick: () => void close(rest) };
-      const amount = (v: string) => qtyOf(specs, p.symbol, v, t("pcTrade.contractsUnit"));
-      if (dec.sign(r.left) === 0) toast.success(t("pcTrade.closeDone"));
-      else if (dec.sign(r.closed) > 0) {
-        toast.info(t("pcTrade.closePartly", { closed: amount(r.closed), left: amount(r.left) }), { description: t("pcTrade.closePartlyHint"), action: again });
-      } else toast.error(t("pcTrade.closeNone"), { action: again });
+      reportClose(t, r, (v) => qtyOf(specs, p.symbol, v, t("pcTrade.contractsUnit")), again);
       void qc.invalidateQueries({ queryKey: ["derivatives"] });
     } catch (e) {
       toast.error(errorText(e));

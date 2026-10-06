@@ -68,14 +68,15 @@ export function toContracts(amount: string, unit: ContractUnit, size: string, pr
 
 /**
  * fromContracts shows whole contracts in a unit: themselves, the coin
- * they are worth at price (half up to decimals), or their USD face value;
+ * they are worth at price (up to decimals, so that toContracts turns it
+ * back into as many contracts, review FN, B136), or their USD face value;
  * "" for none (or the coin without a price).
  */
 export function fromContracts(contracts: string, unit: ContractUnit, size: string, price: string | null | undefined, decimals = 8): string {
   if (!isDecimal(contracts) || sign(contracts) <= 0) return "";
   if (unit === "CONT") return normalize(contracts);
   if (unit === "USD") return usdValue(contracts, size);
-  return ok(price) ? coinValue(contracts, size, price, decimals) : "";
+  return ok(price) ? normalize(div(mul(abs(contracts), size), price, decimals, "up")) : "";
 }
 
 /**

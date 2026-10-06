@@ -21,6 +21,8 @@ export const zhTWOverrides = {
     ["手机号", "手機號碼"],
     ["用户", "用戶"],
     ["账本", "帳本"], ["杠杆", "槓桿"],
+    // An order's 只 is "only" (订单只用来…, 市价单只能…), not the measure word 隻.
+    ["单只", "單只"],
     ["退出登录", "登出"],
     // An account closed for good, not a sign-out.
     ["注销", "註銷"],

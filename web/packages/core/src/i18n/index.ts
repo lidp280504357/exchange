@@ -112,6 +112,13 @@ export function enumLabel(code: string | null | undefined, kind?: string): strin
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** codeText localizes a stable error code given as text (an order's reject reason). */
+export function codeText(code: string | null | undefined): string {
+  if (!code) return "—";
+  const key = `errors.${code}`;
+  return i18n.exists(key) ? i18n.t(key) : i18n.t("errors.unknown", { code });
+}
+
 /** errorText localizes an error by its stable code (requirements §7.1). */
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {

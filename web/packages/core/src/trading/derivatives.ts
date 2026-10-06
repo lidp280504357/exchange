@@ -234,8 +234,13 @@ export async function waitForOrder(order: ContractOrder): Promise<ContractOrder>
   return o;
 }
 
-/** A market close's outcome: what it closed and what is left of the position, and how many orders it took. */
-export type MarketClose = { closed: string; left: string; orders: number };
+/**
+ * A market close's outcome: what it closed and what is left of the
+ * position, how many orders it took, and its last order's state and
+ * reject reason (a refusal or a wait that timed out tell why nothing
+ * closed, review FN, B136).
+ */
+export type MarketClose = { closed: string; left: string; orders: number; status: string; reason: string };
 
 /**
  * closeAtMarket closes a position with reduce-only market orders (review
@@ -254,6 +259,7 @@ export async function closeAtMarket(
   let left = abs(p.quantity);
   let closed = "0";
   let orders = 0;
+  let last: ContractOrder | null = null;
   while (sign(left) > 0 && orders < tries) {
     let placed: ContractOrder;
     try {
@@ -270,12 +276,13 @@ export async function closeAtMarket(
     }
     orders++;
     const done = await waitForOrder(placed);
+    last = done;
     const filled = done.filled_quantity;
     closed = add(closed, filled);
     left = max(sub(left, filled), "0");
     if (sign(filled) === 0) break;
   }
-  return { closed: normalize(closed), left: normalize(left), orders };
+  return { closed: normalize(closed), left: normalize(left), orders, status: last?.status ?? "", reason: last?.reject_reason ?? "" };
 }
 
 /** cancelContractOrder asks the engine to cancel one contract order. */

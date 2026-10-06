@@ -9,6 +9,7 @@ import { ArrowRightLeft } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
+import { reportClose } from "./closeReport";
 import { ORDER_FORM_ID } from "./EmptyList";
 
 type Action = { side: "BUY" | "SELL"; positionSide: "BOTH" | "LONG" | "SHORT"; reduceOnly: boolean; label: string };
@@ -156,20 +157,16 @@ export function FuturesOrderPanel({
   // A market close fills what the book offers at that moment: what it
   // leaves open is said, with a button that closes the rest (review FE,
   // B129; three market orders at most, core's closeAtMarket).
-  const reportClose = (order: NewContractOrder, closed: string, left: string) => {
-    const amount = (v: string) => `${formatAmount(v, qtyDecimals)} ${unit}`;
+  const closeReported = (order: NewContractOrder, r: { closed: string; left: string; status: string; reason: string }) => {
     const again = {
       label: t("pcTrade.continueClose"),
       onClick: () =>
-        void closeAtMarket({ symbol, quantity: order.side === "SELL" ? left : dec.neg(left), position_side: order.position_side ?? "BOTH" })
-          .then((r) => reportClose(order, r.closed, r.left))
+        void closeAtMarket({ symbol, quantity: order.side === "SELL" ? r.left : dec.neg(r.left), position_side: order.position_side ?? "BOTH" })
+          .then((next) => closeReported(order, next))
           .catch((e: unknown) => toast.error(errorText(e)))
           .finally(() => void qc.invalidateQueries({ queryKey: ["derivatives"] })),
     };
-    if (dec.sign(left) === 0) toast.success(t("pcTrade.closeDone"));
-    else if (dec.sign(closed) > 0) {
-      toast.info(t("pcTrade.closePartly", { closed: amount(closed), left: amount(left) }), { description: t("pcTrade.closePartlyHint"), action: again });
-    } else toast.error(t("pcTrade.closeNone"), { action: again });
+    reportClose(t, r, (v) => `${formatAmount(v, qtyDecimals)} ${unit}`, again);
   };
 
   const send = async (order: NewContractOrder) => {
@@ -181,7 +178,9 @@ export function FuturesOrderPanel({
       void qc.invalidateQueries({ queryKey: ["derivatives"] });
       if (tab === "close" && order.type === "MARKET") {
         const done = await waitForOrder(placed);
-        reportClose(order, done.filled_quantity, dec.max(dec.sub(done.quantity, done.filled_quantity), "0"));
+        closeReported(order, {
+          closed: done.filled_quantity, left: dec.max(dec.sub(done.quantity, done.filled_quantity), "0"), status: done.status, reason: done.reject_reason ?? "",
+        });
         void qc.invalidateQueries({ queryKey: ["derivatives"] });
       } else toast.success(t("pcTrade.placed"));
     } catch (e) {

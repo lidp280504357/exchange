@@ -98,6 +98,16 @@ describe("coin-margined contracts", () => {
     expect(fromContracts("", "USD", "100", "60000")).toBe("");
   });
 
+  it("gives back as many contracts as it shows in the coin, at any price (review FN, B136)", () => {
+    for (const price of ["84957.3", "60000", "2654.37", "0.1234", "1.0007"]) {
+      for (const size of ["100", "10"]) {
+        for (const n of ["1", "2", "3", "7", "48", "1000"]) {
+          expect(toContracts(fromContracts(n, "COIN", size, price), "COIN", size, price), `${n} at ${price}`).toBe(n);
+        }
+      }
+    }
+  });
+
   it("leaves a linear contract's arithmetic as it was", () => {
     const m = contractMath(btcUsdt);
     expect(m.inverse).toBe(false);

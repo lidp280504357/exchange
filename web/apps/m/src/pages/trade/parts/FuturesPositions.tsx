@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { reportClose } from "./closeReport";
 import { EmptyList } from "./EmptyList";
 
 type Spec = { price: number; qty: number; contract?: Contract };
@@ -97,11 +98,7 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: Spec; tpsl
       setClosing(false);
       const rest = long ? r.left : dec.neg(r.left);
       const again = { label: t("mTrade.continueClose"), onClick: () => void close(rest) };
-      const amount = (v: string) => (unit ? `${formatAmount(v, spec.qty)} ${unit}` : formatAmount(v, spec.qty));
-      if (dec.sign(r.left) === 0) toast.success(t("mTrade.closeDone"));
-      else if (dec.sign(r.closed) > 0) {
-        toast.info(t("mTrade.closePartly", { closed: amount(r.closed), left: amount(r.left) }), { description: t("mTrade.closePartlyHint"), action: again });
-      } else toast.error(t("mTrade.closeNone"), { action: again });
+      reportClose(t, r, (v) => (unit ? `${formatAmount(v, spec.qty)} ${unit}` : formatAmount(v, spec.qty)), again);
       void qc.invalidateQueries({ queryKey: ["derivatives"] });
     } catch (e) {
       toast.error(errorText(e));

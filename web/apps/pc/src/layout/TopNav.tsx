@@ -2,10 +2,14 @@ import {
   DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, isInverse, LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, signOut, useContracts, useSession,
   useSettings, useTerminalPrefs, type Locale,
 } from "@exchange/core";
+import { useMarginAssets } from "@exchange/core/margin/hooks";
 import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
-import { ArrowLeftRight, Bell, Bitcoin, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark, UserRound } from "lucide-react";
+import {
+  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Bell, Bitcoin, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark, ScrollText, UserRound,
+  Wallet,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
@@ -37,6 +41,15 @@ export function TopNav() {
   const listed = contracts.data?.contracts ?? [];
   const bySymbol = new Map(listed.map((c) => [c.symbol, c]));
   const spot = recent.find((s) => !isContract(s)) ?? DEFAULT_SYMBOL;
+  // Margin opens the last pair the cross account trades: both its assets
+  // are collateral (review FN, B136).
+  const collateral = new Set((useMarginAssets().data ?? []).filter((a) => a.collateral).map((a) => a.asset));
+  const marginPair =
+    recent.find((s) => {
+      if (isContract(s)) return false;
+      const [base = "", quote = ""] = s.split("-");
+      return collateral.has(base) && collateral.has(quote);
+    }) ?? DEFAULT_SYMBOL;
   const lastOf = (coin: boolean) => recent.find((s) => bySymbol.has(s) && isInverse(bySymbol.get(s)) === coin);
   const usdtContract = lastOf(false) ?? DEFAULT_CONTRACT;
   const coinContract = lastOf(true) ?? (bySymbol.has(DEFAULT_COIN_CONTRACT) ? DEFAULT_COIN_CONTRACT : listed.find((c) => isInverse(c))?.symbol);
@@ -55,7 +68,7 @@ export function TopNav() {
           <Menu label={t("nav.trade")} to={routes.trade(spot)} wide>
             <MenuEntry to={routes.trade(spot)} icon={<ArrowLeftRight size={18} />} title={t("pc.menu.spot")} hint={t("pc.menu.spotHint")} onClick={account("SPOT")} />
             <MenuEntry
-              to={routes.trade(spot)}
+              to={routes.trade(marginPair)}
               icon={<Landmark size={18} />}
               title={t("pc.menu.margin")}
               hint={t("pc.menu.marginHint")}
@@ -75,12 +88,13 @@ export function TopNav() {
             <MenuEntry to={routes.futuresData} icon={<ChartColumn size={18} />} title={t("pc.menu.futuresData")} hint={t("pc.menu.futuresDataHint")} />
           </Menu>
           {signedIn && (
-            <Menu label={t("nav.assets")} to={routes.assets}>
-              <MenuLink to={routes.assets}>{t("nav.overview")}</MenuLink>
-              <MenuLink to={routes.deposit}>{t("nav.deposit")}</MenuLink>
-              <MenuLink to={routes.withdraw}>{t("nav.withdraw")}</MenuLink>
-              <MenuLink to={routes.transfer}>{t("nav.transfer")}</MenuLink>
-              <MenuLink to={routes.history}>{t("nav.history")}</MenuLink>
+            // The assets menu as the trade and futures menus (the user's request of 06:0x, B135).
+            <Menu label={t("nav.assets")} to={routes.assets} wide>
+              <MenuEntry to={routes.assets} icon={<Wallet size={18} />} title={t("nav.overview")} hint={t("pc.menu.overviewHint")} />
+              <MenuEntry to={routes.deposit} icon={<ArrowDownToLine size={18} />} title={t("nav.deposit")} hint={t("pc.menu.depositHint")} />
+              <MenuEntry to={routes.withdraw} icon={<ArrowUpFromLine size={18} />} title={t("nav.withdraw")} hint={t("pc.menu.withdrawHint")} />
+              <MenuEntry to={routes.transfer} icon={<ArrowLeftRight size={18} />} title={t("nav.transfer")} hint={t("pc.menu.transferHint")} />
+              <MenuEntry to={routes.history} icon={<ScrollText size={18} />} title={t("nav.history")} hint={t("pc.menu.historyHint")} />
             </Menu>
           )}
           <Item to={routes.announcements}>{t("nav.announcements")}</Item>
