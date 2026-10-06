@@ -678,7 +678,8 @@ await f.step("P3", "⌘K / Ctrl+K opens the site search, which reaches the futur
     const futures = want.startsWith("/futures");
     await A.page.evaluate((fut) => {
       const options = [...document.querySelectorAll("[role=dialog] [role=option]")];
-      const o = options.find((x) => x.innerText.includes("BTC") && x.innerText.includes("永续") === fut && (fut || x.innerText.includes("/USDT")));
+      // BTCUSDT's perpetual, not BTCUSD's (coin-margined, listed too since G4).
+      const o = options.find((x) => x.innerText.includes("BTC") && x.innerText.includes("永续") === fut && x.innerText.includes(fut ? "USDT" : "/USDT"));
       o?.click();
     }, futures);
     await A.waitPath(want, 10000);
