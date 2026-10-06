@@ -64,6 +64,9 @@ type Books struct {
 	now    func() time.Time
 	// remap is how often the followed symbols are looked at.
 	remap time.Duration
+	// first are the base assets whose symbols lead their groups, loading
+	// their snapshots first (LoadFirst).
+	first map[string]bool
 
 	mu    sync.Mutex
 	books map[string]*bookState
@@ -115,6 +118,19 @@ func NewBooks(src ports.BookSource, refs *ReferenceMap, fl Flags, pub kafka.Publ
 	}
 	reg.MustRegister(b.published, b.resyncs, b.failures, bookAgeCollector{b})
 	return b
+}
+
+// LoadFirst puts the symbols of the base assets first in their groups
+// (BINANCE_FAST_DEPTH: BTC and ETH): after a restart their books are back
+// before the others', which wait for Binance's request weight. Call it
+// before Run.
+func (b *Books) LoadFirst(bases []string) {
+	b.first = map[string]bool{}
+	for _, base := range bases {
+		if base = strings.ToUpper(strings.TrimSpace(base)); base != "" {
+			b.first[base] = true
+		}
+	}
 }
 
 // bookAgeCollector reports market_reference_book_age_seconds: how long
@@ -237,7 +253,7 @@ func (b *Books) regroup(ctx context.Context, running []*runningGroup, followed m
 			rest[symbol] = ref
 		}
 	}
-	added := groups(rest)
+	added := groups(rest, b.first)
 	if len(running) > 0 && (len(stopped) > 0 || len(added) > 0) {
 		b.log.InfoContext(ctx, "reference books: followed symbols changed", "kept", len(kept), "stopped", len(stopped), "started", len(added))
 	}
@@ -295,17 +311,29 @@ type bookGroup struct {
 }
 
 // groups splits the followed symbols by market (spot, USDⓈ-M, COIN-M)
-// into connections of at most bookStreamsPerConn symbols, in symbol
-// order.
-func groups(m map[string]ports.Reference) []bookGroup {
+// into connections of at most bookStreamsPerConn symbols: those of the
+// first base assets, then the others, in symbol order.
+func groups(m map[string]ports.Reference, first map[string]bool) []bookGroup {
 	byMarket := map[string][]ports.Reference{}
 	for _, ref := range m {
 		byMarket[ref.Market] = append(byMarket[ref.Market], ref)
 	}
+	leads := func(r ports.Reference) bool {
+		base, _, _ := strings.Cut(r.Symbol, "-")
+		return first[base]
+	}
 	var out []bookGroup
 	for _, market := range []string{ports.MarketSpot, ports.MarketUSDM, ports.MarketCoinM} {
 		refs := byMarket[market]
-		slices.SortFunc(refs, func(x, y ports.Reference) int { return strings.Compare(x.Symbol, y.Symbol) })
+		slices.SortFunc(refs, func(x, y ports.Reference) int {
+			if lx, ly := leads(x), leads(y); lx != ly {
+				if lx {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(x.Symbol, y.Symbol)
+		})
 		for chunk := range slices.Chunk(refs, bookStreamsPerConn) {
 			out = append(out, bookGroup{market: market, refs: chunk})
 		}

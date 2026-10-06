@@ -42,8 +42,8 @@ type Source struct {
 	coinREST   string
 	coinStream string
 	client     *http.Client
-	// gap spaces REST requests: Binance allows 6000 request weight a
-	// minute per IP; a klines call weighs 2.
+	// gap spaces REST requests, ten a second at most; their weight is kept
+	// within each host's budget apart (weight.go).
 	gap time.Duration
 	// idle ends a stream that sent nothing for this long: tickers arrive
 	// every second, and a connection the network silently dropped would
@@ -68,7 +68,7 @@ type Source struct {
 // https://data-api.binance.vision and wss://data-stream.binance.vision.
 func New(rest, stream string, client *http.Client) *Source {
 	return &Source{
-		rest: strings.TrimRight(rest, "/"), stream: strings.TrimRight(stream, "/"), client: client, gap: 200 * time.Millisecond,
+		rest: strings.TrimRight(rest, "/"), stream: strings.TrimRight(stream, "/"), client: client, gap: 100 * time.Millisecond,
 		turn: make(chan struct{}, 1), weights: map[string]*hostWeight{}, fastDepth: map[string]bool{"BTC": true, "ETH": true},
 		idle: 30 * time.Second,
 	}
@@ -165,13 +165,16 @@ func (s *Source) getAt(ctx context.Context, what, base, path string, q url.Value
 	return nil
 }
 
-// Backfill pages through /api/v3/klines from from up to to.
+// Backfill pages through the 1m klines from from up to to, each page
+// asking for the minutes left at most (a futures page under 100 weighs 1,
+// a full one 5: a restart's few missed minutes stay cheap).
 func (s *Source) Backfill(ctx context.Context, ref ports.Reference, from, to time.Time) ([]domain.Candle, error) {
 	var out []domain.Candle
 	for start := from; start.Before(to); {
+		limit := min(1000, int(to.Sub(start)/time.Minute)+1)
 		q := url.Values{
 			"symbol": {ref.Remote}, "interval": {"1m"}, "startTime": {strconv.FormatInt(start.UnixMilli(), 10)},
-			"endTime": {strconv.FormatInt(to.UnixMilli()-1, 10)}, "limit": {"1000"},
+			"endTime": {strconv.FormatInt(to.UnixMilli()-1, 10)}, "limit": {strconv.Itoa(limit)},
 		}
 		page, err := s.klines(ctx, ref, domain.Minute1, q)
 		if err != nil {
@@ -182,7 +185,7 @@ func (s *Source) Backfill(ctx context.Context, ref ports.Reference, from, to tim
 		}
 		out = append(out, page...)
 		start = out[len(out)-1].OpenTime.Add(time.Minute)
-		if len(page) < 1000 {
+		if len(page) < limit {
 			break
 		}
 	}

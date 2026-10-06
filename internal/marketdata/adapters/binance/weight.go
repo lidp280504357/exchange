@@ -11,12 +11,13 @@ import (
 
 // Request weight (review ET ②). Binance limits the weight of an IP's REST
 // requests a minute: 6000 on spot, 2400 on each futures market. Source
-// keeps its own requests to half of that a host (the futures statistics,
-// Futures, read the same hosts at their own pace) and holds a host once
-// Binance reports the IP at three quarters of its limit
-// (X-MBX-USED-WEIGHT-1M), until the next minute. Without it, the books'
-// snapshots and trades loaded at once after a restart went past the
-// futures' limit, which Binance answers with 429 and then a ban (418).
+// keeps its own requests to 80% of the spot limit and half of a futures
+// one (the futures statistics, Futures, read the futures hosts at their
+// own pace) and holds a host once Binance reports the IP at three
+// quarters of its limit (X-MBX-USED-WEIGHT-1M), until the next minute.
+// Without it, the books' snapshots and trades loaded at once after a
+// restart went past the futures' limit, which Binance answers with 429 and
+// then a ban (418).
 const (
 	spotWeightLimit    = 6000
 	futuresWeightLimit = 2400
@@ -36,8 +37,9 @@ type spent struct {
 	weight int
 }
 
-func newHostWeight(limit int) *hostWeight {
-	return &hostWeight{budget: limit / 2, limit: limit}
+// newHostWeight is a host's budget: share percent of its limit.
+func newHostWeight(limit, share int) *hostWeight {
+	return &hostWeight{budget: limit * share / 100, limit: limit}
 }
 
 // delay is how long a request of weight w waits at now, zero when it may
@@ -113,11 +115,10 @@ func (s *Source) weigh(ctx context.Context, base string, w int) error {
 func (s *Source) host(base string) *hostWeight {
 	h, ok := s.weights[base]
 	if !ok {
-		limit := futuresWeightLimit
+		h = newHostWeight(futuresWeightLimit, 50)
 		if base == s.rest {
-			limit = spotWeightLimit
+			h = newHostWeight(spotWeightLimit, 80)
 		}
-		h = newHostWeight(limit)
 		s.weights[base] = h
 	}
 	return h

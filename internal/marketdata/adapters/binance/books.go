@@ -121,8 +121,14 @@ type aggTradeRow struct {
 	BestMatch bool `json:"M"`
 }
 
-// RecentTrades returns ref's latest aggregate trades, oldest first.
+// RecentTrades returns ref's latest aggregate trades, oldest first; none
+// for a perpetual on 500 ms updates, whose trades come from the stream
+// only (a futures aggTrades request weighs 20: about 2,000 for the 100 or
+// so listed).
 func (s *Source) RecentTrades(ctx context.Context, ref ports.Reference, limit int) ([]domain.Trade, error) {
+	if s.slow(ref) {
+		return nil, nil
+	}
 	rest, prefix, _, err := s.endpoints(ref.Market)
 	if err != nil {
 		return nil, err

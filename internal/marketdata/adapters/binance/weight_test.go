@@ -51,7 +51,10 @@ func TestRequestWeights(t *testing.T) {
 // enough of the oldest weight to leave the minute. Binance's own count at
 // three quarters of the limit holds the host until the next minute.
 func TestHostWeight(t *testing.T) {
-	h := newHostWeight(futuresWeightLimit) // 1200 a minute
+	if spot := newHostWeight(spotWeightLimit, 80); spot.budget != 4800 {
+		t.Fatalf("spot budget %d", spot.budget)
+	}
+	h := newHostWeight(futuresWeightLimit, 50) // 1200 a minute
 	t0 := time.Date(2026, 10, 7, 1, 0, 10, 0, time.UTC)
 	for i := range 60 {
 		h.take(t0.Add(time.Duration(i)*time.Second), 20)

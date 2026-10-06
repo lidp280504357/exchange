@@ -164,6 +164,7 @@ func setup(ctx context.Context, a *app.App) error {
 	svc.StoreFlats(flats)
 	a.Add("flat minutes", app.Loop(flats.Run))
 	books := application.NewBooks(src, refs, flagClient, prod, events, a.Logger(), a.Metrics())
+	books.LoadFirst(cfg.BinanceFastDepth)
 	a.Add("reference books", app.Loop(books.Run))
 	a.Add("public books", app.Loop(books.Push))
 	// Pairs and contracts alike: their symbols differ. The platform's

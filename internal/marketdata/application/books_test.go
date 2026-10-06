@@ -280,12 +280,18 @@ func TestBooksAreSplitIntoConnections(t *testing.T) {
 		m[sym] = ports.Reference{Symbol: sym, Remote: sym}
 	}
 	m["BTC-USDT-PERP"] = ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Market: ports.MarketUSDM}
+	m["AAVE-USDT-PERP"] = ports.Reference{Symbol: "AAVE-USDT-PERP", Remote: "AAVEUSDT", Market: ports.MarketUSDM}
 	m["BTC-USD-PERP"] = ports.Reference{Symbol: "BTC-USD-PERP", Remote: "BTCUSD_PERP", Market: ports.MarketCoinM, ContractSize: d("100")}
-	gs := groups(m)
+	gs := groups(m, nil)
 	if len(gs) != 4 || gs[0].market != ports.MarketSpot || len(gs[0].refs) != bookStreamsPerConn || len(gs[1].refs) != 5 ||
-		gs[2].market != ports.MarketUSDM || gs[2].refs[0].Symbol != "BTC-USDT-PERP" ||
+		gs[2].market != ports.MarketUSDM || gs[2].refs[0].Symbol != "AAVE-USDT-PERP" || gs[2].refs[1].Symbol != "BTC-USDT-PERP" ||
 		gs[3].market != ports.MarketCoinM || gs[3].refs[0].Symbol != "BTC-USD-PERP" {
 		t.Fatalf("groups %+v", gs)
+	}
+	// BTC's symbols lead their groups: their snapshots load first.
+	gs = groups(m, map[string]bool{"BTC": true})
+	if gs[2].refs[0].Symbol != "BTC-USDT-PERP" || gs[2].refs[1].Symbol != "AAVE-USDT-PERP" {
+		t.Fatalf("BTC first: %+v", gs[2].refs)
 	}
 }
 
