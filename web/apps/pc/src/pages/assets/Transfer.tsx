@@ -1,6 +1,6 @@
-import { ApiError, dec, errorText, formatAmount, formatDecimal, newIdempotencyKey, useSettings, useSettleAssets } from "@exchange/core";
+import { ApiError, dec, errorText, formatAmount, formatDecimal, newIdempotencyKey, useContracts, useSettings, useSettleAssets } from "@exchange/core";
 import { availableOf, useBalances, useFuturesAccount, useTransferAction, useTransfers, type Transfer as TransferRecord } from "@exchange/core/assets/hooks";
-import { checkTransfer, otherAccount, transferMax, type AccountType } from "@exchange/core/assets/transfer";
+import { checkTransfer, otherAccount, transferCoins, transferMax, type AccountType } from "@exchange/core/assets/transfer";
 import { sortAssets } from "@exchange/core/wallet/networks";
 import {
   Badge,
@@ -24,7 +24,7 @@ import {
 } from "@exchange/ui";
 import { ArrowLeftRight, ArrowRight, ChartCandlestick, ChevronDown, CircleCheck, Info, ScrollText, Wallet, Zap } from "lucide-react";
 import { motion } from "motion/react";
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 import { AssetsLayout, Card, Tips } from "./parts/AssetsLayout";
@@ -80,10 +80,16 @@ export default function Transfer() {
             : undefined;
   const ready = allowed && amount.trim() !== "" && issue === null && !busy && balances.isSuccess;
 
-  // Coins with a balance on the "from" side come first, then the others.
-  const held = new Set((list ?? []).filter((b) => b.account_type === from && dec.sign(b.available) > 0).map((b) => b.asset));
-  const codes = sortAssets(meta.list.map((a) => a.asset_code));
-  const ordered = [...codes.filter((c) => held.has(c)), ...codes.filter((c) => !held.has(c))];
+  // The coins a futures account can hold (its settlement assets, and what
+  // it still holds of another), those with a balance on the "from" side
+  // first (review FE, B128). A coin asked for in the address that it
+  // cannot hold falls back to USDT once the lists are in.
+  const contracts = useContracts();
+  const ordered = useMemo(() => transferCoins(sortAssets(meta.list.map((a) => a.asset_code)), settles, list, from), [meta.list, settles, list, from]);
+  const known = contracts.isSuccess && balances.isSuccess && meta.list.length > 0;
+  useEffect(() => {
+    if (known && !ordered.includes(asset)) setAsset("USDT");
+  }, [known, ordered, asset]);
   const items = coinItems(ordered.length > 0 ? ordered : [asset], locale).map((it) => ({
     ...it,
     description: meta.name(it.value),

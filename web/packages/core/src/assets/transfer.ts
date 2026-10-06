@@ -33,3 +33,19 @@ export function checkTransfer(amount: string, max: string, decimals: number): Tr
   if (c !== "ok") return c;
   return dec.gt(a, max) ? "insufficient" : null;
 }
+
+type BalanceRow = { account_type: string; asset: string; available: string };
+
+/**
+ * transferCoins lists the coins a transfer may move (review FE, B128): the
+ * futures accounts' settlement assets (USDT and the coin-margined
+ * contracts' coins) and what FUTURES still holds of another; those with a
+ * balance on the "from" side first, in codes' order.
+ */
+export function transferCoins(codes: readonly string[], settles: readonly string[], balances: readonly BalanceRow[] | undefined, from: AccountType): string[] {
+  const positive = (b: BalanceRow) => dec.isDecimal(b.available) && dec.sign(b.available) > 0;
+  const inFutures = new Set((balances ?? []).filter((b) => b.account_type === "FUTURES" && positive(b)).map((b) => b.asset));
+  const held = new Set((balances ?? []).filter((b) => b.account_type === from && positive(b)).map((b) => b.asset));
+  const movable = codes.filter((c) => settles.includes(c) || inFutures.has(c));
+  return [...movable.filter((c) => held.has(c)), ...movable.filter((c) => !held.has(c))];
+}

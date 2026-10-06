@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dayRange, dayStart, inRange, LEDGER_ENTRY_TYPES, ledgerRelation, pastRange, presetRange } from "./ledger";
-import { checkTransfer, otherAccount, transferMax } from "./transfer";
+import { checkTransfer, otherAccount, transferCoins, transferMax } from "./transfer";
 
 describe("ledgerRelation", () => {
   it("links every entry type to the page it belongs to", () => {
@@ -82,5 +82,19 @@ describe("transfers", () => {
     expect(checkTransfer("0", "10", 6)).toBe("zero");
     expect(checkTransfer("1e3", "10", 6)).toBe("format");
     expect(checkTransfer("-1", "10", 6)).toBe("format");
+  });
+});
+
+describe("transferCoins", () => {
+  const balances = [
+    { account_type: "SPOT", asset: "BTC", available: "0.1" },
+    { account_type: "SPOT", asset: "SOL", available: "3" },
+    { account_type: "FUTURES", asset: "DOGE", available: "5" },
+  ];
+  it("lists the settlement assets and what futures holds, the held ones first (B128)", () => {
+    const codes = ["BTC", "ETH", "USDT", "SOL", "DOGE"];
+    expect(transferCoins(codes, ["USDT", "BTC", "ETH"], balances, "SPOT")).toEqual(["BTC", "ETH", "USDT", "DOGE"]);
+    expect(transferCoins(codes, ["USDT", "BTC", "ETH"], balances, "FUTURES")).toEqual(["DOGE", "BTC", "ETH", "USDT"]);
+    expect(transferCoins(codes, ["USDT"], undefined, "SPOT")).toEqual(["USDT"]);
   });
 });
