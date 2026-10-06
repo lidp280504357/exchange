@@ -125,17 +125,35 @@ try {
   // 3. Markets: every market listed, the search narrows them.
   await page.waitForFunction(() => document.body.innerText.includes("BTC") && document.body.innerText.includes("ETH"), { timeout: 20000 });
   // The page scrolls the table (it has no scroll box of its own, which left
-  // a blank under it), and its header sticks right under the top bar.
-  const scrolled = await page.evaluate(async () => {
-    const table = document.querySelector("main table");
-    const box = table.parentElement;
-    window.scrollTo(0, document.documentElement.scrollHeight / 2);
-    await new Promise((r) => setTimeout(r, 500));
-    const gap = table.tHead.rows[0].cells[0].getBoundingClientRect().top - document.querySelector("header").getBoundingClientRect().bottom;
-    window.scrollTo(0, 0);
-    return { innerScroll: box.scrollHeight > box.clientHeight + 1, gap: Math.round(gap) };
-  });
-  if (scrolled.innerScroll || Math.abs(scrolled.gap) > 1) throw new Error(`the market table scrolls in a box (${scrolled.innerScroll}) or its header is ${scrolled.gap}px off the top bar`);
+  // a blank under it), and its header sticks right under the top bar. From
+  // 200 rows (Markets.tsx VIRTUAL_FROM: 全部 has the 91 pairs and the 109
+  // contracts since they opened) the table scrolls virtually in a box of its
+  // own, its header stuck to the box's top; the page-scrolled table is then
+  // the 现货 category's.
+  const tableScroll = () =>
+    page.evaluate(async () => {
+      const table = document.querySelector("main table");
+      const box = table.parentElement;
+      const boxed = box.scrollHeight > box.clientHeight + 1 && getComputedStyle(box).overflowY === "auto";
+      if (boxed) box.scrollTop = box.scrollHeight / 2;
+      else window.scrollTo(0, document.documentElement.scrollHeight / 2);
+      await new Promise((r) => setTimeout(r, 500));
+      const top = boxed ? box.getBoundingClientRect().top : document.querySelector("header").getBoundingClientRect().bottom;
+      const gap = table.tHead.rows[0].cells[0].getBoundingClientRect().top - top;
+      const rows = table.tBodies[0].rows.length;
+      box.scrollTop = 0;
+      window.scrollTo(0, 0);
+      return { boxed, rows, gap: Math.round(gap) };
+    });
+  let scrolled = await tableScroll();
+  if (scrolled.boxed) {
+    if (Math.abs(scrolled.gap) > 1) throw new Error(`the market table's header is ${scrolled.gap}px off its box's top`);
+    ok(`the long market table scrolls in its own box (${scrolled.rows} rows in the DOM), its header stuck to the box's top`);
+    await go("/markets?cat=spot");
+    await page.waitForSelector("main table tbody tr", { timeout: 20000 });
+    scrolled = await tableScroll();
+  }
+  if (scrolled.boxed || Math.abs(scrolled.gap) > 1) throw new Error(`the market table scrolls in a box (${scrolled.boxed}) or its header is ${scrolled.gap}px off the top bar`);
   ok("the market table scrolls with the page, its header stuck under the top bar");
   // The top bar's menus open over the table's stuck header (the assets
   // page of a new account is too short for its header to stick).
