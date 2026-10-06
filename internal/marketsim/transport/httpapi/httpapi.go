@@ -113,8 +113,11 @@ type StatusJSON struct {
 	Guards          map[string]int `json:"guards"`
 	Bots            []BotJSON      `json:"bots"`
 	Events          []EventJSON    `json:"events"`
-	Perp            string         `json:"perp"`
-	PerpRunning     bool           `json:"perp_running"`
+	// Perp and PerpRunning are the first perpetual (the linear one), as
+	// before the coin-margined one; Perps every perpetual.
+	Perp        string     `json:"perp"`
+	PerpRunning bool       `json:"perp_running"`
+	Perps       []PerpJSON `json:"perps"`
 	// The price band (ASTRA design §4): its anchor as market-sim reads it,
 	// the band, where the makers quote, whether the quotes walk toward a
 	// target beyond the band, how far the target is from the anchor in
@@ -205,19 +208,31 @@ func timeOrNil(t time.Time) *string {
 	return &v
 }
 
+// PerpJSON is one of the perpetuals: whether the bots trade it and the
+// asset their margins on it are in.
+type PerpJSON struct {
+	Symbol      string `json:"symbol"`
+	SettleAsset string `json:"settle_asset"`
+	Running     bool   `json:"running"`
+}
+
 // BotJSON is one bot.
 type BotJSON struct {
-	UserID        string  `json:"user_id"`
-	Role          string  `json:"role"`
-	Label         string  `json:"label"`
-	Enabled       bool    `json:"enabled"`
-	BalancesKnown bool    `json:"balances_known"`
-	USDT          string  `json:"usdt"`
-	Coin          string  `json:"coin"`
-	Position      string  `json:"perp_position"`
-	Futures       string  `json:"futures_usdt"`
-	Error         string  `json:"error"`
-	ErrorAt       *string `json:"error_at"`
+	UserID        string `json:"user_id"`
+	Role          string `json:"role"`
+	Label         string `json:"label"`
+	Enabled       bool   `json:"enabled"`
+	BalancesKnown bool   `json:"balances_known"`
+	USDT          string `json:"usdt"`
+	Coin          string `json:"coin"`
+	// Position and Futures are on the first perpetual and in USDT;
+	// Positions by perpetual, FuturesBy by settlement asset.
+	Position  string            `json:"perp_position"`
+	Futures   string            `json:"futures_usdt"`
+	Positions map[string]string `json:"perp_positions"`
+	FuturesBy map[string]string `json:"futures"`
+	Error     string            `json:"error"`
+	ErrorAt   *string           `json:"error_at"`
 	// RetryAt is when the bot places orders again after a refusal; null
 	// while it does.
 	RetryAt *string `json:"retry_at"`
@@ -263,10 +278,21 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 	for _, e := range st.Events {
 		out.Events = append(out.Events, eventJSON(e))
 	}
+	out.Perps = []PerpJSON{}
+	for _, k := range st.Perps {
+		out.Perps = append(out.Perps, PerpJSON{Symbol: k.Symbol, SettleAsset: k.SettleAsset, Running: k.On})
+	}
 	for _, b := range st.Bots {
 		j := BotJSON{
 			UserID: b.UserID, Role: string(b.Role), Label: b.Label, Enabled: b.Enabled, BalancesKnown: b.Known,
 			USDT: b.USDT.String(), Coin: b.Coin.String(), Position: b.Position.String(), Futures: b.Futures.String(), Error: b.Error,
+			Positions: map[string]string{}, FuturesBy: map[string]string{},
+		}
+		for symbol, q := range b.Positions {
+			j.Positions[symbol] = q.String()
+		}
+		for asset, v := range b.FuturesBy {
+			j.FuturesBy[asset] = v.String()
 		}
 		if !b.ErrorAt.IsZero() {
 			v := httpx.FormatTime(b.ErrorAt)

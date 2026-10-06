@@ -14,17 +14,21 @@ import (
 	"github.com/skill/exchange/internal/platform/flags"
 )
 
-// The platform coin's perpetual (ASTRA design §4 and §5.2, batch A4): with
-// sim.perp on and the contract trading, the makers keep ladders on it
+// The platform coin's perpetuals (ASTRA design §4 and §5.2, batch A4; the
+// coin-margined one, design 2026-10-06 §2.3, batch G2): with sim.perp on
+// for a contract and the contract trading, the makers keep ladders on it
 // around its mark price (the design's quote center for the perpetual: the
 // contract's price band is around it), pulled halfway to the index — the
 // mark is the index times one plus the EMA of the book's premium, so
 // quotes at the mark itself would keep any premium the takers' flow made,
 // and the funding rate with it; halfway, the premium decays — and the
-// takers trade it at the market. Each
-// bot's position stays within PerpBotCap worth (beyond it the bot only
-// reduces), and its FUTURES margin is topped up to PerpMargin from its
-// spot USDT. The bots' positions net out across the pool.
+// takers trade it at the market. Each contract is run on its own, with
+// the same settings: each bot's position on it stays within PerpBotCap
+// worth (beyond it the bot only reduces), and its FUTURES margin in the
+// contract's settlement asset is topped up to PerpMargin worth from its
+// spot holdings — USDT for the linear contract, the coin for the
+// coin-margined one, whose quantities are whole contracts of a USD face
+// value. The bots' positions net out across the pool.
 
 // perpCheckEvery is how often the bots' positions and margins are read
 // (often enough that the makers' fills between two reads take a position
@@ -36,7 +40,7 @@ const (
 	perpTradeEvery = 5 * time.Second
 )
 
-// perpQuietTake is how long the perpetual goes without a trade before a
+// perpQuietTake is how long a perpetual goes without a trade before a
 // taker trades the contract's minimum anyway, as the pair's takers do
 // after quietTake (coordinator 2026-10-04: about a fifth of the
 // perpetual's minutes had no trade and its 1-minute candles broke up); not
@@ -49,12 +53,32 @@ const (
 // (a budget below what the quiet orders alone trade cannot be kept).
 const perpQuietTake = 45 * time.Second
 
-// perpBot is what the simulation knows of a bot on the perpetual.
+// perpetual is the simulation's state on one of the coin's perpetuals.
+type perpetual struct {
+	symbol string
+	pair   domain.Pair
+	pairAt time.Time
+	// The contract's mark and index prices as last read.
+	mark, index float64
+	markAt      time.Time
+	running     bool
+	turn        int
+	bots        map[string]*perpBot
+	checkedAt   time.Time
+	// The contract's last trade as last read (perpTradeEvery), when the
+	// bots started on it and its last quiet order (perpQuietTake).
+	tradeAt, tradeReadAt, watchFrom, quietAt time.Time
+	// quietDebt is what the quiet orders traded on the contract ahead of
+	// perp_daily_volume, in USD, taken off the takers' next orders.
+	quietDebt float64
+}
+
+// perpBot is what the simulation knows of a bot on a perpetual.
 type perpBot struct {
 	quotedP   float64
 	nextQuote time.Time
 	position  decimal.Decimal // signed, at the last check plus own market orders
-	futures   decimal.Decimal // available FUTURES balance at the last check
+	futures   decimal.Decimal // available FUTURES balance in the settlement asset at the last check
 	known     bool
 	// After a refused order the bot waits on the perpetual until retryAt.
 	wait    time.Duration
@@ -63,72 +87,105 @@ type perpBot struct {
 
 func (pb *perpBot) ready(now time.Time) bool { return !now.Before(pb.retryAt) }
 
-func (s *Sim) perpOf(b *bot) *perpBot {
-	if s.perpBots == nil {
-		s.perpBots = map[string]*perpBot{}
+// perpetuals are the contracts the bots trade (Config.Perps), in order.
+func (s *Sim) perpetuals() []*perpetual {
+	if s.perps == nil {
+		s.perps = []*perpetual{}
+		for _, symbol := range s.cfg.Perps {
+			s.perps = append(s.perps, &perpetual{symbol: symbol, bots: map[string]*perpBot{}})
+		}
 	}
-	pb, ok := s.perpBots[b.UserID]
+	return s.perps
+}
+
+func (k *perpetual) botOf(b *bot) *perpBot {
+	pb, ok := k.bots[b.UserID]
 	if !ok {
 		pb = &perpBot{}
-		s.perpBots[b.UserID] = pb
+		k.bots[b.UserID] = pb
 	}
 	return pb
 }
 
-// perp runs the bots on the perpetual for a round.
-func (s *Sim) perp(ctx context.Context, now time.Time, p float64, dt time.Duration) {
-	if s.cfg.Perp == "" || s.Derivatives == nil {
+// settleAsset is the contract's margin asset: its pair's, USDT until read.
+func (k *perpetual) settleAsset() string {
+	if k.pair.SettleAsset == "" {
+		return "USDT"
+	}
+	return k.pair.SettleAsset
+}
+
+// runPerps runs the bots on each perpetual for a round.
+func (s *Sim) runPerps(ctx context.Context, now time.Time, p float64, dt time.Duration) {
+	if s.Derivatives == nil {
 		return
 	}
-	if s.perpPairAt.IsZero() || now.Sub(s.perpPairAt) >= pairEvery {
-		if k, err := s.Derivatives.Contract(ctx, s.cfg.Perp); err == nil {
-			s.perpPair, s.perpPairAt = k, now
+	for _, k := range s.perpetuals() {
+		s.perp(ctx, k, now, p, dt)
+	}
+}
+
+// stopPerps cancels the makers' orders on every perpetual they trade.
+func (s *Sim) stopPerps(ctx context.Context) {
+	for _, k := range s.perpetuals() {
+		if k.running {
+			s.stopPerp(ctx, k)
+		}
+	}
+}
+
+// perp runs the bots on one perpetual for a round; p is the coin's price
+// in USDT, the quotes' center before the contract's first mark price.
+func (s *Sim) perp(ctx context.Context, k *perpetual, now time.Time, p float64, dt time.Duration) {
+	if k.pairAt.IsZero() || now.Sub(k.pairAt) >= pairEvery {
+		if c, err := s.Derivatives.Contract(ctx, k.symbol); err == nil {
+			k.pair, k.pairAt = c, now
 		} else {
 			s.m.errors.WithLabelValues("contract").Inc()
 		}
 	}
-	if !s.flags.Enabled(flags.KeySimPerp, flags.Subject{Symbol: s.cfg.Perp}) || !s.perpPair.Trading {
-		if s.perpRunning {
-			s.stopPerp(ctx)
+	if !s.flags.Enabled(flags.KeySimPerp, flags.Subject{Symbol: k.symbol}) || !k.pair.Trading {
+		if k.running {
+			s.stopPerp(ctx, k)
 		}
 		return
 	}
-	if !s.perpRunning || now.Sub(s.perpCheckedAt) >= perpCheckEvery {
-		s.checkPerp(ctx, now)
+	if !k.running || now.Sub(k.checkedAt) >= perpCheckEvery {
+		s.checkPerp(ctx, k, now, p)
 	}
-	if !s.perpRunning {
-		s.perpWatchFrom = now
+	if !k.running {
+		k.watchFrom = now
 	}
-	s.perpRunning = true
-	if s.perpMarkAt.IsZero() || now.Sub(s.perpMarkAt) >= markEvery {
-		s.perpMarkAt = now
-		if mark, index, err := s.prices.Mark(ctx, s.cfg.Perp); err != nil {
+	k.running = true
+	if k.markAt.IsZero() || now.Sub(k.markAt) >= markEvery {
+		k.markAt = now
+		if mark, index, err := s.prices.Mark(ctx, k.symbol); err != nil {
 			s.m.errors.WithLabelValues("mark").Inc()
 		} else if mark.IsPositive() {
-			s.perpMark, s.perpIndex = mark.InexactFloat64(), index.InexactFloat64()
+			k.mark, k.index = mark.InexactFloat64(), index.InexactFloat64()
 		}
 	}
-	if s.perpTradeReadAt.IsZero() || now.Sub(s.perpTradeReadAt) >= perpTradeEvery {
-		s.perpTradeReadAt = now
-		if _, at, err := s.prices.LastTrade(ctx, s.cfg.Perp); err != nil {
+	if k.tradeReadAt.IsZero() || now.Sub(k.tradeReadAt) >= perpTradeEvery {
+		k.tradeReadAt = now
+		if _, at, err := s.prices.LastTrade(ctx, k.symbol); err != nil {
 			s.m.errors.WithLabelValues("perp_last_trade").Inc()
 		} else if !at.IsZero() {
-			s.perpTradeAt = at
+			k.tradeAt = at
 		}
 	}
 	center := p // before the contract's first mark price
-	if s.perpMark > 0 {
-		center = s.perpMark
-		if s.perpIndex > 0 {
-			center = (s.perpMark + s.perpIndex) / 2
+	if k.mark > 0 {
+		center = k.mark
+		if k.index > 0 {
+			center = (k.mark + k.index) / 2
 		}
 	}
-	s.quotePerp(ctx, now, center)
+	s.quotePerp(ctx, k, now, center)
 	if s.runs(domain.EventPause) {
 		return
 	}
-	if s.takePerp(ctx, now, center, dt) == 0 && s.quietPerp(now) {
-		s.takeQuietPerp(ctx, now, center)
+	if s.takePerp(ctx, k, now, center, dt) == 0 && s.quietPerp(k, now) {
+		s.takeQuietPerp(ctx, k, now, center)
 	}
 }
 
@@ -136,13 +193,13 @@ func (s *Sim) perp(ctx context.Context, now time.Time, p float64, dt time.Durati
 // (since the bots started on it, when that is later) and no quiet order
 // went out since; never while its takers are switched off
 // (perp_daily_volume 0).
-func (s *Sim) quietPerp(now time.Time) bool {
-	since := s.perpTradeAt
-	if s.perpWatchFrom.After(since) {
-		since = s.perpWatchFrom
+func (s *Sim) quietPerp(k *perpetual, now time.Time) bool {
+	since := k.tradeAt
+	if k.watchFrom.After(since) {
+		since = k.watchFrom
 	}
-	if s.perpQuietAt.After(since) {
-		since = s.perpQuietAt
+	if k.quietAt.After(since) {
+		since = k.quietAt
 	}
 	return s.params.PerpDailyVolume > 0 && !since.IsZero() && now.Sub(since) >= perpQuietTake
 }
@@ -151,25 +208,26 @@ func (s *Sim) quietPerp(now time.Time) bool {
 // contract's minimum (its minimum notional, rounded up to the lot) at the
 // market, reducing a position at the cap; stamped once placed, so a
 // throttled or refused one is tried again next round.
-func (s *Sim) takeQuietPerp(ctx context.Context, now time.Time, p float64) {
+func (s *Sim) takeQuietPerp(ctx context.Context, k *perpetual, now time.Time, p float64) {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 || p <= 0 {
 		return
 	}
 	rng := s.model.Rand()
 	b := takers[rng.IntN(len(takers))]
-	pb := s.perpOf(b)
+	pb := k.botOf(b)
 	if !pb.ready(now) {
 		return
 	}
+	price := decimal.NewFromFloat(p)
 	side, reduce := domain.TakerSide(rng, s.params, 0), false
-	if s.overCap(pb.position, p) {
+	if s.overCap(k, pb.position, price) {
 		side, reduce = domain.Sell, true
 		if pb.position.IsNegative() {
 			side = domain.Buy
 		}
 	}
-	qty := domain.Quantity(s.perpPair.MinNotional.InexactFloat64(), decimal.NewFromFloat(p), s.perpPair)
+	qty := domain.Quantity(k.pair.MinNotional.InexactFloat64(), price, k.pair)
 	if reduce {
 		qty = decimal.Min(qty, pb.position.Abs())
 	}
@@ -180,13 +238,13 @@ func (s *Sim) takeQuietPerp(ctx context.Context, now time.Time, p float64) {
 		s.m.throttled.WithLabelValues("order").Inc()
 		return
 	}
-	err := s.Derivatives.MarketContract(ctx, b.UserID, s.cfg.Perp, side, qty, reduce)
+	err := s.Derivatives.MarketContract(ctx, b.UserID, k.symbol, side, qty, reduce)
 	s.placedPerp(ctx, now, b, pb, err, true)
 	if err != nil {
 		return
 	}
-	s.perpQuietAt = now
-	s.perpQuietDebt = math.Min(s.perpQuietDebt+qty.InexactFloat64()*p, s.params.PerpDailyVolume/24)
+	k.quietAt = now
+	k.quietDebt = math.Min(k.quietDebt+k.pair.Notional(qty, price).InexactFloat64(), s.params.PerpDailyVolume/24)
 	s.m.perpQuiet.Inc()
 	if side == domain.Buy {
 		pb.position = pb.position.Add(qty)
@@ -195,57 +253,73 @@ func (s *Sim) takeQuietPerp(ctx context.Context, now time.Time, p float64) {
 	}
 }
 
-// checkPerp reads the bots' positions and FUTURES balances and tops up a
-// margin below half of PerpMargin from the bot's spot USDT.
-func (s *Sim) checkPerp(ctx context.Context, now time.Time) {
-	s.perpCheckedAt = now
+// checkPerp reads the bots' positions and FUTURES balances in the
+// contract's settlement asset and tops up a margin below half of
+// PerpMargin worth from the bot's spot holdings of that asset: PerpMargin
+// in USDT, or its worth in the coin at the coin's price p.
+func (s *Sim) checkPerp(ctx context.Context, k *perpetual, now time.Time, p float64) {
+	k.checkedAt = now
+	asset := k.settleAsset()
 	target := decimal.NewFromFloat(s.params.PerpMargin)
+	places := int32(2)
+	if asset != "USDT" {
+		if p <= 0 {
+			return // the coin's worth unknown yet
+		}
+		target, places = decimal.NewFromFloat(s.params.PerpMargin/p), 4
+	}
 	for _, b := range s.bots {
 		if !b.Enabled || (b.Role != domain.RoleMaker && b.Role != domain.RoleTaker) {
 			continue
 		}
-		pb := s.perpOf(b)
-		pos, err := s.Derivatives.Position(ctx, b.UserID, s.cfg.Perp)
+		pb := k.botOf(b)
+		pos, err := s.Derivatives.Position(ctx, b.UserID, k.symbol)
 		if err != nil {
 			s.fail(ctx, b, "position", err)
 			continue
 		}
-		fut, err := s.Derivatives.Futures(ctx, b.UserID)
+		fut, err := s.Derivatives.Futures(ctx, b.UserID, asset)
 		if err != nil {
 			s.fail(ctx, b, "futures", err)
 			continue
 		}
 		pb.position, pb.futures, pb.known = pos, fut, true
 		if fut.LessThan(target.Div(decimal.NewFromInt(2))) {
-			need := target.Sub(fut).Round(2)
-			key := fmt.Sprintf("sim-margin-%s-%d", b.UserID, now.Unix()/int64(perpCheckEvery/time.Second))
-			if err := s.Derivatives.ToFutures(ctx, b.UserID, need, key); err != nil {
+			need := target.Sub(fut).Round(places)
+			key := fmt.Sprintf("sim-margin-%s-%s-%d", b.UserID, asset, now.Unix()/int64(perpCheckEvery/time.Second))
+			if asset == "USDT" {
+				// The key the bots used before the coin-margined contract:
+				// a top-up retried across the deploy stays one.
+				key = fmt.Sprintf("sim-margin-%s-%d", b.UserID, now.Unix()/int64(perpCheckEvery/time.Second))
+			}
+			if err := s.Derivatives.ToFutures(ctx, b.UserID, asset, need, key); err != nil {
 				s.fail(ctx, b, "to_futures", err)
 				continue
 			}
 			pb.futures = pb.futures.Add(need)
-			s.log.InfoContext(ctx, "simulated market: a bot's margin topped up", "bot", b.Label, "usdt", need.String())
+			s.log.InfoContext(ctx, "simulated market: a bot's margin topped up", "bot", b.Label, "contract", k.symbol, "asset", asset,
+				"amount", need.String())
 		}
 	}
 }
 
-// overCap reports whether a position is worth PerpBotCap or more at p.
-func (s *Sim) overCap(pos decimal.Decimal, p float64) bool {
-	return math.Abs(pos.InexactFloat64())*p >= s.params.PerpBotCap
+// overCap reports whether a position is worth PerpBotCap or more at price.
+func (s *Sim) overCap(k *perpetual, pos, price decimal.Decimal) bool {
+	return k.pair.Notional(pos.Abs(), price).InexactFloat64() >= s.params.PerpBotCap
 }
 
 // quotePerp lets the perpetual's makers requote in turn, one a round:
 // their ladder around the mark price p, within the contract's price band,
 // without the side that would grow a position at the cap.
-func (s *Sim) quotePerp(ctx context.Context, now time.Time, p float64) {
+func (s *Sim) quotePerp(ctx context.Context, k *perpetual, now time.Time, p float64) {
 	makers := s.botsOf(domain.RoleMaker)
 	if len(makers) == 0 {
 		return
 	}
-	tick := s.perpPair.Tick.InexactFloat64()
+	tick := k.pair.Tick.InexactFloat64()
 	for i := range makers {
-		b := makers[(s.perpTurn+i)%len(makers)]
-		pb := s.perpOf(b)
+		b := makers[(k.turn+i)%len(makers)]
+		pb := k.botOf(b)
 		if !pb.ready(now) {
 			continue
 		}
@@ -253,26 +327,26 @@ func (s *Sim) quotePerp(ctx context.Context, now time.Time, p float64) {
 		if !moved && now.Before(pb.nextQuote) {
 			continue
 		}
-		s.requotePerp(ctx, now, b, pb, p)
+		s.requotePerp(ctx, k, now, b, pb, p)
 		break
 	}
-	s.perpTurn = (s.perpTurn + 1) % len(makers)
+	k.turn = (k.turn + 1) % len(makers)
 }
 
-func (s *Sim) requotePerp(ctx context.Context, now time.Time, b *bot, pb *perpBot, p float64) {
+func (s *Sim) requotePerp(ctx context.Context, k *perpetual, now time.Time, b *bot, pb *perpBot, p float64) {
 	rng := s.model.Rand()
 	pb.nextQuote = now.Add(time.Second + time.Duration(rng.Int64N(int64(2*time.Second))))
-	open, err := s.Derivatives.OpenContract(ctx, b.UserID, s.cfg.Perp)
+	open, err := s.Derivatives.OpenContract(ctx, b.UserID, k.symbol)
 	if err != nil {
 		s.fail(ctx, b, "open_contract", err)
 		return
 	}
-	bids, asks := domain.LadderPrices(p, b.phase, s.params, s.perpPair)
-	if s.perpMark > 0 {
-		mark := domain.Anchors{Lo: s.perpMark, Hi: s.perpMark}
-		bids, asks = domain.InBand(bids, mark, s.perpPair.Band), domain.InBand(asks, mark, s.perpPair.Band)
+	bids, asks := domain.LadderPrices(p, b.phase, s.params, k.pair)
+	if k.mark > 0 {
+		mark := domain.Anchors{Lo: k.mark, Hi: k.mark}
+		bids, asks = domain.InBand(bids, mark, k.pair.Band), domain.InBand(asks, mark, k.pair.Band)
 	}
-	if s.overCap(pb.position, p) {
+	if s.overCap(k, pb.position, decimal.NewFromFloat(p)) {
 		if pb.position.IsPositive() {
 			bids = nil // long at the cap: no more buying
 		} else {
@@ -301,8 +375,8 @@ func (s *Sim) requotePerp(ctx context.Context, now time.Time, b *bot, pb *perpBo
 			stop = true
 			return
 		}
-		qty := domain.Quantity(domain.Worth(rng, s.params.LevelSize, 0.5), price, s.perpPair)
-		_, err := s.Derivatives.LimitContract(ctx, b.UserID, s.cfg.Perp, side, price, qty)
+		qty := domain.Quantity(domain.Worth(rng, s.params.LevelSize, 0.5), price, k.pair)
+		_, err := s.Derivatives.LimitContract(ctx, b.UserID, k.symbol, side, price, qty)
 		switch {
 		case err == nil:
 		case isFunds(err):
@@ -327,33 +401,34 @@ func (s *Sim) requotePerp(ctx context.Context, now time.Time, b *bot, pb *perpBo
 // in dt, less what the quiet orders traded ahead of the budget; a taker at
 // its cap only reduces, one waiting after a refusal sits the order out. It
 // returns how many arrived.
-func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Duration) int {
+func (s *Sim) takePerp(ctx context.Context, k *perpetual, now time.Time, p float64, dt time.Duration) int {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 || s.params.PerpDailyVolume <= 0 {
 		return 0
 	}
 	rng := s.model.Rand()
+	price := decimal.NewFromFloat(p)
 	n := domain.Arrivals(rng, s.params.PerpDailyVolume, s.params.OrderSize, dt, now)
 	for range n {
 		b := takers[rng.IntN(len(takers))]
-		pb := s.perpOf(b)
+		pb := k.botOf(b)
 		if !pb.ready(now) {
 			continue
 		}
 		side, reduce := domain.TakerSide(rng, s.params, 0), false
-		if s.overCap(pb.position, p) {
+		if s.overCap(k, pb.position, price) {
 			side, reduce = domain.Sell, true
 			if pb.position.IsNegative() {
 				side = domain.Buy
 			}
 		}
-		worth, owed := domain.Repay(domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), s.perpQuietDebt,
-			s.perpPair.MinNotional.InexactFloat64())
+		worth, owed := domain.Repay(domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), k.quietDebt,
+			k.pair.MinNotional.InexactFloat64())
 		if worth == 0 {
-			s.perpQuietDebt = owed // the order went to the quiet ones
+			k.quietDebt = owed // the order went to the quiet ones
 			continue
 		}
-		qty := domain.Quantity(worth, decimal.NewFromFloat(p), s.perpPair)
+		qty := domain.Quantity(worth, price, k.pair)
 		if reduce {
 			qty = decimal.Min(qty, pb.position.Abs())
 		}
@@ -364,10 +439,10 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 			s.m.throttled.WithLabelValues("order").Inc()
 			return n
 		}
-		err := s.Derivatives.MarketContract(ctx, b.UserID, s.cfg.Perp, side, qty, reduce)
+		err := s.Derivatives.MarketContract(ctx, b.UserID, k.symbol, side, qty, reduce)
 		s.placedPerp(ctx, now, b, pb, err, true)
 		if err == nil {
-			s.perpQuietDebt = owed
+			k.quietDebt = owed
 			if side == domain.Buy {
 				pb.position = pb.position.Add(qty)
 			} else {
@@ -378,8 +453,8 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 	return n
 }
 
-// placedPerp counts an order's result on the perpetual as placed does
-// for the pair, the waits being the bot's on the perpetual.
+// placedPerp counts an order's result on a perpetual as placed does for
+// the pair, the waits being the bot's on that perpetual.
 func (s *Sim) placedPerp(ctx context.Context, now time.Time, b *bot, pb *perpBot, err error, backOff bool) {
 	role, result := "PERP_"+string(b.Role), "placed"
 	switch {
@@ -412,14 +487,14 @@ func (s *Sim) placedPerp(ctx context.Context, now time.Time, b *bot, pb *perpBot
 }
 
 // stopPerp cancels the makers' orders on the perpetual.
-func (s *Sim) stopPerp(ctx context.Context) {
+func (s *Sim) stopPerp(ctx context.Context, k *perpetual) {
 	for _, b := range s.botsOf(domain.RoleMaker) {
-		if err := s.Derivatives.CancelAllContract(ctx, b.UserID, s.cfg.Perp); err != nil {
+		if err := s.Derivatives.CancelAllContract(ctx, b.UserID, k.symbol); err != nil {
 			s.fail(ctx, b, "cancel_all_contract", err)
 		}
-		pb := s.perpOf(b)
+		pb := k.botOf(b)
 		pb.quotedP, pb.nextQuote = 0, time.Time{}
 	}
-	s.perpRunning = false
-	s.log.InfoContext(ctx, "simulated market: the bots left the perpetual", "symbol", s.cfg.Perp)
+	k.running = false
+	s.log.InfoContext(ctx, "simulated market: the bots left the perpetual", "symbol", k.symbol)
 }

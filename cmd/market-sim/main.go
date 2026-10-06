@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
@@ -38,9 +39,10 @@ type settings struct {
 	Symbol string `koanf:"sim_symbol"`
 	Quote  string `koanf:"sim_quote"`
 	Seed   uint64 `koanf:"sim_seed"`
-	// Perp is the coin's perpetual (SIM_PERP_SYMBOL; empty: none), traded
-	// through derivatives-service (DERIVATIVES_SERVICE_URL).
-	Perp           string `koanf:"sim_perp_symbol"`
+	// Perps are the coin's perpetuals, comma-separated (SIM_PERP_SYMBOLS;
+	// empty: none), traded through derivatives-service
+	// (DERIVATIVES_SERVICE_URL), each when sim.perp is on for it.
+	Perps          string `koanf:"sim_perp_symbols"`
 	DerivativesURL string `koanf:"derivatives_service_url"`
 	// The platform's REST peers, and instrument-service's gRPC address
 	// (INSTRUMENT_GRPC_ADDR) for the halts.
@@ -81,7 +83,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Postgres: pg.DefaultConfig(), HTTPAddr: ":8098", Symbol: "ASTRA-USDT", Quote: "USDT",
 		TradingURL: "http://localhost:8088", LedgerURL: "http://localhost:8085", MarketURL: "http://localhost:8090",
 		InstrumentURL: "http://localhost:8084", InstrumentAddr: "localhost:9184",
-		Perp: "ASTRA-USDT-PERP", DerivativesURL: "http://localhost:8095",
+		Perps: "ASTRA-USDT-PERP,ASTRA-USD-PERP", DerivativesURL: "http://localhost:8095",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -107,7 +109,13 @@ func setup(ctx context.Context, a *app.App) error {
 		TradingURL: cfg.TradingURL, LedgerURL: cfg.LedgerURL, MarketURL: cfg.MarketURL, InstrumentURL: cfg.InstrumentURL,
 		DerivativesURL: cfg.DerivativesURL, HTTP: &http.Client{Timeout: 2 * time.Second},
 	}
-	sim := application.New(application.Config{Symbol: cfg.Symbol, Quote: cfg.Quote, Perp: cfg.Perp, Tick: 250 * time.Millisecond, Seed: cfg.Seed},
+	var perps []string
+	for _, symbol := range strings.Split(cfg.Perps, ",") {
+		if symbol = strings.TrimSpace(symbol); symbol != "" {
+			perps = append(perps, symbol)
+		}
+	}
+	sim := application.New(application.Config{Symbol: cfg.Symbol, Quote: cfg.Quote, Perps: perps, Tick: 250 * time.Millisecond, Seed: cfg.Seed},
 		client, client, instruments.Client{API: instrumentv1.NewInstrumentServiceClient(instrumentConn)}, postgres.NewStore(db, events),
 		flagClient, a.Logger(), a.Metrics())
 	sim.Derivatives = client

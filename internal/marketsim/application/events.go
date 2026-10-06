@@ -85,16 +85,19 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 				s.log.WarnContext(ctx, "simulated market: the pair not halted", "event", e.ID, "error", err)
 			}
 			s.pairAt = time.Time{}
-			// The perpetual halts with its index pair (§5.2).
-			if s.cfg.Perp != "" && s.perpPair.Trading {
-				if s.perpRunning {
-					s.stopPerp(ctx)
+			// The perpetuals halt with their index pair (§5.2).
+			for _, k := range s.perpetuals() {
+				if !k.pair.Trading {
+					continue
 				}
-				if err := s.pairs.SetContractStatus(ctx, s.cfg.Perp, "HALT", "system:market-sim", why); err != nil {
+				if k.running {
+					s.stopPerp(ctx, k)
+				}
+				if err := s.pairs.SetContractStatus(ctx, k.symbol, "HALT", "system:market-sim", why); err != nil {
 					s.m.errors.WithLabelValues("halt").Inc()
-					s.log.WarnContext(ctx, "simulated market: the perpetual not halted", "event", e.ID, "error", err)
+					s.log.WarnContext(ctx, "simulated market: the perpetual not halted", "event", e.ID, "symbol", k.symbol, "error", err)
 				}
-				s.perpPairAt = time.Time{}
+				k.pairAt = time.Time{}
 			}
 		}
 		s.persist(ctx, e, nil)
@@ -130,17 +133,21 @@ func (s *Sim) keepHalted(ctx context.Context, now time.Time) {
 		}
 		s.pairAt = time.Time{}
 	}
-	if s.cfg.Perp == "" || s.Derivatives == nil {
+	if s.Derivatives == nil {
 		return
 	}
-	if k, err := s.Derivatives.Contract(ctx, s.cfg.Perp); err == nil && k.Status == "TRADING" {
-		if err := s.pairs.SetContractStatus(ctx, s.cfg.Perp, "HALT", "system:market-sim", why); err != nil {
-			s.m.errors.WithLabelValues("halt").Inc()
-			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual still trades, not halted", "event", e.ID, "error", err)
-		} else {
-			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual was trading; halted again", "event", e.ID)
+	for _, k := range s.perpetuals() {
+		if c, err := s.Derivatives.Contract(ctx, k.symbol); err != nil || c.Status != "TRADING" {
+			continue
 		}
-		s.perpPairAt = time.Time{}
+		if err := s.pairs.SetContractStatus(ctx, k.symbol, "HALT", "system:market-sim", why); err != nil {
+			s.m.errors.WithLabelValues("halt").Inc()
+			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual still trades, not halted", "event", e.ID, "symbol", k.symbol,
+				"error", err)
+		} else {
+			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual was trading; halted again", "event", e.ID, "symbol", k.symbol)
+		}
+		k.pairAt = time.Time{}
 	}
 }
 
@@ -459,7 +466,7 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 			if err := s.resumePair(ctx, actor, why); err != nil {
 				return domain.Event{}, err
 			}
-			if err := s.resumePerp(ctx, actor, why); err != nil {
+			if err := s.resumePerps(ctx, actor, why); err != nil {
 				return domain.Event{}, err
 			}
 		}
@@ -500,23 +507,24 @@ func (s *Sim) resumePair(ctx context.Context, actor, why string) error {
 	return nil
 }
 
-// resumePerp lets the perpetual trade again after a halt, if a halt left
-// it halted.
-func (s *Sim) resumePerp(ctx context.Context, actor, why string) error {
-	if s.cfg.Perp == "" || s.Derivatives == nil {
+// resumePerps lets each perpetual a halt left halted trade again.
+func (s *Sim) resumePerps(ctx context.Context, actor, why string) error {
+	if s.Derivatives == nil {
 		return nil
 	}
-	k, err := s.Derivatives.Contract(ctx, s.cfg.Perp)
-	if err != nil {
-		return err
+	for _, k := range s.perpetuals() {
+		c, err := s.Derivatives.Contract(ctx, k.symbol)
+		if err != nil {
+			return err
+		}
+		if c.Status != "HALT" {
+			continue
+		}
+		if err := s.pairs.SetContractStatus(ctx, k.symbol, "TRADING", actor, why); err != nil {
+			return err
+		}
+		k.pairAt = time.Time{}
 	}
-	if k.Status != "HALT" {
-		return nil
-	}
-	if err := s.pairs.SetContractStatus(ctx, s.cfg.Perp, "TRADING", actor, why); err != nil {
-		return err
-	}
-	s.perpPairAt = time.Time{}
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -371,7 +372,7 @@ type fakePairs struct {
 	contractFails int
 }
 
-func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) error {
+func (f *fakePairs) SetContractStatus(_ context.Context, symbol, to, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.down {
@@ -387,9 +388,7 @@ func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) err
 	}
 	f.contracts = append(f.contracts, to)
 	if f.perp != nil {
-		f.perp.mu.Lock()
-		f.perp.contract.Status, f.perp.contract.Trading = to, to == "TRADING"
-		f.perp.mu.Unlock()
+		f.perp.setStatus(symbol, to)
 	}
 	return nil
 }
@@ -912,94 +911,143 @@ func TestAScheduledEventIsCanceled(t *testing.T) {
 
 func apperrIs(err error, code string) bool { return err != nil && apperr.Is(err, code) }
 
-// fakeDerivatives is the perpetual as the bots see it: limit orders rest
-// until canceled, market orders move the position, transfers fund margin.
+// fakeDerivatives is the perpetuals as the bots see them: limit orders
+// rest until canceled, market orders move the position, transfers fund
+// margin. The linear ASTRA-USDT-PERP (contract) keeps its state by user,
+// a contract in extra (the coin-margined one) by "user|symbol", and the
+// FUTURES balances are by user for USDT, by "user|asset" otherwise.
 type fakeDerivatives struct {
 	mu        sync.Mutex
 	contract  domain.Pair
+	extra     map[string]domain.Pair
 	seq       int
 	open      map[string][]domain.Order
 	positions map[string]decimal.Decimal
 	futures   map[string]decimal.Decimal
-	markets   []string // "user side qty reduce"
+	markets   []string // "user side qty reduce", "user|symbol side qty reduce" on extra
+	limits    []string // "user|symbol side price qty" on extra
 	transfers map[string]bool
 	cancelAll map[string]int
 }
 
 func newFakeDerivatives() *fakeDerivatives {
 	return &fakeDerivatives{
-		contract: domain.Pair{Symbol: "ASTRA-USDT-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Status: "TRADING", Trading: true},
-		open:     map[string][]domain.Order{}, positions: map[string]decimal.Decimal{}, futures: map[string]decimal.Decimal{},
-		transfers: map[string]bool{}, cancelAll: map[string]int{},
+		contract: domain.Pair{
+			Symbol: "ASTRA-USDT-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Status: "TRADING", Trading: true,
+			SettleAsset: "USDT",
+		},
+		extra: map[string]domain.Pair{}, open: map[string][]domain.Order{}, positions: map[string]decimal.Decimal{},
+		futures: map[string]decimal.Decimal{}, transfers: map[string]bool{}, cancelAll: map[string]int{},
 	}
 }
 
-func (f *fakeDerivatives) Contract(context.Context, string) (domain.Pair, error) {
+// key is where a user's state on a contract is kept.
+func (f *fakeDerivatives) key(user, symbol string) string {
+	if _, ok := f.extra[symbol]; ok {
+		return user + "|" + symbol
+	}
+	return user
+}
+
+func (f *fakeDerivatives) Contract(_ context.Context, symbol string) (domain.Pair, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if k, ok := f.extra[symbol]; ok {
+		return k, nil
+	}
 	return f.contract, nil
 }
 
-func (f *fakeDerivatives) OpenContract(_ context.Context, user, _ string) ([]domain.Order, error) {
+// setStatus is a contract's status change (fakePairs).
+func (f *fakeDerivatives) setStatus(symbol, to string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.open[user]), nil
+	if k, ok := f.extra[symbol]; ok {
+		k.Status, k.Trading = to, to == "TRADING"
+		f.extra[symbol] = k
+		return
+	}
+	f.contract.Status, f.contract.Trading = to, to == "TRADING"
 }
 
-func (f *fakeDerivatives) LimitContract(_ context.Context, user, _ string, side domain.Side, price, _ decimal.Decimal) (string, error) {
+func (f *fakeDerivatives) OpenContract(_ context.Context, user, symbol string) ([]domain.Order, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.open[f.key(user, symbol)]), nil
+}
+
+func (f *fakeDerivatives) LimitContract(_ context.Context, user, symbol string, side domain.Side, price, qty decimal.Decimal) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seq++
 	id := fmt.Sprintf("k%d", f.seq)
-	f.open[user] = append(f.open[user], domain.Order{ID: id, Side: side, Price: price})
+	k := f.key(user, symbol)
+	f.open[k] = append(f.open[k], domain.Order{ID: id, Side: side, Price: price})
+	if k != user {
+		f.limits = append(f.limits, fmt.Sprintf("%s %s %s %s", k, side, price, qty))
+	}
 	return id, nil
 }
 
-func (f *fakeDerivatives) MarketContract(_ context.Context, user, _ string, side domain.Side, qty decimal.Decimal, reduce bool) error {
+func (f *fakeDerivatives) MarketContract(_ context.Context, user, symbol string, side domain.Side, qty decimal.Decimal, reduce bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	k := f.key(user, symbol)
 	if side == domain.Buy {
-		f.positions[user] = f.positions[user].Add(qty)
+		f.positions[k] = f.positions[k].Add(qty)
 	} else {
-		f.positions[user] = f.positions[user].Sub(qty)
+		f.positions[k] = f.positions[k].Sub(qty)
 	}
-	f.markets = append(f.markets, fmt.Sprintf("%s %s %s %v", user, side, qty, reduce))
+	f.markets = append(f.markets, fmt.Sprintf("%s %s %s %v", k, side, qty, reduce))
 	return nil
 }
 
 func (f *fakeDerivatives) CancelContract(_ context.Context, user, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.open[user] = slices.DeleteFunc(f.open[user], func(o domain.Order) bool { return o.ID == id })
+	for k := range f.open {
+		if k == user || strings.HasPrefix(k, user+"|") {
+			f.open[k] = slices.DeleteFunc(f.open[k], func(o domain.Order) bool { return o.ID == id })
+		}
+	}
 	return nil
 }
 
-func (f *fakeDerivatives) CancelAllContract(_ context.Context, user, _ string) error {
+func (f *fakeDerivatives) CancelAllContract(_ context.Context, user, symbol string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.cancelAll[user]++
-	delete(f.open, user)
+	k := f.key(user, symbol)
+	f.cancelAll[k]++
+	delete(f.open, k)
 	return nil
 }
 
-func (f *fakeDerivatives) Position(_ context.Context, user, _ string) (decimal.Decimal, error) {
+func (f *fakeDerivatives) Position(_ context.Context, user, symbol string) (decimal.Decimal, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.positions[user], nil
+	return f.positions[f.key(user, symbol)], nil
 }
 
-func (f *fakeDerivatives) Futures(_ context.Context, user string) (decimal.Decimal, error) {
+// fundsKey is where a user's FUTURES balance in asset is kept.
+func fundsKey(user, asset string) string {
+	if asset == "USDT" {
+		return user
+	}
+	return user + "|" + asset
+}
+
+func (f *fakeDerivatives) Futures(_ context.Context, user, asset string) (decimal.Decimal, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.futures[user], nil
+	return f.futures[fundsKey(user, asset)], nil
 }
 
-func (f *fakeDerivatives) ToFutures(_ context.Context, user string, amount decimal.Decimal, key string) error {
+func (f *fakeDerivatives) ToFutures(_ context.Context, user, asset string, amount decimal.Decimal, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.transfers[key] {
 		f.transfers[key] = true
-		f.futures[user] = f.futures[user].Add(amount)
+		f.futures[fundsKey(user, asset)] = f.futures[fundsKey(user, asset)].Add(amount)
 	}
 	return nil
 }
@@ -1014,7 +1062,7 @@ func perpRig(t *testing.T, p domain.Params) (*rig, *fakeDerivatives) {
 	t.Helper()
 	r := newRig(t, &memStore{params: &p, version: 1})
 	fd := newFakeDerivatives()
-	r.sim.cfg.Perp = "ASTRA-USDT-PERP"
+	r.sim.cfg.Perps = []string{"ASTRA-USDT-PERP"}
 	r.sim.Derivatives = fd
 	r.pairs.perp = fd
 	r.flags.perp = true
@@ -1099,6 +1147,112 @@ func TestAPositionAtTheCapOnlyReduces(t *testing.T) {
 		if o.Side == domain.Sell {
 			t.Fatalf("m1 short at the cap asks at %s", o.Price)
 		}
+	}
+}
+
+// coinRig adds the coin-margined perpetual (design 2026-10-06 §2.3): USD
+// face value 10, whole contracts, settled in ASTRA.
+func coinRig(t *testing.T, p domain.Params) (*rig, *fakeDerivatives) {
+	t.Helper()
+	r, fd := perpRig(t, p)
+	fd.mu.Lock()
+	fd.extra["ASTRA-USD-PERP"] = domain.Pair{
+		Symbol: "ASTRA-USD-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("10"), Status: "TRADING", Trading: true,
+		ContractSize: d("10"), SettleAsset: "ASTRA",
+	}
+	fd.mu.Unlock()
+	r.sim.cfg.Perps = []string{"ASTRA-USDT-PERP", "ASTRA-USD-PERP"}
+	return r, fd
+}
+
+// The coin-margined perpetual runs beside the linear one on the same
+// settings: ladders and market orders in whole contracts of 10 USD, the
+// margin topped up in ASTRA to PerpMargin's worth at the coin's price, a
+// position worth the cap (contracts × 10 USD) only reduced, and a halt
+// stops both.
+func TestTheBotsMakeTheCoinMarginedPerpetual(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume, p.PerpBotCap = 0, 86_400*400*2, 1000
+	r, fd := coinRig(t, p)
+	fd.mu.Lock()
+	fd.positions["t1|ASTRA-USD-PERP"] = d("150") // 1,500 USD: over the cap of 1,000
+	fd.mu.Unlock()
+	r.rounds(4 * 20)
+	fd.mu.Lock()
+	limits, markets := slices.Clone(fd.limits), slices.Clone(fd.markets)
+	coinMargin, usdtMargin := fd.futures["m1|ASTRA"], fd.futures["m1"]
+	bids, asks := 0, 0
+	for _, o := range fd.open["m1|ASTRA-USD-PERP"] {
+		if o.Side == domain.Buy {
+			bids++
+		} else {
+			asks++
+		}
+	}
+	fd.mu.Unlock()
+	if bids != 8 || asks != 8 || len(fd.orders("m1")) != 16 {
+		t.Fatalf("m1: %d bids and %d asks on the coin-margined perpetual, %d orders on the linear one", bids, asks, len(fd.orders("m1")))
+	}
+	for _, l := range limits {
+		var key, side, price, qty string
+		if _, err := fmt.Sscanf(l, "%s %s %s %s", &key, &side, &price, &qty); err != nil {
+			t.Fatal(err)
+		}
+		// The level's worth (median 1,000 USD) in contracts of 10 USD.
+		if q := d(qty); !q.Equal(q.Floor()) || q.LessThan(d("1")) || q.GreaterThan(d("2000")) {
+			t.Fatalf("a level of %s contracts: %s", qty, l)
+		}
+	}
+	// PerpMargin (30,000) in ASTRA near 1 USDT, rounded to 4 places; the
+	// linear contract's in USDT as before.
+	if coinMargin.LessThan(d("25000")) || coinMargin.GreaterThan(d("35000")) || !coinMargin.Equal(coinMargin.Round(4)) || !usdtMargin.Equal(d("30000")) {
+		t.Fatalf("margins: %s ASTRA, %s USDT", coinMargin, usdtMargin)
+	}
+	reduced, coin := 0, 0
+	pos := d("150")
+	for _, m := range markets {
+		var key, side, qty string
+		var reduce bool
+		if _, err := fmt.Sscanf(m, "%s %s %s %v", &key, &side, &qty, &reduce); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(key, "|ASTRA-USD-PERP") {
+			continue
+		}
+		coin++
+		if q := d(qty); !q.Equal(q.Floor()) {
+			t.Fatalf("a market order of %s contracts", qty)
+		}
+		if key != "t1|ASTRA-USD-PERP" {
+			continue
+		}
+		if pos.GreaterThanOrEqual(d("100")) { // 100 contracts: the cap of 1,000 USD
+			if side != "SELL" || !reduce {
+				t.Fatalf("over the cap at %s contracts: %s", pos, m)
+			}
+			reduced++
+		}
+		if side == "SELL" {
+			pos = pos.Sub(d(qty))
+		} else {
+			pos = pos.Add(d(qty))
+		}
+	}
+	if coin == 0 || reduced == 0 {
+		t.Fatalf("%d market orders on the coin-margined perpetual, %d reducing t1's", coin, reduced)
+	}
+	st := r.sim.Status()
+	if len(st.Perps) != 2 || st.Perps[1] != (PerpStatus{Symbol: "ASTRA-USD-PERP", SettleAsset: "ASTRA", On: true}) || st.Perp != "ASTRA-USDT-PERP" {
+		t.Fatalf("status %+v", st.Perps)
+	}
+	// A halt stops both perpetuals with the pair.
+	r.create(t, domain.Event{Type: domain.EventHalt})
+	r.rounds(2)
+	if !slices.Equal(r.pairs.contracts, []string{"HALT", "HALT"}) || len(fd.orders("m1")) != 0 {
+		t.Fatalf("halted: contracts %v, %d linear orders", r.pairs.contracts, len(fd.orders("m1")))
+	}
+	if c, _ := fd.Contract(context.Background(), "ASTRA-USD-PERP"); c.Trading {
+		t.Fatal("the coin-margined perpetual still trades")
 	}
 }
 
@@ -1696,8 +1850,8 @@ func TestAQuietPerpetualGetsTheMinimumOrder(t *testing.T) {
 		t.Fatalf("the quiet order %q", got[0])
 	}
 	// Owed to the takers' budget, at most an hour of it.
-	if r.sim.perpQuietDebt != p.PerpDailyVolume/24 {
-		t.Fatalf("owed %v", r.sim.perpQuietDebt)
+	if debt := r.sim.perpetuals()[0].quietDebt; debt != p.PerpDailyVolume/24 {
+		t.Fatalf("owed %v", debt)
 	}
 	r.rounds(4 * 40)
 	if n := len(markets()); n != 1 {

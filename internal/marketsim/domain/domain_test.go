@@ -180,6 +180,27 @@ func TestQuantityMeetsThePairsMinimums(t *testing.T) {
 	}
 }
 
+// A coin-margined contract's quantities are whole contracts of its face
+// value, whatever the price (design 2026-10-06 §2.1).
+func TestQuantityInContracts(t *testing.T) {
+	coin := Pair{Symbol: "ASTRA-USD-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("10"), ContractSize: d("10"), SettleAsset: "ASTRA"}
+	if q := Quantity(1000, d("1.03"), coin); q.String() != "100" {
+		t.Fatalf("1,000 USD: %s contracts", q)
+	}
+	if q := Quantity(1999, d("0.5"), coin); q.String() != "199" {
+		t.Fatalf("1,999 USD: %s contracts", q)
+	}
+	if q := Quantity(3, d("1.03"), coin); q.String() != "1" {
+		t.Fatalf("below one contract: %s", q)
+	}
+	if n := coin.Notional(d("150"), d("1.03")); n.String() != "1500" || !coin.Inverse() || astra.Inverse() {
+		t.Fatalf("150 contracts: %s USD", n)
+	}
+	if n := astra.Notional(d("800"), d("1.25")); n.String() != "1000" {
+		t.Fatalf("800 ASTRA: %s USDT", n)
+	}
+}
+
 // A day of taker orders is worth the turnover asked for: 1,600,000 (the
 // takers' share of 2,000,000) in orders of a median 400, a mean of 551.
 func TestArrivalsMakeTheDaysTurnover(t *testing.T) {

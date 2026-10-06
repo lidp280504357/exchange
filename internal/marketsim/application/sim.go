@@ -33,9 +33,12 @@ import (
 // Config is the simulation's fixed setup.
 type Config struct {
 	// Symbol is the pair the bots trade (ASTRA-USDT); Quote its quote
-	// asset, which the bots keep about BotUSDT of; Perp its perpetual
-	// (empty: none).
-	Symbol, Quote, Perp string
+	// asset, which the bots keep about BotUSDT of.
+	Symbol, Quote string
+	// Perps are the coin's perpetuals the bots trade too, each when
+	// sim.perp is on for it (ASTRA-USDT-PERP, and the coin-margined
+	// ASTRA-USD-PERP from design 2026-10-06 §2.3); none: no perpetual.
+	Perps []string
 	// Tick is how often the model steps and the bots act (250 ms).
 	Tick time.Duration
 	// Seed seeds a first start's random source; 0 takes the clock.
@@ -136,25 +139,9 @@ type Sim struct {
 	// one operator's share.
 	ops sync.Mutex
 
-	perpPair      domain.Pair
-	perpPairAt    time.Time
-	haltCheckAt   time.Time // when a running HALT event last checked the halt
-	perpMark      float64   // the contract's mark and index prices as last read
-	perpIndex     float64
-	perpMarkAt    time.Time
-	perpRunning   bool
-	perpTurn      int
-	perpBots      map[string]*perpBot
-	perpCheckedAt time.Time
-	// The perpetual's last trade as last read (perpTradeEvery), when the
-	// bots started on it and its last quiet order (perpQuietTake).
-	perpTradeAt     time.Time
-	perpTradeReadAt time.Time
-	perpWatchFrom   time.Time
-	perpQuietAt     time.Time
-	// perpQuietDebt is what the quiet orders traded on the perpetual ahead
-	// of perp_daily_volume, in USDT, taken off the takers' next orders.
-	perpQuietDebt float64
+	haltCheckAt time.Time // when a running HALT event last checked the halt
+	// perps are the perpetuals' states (perpetuals, Config.Perps).
+	perps []*perpetual
 }
 
 // bot is a bot account as the simulation runs it.
@@ -360,9 +347,7 @@ func (s *Sim) Round(ctx context.Context) {
 		if s.running {
 			s.stop(ctx)
 		}
-		if s.perpRunning {
-			s.stopPerp(ctx)
-		}
+		s.stopPerps(ctx)
 		s.m.running.Set(0)
 		if enabled {
 			// The pair a running HALT event halted: the perpetual's halt
@@ -398,9 +383,7 @@ func (s *Sim) Round(ctx context.Context) {
 	s.refreshAnchor(ctx, now)
 	s.watch(ctx, now, sh)
 	if sh.Halted {
-		if s.perpRunning {
-			s.stopPerp(ctx)
-		}
+		s.stopPerps(ctx)
 		s.keepHalted(ctx, now)
 		return // the halt canceled the makers' orders; the pair waits
 	}
@@ -417,7 +400,7 @@ func (s *Sim) Round(ctx context.Context) {
 		s.follow(ctx, now, center)
 	}
 	s.execute(ctx, now, center, sh.Spike != 0)
-	s.perp(ctx, now, p, dt)
+	s.runPerps(ctx, now, p, dt)
 	s.chores(ctx, now)
 }
 
@@ -827,8 +810,12 @@ type Status struct {
 	Guards    map[domain.Guard]int
 	Bots      []BotStatus
 	Events    []domain.Event // scheduled and running
-	Perp      string
-	PerpOn    bool // the bots trade the perpetual
+	// Perp and PerpOn are the first perpetual (the linear one) and
+	// whether the bots trade it, as before the coin-margined one; Perps
+	// every perpetual.
+	Perp   string
+	PerpOn bool
+	Perps  []PerpStatus
 	// The price band: its anchor as last read (0: none), the band (a
 	// share; 0: none), where the makers quote, whether the quotes walk
 	// toward a target beyond the band, the pair's last trade, and how
@@ -843,14 +830,25 @@ type Status struct {
 	At          time.Time
 }
 
+// PerpStatus is a perpetual as the operators see it: whether the bots
+// trade it and the asset its margins are in.
+type PerpStatus struct {
+	Symbol, SettleAsset string
+	On                  bool
+}
+
 // BotStatus is one bot as the operators see it.
 type BotStatus struct {
 	ports.Bot
 	USDT, Coin decimal.Decimal
 	Known      bool
-	// Position and Futures are its signed position on the perpetual and
-	// its available FUTURES balance, as last read.
+	// Position and Futures are its signed position on the first perpetual
+	// and its available FUTURES balance in USDT, as last read; Positions
+	// its positions by perpetual, FuturesBy its FUTURES balances by
+	// settlement asset.
 	Position, Futures decimal.Decimal
+	Positions         map[string]decimal.Decimal
+	FuturesBy         map[string]decimal.Decimal
 	Error             string
 	ErrorAt           time.Time
 	// RetryAt is when the bot places orders again after a refusal (zero:
@@ -872,7 +870,13 @@ func (s *Sim) Status() Status {
 	for g, n := range s.guards {
 		st.Guards[g] = n
 	}
-	st.Perp, st.PerpOn = s.cfg.Perp, s.perpRunning
+	perps := s.perpetuals()
+	for i, k := range perps {
+		if i == 0 {
+			st.Perp, st.PerpOn = k.symbol, k.running
+		}
+		st.Perps = append(st.Perps, PerpStatus{Symbol: k.symbol, SettleAsset: k.settleAsset(), On: k.running})
+	}
 	st.Anchor, st.Band, st.Center, st.Walking = s.anchor(), s.pair.Band, s.center, s.walking
 	st.LastTradeAt, st.Deadlocks, st.DeadlockAt = s.lastTradeAt, s.deadlocks, s.deadlockAt
 	for _, b := range s.bots {
@@ -880,8 +884,18 @@ func (s *Sim) Status() Status {
 		if s.round.Before(b.retryAt) {
 			bs.RetryAt = b.retryAt
 		}
-		if pb, ok := s.perpBots[b.UserID]; ok {
-			bs.Position, bs.Futures = pb.position, pb.futures
+		for i, k := range perps {
+			pb, ok := k.bots[b.UserID]
+			if !ok {
+				continue
+			}
+			if bs.Positions == nil {
+				bs.Positions, bs.FuturesBy = map[string]decimal.Decimal{}, map[string]decimal.Decimal{}
+			}
+			bs.Positions[k.symbol], bs.FuturesBy[k.settleAsset()] = pb.position, pb.futures
+			if i == 0 {
+				bs.Position, bs.Futures = pb.position, pb.futures
+			}
 		}
 		st.Bots = append(st.Bots, bs)
 	}

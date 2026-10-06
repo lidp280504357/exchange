@@ -22,14 +22,19 @@
 #                                 more for the bots (ASTRA by default), spread
 #                                 evenly, audited (ledger adjustments).
 #   scripts/ops/astra.sh on|off   switch the bots (flag sim.enabled).
-#   scripts/ops/astra.sh perp-open
-#                                 ASTRA-USDT-PERP moves from PREPARE to
-#                                 TRADING (its index is the platform's
-#                                 ASTRA-USDT; HOUSE does not quote it).
-#   scripts/ops/astra.sh perp-on|perp-off
-#                                 switch the bots on the perpetual (flag
-#                                 sim.perp); they top up their margin from
-#                                 their spot USDT.
+#   scripts/ops/astra.sh perp-open [SYMBOL]
+#                                 a perpetual moves from PREPARE to TRADING:
+#                                 ASTRA-USDT-PERP by default, or the
+#                                 coin-margined ASTRA-USD-PERP (design
+#                                 2026-10-06 G2; after the coordinator's
+#                                 C39 gate). Their index is the platform's
+#                                 ASTRA-USDT; HOUSE does not quote them.
+#   scripts/ops/astra.sh perp-on [SYMBOL...]|perp-off
+#                                 switch the bots on the perpetuals named
+#                                 (flag sim.perp; ASTRA-USDT-PERP by
+#                                 default; the list replaces the one
+#                                 before); they top up their margin from
+#                                 their spot USDT, ASTRA for ASTRA-USD-PERP.
 #   scripts/ops/astra.sh events-on|events-off
 #                                 allow the operators' price events (flag
 #                                 sim.events).
@@ -152,10 +157,13 @@ off)
   ctl market-sim flags set sim.enabled --off --reason "the simulated market's bots stop (astra.sh off)" </dev/null
   ;;
 perp-open)
-  ctl instrument-service instruments contract-status "$PERP" --to TRADING --reason "ASTRA-USDT-PERP opens (design 2026-10-02 batch A4)" </dev/null
+  perp=${2:-$PERP}
+  ctl instrument-service instruments contract-status "$perp" --to TRADING --reason "$perp opens (ASTRA design batch A4; coin-margined: design 2026-10-06 G2)" </dev/null
   ;;
 perp-on)
-  ctl market-sim flags set sim.perp --on --allow-symbols "$PERP" --reason "the bots make the platform coin's perpetual (astra.sh perp-on)" </dev/null
+  shift
+  perps=$(IFS=,; echo "${*:-$PERP}")
+  ctl market-sim flags set sim.perp --on --allow-symbols "$perps" --reason "the bots make the platform coin's perpetuals $perps (astra.sh perp-on)" </dev/null
   ;;
 perp-off)
   ctl market-sim flags set sim.perp --off --reason "the bots leave the perpetual (astra.sh perp-off)" </dev/null

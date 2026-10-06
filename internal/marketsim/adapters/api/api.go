@@ -344,16 +344,20 @@ func (c *Client) Mark(ctx context.Context, symbol string) (mark, index decimal.D
 	return parse(body.MarkPrice), parse(body.IndexPrice), nil
 }
 
-// Contract reads the contract's rules from instrument-service.
+// Contract reads the contract's rules from instrument-service, with its
+// face value and settlement asset (G0's contract; USDT and no face value
+// before it).
 func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, error) {
 	var k struct {
-		Symbol      string `json:"symbol"`
-		TickSize    string `json:"tick_size"`
-		LotSize     string `json:"lot_size"`
-		MinQuantity string `json:"min_quantity"`
-		MinNotional string `json:"min_notional"`
-		PriceBand   string `json:"price_band"`
-		Status      string `json:"status"`
+		Symbol       string `json:"symbol"`
+		TickSize     string `json:"tick_size"`
+		LotSize      string `json:"lot_size"`
+		MinQuantity  string `json:"min_quantity"`
+		MinNotional  string `json:"min_notional"`
+		PriceBand    string `json:"price_band"`
+		Status       string `json:"status"`
+		ContractSize string `json:"contract_size"`
+		SettleAsset  string `json:"settle_asset"`
 	}
 	if err := c.do(ctx, http.MethodGet, c.InstrumentURL+"/v1/market/contracts/"+url.PathEscape(symbol), "", nil, &k); err != nil {
 		return domain.Pair{}, fmt.Errorf("contract %s: %w", symbol, err)
@@ -369,9 +373,21 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, erro
 	if !ds[0].IsPositive() || !ds[1].IsPositive() {
 		return domain.Pair{}, fmt.Errorf("contract %s: no tick or lot size", symbol)
 	}
+	size := decimal.Zero
+	if k.ContractSize != "" {
+		v, err := decimal.NewFromString(k.ContractSize)
+		if err != nil || v.IsNegative() {
+			return domain.Pair{}, fmt.Errorf("contract %s: bad contract size %q", symbol, k.ContractSize)
+		}
+		size = v
+	}
+	settle := k.SettleAsset
+	if settle == "" {
+		settle = "USDT"
+	}
 	return domain.Pair{
 		Symbol: k.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(k.PriceBand), Status: k.Status,
-		Trading: k.Status == "TRADING",
+		Trading: k.Status == "TRADING", ContractSize: size, SettleAsset: settle,
 	}, nil
 }
 
@@ -471,20 +487,20 @@ func (c *Client) Position(ctx context.Context, user, symbol string) (decimal.Dec
 	return total, nil
 }
 
-// Futures returns the bot's available FUTURES balance.
-func (c *Client) Futures(ctx context.Context, user string) (decimal.Decimal, error) {
+// Futures returns the bot's available FUTURES balance in asset.
+func (c *Client) Futures(ctx context.Context, user, asset string) (decimal.Decimal, error) {
 	var body struct {
 		Available string `json:"available"`
 	}
-	if err := c.do(ctx, http.MethodGet, c.DerivativesURL+"/v1/derivatives/account", user, nil, &body); err != nil {
-		return decimal.Zero, fmt.Errorf("futures account: %w", err)
+	if err := c.do(ctx, http.MethodGet, c.DerivativesURL+"/v1/derivatives/account?"+url.Values{"asset": {asset}}.Encode(), user, nil, &body); err != nil {
+		return decimal.Zero, fmt.Errorf("futures account %s: %w", asset, err)
 	}
 	return decimal.NewFromString(body.Available)
 }
 
-// ToFutures moves USDT from the bot's SPOT account to its FUTURES account.
-func (c *Client) ToFutures(ctx context.Context, user string, amount decimal.Decimal, key string) error {
-	body := map[string]string{"asset": "USDT", "amount": amount.String(), "from_account_type": "SPOT", "to_account_type": "FUTURES"}
+// ToFutures moves asset from the bot's SPOT account to its FUTURES account.
+func (c *Client) ToFutures(ctx context.Context, user, asset string, amount decimal.Decimal, key string) error {
+	body := map[string]string{"asset": asset, "amount": amount.String(), "from_account_type": "SPOT", "to_account_type": "FUTURES"}
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err

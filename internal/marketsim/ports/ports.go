@@ -55,9 +55,12 @@ type Trading interface {
 }
 
 // Derivatives is the platform's contract trading as a bot uses it (one-way
-// positions, the contract's default settings).
+// positions, the contract's default settings), linear contracts settled in
+// USDT and coin-margined ones settled in their coin (quantities in whole
+// contracts).
 type Derivatives interface {
-	// Contract reads the contract's rules and whether it trades.
+	// Contract reads the contract's rules, its face value and settlement
+	// asset, and whether it trades.
 	Contract(ctx context.Context, symbol string) (domain.Pair, error)
 	// OpenContract lists the bot's active orders on the contract.
 	OpenContract(ctx context.Context, user, symbol string) ([]domain.Order, error)
@@ -75,11 +78,12 @@ type Derivatives interface {
 	// Position returns the bot's signed position on the contract (long
 	// positive).
 	Position(ctx context.Context, user, symbol string) (decimal.Decimal, error)
-	// Futures returns the bot's available FUTURES balance.
-	Futures(ctx context.Context, user string) (decimal.Decimal, error)
-	// ToFutures moves amount of USDT from the bot's SPOT account to its
+	// Futures returns the bot's available FUTURES balance in asset (a
+	// contract's settlement asset).
+	Futures(ctx context.Context, user, asset string) (decimal.Decimal, error)
+	// ToFutures moves amount of asset from the bot's SPOT account to its
 	// FUTURES account; key makes a retry safe.
-	ToFutures(ctx context.Context, user string, amount decimal.Decimal, key string) error
+	ToFutures(ctx context.Context, user, asset string, amount decimal.Decimal, key string) error
 }
 
 // Prices reads the reference market's prices and the platform's market

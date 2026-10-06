@@ -32,9 +32,9 @@ const (
 	Sell Side = "SELL"
 )
 
-// Pair is what the bots need of the pair they trade: its rules, its price
-// band (a share of the anchor a limit price may be off; 0: none) and
-// whether it trades.
+// Pair is what the bots need of the pair or contract they trade: its
+// rules, its price band (a share of the anchor a limit price may be off;
+// 0: none) and whether it trades.
 type Pair struct {
 	Symbol        string
 	Tick, Lot     decimal.Decimal
@@ -44,7 +44,30 @@ type Pair struct {
 	Band          float64
 	Status        string
 	Trading       bool
+	// ContractSize is a coin-margined contract's face value in USD, its
+	// quantities whole contracts (design 2026-10-06 §2.1); zero for a pair
+	// and a linear contract, whose quantities are the base asset.
+	ContractSize decimal.Decimal
+	// SettleAsset is a contract's margin and settlement asset: the quote
+	// (USDT) for a linear one, the base asset for a coin-margined one.
+	SettleAsset string
 }
+
+// Inverse reports a coin-margined contract.
+func (p Pair) Inverse() bool { return p.ContractSize.IsPositive() }
+
+// unit is what one of the pair's quantity is worth at price, in the quote
+// (USD): the price, or a coin-margined contract's face value.
+func (p Pair) unit(price decimal.Decimal) decimal.Decimal {
+	if p.Inverse() {
+		return p.ContractSize
+	}
+	return price
+}
+
+// Notional is what qty is worth at price in the quote (USD): qty × price,
+// or qty contracts × the face value.
+func (p Pair) Notional(qty, price decimal.Decimal) decimal.Decimal { return qty.Mul(p.unit(price)) }
 
 // Order is one of a bot's open orders.
 type Order struct {
@@ -102,20 +125,22 @@ func Diff(open []Order, bids, asks []decimal.Decimal) (cancel []Order, placeBids
 	return cancel, want[Buy], want[Sell]
 }
 
-// Quantity is how much of the base a worth (in the quote) buys at price,
+// Quantity is how much of the base a worth (in the quote) buys at price
+// (for a coin-margined contract, how many contracts of its face value),
 // down to the lot, at least the pair's minimum quantity and notional; zero
 // when the price is not positive.
 func Quantity(worth float64, price decimal.Decimal, pair Pair) decimal.Decimal {
-	if !price.IsPositive() || worth <= 0 {
+	unit := pair.unit(price)
+	if !price.IsPositive() || !unit.IsPositive() || worth <= 0 {
 		return decimal.Zero
 	}
-	q := decimal.NewFromFloat(worth).Div(price)
+	q := decimal.NewFromFloat(worth).Div(unit)
 	if pair.Lot.IsPositive() {
 		q = q.Div(pair.Lot).Floor().Mul(pair.Lot)
 	}
 	q = decimal.Max(q, pair.MinQty)
-	if pair.MinNotional.IsPositive() && q.Mul(price).LessThan(pair.MinNotional) {
-		need := pair.MinNotional.Div(price)
+	if pair.MinNotional.IsPositive() && q.Mul(unit).LessThan(pair.MinNotional) {
+		need := pair.MinNotional.Div(unit)
 		if pair.Lot.IsPositive() {
 			need = need.Div(pair.Lot).Ceil().Mul(pair.Lot)
 		}
