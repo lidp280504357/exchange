@@ -50,7 +50,9 @@ type CapsRecord struct {
 var ErrCapsVersion = apperr.New(apperr.KindConflict, "HOUSE_CAPS_VERSION", "the caps changed meanwhile: read them again")
 
 // Validate checks a change: an actor and a reason, every cap a decimal
-// not below zero (a level cap of zero leaves the levels whole).
+// not below zero (a level cap of zero leaves the levels whole), the
+// contract leverage above it (zero would stop every contract quietly;
+// market.house_liquidity does that openly).
 func (c CapsChange) Validate() error {
 	switch {
 	case c.Actor == "":
@@ -59,6 +61,8 @@ func (c CapsChange) Validate() error {
 		return apperr.Invalid("reason is required")
 	case c.Version <= 0:
 		return apperr.Invalid("version is required: the version of the caps being changed")
+	case !c.Caps.ContractLeverage.IsPositive():
+		return apperr.Invalid("contract_leverage must be above zero")
 	}
 	for name, v := range c.Caps.fields() {
 		if v.IsNegative() {

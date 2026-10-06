@@ -128,6 +128,9 @@ func TestTheCapsAPI(t *testing.T) {
 	if code, _ = serve(t, r, http.MethodPut, "/internal/house/caps", `{"level":"-1","version":2,"actor":"a","reason":"r"}`); code != 400 {
 		t.Fatalf("below zero: %d", code)
 	}
+	if code, _ = serve(t, r, http.MethodPut, "/internal/house/caps", `{"contract_leverage":"0","version":2,"actor":"a","reason":"r"}`); code != 400 {
+		t.Fatalf("no leverage: %d", code)
+	}
 	if code, got = serve(t, r, http.MethodGet, "/internal/house/caps/changes", ""); code != 200 || len(got["items"].([]any)) != 1 {
 		t.Fatalf("changes: %d %v", code, got)
 	}
