@@ -407,8 +407,8 @@ try {
   await clickButton("取消", "[role=dialog]");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   await clickButton("保险基金", "main");
-  await page.waitForSelector('main table[aria-label="insurance funds"] tbody tr');
-  const funds = await page.$$eval('main table[aria-label="insurance funds"] tbody tr', (rows) => rows.map((r) => r.cells[0]?.innerText.trim()));
+  await page.waitForSelector('main table[aria-label="insurance funds"] tbody tr[data-row-id]');
+  const funds = await page.$$eval('main table[aria-label="insurance funds"] tbody tr[data-row-id]', (rows) => rows.map((r) => r.dataset.rowId));
   if (funds[0] !== "USDT" || !funds.includes("BTC")) throw new Error(`the insurance funds are ${JSON.stringify(funds)}`);
   await page.click('main button[role=combobox][aria-label="资产"]');
   await page.waitForSelector("[role=option]");

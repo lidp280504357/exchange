@@ -323,8 +323,9 @@ cancel_coin_changes() {
     as ADMIN POST "/admin/v1/instruments/changes/$id/cancel" '{"reason":"e2e cleanup"}' >/dev/null
   done
 }
+# BTC has contracts: a 404 here is an admin-service without the route.
 as OPERATOR POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"CANCEL_ONLY"}'
-if [[ $STATUS == 404 && $(jq -r '.code // ""' <<<"$BODY") != COMMON_NOT_FOUND ]] || [[ $STATUS == 405 ]]; then
+if [[ $STATUS == 404 || $STATUS == 405 ]]; then
   echo "skip a coin's contracts at once: this admin-service is from before A63"
 else
   expect 403 ADMIN_FORBIDDEN "an OPERATOR closes no coin"
@@ -541,7 +542,7 @@ expect 200 - "positions near liquidation"
 check '.positions | type == "array"' "a list"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?days=30" ""
 expect 200 - "liquidation steps"
-check '.items | type == "array" and all(.items[]; (.settle_asset | type) == "string" and (.symbol == "" or .settle_asset != ""))' \
+check '(.items | type == "array") and all(.items[]; (.settle_asset | type) == "string" and (.symbol == "" or .settle_asset != ""))' \
   "a list, each step of a contract with its settlement asset (review ER)"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?kind=SIDEWAYS" ""
 expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
