@@ -12,6 +12,7 @@ export default {
     overview: "市場概覽",
     searchHint: "搜尋幣種",
     perpetual: "永續",
+    allFutures: "全部合約",
     testMode: "測試模式",
   },
 };
