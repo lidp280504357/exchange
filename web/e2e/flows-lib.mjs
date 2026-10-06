@@ -573,6 +573,43 @@ export function decimalIssues(where, rows, want) {
   return out;
 }
 
+/**
+ * coinMarginCleared leaves the account as a coin-margined step found it
+ * (review FE, B128): a position it left open on symbol (it failed before
+ * closing it) closes at the market, and what asset's futures account may
+ * transfer goes back to spot.
+ */
+export async function coinMarginCleared(base, who, symbol, asset) {
+  const token = await signInApi(base, who);
+  const auth = { Authorization: `Bearer ${token}` };
+  for (const until = Date.now() + 20_000; ; ) {
+    const res = await api(base, "GET", `/v1/derivatives/positions?symbol=${symbol}`, undefined, auth);
+    const open = (res.body?.positions ?? []).filter((x) => Number(x.quantity) !== 0);
+    if (!open.length) break;
+    if (Date.now() > until) throw new Error(`${symbol}: still open after closing at the market: ${open.map((x) => x.quantity).join(", ")}`);
+    for (const x of open) {
+      const long = !x.quantity.startsWith("-");
+      await api(
+        base,
+        "POST",
+        "/v1/derivatives/orders",
+        { symbol, side: long ? "SELL" : "BUY", type: "MARKET", quantity: x.quantity.replace(/^-/, ""), position_side: x.position_side, reduce_only: x.position_side === "BOTH" || undefined },
+        { ...auth, "Idempotency-Key": `flows-clear-${symbol}-${Date.now()}` },
+      );
+    }
+    await sleep(2000);
+  }
+  const account = await api(base, "GET", `/v1/derivatives/account?asset=${asset}`, undefined, auth);
+  const amount = account.body?.transferable;
+  if (amount && Number(amount) > 0) {
+    const t = await api(base, "POST", "/v1/account/transfers", { asset, amount, from_account_type: "FUTURES", to_account_type: "SPOT" }, {
+      ...auth,
+      "Idempotency-Key": `flows-clear-${asset}-${Date.now()}`,
+    });
+    if (t.status !== 201) throw new Error(`moving ${amount} ${asset} back to spot: ${t.status} ${JSON.stringify(t.body)}`);
+  }
+}
+
 /** api calls the user API: {status, body}. */
 export async function api(base, method, path, body, headers = {}) {
   const res = await fetch(base + path, {

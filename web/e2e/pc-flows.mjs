@@ -12,7 +12,7 @@
 // emulation), an expired access token, a degraded mark price. Steps that
 // fail leave screenshots and a log (flows-lib.mjs).
 import {
-  api, budgetBuy, cancelOrders, colorsOf, contrastIssues, decimalIssues, desktop, flows, fmtTime, listDecimals, longAnimations, overflowX, PHONE_IOS,
+  api, budgetBuy, cancelOrders, coinMarginCleared, colorsOf, contrastIssues, decimalIssues, desktop, flows, fmtTime, listDecimals, longAnimations, overflowX, PHONE_IOS,
   register, scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
 import { menuOnTop } from "./lib.mjs";
@@ -1054,11 +1054,19 @@ else await f.step("P9", P9, async () => {
 // contract at the market and closes it from its position card.
 const G4 =
   "a coin-margined contract: BTC moves to its own futures account; BTC-USD-PERP takes whole contracts and shows their BTC and USD worth; a 1-contract long shows in contracts with its value, and closes from its card";
-const coinContract = await api(API, "GET", "/v1/market/contracts/BTC-USD-PERP");
-if (NO_FUNDS()) f.skip("G4", G4, NO_FUNDS());
-else if (coinContract.status !== 200 || coinContract.body.status !== "TRADING") {
-  f.skip("G4", G4, `BTC-USD-PERP is not trading (${coinContract.status} ${coinContract.body?.status ?? ""})`);
-} else await f.step("G4", G4, async () => {
+// Why G4 cannot run now, or "": the contract trades and the account still
+// has the USDT it spends (the earlier steps spend some; review FE, B128).
+async function coinClosed() {
+  const c = await api(API, "GET", "/v1/market/contracts/BTC-USD-PERP");
+  if (c.status !== 200 || c.body.status !== "TRADING") return `BTC-USD-PERP is not trading (${c.status} ${c.body?.status ?? ""})`;
+  if (Number(await spotAvailable(API, await signInApi(API, user), "USDT")) < 45) return "the account has under 45 USDT (no welcome funds?)";
+  return "";
+}
+const noCoin = await coinClosed();
+if (noCoin) f.skip("G4", G4, noCoin);
+else await f.step("G4", G4, async () => {
+  // A failure leaves no position, and the BTC goes back to spot either way.
+  f.atExit(() => coinMarginCleared(API, user, "BTC-USD-PERP", "BTC"));
   const token = await signInApi(API, user);
   const auth = { Authorization: `Bearer ${token}` };
   const buy = await api(API, "POST", "/v1/orders", { symbol: "BTC-USDT", side: "BUY", type: "MARKET", quote_amount: "40" }, { ...auth, "Idempotency-Key": `pcflows-g4-${run}` });

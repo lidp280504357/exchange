@@ -13,7 +13,7 @@
 // (flows-lib.mjs); real devices, iOS autofill and how a gesture feels stay
 // on the manual list.
 import {
-  api, budgetBuy, cancelOrders, code, colorsOf, contrastIssues, decimalIssues, flows, fmtTime, inboxCount, listDecimals, longAnimations, overflowX,
+  api, budgetBuy, cancelOrders, code, coinMarginCleared, colorsOf, contrastIssues, decimalIssues, flows, fmtTime, inboxCount, listDecimals, longAnimations, overflowX,
   PHONE_ANDROID, PHONE_IOS, phone, register, scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, textAligned, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
 
@@ -864,6 +864,8 @@ async function coinClosed() {
 const noCoin = await coinClosed();
 if (noCoin) f.skip("G4", G4, noCoin);
 else await f.step("G4", G4, async () => {
+  // A failure leaves no position, and the BTC goes back to spot either way (review FE, B128).
+  f.atExit(() => coinMarginCleared(API, user, "BTC-USD-PERP", "BTC"));
   const token = await signInApi(API, user);
   const auth = { Authorization: `Bearer ${token}` };
   const buy = await api(API, "POST", "/v1/orders", { symbol: "BTC-USDT", side: "BUY", type: "MARKET", quote_amount: "40" }, { ...auth, "Idempotency-Key": `mflows-g4-${run}` });
