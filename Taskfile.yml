@@ -96,7 +96,7 @@ tasks:
       - scripts/ops/lock.sh run --owner "task e2e" -- bash -c 'for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done'
 
   fault:
-    desc: 对测试环境做故障注入（Redpanda、ClickHouse、Redis 停机与 PostgreSQL 重启），每项会中断服务约半分钟，结束时恢复；持运维锁
+    desc: 对测试环境做故障注入（scripts/fault/*.sh：Redpanda、ClickHouse、Redis 停机与 PostgreSQL 重启各中断约半分钟；撮合主备、链节点、参考行情、合约降级、托管回调、模拟市场停机、杠杆强平各约三到五分钟——杠杆强平用一次运营价格事件把 ASTRA 压低 20%，对整个平台生效，占一小时内单人调价额度，之后一小时 astra.sh 的调价跳过），结束时恢复；持运维锁
     cmds:
       - scripts/ops/lock.sh run --owner "task fault" -- bash -c 'for f in scripts/fault/*.sh; do echo "### $f"; bash "$f" || exit 1; done'
 

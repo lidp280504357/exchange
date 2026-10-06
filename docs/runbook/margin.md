@@ -138,7 +138,7 @@ admin-service 经 margin-service 的 HTTP 端口调 `/internal/margin/*`（协�
 ## 测试服设置
 
 - `margin.enabled` 已于 2026-10-06 07:06（北京时间；UTC 10-05 23:06:48）对所有人打开：审查 CR ③ 的条件是 C11 部署（7039fc5）且 margin.sh 通过（65 项），条件满足后由本会话持运维锁打开（理由写在开关历史里）。`margin.auto_borrow` 依协调会话 07:40 的决定 ③ 于 2026-10-06 08:39（北京时间；UTC 00:39:36）在 E3（42a96e7）部署、margin.sh 通过（75 项）后同样对所有人打开；上线前两者都要回到按用户或地区的规则。`margin.liquidation` 仍关着，只由脚本按用户临时打开。
-- 故障演练：`scripts/fault/margin-liquidation.sh`（`task fault` 包含）——新用户全仓 100 USDT 自动借币买入约 210 USDT 的 ASTRA（风险率约 1.34），运营价格事件把 ASTRA 压低 20%，监控预警、连续两轮到强平线后自动强平（`margin.liquidation` 只对该用户打开）：ASTRA 卖给模拟市场、收费、还清、账户回到 NORMAL，结束时价格与开关都还原。要模拟市场的机器人与价格事件开着，并且一小时内单人还有 45% 的调价额度（否则跳过，同 astra.sh）。
+- 故障演练：`scripts/fault/margin-liquidation.sh`（`task fault` 包含）——新用户全仓 100 USDT 自动借币买入约 210 USDT 的 ASTRA（风险率约 1.33），运营价格事件把 ASTRA 压低 20%：收件箱出现 `MARGIN_WARNED`，监控连续两轮到强平线后自动强平（三个开关只对该用户打开）：只卖够负债与强平费的 ASTRA、保险基金恰好收到强平费且没有付出（按该用户的分录核对）、跌价前欠的 USDT 还清、账户回到 NORMAL、`MARGIN_LIQUIDATED` 到达；中途 `SHORTFALL` 或还款被拒立即判失败。结束时价格与开关还原，任一还原失败都判失败并给出手工命令（审查 DH 的 C20）。**跌价对整个平台生效**：所有带负债、持 ASTRA 的杠杆账户都可能被预警并收到邮件（跌价前列出个数），ASTRA 永续上的仓位可能被强平或减仓且回调不撤销——除模拟市场机器人外有人持仓时跳过。要模拟市场在运行、价格事件开着，并且一小时内没有过调价（占单人一小时额度约 45%，之后一小时 astra.sh 的调价跳过）。有人值守时跑完看一眼 `scripts/ops/astra.sh status`。
 - 端到端：`scripts/e2e/margin.sh`（`task e2e` 包含）。它持运维锁，注册的用户拿到 user_id 后把这两个开关**只对这个用户**打开（加进开关的 `allow-users`，开关原本已对所有人打开时不动），结束时（含失败）还原成原来的状态；单独运行时自己取锁。
 
 ## 常用命令
