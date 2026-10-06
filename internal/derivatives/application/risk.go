@@ -194,7 +194,7 @@ func (s *Service) warnPosition(ctx context.Context, p domain.Position, balance, 
 		s.step("warning")
 		return r.Emit(ctx, event.TopicDerivLiquidation, &derivativesv1.LiquidationWarning{
 			UserId: p.UserID, Symbol: p.Symbol, PositionSide: string(p.Side), MarginBalance: balance.String(),
-			MaintenanceMargin: maintenance.String(), At: timestamppb.New(s.Now()), SettleAsset: c.Settle(),
+			MaintenanceMargin: maintenance.String(), At: timestamppb.New(s.Now()), SettleAsset: c.Settle(), Direction: direction(cur),
 		}, "user", p.UserID)
 	})
 }
@@ -401,15 +401,43 @@ func liquidationEvent(c domain.Contract, o domain.Order, f domain.Fill, liquidat
 		return &derivativesv1.LiquidationFilled{
 			UserId: f.UserID, Symbol: f.Symbol, PositionSide: string(f.PositionSide), TradeId: f.TradeID, Price: f.Price.String(),
 			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), InsurancePaid: f.Insurance.String(), Adl: o.Kind == domain.KindADL,
-			SettleAsset: c.Settle(),
+			SettleAsset: c.Settle(), Direction: closedDirection(f),
 		}
 	case o.Kind == domain.KindADL:
 		return &derivativesv1.AdlExecuted{
 			UserId: f.UserID, Symbol: f.Symbol, PositionSide: string(f.PositionSide), TradeId: f.TradeID, Price: f.Price.String(),
-			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), SettleAsset: c.Settle(), ContractSize: c.ContractSize.String(),
+			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), SettleAsset: c.Settle(), ContractSize: sizeOf(c),
+			Direction: closedDirection(f),
 		}
 	}
 	return nil
+}
+
+// direction is LONG or SHORT for a position, which position_side does not
+// tell in one-way mode (BOTH; review FS, C49): by its quantity's sign;
+// empty when flat.
+func direction(p domain.Position) string {
+	switch {
+	case p.Side == domain.SideLong || p.Side == domain.SideShort:
+		return string(p.Side)
+	case p.Qty.IsPositive():
+		return string(domain.SideLong)
+	case p.Qty.IsNegative():
+		return string(domain.SideShort)
+	}
+	return ""
+}
+
+// closedDirection is the direction of the position a liquidation or ADL
+// fill closed: a sell closes a long, a buy a short.
+func closedDirection(f domain.Fill) string {
+	switch {
+	case f.PositionSide == domain.SideLong || f.PositionSide == domain.SideShort:
+		return string(f.PositionSide)
+	case f.Side == domain.Sell:
+		return string(domain.SideLong)
+	}
+	return string(domain.SideShort)
 }
 
 func (s *Service) step(name string) {

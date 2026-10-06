@@ -329,13 +329,23 @@ func TestAnUnfillableCoinMarginedLiquidationIsDeleveraged(t *testing.T) {
 		return
 	}
 	var adl *derivativesv1.AdlExecuted
+	var filled *derivativesv1.LiquidationFilled
 	for _, e := range events {
 		if a, ok := e.(*derivativesv1.AdlExecuted); ok && a.GetUserId() == alice {
 			adl = a
 		}
+		if f, ok := e.(*derivativesv1.LiquidationFilled); ok && f.GetUserId() == bob && f.GetAdl() {
+			filled = f
+		}
 	}
-	if adl == nil || adl.GetContractSize() != "100" || adl.GetSettleAsset() != "BTC" || adl.GetQuantity() != "250" {
+	// One-way positions (BOTH): the events say which way each went (review
+	// FS, C49).
+	if adl == nil || adl.GetContractSize() != "100" || adl.GetSettleAsset() != "BTC" || adl.GetQuantity() != "250" ||
+		adl.GetPositionSide() != "BOTH" || adl.GetDirection() != "SHORT" {
 		t.Fatalf("alice's AdlExecuted %v", adl)
+	}
+	if filled == nil || filled.GetDirection() != "LONG" {
+		t.Fatalf("bob's LiquidationFilled %v", filled)
 	}
 }
 

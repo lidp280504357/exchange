@@ -135,6 +135,10 @@ message LiquidationWarning {
   // The asset of the margin balance: the cross account's or the
   // position's settlement asset; from batch G1.
   string settle_asset = 8;
+  // LONG or SHORT: the isolated position's direction, which position_side
+  // (BOTH in one-way mode) does not tell; empty for the cross account
+  // (review FS, C49).
+  string direction = 9;
 }
 
 // LiquidationStarted: the liquidation engine took a position over (its
@@ -164,6 +168,8 @@ message LiquidationFilled {
   bool adl = 9;
   // The asset realized_pnl and insurance_paid are in; from batch G1.
   string settle_asset = 10;
+  // LONG or SHORT: the direction of the position the fill closed (C49).
+  string direction = 11;
 }
 
 // AdlExecuted: an auto-deleveraging closed part of a counterparty's
@@ -179,7 +185,10 @@ message AdlExecuted {
   // The asset realized_pnl is in; from batch G1.
   string settle_asset = 8;
   // A coin-margined contract's face value in USD, quantity being whole
-  // contracts; "0" for a linear one (as on Position and FillSettled;
-  // review FG, B133: the notices name the unit).
+  // contracts; empty for a linear one, as on FillSettled (review FG,
+  // B133: the notices name the unit).
   string contract_size = 9;
+  // LONG or SHORT: the direction of the position deleveraged, which
+  // position_side (BOTH in one-way mode) does not tell (review FS, C49).
+  string direction = 10;
 }
