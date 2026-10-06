@@ -62,10 +62,15 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
   }, bypass);
   page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
   // The pushes of the channels in PUSH_SCHEMAS, from the page's WebSocket
-  // frames, each checked against its schema.
+  // frames, each checked against its schema; and the channels the server
+  // confirmed the page's subscription to (on its latest connection: a
+  // margin account is pushed as it changes, not replayed to a page that
+  // subscribed after).
   const pushes = [];
+  const subscribed = new Set();
   const cdp = await page.createCDPSession();
   await cdp.send("Network.enable");
+  cdp.on("Network.webSocketCreated", () => subscribed.clear());
   cdp.on("Network.webSocketFrameReceived", ({ response }) => {
     let m;
     try {
@@ -73,6 +78,7 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
     } catch {
       return;
     }
+    if (m?.op === "subscribe" && m.ok === true && Array.isArray(m.args)) for (const a of m.args) subscribed.add(a);
     const schema = PUSH_SCHEMAS[m?.channel];
     if (!schema || m.data === undefined) return;
     pushes.push(m);
@@ -129,6 +135,11 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
       return true;
     },
     shot: (label) => (shots ? page.screenshot({ path: `${shots}/${name}-${label}.png`, fullPage: false }) : undefined),
+    /** waitSubscribed waits up to timeout ms for the server to confirm the page's subscription to channel. */
+    async waitSubscribed(channel, timeout = 20000) {
+      for (const end = Date.now() + timeout; Date.now() < end; await sleep(100)) if (subscribed.has(channel)) return;
+      throw new Error(`the page was not subscribed to ${channel} within ${timeout / 1000} s`);
+    },
     /** waitPush waits up to timeout ms for a push (of a channel in PUSH_SCHEMAS) that pred accepts, and returns it. */
     async waitPush(pred, timeout = 15000, what = "the push") {
       for (const end = Date.now() + timeout; Date.now() < end; await sleep(250)) {

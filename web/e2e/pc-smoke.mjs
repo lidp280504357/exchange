@@ -241,6 +241,8 @@ try {
       await waitText(done);
       await page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
     };
+    // The push of the account comes once, to the pages subscribed by then.
+    await t.waitSubscribed("margin");
     await marginTransfer("IN", "10", "已划入 10 USDT");
     await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] tbody')?.innerText.includes("USDT"), { timeout: 20000 });
     // margin-service publishes the account it changed (margin.accounts), the
