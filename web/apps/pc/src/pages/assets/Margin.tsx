@@ -1,5 +1,5 @@
 import { dec, enumLabel, errorText, formatAmount, formatPercent, formatPrice } from "@exchange/core";
-import { useIdleImport } from "@exchange/core/idle";
+import { preloadable, useIdleImport } from "@exchange/core/idle";
 import { useMarginAccounts, useMarginAssets, useMarginOpen } from "@exchange/core/margin/hooks";
 import type { MarginActionKind, MarginFormInit } from "@exchange/core/margin/form";
 import { hasDebt, isEmpty, type MarginAccount, type MarginAsset, type MarginBalance } from "@exchange/core/margin/math";
@@ -20,7 +20,7 @@ import {
 } from "@exchange/ui";
 import { ArrowLeftRight, HandCoins, Plus, Undo2 } from "lucide-react";
 import { motion } from "motion/react";
-import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AssetsLayout, Card } from "./parts/AssetsLayout";
 import { shownDecimals, useAssetMeta, type AssetMeta } from "./parts/meta";
@@ -28,9 +28,8 @@ import { Notice, reasonText } from "./parts/Notice";
 
 // The transfer, borrow and repay dialog is not on the page's first screen
 // (its form: fields, selects, number inputs, B108): it loads once the page
-// is idle, ready before it is opened.
-const loadDialog = () => import("./parts/MarginDialog");
-const MarginDialog = lazy(() => loadDialog().then((m) => ({ default: m.MarginDialog })));
+// is idle and opens at once after (B114).
+const MarginDialog = preloadable(() => import("./parts/MarginDialog"), (m) => m.MarginDialog);
 
 type Act = (kind: MarginActionKind, init?: MarginFormInit) => void;
 
@@ -45,7 +44,7 @@ const statusTones = { NORMAL: "success", WARNED: "warn", LIQUIDATING: "danger", 
  * stay available. Accounts refresh every few seconds.
  */
 export default function Margin() {
-  useIdleImport(loadDialog);
+  useIdleImport(MarginDialog.preload);
   const { t } = useTranslation();
   const open = useMarginOpen();
   const accounts = useMarginAccounts();

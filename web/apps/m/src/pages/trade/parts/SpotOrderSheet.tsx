@@ -3,7 +3,7 @@ import {
   selectSignedIn, tradable, unwrap, useAssets, useSession, useSettings, useTerminalPrefs, useTicker, type NewOrder, type Pair,
 } from "@exchange/core";
 import type { MarginActionKind } from "@exchange/core/margin/form";
-import { useIdleImport } from "@exchange/core/idle";
+import { preloadable, useIdleImport } from "@exchange/core/idle";
 import { useMaxBorrowable } from "@exchange/core/margin/hooks";
 import {
   afterMarginOrder, freezeAsset, tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount,
@@ -13,18 +13,17 @@ import {
   type PairRules,
 } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { TextButton } from "../../assets/parts/bits";
 
 type Balance = { account_type: string; asset: string; available: string };
 
-// The margin sheets come with the assets pages' forms: loaded on first
-// use, not with the terminal (review CS ①).
-// The margin sheet loads once the order sheet is idle on a margin account.
-const loadMarginSheet = () => import("../../assets/parts/MarginSheet");
-const MarginSheet = lazy(() => loadMarginSheet().then((m) => ({ default: m.MarginSheet })));
+// The margin sheets come with the assets pages' forms, not with the
+// terminal (review CS ①): the sheet loads once the order sheet is idle on
+// a margin account and opens at once after (B108, B114).
+const MarginSheet = preloadable(() => import("../../assets/parts/MarginSheet"), (m) => m.MarginSheet);
 
 function spotAvailable(list: Balance[] | undefined, asset: string): string {
   return list?.find((b) => b.account_type === "SPOT" && b.asset === asset)?.available ?? "0";
@@ -70,7 +69,7 @@ export function SpotOrderSheet({
   const { open: marginOpen, support, lends } = useMarginSupport(pair);
   const account = signedIn ? tradeAccountFor(chosen, marginOpen, support) : "SPOT";
   const margin = useMarginTrade(pair, account, effect);
-  useIdleImport(loadMarginSheet, account !== "SPOT");
+  useIdleImport(MarginSheet.preload, account !== "SPOT");
   const spends = freezeAsset(pair, side);
   // Only an asset the platform lends is asked for (another answers 422).
   const borrowable = useMaxBorrowable(
