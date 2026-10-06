@@ -40,7 +40,7 @@ export default {
         testnetHint: "这是测试网络，请只发送测试币；主网资产发到这里无法找回。",
         loadMore: "加载更多",
         listSeparator: "、",
-        account: { SPOT: "现货账户", FUTURES: "合约账户" },
+        account: { SPOT: "现货账户", FUTURES: "合约账户", MARGIN: "杠杆账户" },
       },
       overview: {
         total: "总资产估值",
@@ -310,7 +310,7 @@ export default {
         testnetHint: "This is a test network: send test coins only. Mainnet funds sent here cannot be recovered.",
         loadMore: "Load more",
         listSeparator: ", ",
-        account: { SPOT: "Spot account", FUTURES: "Futures account" },
+        account: { SPOT: "Spot account", FUTURES: "Futures account", MARGIN: "Margin accounts" },
       },
       overview: {
         total: "Estimated total value",

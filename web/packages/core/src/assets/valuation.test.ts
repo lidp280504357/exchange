@@ -61,7 +61,23 @@ describe("valuePortfolio", () => {
   });
 
   it("is zero without balances", () => {
-    expect(valuePortfolio([], prices)).toMatchObject({ total: "0", spot: "0", futures: "0", unpriced: [] });
+    expect(valuePortfolio([], prices)).toMatchObject({ total: "0", spot: "0", futures: "0", margin: "0", unpriced: [] });
+  });
+
+  it("adds the margin accounts' nets, coin by coin, owed coins counting against", () => {
+    const cross = { balances: [{ asset: "USDT", net: "-400" }, { asset: "BTC", net: "0.01" }] };
+    const isolated = { balances: [{ asset: "USDT", net: "100" }, { asset: "SHIB", net: "5" }] };
+    const p = valuePortfolio(balances, prices, [cross, isolated]);
+    expect(p.margin).toBe("332.145"); // -400 + 100 + 0.01 × 63214.5
+    expect(p.total).toBe("2714.79"); // 2382.645 + 332.145
+    expect(p.marginRows).toEqual([
+      { asset: "USDT", value: "-300" },
+      { asset: "BTC", value: "632.145" },
+      { asset: "SHIB", value: null },
+    ]);
+    expect(p.unpriced).toEqual(["DOGE", "SHIB"]);
+    // A coin held and owed alike is not unpriced.
+    expect(valuePortfolio([], prices, [{ balances: [{ asset: "SHIB", net: "0" }] }]).unpriced).toEqual([]);
   });
 });
 

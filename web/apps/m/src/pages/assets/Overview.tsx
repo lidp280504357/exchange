@@ -1,5 +1,5 @@
 import { dec, errorText, formatAmount, formatPercent, routes, useSettings } from "@exchange/core";
-import { useBalances, useFuturesAccount, useLiveTickers } from "@exchange/core/assets/hooks";
+import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
 import { useMarginEntry } from "@exchange/core/margin/hooks";
 import { convertValue, referencePrice, valuePortfolio, type AccountView, type AssetRow, type Portfolio } from "@exchange/core/assets/valuation";
 import {
@@ -23,7 +23,7 @@ import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, Che
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { usePageHeader } from "../../layout/header";
 import { Appear, PRESS, RETRY, Section, useKept } from "./parts/bits";
 import { filterAssets } from "./parts/logic";
@@ -32,16 +32,20 @@ import { PullToRefresh } from "../../components/PullToRefresh";
 
 /**
  * The assets tab (design §7.2): the total value at reference prices with
- * the eye toggle, the spot and futures subtotals, the four quick actions,
- * and the assets as cards (search, "hide small", pull to refresh); a card
- * opens a sheet with the coin's balances and its actions. Balances follow
- * the balance pushes; prices follow the tickers channel.
+ * the eye toggle, the spot and futures subtotals (and the margin accounts'
+ * net, which leads to them, to whom they are shown: B102), the four quick
+ * actions, and the assets as cards (search, "hide small", pull to
+ * refresh); a card opens a sheet with the coin's balances and its actions.
+ * Balances follow the balance pushes; prices follow the tickers channel.
  */
 export default function Overview() {
   const { t } = useTranslation();
   const title = t("nav.assets");
   usePageHeader({ title }, [title]);
+  const navigate = useNavigate();
   const balances = useBalances();
+  const margin = useMarginHoldings();
+  const showMargin = useMarginEntry();
   const meta = useAssetMeta();
   const live = useLiveTickers();
   const reduced = useReducedMotion();
@@ -51,8 +55,8 @@ export default function Overview() {
   const futures = useFuturesAccount(view === "FUTURES");
 
   const portfolio = useMemo(
-    () => valuePortfolio(balances.data?.balances ?? [], (asset) => referencePrice(asset, live.tickers)),
-    [balances.data, live.tickers],
+    () => valuePortfolio(balances.data?.balances ?? [], (asset) => referencePrice(asset, live.tickers), margin),
+    [balances.data, live.tickers, margin],
   );
   const btc = referencePrice("BTC", live.tickers);
 
@@ -75,11 +79,11 @@ export default function Overview() {
             btcPrice={btc}
             unpriced={live.pending ? [] : portfolio.unpriced}
             onAccount={showAccount}
+            onMargin={showMargin ? () => navigate(routes.margin) : null}
           />
         </motion.div>
         <motion.div variants={listItem} initial="initial" animate="animate" custom={1}>
           <QuickActions />
-          <MarginEntry />
         </motion.div>
         <motion.div ref={listRef} variants={listItem} initial="initial" animate="animate" custom={2} className="scroll-mt-14">
           <AssetList
@@ -101,13 +105,15 @@ export default function Overview() {
 }
 
 function TotalCard({
-  loading, error, onRetry, portfolio, btcPrice, unpriced, onAccount,
+  loading, error, onRetry, portfolio, btcPrice, unpriced, onAccount, onMargin,
 }: {
   loading: boolean;
   error: unknown;
   onRetry: () => void;
   portfolio: Portfolio;
   btcPrice: string | null;
+  /** Opens the margin accounts; null where they are not shown (no margin tile). */
+  onMargin: (() => void) | null;
   unpriced: string[];
   onAccount: (v: AccountView) => void;
 }) {
@@ -175,6 +181,18 @@ function TotalCard({
               loading={loading}
               onClick={() => onAccount("FUTURES")}
             />
+            {onMargin && (
+              <AccountTile
+                icon={<Landmark size={16} />}
+                label={t("mAssets.common.account.MARGIN")}
+                value={portfolio.margin}
+                share={share(portfolio.margin)}
+                loading={loading}
+                onClick={onMargin}
+                className="col-span-2"
+                testId="margin-entry"
+              />
+            )}
           </div>
         </>
       )}
@@ -190,11 +208,25 @@ function RollIn({ value, decimals }: { value: string; decimals: number }) {
 }
 
 function AccountTile({
-  icon, label, value, share, loading, onClick,
-}: { icon: ReactNode; label: string; value: string; share: string | null; loading: boolean; onClick: () => void }) {
+  icon, label, value, share, loading, onClick, className, testId,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  share: string | null;
+  loading: boolean;
+  onClick: () => void;
+  className?: string;
+  testId?: string;
+}) {
   const { t } = useTranslation();
   return (
-    <button type="button" onClick={onClick} className={cn("flex min-h-tap min-w-0 flex-col gap-1 rounded-2 bg-bg-2 p-3 text-left", PRESS)}>
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={cn("flex min-h-tap min-w-0 flex-col gap-1 rounded-2 bg-bg-2 p-3 text-left", PRESS, className)}
+    >
       <span className="flex items-center gap-1.5 text-xs text-fg-3">
         <span className="text-brand">{icon}</span>
         <span className="truncate">{label}</span>
@@ -231,21 +263,6 @@ function QuickActions() {
         </Link>
       ))}
     </nav>
-  );
-}
-
-/** MarginEntry leads to the margin accounts, for whom margin trading is open or who still has one. */
-function MarginEntry() {
-  const { t } = useTranslation();
-  if (!useMarginEntry()) return null;
-  return (
-    <Link to={routes.margin} className={cn("mt-2 flex min-h-tap items-center gap-3 rounded-3 bg-bg-1 px-4 py-3", PRESS)} data-testid="margin-entry">
-      <span className="grid size-8 place-items-center rounded-full bg-brand-soft text-brand">
-        <Landmark size={16} />
-      </span>
-      <span className="flex-1 text-sm font-medium text-fg-1">{t("nav.margin")}</span>
-      <ChevronRight size={16} className="text-fg-3" />
-    </Link>
   );
 }
 

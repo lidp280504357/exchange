@@ -96,14 +96,24 @@ export type AssetRow = {
   value: string | null;
 };
 
+/** MarginHoldings is what valuing a margin account takes: each coin's net, what it holds less what it owes. */
+export type MarginHoldings = { balances: readonly { asset: string; net: string }[] };
+
 export type Portfolio = {
-  /** Every account, in USDT. */
+  /** Every account, in USDT: spot, futures and the margin accounts' net. */
   total: string;
   spot: string;
   futures: string;
+  /**
+   * The margin accounts (cross and isolated): each coin's net at its
+   * reference price, as spot and futures are valued (no haircut).
+   */
+  margin: string;
   /** Assets holding funds that have no price (valued at 0). */
   unpriced: string[];
   rows: Record<AccountView, AssetRow[]>;
+  /** The margin accounts' coins, nets merged (negative where more is owed than held). */
+  marginRows: { asset: string; value: string | null }[];
 };
 
 function row(asset: string, available: string, frozen: string, price: string | null): AssetRow {
@@ -126,9 +136,14 @@ function byValue(a: AssetRow, b: AssetRow): number {
 /**
  * valuePortfolio values every balance at its reference price: the rows of
  * each account (and of both merged per asset), the account subtotals and
- * the total, and the assets that could not be priced.
+ * the total, and the assets that could not be priced. The margin accounts
+ * (margin design 2026-10-06, B102) count with their coins' nets.
  */
-export function valuePortfolio(balances: readonly BalanceLike[], priceOf: (asset: string) => string | null): Portfolio {
+export function valuePortfolio(
+  balances: readonly BalanceLike[],
+  priceOf: (asset: string) => string | null,
+  margin: readonly MarginHoldings[] = [],
+): Portfolio {
   const prices = new Map<string, string | null>();
   const price = (asset: string) => {
     if (!prices.has(asset)) prices.set(asset, priceOf(asset));
@@ -145,15 +160,26 @@ export function valuePortfolio(balances: readonly BalanceLike[], priceOf: (asset
     merged.set(b.asset, { available: dec.add(m.available, b.available), frozen: dec.add(m.frozen, b.frozen) });
   }
   const all = [...merged].map(([asset, m]) => row(asset, m.available, m.frozen, price(asset)));
-  const sum = (rows: AssetRow[]) => rows.reduce((s, r) => (r.value === null ? s : dec.add(s, r.value)), "0");
+  const sum = (rows: readonly { value: string | null }[]) => rows.reduce((s, r) => (r.value === null ? s : dec.add(s, r.value)), "0");
+  const nets = new Map<string, string>();
+  for (const a of margin) for (const b of a.balances) nets.set(b.asset, dec.add(nets.get(b.asset) ?? "0", b.net));
+  const marginRows = [...nets].map(([asset, net]) => {
+    const p = price(asset);
+    return { asset, value: p === null ? null : dec.mul(net, p) };
+  });
   const spotTotal = sum(spot);
   const futuresTotal = sum(futures);
+  const marginTotal = sum(marginRows);
+  const unpriced = new Set(all.filter((r) => r.value === null && dec.sign(r.total) > 0).map((r) => r.asset));
+  for (const [asset, net] of nets) if (price(asset) === null && dec.sign(net) !== 0) unpriced.add(asset);
   return {
-    total: dec.add(spotTotal, futuresTotal),
+    total: dec.add(dec.add(spotTotal, futuresTotal), marginTotal),
     spot: spotTotal,
     futures: futuresTotal,
-    unpriced: all.filter((r) => r.value === null && dec.sign(r.total) > 0).map((r) => r.asset),
+    margin: marginTotal,
+    unpriced: [...unpriced],
     rows: { ALL: all.sort(byValue), SPOT: spot.sort(byValue), FUTURES: futures.sort(byValue) },
+    marginRows,
   };
 }
 

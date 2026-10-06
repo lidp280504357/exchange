@@ -44,7 +44,7 @@ export function AssetsCard({ index }: { index: number }) {
   const hidden = useSettings((s) => s.hideAmounts);
   const set = useSettings((s) => s.set);
   const total = dec.round(portfolio.total, 2, "down");
-  const shares = splitShares(portfolio.spot, portfolio.futures);
+  const shares = splitShares(portfolio.spot, portfolio.futures, portfolio.margin);
   const dir = toneOf(day.value);
   const pct = (v: number) => formatPercent(String(v), 1, false);
 
@@ -90,7 +90,9 @@ export function AssetsCard({ index }: { index: number }) {
         <div className="mt-3">
           <div
             role="img"
-            aria-label={`${t("mAccount.me.assets.split")}: ${t("mAccount.me.assets.spot")} ${pct(shares.spot)}, ${t("mAccount.me.assets.futures")} ${pct(shares.futures)}`}
+            aria-label={`${t("mAccount.me.assets.split")}: ${t("mAccount.me.assets.spot")} ${pct(shares.spot)}, ${t("mAccount.me.assets.futures")} ${pct(shares.futures)}${
+              shares.margin > 0 ? `, ${t("mAccount.me.assets.margin")} ${pct(shares.margin)}` : ""
+            }`}
             className="flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-bg-3"
           >
             {shares.spot > 0 && (
@@ -111,6 +113,15 @@ export function AssetsCard({ index }: { index: number }) {
                 transition={{ duration: 0.4, ease, delay: 0.3 }}
               />
             )}
+            {shares.margin > 0 && (
+              <motion.span
+                className="h-full origin-left rounded-full bg-warn"
+                style={{ width: `${shares.margin * 100}%` }}
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: 1 }}
+                transition={{ duration: 0.4, ease, delay: 0.45 }}
+              />
+            )}
           </div>
           <div className="mt-1.5 flex justify-between text-xs text-fg-3 tabular-nums">
             <span className="flex items-center gap-1.5">
@@ -121,6 +132,12 @@ export function AssetsCard({ index }: { index: number }) {
               <span aria-hidden className="size-2 rounded-full bg-info" />
               {t("mAccount.me.assets.futures")} {pct(shares.futures)}
             </span>
+            {shares.margin > 0 && (
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden className="size-2 rounded-full bg-warn" />
+                {t("mAccount.me.assets.margin")} {pct(shares.margin)}
+              </span>
+            )}
           </div>
         </div>
       </div>

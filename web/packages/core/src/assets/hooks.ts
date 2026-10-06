@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { accountApi, derivativesApi, marketApi, unwrap, userApi } from "../api/client";
+import { accountApi, derivativesApi, marginApi, marketApi, unwrap, userApi } from "../api/client";
 import { ApiError } from "../api/errors";
 import type { components as AccountSchemas } from "../api/gen/account";
 import type { components as DerivativesSchemas } from "../api/gen/derivatives";
@@ -10,6 +10,7 @@ import { selectSignedIn, useSession } from "../session/store";
 import { prependItem, type Page } from "../wallet/push";
 import { retryServerErrors } from "../wallet/hooks";
 import type { AccountType } from "./transfer";
+import type { MarginAccount } from "../margin/math";
 import { convertValue, dayChange, referenceChange, referencePrice, valuePortfolio } from "./valuation";
 
 // Account data for the assets pages of both sites (design §6.2, §7.2):
@@ -66,18 +67,45 @@ export function useLiveTickers() {
   return { tickers, pending: rest.isPending && tickers.size === 0, error: tickers.size === 0 ? rest.error : null, refetch: rest.refetch };
 }
 
+const NO_MARGIN: MarginAccount[] = [];
+
+/**
+ * useMarginHoldings is the caller's margin accounts (cross, then the
+ * isolated ones) for valuing the portfolio (B102): asked while margin
+ * trading is open to them; otherwise what the cache holds (the assets
+ * pages' margin entry asks for what is left in them once it closed). The
+ * accounts keep up with the "margin" pushes.
+ */
+export function useMarginHoldings(): MarginAccount[] {
+  const signedIn = useSession(selectSignedIn);
+  const open = useEligibility("MARGIN_TRADE");
+  const q = useQuery({
+    queryKey: qk.marginAccounts,
+    queryFn: () => unwrap(marginApi.GET("/v1/margin/accounts")),
+    enabled: signedIn && open.data?.allowed === true,
+    staleTime: 60_000,
+    retry: retryServerErrors,
+  });
+  return useMemo(() => (q.data ? [q.data.cross, ...q.data.isolated] : NO_MARGIN), [q.data]);
+}
+
 /**
  * usePortfolio values the caller's balances at live reference prices: the
- * portfolio (total, account subtotals, rows), the total in BTC and the
- * estimated 24-hour change of the holdings (valuation dayChange). It
- * recomputes as balances and tickers move.
+ * portfolio (total, account subtotals with the margin accounts' net, rows),
+ * the total in BTC and the estimated 24-hour change of the holdings
+ * (valuation dayChange). It recomputes as balances, margin accounts and
+ * tickers move.
  */
 export function usePortfolio() {
   const balances = useBalances();
+  const margin = useMarginHoldings();
   const { tickers, pending: pricesPending } = useLiveTickers();
   const list = balances.data?.balances;
-  const portfolio = useMemo(() => valuePortfolio(list ?? [], (asset) => referencePrice(asset, tickers)), [list, tickers]);
-  const day = useMemo(() => dayChange(portfolio.rows.ALL, (asset) => referenceChange(asset, tickers)), [portfolio, tickers]);
+  const portfolio = useMemo(() => valuePortfolio(list ?? [], (asset) => referencePrice(asset, tickers), margin), [list, tickers, margin]);
+  const day = useMemo(
+    () => dayChange([...portfolio.rows.ALL, ...portfolio.marginRows], (asset) => referenceChange(asset, tickers)),
+    [portfolio, tickers],
+  );
   const inBtc = convertValue(portfolio.total, referencePrice("BTC", tickers), 8);
   return { balances, portfolio, day, inBtc, pricesPending };
 }

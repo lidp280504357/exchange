@@ -1,5 +1,5 @@
 import { dec, errorText, formatPercent, routes, useSettings } from "@exchange/core";
-import { useBalances, useFuturesAccount, useLiveTickers } from "@exchange/core/assets/hooks";
+import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
 import {
   convertValue,
   distribution,
@@ -9,6 +9,7 @@ import {
   type AccountView,
   type AssetRow,
 } from "@exchange/core/assets/valuation";
+import { useMarginEntry } from "@exchange/core/margin/hooks";
 import {
   AmountText,
   Button,
@@ -30,11 +31,11 @@ import {
   type ColumnDef,
   type DataColumnMeta,
 } from "@exchange/ui";
-import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, Eye, EyeOff, Info, ScrollText, Search, Wallet } from "lucide-react";
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { TOP_NAV_HEIGHT } from "../../layout/TopNav";
 import { AllocationRing, type AllocationSegment } from "./parts/Allocation";
 import { AssetsLayout, Card } from "./parts/AssetsLayout";
@@ -42,20 +43,24 @@ import { shownDecimals, useAssetMeta, useTradeLinks, withQuery, type AssetMeta }
 
 /**
  * The assets overview (design §6.2): the total value at reference prices
- * with the spot and futures subtotals, the allocation ring and the assets
- * table. Balances follow the balance pushes; prices follow the tickers.
+ * with the spot and futures subtotals (and the margin accounts' net, to
+ * whom they are shown: B102), the allocation ring and the assets table.
+ * Balances follow the balance pushes; prices follow the tickers.
  */
 export default function Overview() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const balances = useBalances();
+  const margin = useMarginHoldings();
+  const showMargin = useMarginEntry();
   const meta = useAssetMeta();
   const { tickers, pending: pricesPending } = useLiveTickers();
   const [view, setView] = useState<AccountView>("ALL");
   const tableRef = useRef<HTMLDivElement>(null);
 
   const portfolio = useMemo(
-    () => valuePortfolio(balances.data?.balances ?? [], (asset) => referencePrice(asset, tickers)),
-    [balances.data, tickers],
+    () => valuePortfolio(balances.data?.balances ?? [], (asset) => referencePrice(asset, tickers), margin),
+    [balances.data, tickers, margin],
   );
   const btc = referencePrice("BTC", tickers);
 
@@ -91,6 +96,8 @@ export default function Overview() {
             total={portfolio.total}
             spot={portfolio.spot}
             futures={portfolio.futures}
+            margin={showMargin ? portfolio.margin : null}
+            onMargin={() => navigate(routes.margin)}
             btcPrice={btc}
             unpriced={pricesPending ? [] : portfolio.unpriced}
             onAccount={showAccount}
@@ -122,7 +129,7 @@ export default function Overview() {
 }
 
 function TotalCard({
-  loading, error, onRetry, total, spot, futures, btcPrice, unpriced, onAccount,
+  loading, error, onRetry, total, spot, futures, margin, onMargin, btcPrice, unpriced, onAccount,
 }: {
   loading: boolean;
   error: unknown;
@@ -130,6 +137,9 @@ function TotalCard({
   total: string;
   spot: string;
   futures: string;
+  /** The margin accounts' net; null where they are not shown. */
+  margin: string | null;
+  onMargin: () => void;
   btcPrice: string | null;
   unpriced: string[];
   onAccount: (v: AccountView) => void;
@@ -200,6 +210,18 @@ function TotalCard({
               loading={loading}
               onClick={() => onAccount("FUTURES")}
             />
+            {margin !== null && (
+              <AccountTile
+                icon={<Landmark size={18} />}
+                label={t("pcAssets.common.account.MARGIN")}
+                value={margin}
+                share={share(margin)}
+                loading={loading}
+                onClick={onMargin}
+                className="col-span-2"
+                testId="assets-margin"
+              />
+            )}
           </div>
         </>
       )}
@@ -218,14 +240,27 @@ function RollIn({ value, decimals }: { value: string; decimals: number }) {
 }
 
 function AccountTile({
-  icon, label, value, share, loading, onClick,
-}: { icon: ReactNode; label: string; value: string; share: string | null; loading: boolean; onClick: () => void }) {
+  icon, label, value, share, loading, onClick, className, testId,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  share: string | null;
+  loading: boolean;
+  onClick: () => void;
+  className?: string;
+  testId?: string;
+}) {
   const { t } = useTranslation();
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group flex items-center gap-3 rounded-2 border border-line-1 bg-bg-2 p-3 text-left transition-[transform,border-color] duration-[var(--t-base)] hover:-translate-y-0.5 hover:border-line-2"
+      data-testid={testId}
+      className={cn(
+        "group flex items-center gap-3 rounded-2 border border-line-1 bg-bg-2 p-3 text-left transition-[transform,border-color] duration-[var(--t-base)] hover:-translate-y-0.5 hover:border-line-2",
+        className,
+      )}
     >
       <span className="grid size-9 shrink-0 place-items-center rounded-full bg-bg-3 text-fg-2 group-hover:text-brand">{icon}</span>
       <span className="min-w-0 flex-1">

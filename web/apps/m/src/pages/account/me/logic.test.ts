@@ -44,11 +44,16 @@ describe("isNew", () => {
 
 describe("splitShares", () => {
   it("divides the total between the accounts", () => {
-    expect(splitShares("750", "250")).toEqual({ spot: 0.75, futures: 0.25 });
-    expect(splitShares("10000", "0")).toEqual({ spot: 1, futures: 0 });
+    expect(splitShares("750", "250")).toEqual({ spot: 0.75, futures: 0.25, margin: 0 });
+    expect(splitShares("10000", "0")).toEqual({ spot: 1, futures: 0, margin: 0 });
+    expect(splitShares("500", "250", "250")).toEqual({ spot: 0.5, futures: 0.25, margin: 0.25 });
+  });
+
+  it("gives an account owing more than it holds no share", () => {
+    expect(splitShares("100", "0", "-20")).toEqual({ spot: 1, futures: 0, margin: 0 });
   });
 
   it("is empty without funds", () => {
-    expect(splitShares("0", "0")).toEqual({ spot: 0, futures: 0 });
+    expect(splitShares("0", "0")).toEqual({ spot: 0, futures: 0, margin: 0 });
   });
 });

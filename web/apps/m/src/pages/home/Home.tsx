@@ -14,7 +14,7 @@ import {
   useSettings,
   type TickerData,
 } from "@exchange/core";
-import { useBalances } from "@exchange/core/assets/hooks";
+import { useBalances, useMarginHoldings } from "@exchange/core/assets/hooks";
 import { convertValue, referencePrice, valuePortfolio } from "@exchange/core/assets/valuation";
 import { useArticles, useHero } from "@exchange/core/content/index";
 import { useIsolatedLeverage } from "@exchange/core/margin/hooks";
@@ -166,20 +166,22 @@ function RollIn({ value, decimals }: { value: string; decimals: number }) {
 }
 
 /**
- * AssetCard: the total value of both accounts at reference prices (live
- * with the balance pushes and the tickers), the eye that hides amounts
- * everywhere, and the shortcuts. There is no API for today's PnL yet.
+ * AssetCard: the total value of the accounts at reference prices (spot,
+ * futures and the margin accounts' net; live with the balance and margin
+ * pushes and the tickers), the eye that hides amounts everywhere, and the
+ * shortcuts. There is no API for today's PnL yet.
  */
 function AssetCard({ tickers }: { tickers: ReadonlyMap<string, TickerData> }) {
   const { t } = useTranslation();
   const balances = useBalances();
+  const margin = useMarginHoldings();
   const hidden = useSettings((s) => s.hideAmounts);
   const set = useSettings((s) => s.set);
   const list = balances.data?.balances;
-  const portfolio = useMemo(() => valuePortfolio(list ?? [], (asset) => referencePrice(asset, tickers)), [list, tickers]);
+  const portfolio = useMemo(() => valuePortfolio(list ?? [], (asset) => referencePrice(asset, tickers), margin), [list, tickers, margin]);
   const total = dec.round(portfolio.total, 2, "down");
   const inBtc = convertValue(portfolio.total, referencePrice("BTC", tickers), 8);
-  const empty = list !== undefined && list.every((b) => dec.sign(b.total) <= 0);
+  const empty = list !== undefined && list.every((b) => dec.sign(b.total) <= 0) && margin.every((a) => a.balances.length === 0);
 
   return (
     <motion.section

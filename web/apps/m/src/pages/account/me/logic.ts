@@ -43,11 +43,16 @@ export function isNew(date: string, now: number): boolean {
   return Number.isFinite(at) && now >= at && now - at < NEW_FOR_MS;
 }
 
-/** splitShares are the spot and futures shares of their sum for the split bar (each 0..1; both 0 without funds). */
-export function splitShares(spot: string, futures: string): { spot: number; futures: number } {
+/**
+ * splitShares are the spot, futures and margin shares of their sum for the
+ * split bar (each 0..1; all 0 without funds; a margin net below zero, more
+ * owed than held, takes no share).
+ */
+export function splitShares(spot: string, futures: string, margin = "0"): { spot: number; futures: number; margin: number } {
   const s = Math.max(0, dec.toNumber(spot));
   const f = Math.max(0, dec.toNumber(futures));
-  const total = s + f;
-  if (!(total > 0)) return { spot: 0, futures: 0 };
-  return { spot: s / total, futures: f / total };
+  const m = Math.max(0, dec.toNumber(margin));
+  const total = s + f + m;
+  if (!(total > 0)) return { spot: 0, futures: 0, margin: 0 };
+  return { spot: s / total, futures: f / total, margin: m / total };
 }
