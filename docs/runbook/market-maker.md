@@ -24,7 +24,7 @@
 
 - 报价的合约读 instrument-service 的全部合约（`/v1/market/contracts?margin_type=ALL`），`TRADING` 且有 `reference_symbol` 的才报（平台币的两个永续没有）。币本位合约的盘口是币安 COIN-M 的（数量是张），HOUSE 按张报价：每档最多值 20,000 美元（BTC 200 张、ETH 2,000 张），`HOUSE_CONTRACT_CAP` 按美元名义（张 × 面值）折成张。
 - 额度按结算资产分开：每个币本位账户（HOUSE 的 BTC、ETH FUTURES）的仓位合计（美元）最多是该账户权益（币，按该币的 USDT 交易对参考盘口中间价折成美元）的 `HOUSE_CONTRACT_LEVERAGE` 倍，超出时该方向不再报价；同一结算资产的合约平分剩余额度。没有该币价格时没有额度。USDT 账户与 U 本位合约照旧。
-- HOUSE 的 BTC、ETH 是可充提资产，不能为负：亏损超过账户余额时账本由同一资产的保险基金补，基金不够时整笔拒绝。测试服由 `scripts/ops/house.sh seed` 注资（HOUSE 币本位保证金 BTC 6、ETH 200，约各 50 万美元；保险基金 BTC +2、ETH +40、ASTRA 100,000），`exchangectl ledger house-margin --asset BTC --amount …` 可补。
+- HOUSE 的 BTC、ETH 是可充提资产，不能为负：亏损超过账户余额时账本由同一资产的保险基金补，基金不够时整笔拒绝。测试服由 `scripts/ops/house.sh seed` 注资（HOUSE 币本位保证金 BTC 6、ETH 200，约各 50 万美元；保险基金 BTC +2、ETH +40、ASTRA 100,000），`exchangectl ledger house-margin --asset BTC --amount …` 可补。合约按币安列表扩充后（§3.4，批次 G1c）同一命令按上架的、有 `reference_symbol` 的合约逐个补：每个合约一次 50 万美元的保证金（`HOUSE_CONTRACT_CAP` 的 10%；U 本位给 USDT，币本位按当时标记价折成该币），币本位另给该币的保险基金 10 万美元一次；键按合约与币（`seed-house-margin-<合约>-v1`、`seed-insurance-coinm-<币>-v1`），重跑不重复。没有标记价的币本位合约跳过、下次再补。上架后还要重跑 `house.sh flags`，HOUSE 才报新合约。
 
 ## 引擎怎么用参考簿
 

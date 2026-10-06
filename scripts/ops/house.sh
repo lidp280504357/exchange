@@ -10,6 +10,10 @@
 #                               FUTURES account (HOUSE_USER_ID), 6 BTC and 200
 #                               ETH in its coin-margined ones, and the
 #                               insurance fund's BTC, ETH and ASTRA rows;
+#                               500,000 USD of margin more for every other
+#                               contract listed with a reference market
+#                               (and 100,000 USD of insurance fund for its
+#                               coin when coin-margined);
 #                               audited adjustments, needs
 #                               ledger.manual_adjustment. Idempotent.
 #   scripts/ops/house.sh flags  public books and charts from Binance everywhere
@@ -73,6 +77,27 @@ seed)
     ctl ledger-service ledger insurance-fund --asset "$asset" --amount "$amount" \
       --reason "insurance fund of the coin-margined contracts" --key "seed-insurance-coinm-$asset-$version"
   done
+  # Every further contract HOUSE quotes (one with a reference market,
+  # coin-margined design §3.4, batch G1c) brings 10% of its
+  # HOUSE_CONTRACT_CAP (5,000,000 USD, the cap at 10x) of margin once,
+  # keyed by the contract: USDT for a USDT-margined one; its coin at the
+  # mark price for a coin-margined one, whose coin's insurance fund gets
+  # 100,000 USD of it once too. The four above are seeded already.
+  contracts="$(curl -fsS "$API/v1/market/contracts?margin_type=ALL")"
+  while IFS=$'\t' read -r symbol margin settle; do
+    case "$symbol" in BTC-USDT-PERP | ETH-USDT-PERP | BTC-USD-PERP | ETH-USD-PERP) continue ;; esac
+    if [[ $margin != COIN ]]; then
+      ctl ledger-service ledger house-margin --amount 500000 \
+        --reason "HOUSE contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1" </dev/null
+      continue
+    fi
+    mark="$(curl -fsS "$API/v1/market/$symbol/mark-price" | jq -r '.mark_price // empty')"
+    [[ -n $mark ]] || { echo "$symbol has no mark price: skipped, seed again later" >&2; continue; }
+    ctl ledger-service ledger house-margin --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 500000 / m }')" \
+      --reason "HOUSE coin-margined contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1" </dev/null
+    ctl ledger-service ledger insurance-fund --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 100000 / m }')" \
+      --reason "insurance fund of the coin-margined contracts (G1c)" --key "seed-insurance-coinm-$settle-v1" </dev/null
+  done < <(jq -r '.contracts[] | select((.reference_symbol // "") != "") | [.symbol, .margin_type, .settle_asset] | @tsv' <<<"$contracts")
   ;;
 flags)
   # The pairs and contracts as listed now, not test.json: one listed from
@@ -103,7 +128,7 @@ show)
   ssh exchange "cd $INFRA && set -a && . ./.env && set +a && sudo docker compose exec -T postgres psql -U \"\$POSTGRES_USER\" -d exchange -At -c \"SELECT asset, available FROM ledger.accounts WHERE account_type = 'MARKET_MAKER' ORDER BY asset\""
   ;;
 *)
-  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac
