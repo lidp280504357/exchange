@@ -462,11 +462,25 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
     await sleep(2000);
   }
 
+  // Whatever happens below, the page closes and the 20 USDT go back to spot
+  // (nothing is borrowed).
   const page = await open(browser, device);
-  await page.evaluateOnNewDocument((token) => {
-    window.__E2E_CAPTCHA_TOKEN__ = token;
-  }, bypass);
-  const done = () => page.browserContext().close();
+  try {
+    await page.evaluateOnNewDocument((token) => {
+      window.__E2E_CAPTCHA_TOKEN__ = token;
+    }, bypass);
+    await marginPages(page, { site, base, user, password, budgets, sheet });
+  } finally {
+    await page.browserContext().close().catch(() => {});
+    await api(base, "POST", "/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: "20" }, {
+      ...auth,
+      "Idempotency-Key": `${key}-out`,
+    });
+  }
+}
+
+/** marginPages takes the measurements of margin() on a page of a fresh context. */
+async function marginPages(page, { site, base, user, password, budgets, sheet }) {
   await page.goto(`${base}/login?next=%2Fassets`, { waitUntil: "networkidle2", timeout: 60000 });
   await page.type('input[autocomplete="username"]', user.email);
   await page.type('input[autocomplete="current-password"]', password);
@@ -475,19 +489,21 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
 
   // A page loaded afresh: its LCP, and the JavaScript fetched (compressed,
   // as served) by the frame that first showed selector, its first screen.
+  // One poller, registered once, notes when each of these first shows.
+  await page.evaluateOnNewDocument((selectors) => {
+    window.__perfShown = {};
+    const check = () => {
+      for (const sel of selectors) if (!(sel in window.__perfShown) && document.querySelector(sel)) window.__perfShown[sel] = performance.now();
+      if (selectors.some((sel) => !(sel in window.__perfShown))) requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }, ['[data-testid="assets-total"]', '[data-testid="margin-account-MARGIN_CROSS"]']);
   const fresh = async (path, selector) => {
-    await page.evaluateOnNewDocument((sel) => {
-      const check = () => {
-        if (document.querySelector(sel)) window.__perfShown = performance.now();
-        else requestAnimationFrame(check);
-      };
-      requestAnimationFrame(check);
-    }, selector);
     await page.goto(`${base}${path}`, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(selector, { visible: true, timeout: 30000 });
     await sleep(1500);
-    return page.evaluate(() => {
-      const shown = window.__perfShown ?? Infinity;
+    return page.evaluate((sel) => {
+      const shown = window.__perfShown?.[sel] ?? Infinity;
       const js = performance.getEntriesByType("resource").filter((r) => /\.js($|\?)/.test(new URL(r.name).pathname) && r.responseEnd <= shown);
       return {
         lcp: window.__perf.lcp ?? null,
@@ -498,7 +514,7 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
           .slice(0, 12)
           .map((r) => `${new URL(r.name).pathname.split("/").pop()} ${(r.encodedBodySize / 1024).toFixed(1)}`),
       };
-    });
+    }, selector);
   };
   // The assets overview first, for comparison: the same shell and session.
   const overview = await fresh("/assets", '[data-testid="assets-total"]');
@@ -530,7 +546,7 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
     const opened = await clickTo(page, "买入 BTC", "", '[role=dialog] [data-testid="margin-bar"]');
     if (opened < 0 || opened === Infinity) {
       report(`${site} the order sheet`, opened < 0 ? "no 买入 BTC button" : "no margin bar", "found", false);
-      return done();
+      return;
     }
     bar = `[role=dialog] ${bar}`;
     await sleep(800); // the sheet slides in
@@ -554,12 +570,6 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
     `≤ ${budgets.longTasks}`,
     tasks.length <= budgets.longTasks,
   );
-  await done();
-  // The 20 USDT back to spot (nothing was borrowed).
-  await api(base, "POST", "/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: "20" }, {
-    ...auth,
-    "Idempotency-Key": `${key}-out`,
-  });
 }
 
 const PC_DEVICE = { viewport: { width: 1440, height: 900 } };
