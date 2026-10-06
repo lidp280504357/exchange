@@ -1032,8 +1032,14 @@ components:
         low:
           $ref: '#/components/schemas/NullableDecimal'
         volume:
+          description: >-
+            The 24 hours' volume in the market's quantity: the base asset of a pair or a linear contract, whole
+            contracts of a coin-margined one (design 2026-10-06 §3.2).
           $ref: '#/components/schemas/Decimal'
         quote_volume:
+          description: >-
+            The 24 hours' turnover in the quote: USDT for a pair quoted in it and a linear contract, USD (contracts x
+            face value) for a coin-margined one.
           $ref: '#/components/schemas/Decimal'
         trade_count:
           type: integer
@@ -1139,8 +1145,10 @@ components:
         price:
           $ref: '#/components/schemas/Decimal'
         quantity:
+          description: In the market's quantity (whole contracts on a coin-margined contract).
           $ref: '#/components/schemas/Decimal'
         quote_quantity:
+          description: price x quantity in the quote; on a coin-margined contract its USD value (contracts x face value).
           $ref: '#/components/schemas/Decimal'
         taker_side:
           type: string
@@ -1164,8 +1172,10 @@ components:
         close:
           $ref: '#/components/schemas/Decimal'
         volume:
+          description: In the market's quantity (whole contracts on a coin-margined contract).
           $ref: '#/components/schemas/Decimal'
         quote_volume:
+          description: In the quote; USD (contracts x face value) on a coin-margined contract.
           $ref: '#/components/schemas/Decimal'
         trade_count:
           type: integer
