@@ -33,18 +33,18 @@ type bookDiff struct {
 	d      domain.DepthDiff
 }
 
-func (s *bookSource) DepthSnapshot(_ context.Context, ref ports.Reference, _ bool) (int64, []domain.Level, []domain.Level, error) {
+func (s *bookSource) DepthSnapshot(_ context.Context, ref ports.Reference) (int64, []domain.Level, []domain.Level, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.snaps[ref.Symbol], []domain.Level{{Price: d("100"), Quantity: d("1")}, {Price: d("99"), Quantity: d("2")}},
 		[]domain.Level{{Price: d("101"), Quantity: d("1")}}, nil
 }
 
-func (s *bookSource) RecentTrades(context.Context, ports.Reference, bool, int) ([]domain.Trade, error) {
+func (s *bookSource) RecentTrades(context.Context, ports.Reference, int) ([]domain.Trade, error) {
 	return nil, nil
 }
 
-func (s *bookSource) BookStream(ctx context.Context, refs []ports.Reference, _ bool, on ports.BookHandlers) error {
+func (s *bookSource) BookStream(ctx context.Context, refs []ports.Reference, on ports.BookHandlers) error {
 	s.opened <- refs
 	for {
 		select {
@@ -218,12 +218,14 @@ func TestBooksAreSplitIntoConnections(t *testing.T) {
 	m := map[string]ports.Reference{}
 	for i := range 30 {
 		sym := string(rune('A'+i%26)) + string(rune('A'+i/26)) + "X-USDT"
-		m[sym] = ports.Reference{Remote: sym}
+		m[sym] = ports.Reference{Symbol: sym, Remote: sym}
 	}
-	m["BTC-USDT-PERP"] = ports.Reference{Symbol: "BTC-USDT", Remote: "BTCUSDT"}
+	m["BTC-USDT-PERP"] = ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Market: ports.MarketUSDM}
+	m["BTC-USD-PERP"] = ports.Reference{Symbol: "BTC-USD-PERP", Remote: "BTCUSD_PERP", Market: ports.MarketCoinM, ContractSize: d("100")}
 	gs := groups(m)
-	if len(gs) != 3 || gs[0].futures || len(gs[0].refs) != bookStreamsPerConn || len(gs[1].refs) != 5 || !gs[2].futures ||
-		gs[2].refs[0].Symbol != "BTC-USDT-PERP" {
+	if len(gs) != 4 || gs[0].market != ports.MarketSpot || len(gs[0].refs) != bookStreamsPerConn || len(gs[1].refs) != 5 ||
+		gs[2].market != ports.MarketUSDM || gs[2].refs[0].Symbol != "BTC-USDT-PERP" ||
+		gs[3].market != ports.MarketCoinM || gs[3].refs[0].Symbol != "BTC-USD-PERP" {
 		t.Fatalf("groups %+v", gs)
 	}
 }

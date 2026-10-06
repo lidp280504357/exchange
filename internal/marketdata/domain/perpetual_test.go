@@ -103,6 +103,19 @@ func TestImpactPricesAndThePremium(t *testing.T) {
 	if _, ok := ImpactPrice(asks, d("20000")); ok {
 		t.Fatal("asks holding 11210 cannot fill 20000")
 	}
+	// An inverse contract's impact notional is contracts: 100 against the
+	// bids fill 50 at 100 and 50 at 99, worth 50/100 + 50/99 coin per face
+	// value; they average to 100 / (0.5 + 0.50505051) = 99.49748744.
+	inv, ok := ImpactPriceInverse(bids, d("100"))
+	if !ok || !inv.Equal(d("99.49748744")) {
+		t.Fatalf("inverse impact bid %s %v", inv, ok)
+	}
+	if inv, ok := ImpactPriceInverse(asks, d("5")); !ok || !inv.Equal(d("101")) {
+		t.Fatalf("inverse impact ask within the first level %s %v", inv, ok)
+	}
+	if _, ok := ImpactPriceInverse(asks, d("111")); ok {
+		t.Fatal("asks holding 110 contracts cannot fill 111")
+	}
 	for _, c := range []struct {
 		index, bid, ask string
 		bidOK, askOK    bool

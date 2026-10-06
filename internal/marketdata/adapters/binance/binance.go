@@ -1,7 +1,9 @@
 // Package binance reads Binance's public market data (data-api.binance.vision
-// over REST, data-stream.binance.vision over WebSocket) as a reference
-// source: 1m candles and rolling 24-hour tickers for the reference feed,
-// candles of any interval for reference K-lines. Everything it returns is
+// over REST, data-stream.binance.vision over WebSocket for spot; the
+// USDⓈ-M and COIN-M futures endpoints for perpetual contracts, coin-M
+// design §3.2) as a reference source: 1m candles and rolling 24-hour
+// tickers for the reference feed, candles of any interval for reference
+// K-lines, books, trades and mark prices. Everything it returns is
 // converted to the platform's symbols and units (ADR-0010, ADR-0014).
 // Binance's terms forbid using the data for a trading service without a
 // license (requirements §11.9, ADR-0004): test environments only, behind
@@ -111,11 +113,6 @@ func (s *Source) backOff(resp *http.Response) {
 	s.mu.Unlock()
 }
 
-// get fetches a spot REST path into out.
-func (s *Source) get(ctx context.Context, what, path string, q url.Values, out any) error {
-	return s.getAt(ctx, what, s.rest, path, q, out)
-}
-
 // getAt fetches a REST path of base into out; requests to every base wait
 // their turn together.
 func (s *Source) getAt(ctx context.Context, what, base, path string, q url.Values, out any) error {
@@ -183,8 +180,12 @@ func (s *Source) Klines(ctx context.Context, ref ports.Reference, interval domai
 }
 
 func (s *Source) klines(ctx context.Context, ref ports.Reference, interval domain.Interval, q url.Values) ([]domain.Candle, error) {
+	rest, prefix, _, err := s.endpoints(ref.Market)
+	if err != nil {
+		return nil, err
+	}
 	var rows [][]any
-	if err := s.get(ctx, "klines", "/api/v3/klines", q, &rows); err != nil {
+	if err := s.getAt(ctx, "klines", rest, prefix+"/klines", q, &rows); err != nil {
 		return nil, err
 	}
 	conv := newConverter(ref)
@@ -200,7 +201,8 @@ func (s *Source) klines(ctx context.Context, ref ports.Reference, interval domai
 }
 
 // fromRow reads [openTime, open, high, low, close, volume, closeTime,
-// quoteVolume, trades, ...].
+// quoteVolume, trades, ...] (COIN-M's eighth is the base asset's volume;
+// the converter replaces it).
 func fromRow(symbol string, interval domain.Interval, row []any) (domain.Candle, error) {
 	if len(row) < 9 {
 		return domain.Candle{}, errors.New("binance klines: short row")
@@ -225,7 +227,9 @@ func fromRow(symbol string, interval domain.Interval, row []any) (domain.Candle,
 	}, nil
 }
 
-// tickerRow is a /api/v3/ticker/24hr answer.
+// tickerRow is a /ticker/24hr answer: spot's, or a futures market's
+// (without the best bid and ask; COIN-M's volume is contracts and it has
+// the base asset's volume instead of the quote's).
 type tickerRow struct {
 	Symbol      string `json:"symbol"`
 	LastPrice   string `json:"lastPrice"`
@@ -240,10 +244,20 @@ type tickerRow struct {
 	CloseTime   int64  `json:"closeTime"`
 }
 
-// Tickers reads the rolling 24-hour tickers of refs in one request.
+// Tickers reads the rolling 24-hour tickers of refs, all of one market,
+// in one request: spot by the list of symbols, a futures market's every
+// symbol (it takes one symbol or all).
 func (s *Source) Tickers(ctx context.Context, refs []ports.Reference) ([]domain.Ticker, error) {
 	if len(refs) == 0 {
 		return nil, nil
+	}
+	m, err := market(refs)
+	if err != nil {
+		return nil, err
+	}
+	rest, prefix, _, err := s.endpoints(m)
+	if err != nil {
+		return nil, err
 	}
 	byRemote := make(map[string]ports.Reference, len(refs))
 	names := make([]string, 0, len(refs))
@@ -251,23 +265,27 @@ func (s *Source) Tickers(ctx context.Context, refs []ports.Reference) ([]domain.
 		byRemote[r.Remote] = r
 		names = append(names, r.Remote)
 	}
-	list, err := json.Marshal(names)
-	if err != nil {
-		return nil, err
+	q := url.Values{}
+	if m == ports.MarketSpot {
+		list, err := json.Marshal(names)
+		if err != nil {
+			return nil, err
+		}
+		q.Set("symbols", string(list))
 	}
 	var rows []tickerRow
-	if err := s.get(ctx, "tickers", "/api/v3/ticker/24hr", url.Values{"symbols": {string(list)}}, &rows); err != nil {
+	if err := s.getAt(ctx, "tickers", rest, prefix+"/ticker/24hr", q, &rows); err != nil {
 		return nil, err
 	}
-	out := make([]domain.Ticker, 0, len(rows))
+	out := make([]domain.Ticker, 0, len(refs))
 	for _, row := range rows {
 		ref, ok := byRemote[row.Symbol]
 		if !ok {
 			continue
 		}
-		t, err := ticker(ref, [8]string{
-			row.LastPrice, row.OpenPrice, row.HighPrice, row.LowPrice, row.Volume, row.QuoteVolume,
-			row.BidPrice, row.AskPrice,
+		t, err := ticker(ref, tickerFields{
+			last: row.LastPrice, open: row.OpenPrice, high: row.HighPrice, low: row.LowPrice, volume: row.Volume,
+			quoteVolume: row.QuoteVolume, bid: row.BidPrice, ask: row.AskPrice,
 		}, row.Count, row.CloseTime)
 		if err != nil {
 			return nil, err
@@ -277,14 +295,24 @@ func (s *Source) Tickers(ctx context.Context, refs []ports.Reference) ([]domain.
 	return out, nil
 }
 
-// ticker builds a platform ticker from Binance's last, open, high, low,
-// volume, quote volume, bid and ask.
-func ticker(ref ports.Reference, fields [8]string, trades, atMS int64) (domain.Ticker, error) {
+// tickerFields are a Binance ticker's amounts as sent; a futures market
+// sends no best bid and ask, COIN-M no quote volume.
+type tickerFields struct {
+	last, open, high, low, volume, quoteVolume, bid, ask string
+}
+
+// ticker builds a platform ticker from Binance's. Missing bid, ask and
+// quote volume are zero; a COIN-M contract's quote volume is its volume's
+// USD value (contracts times the contract size).
+func ticker(ref ports.Reference, f tickerFields, trades, atMS int64) (domain.Ticker, error) {
 	var n [8]decimal.Decimal
-	for i, f := range fields {
-		d, err := decimal.NewFromString(f)
+	for i, s := range []string{f.last, f.open, f.high, f.low, f.volume, f.quoteVolume, f.bid, f.ask} {
+		if s == "" && i >= 5 {
+			continue
+		}
+		d, err := decimal.NewFromString(s)
 		if err != nil {
-			return domain.Ticker{}, fmt.Errorf("binance ticker %s: bad amount %q", ref.Remote, f)
+			return domain.Ticker{}, fmt.Errorf("binance ticker %s: bad amount %q", ref.Remote, s)
 		}
 		n[i] = d
 	}
@@ -294,6 +322,9 @@ func ticker(ref ports.Reference, fields [8]string, trades, atMS int64) (domain.T
 		Volume: conv.quantity(n[4]), QuoteVolume: n[5], Trades: trades, Bid: conv.price(n[6]), Ask: conv.price(n[7]),
 		At: time.UnixMilli(atMS).UTC(),
 	}
+	if ref.Market == ports.MarketCoinM {
+		t.QuoteVolume = t.Volume.Mul(ref.ContractSize)
+	}
 	if t.Open.IsPositive() {
 		t.Change = t.Last.Sub(t.Open).DivRound(t.Open, 8)
 	}
@@ -301,14 +332,23 @@ func ticker(ref ports.Reference, fields [8]string, trades, atMS int64) (domain.T
 }
 
 // converter turns the source's prices and quantities into the platform's.
-type converter struct{ shift int32 }
+type converter struct {
+	shift int32
+	// size is a COIN-M contract's size: its quote volume is the
+	// contracts' USD value.
+	size decimal.Decimal
+}
 
 func newConverter(ref ports.Reference) converter {
 	shift := int32(0)
 	for m := ref.Multiplier; m.GreaterThan(decimal.NewFromInt(1)); m = m.Shift(-1) {
 		shift++
 	}
-	return converter{shift: shift}
+	c := converter{shift: shift}
+	if ref.Market == ports.MarketCoinM {
+		c.size = ref.ContractSize
+	}
+	return c
 }
 
 func (c converter) price(d decimal.Decimal) decimal.Decimal    { return d.Shift(c.shift) }
@@ -317,6 +357,9 @@ func (c converter) quantity(d decimal.Decimal) decimal.Decimal { return d.Shift(
 func (c converter) candle(k domain.Candle) domain.Candle {
 	k.Open, k.High, k.Low, k.Close = c.price(k.Open), c.price(k.High), c.price(k.Low), c.price(k.Close)
 	k.Volume = c.quantity(k.Volume)
+	if c.size.IsPositive() {
+		k.QuoteVolume = k.Volume.Mul(c.size)
+	}
 	return k
 }
 
@@ -369,11 +412,23 @@ type streamEvent struct {
 	} `json:"data"`
 }
 
-// Stream follows the combined kline_1m and ticker streams of refs.
-// Binance pings every few minutes (answered by the library) and closes
-// connections after 24 hours; a stream silent for idle ends too. The
-// caller reconnects.
+// Stream follows the combined kline_1m and ticker streams of refs, all of
+// one market (a USDⓈ-M contract's under /market). Binance pings every few
+// minutes (answered by the library) and closes connections after 24
+// hours; a stream silent for idle ends too. The caller reconnects.
 func (s *Source) Stream(ctx context.Context, refs []ports.Reference, on ports.StreamHandlers) error {
+	m, err := market(refs)
+	if err != nil {
+		return err
+	}
+	_, _, stream, err := s.endpoints(m)
+	if err != nil {
+		return err
+	}
+	path := allStreams
+	if m == ports.MarketUSDM {
+		path = marketStreams
+	}
 	names := make([]string, 0, 2*len(refs))
 	byRemote := make(map[string]ports.Reference, len(refs))
 	for _, r := range refs {
@@ -381,7 +436,7 @@ func (s *Source) Stream(ctx context.Context, refs []ports.Reference, on ports.St
 		names = append(names, lower+"@kline_1m", lower+"@ticker")
 		byRemote[r.Remote] = r
 	}
-	return s.listen(ctx, "binance stream", s.stream+allStreams+strings.Join(names, "/"), 1<<16, s.idle, func(data []byte) {
+	return s.listen(ctx, "binance stream", stream+path+strings.Join(names, "/"), 1<<16, s.idle, func(data []byte) {
 		var ev streamEvent
 		if err := json.Unmarshal(data, &ev); err != nil {
 			return
@@ -396,7 +451,10 @@ func (s *Source) Stream(ctx context.Context, refs []ports.Reference, on ports.St
 		case "24hrTicker":
 			if ref, ok := byRemote[ev.Data.Symbol]; ok && on.Ticker != nil {
 				d := ev.Data
-				if t, err := ticker(ref, [8]string{d.Last, d.Open, d.High, d.Low, d.Volume, d.QuoteVol, d.Bid, d.Ask}, d.Count, d.EventT); err == nil {
+				f := tickerFields{
+					last: d.Last, open: d.Open, high: d.High, low: d.Low, volume: d.Volume, quoteVolume: d.QuoteVol, bid: d.Bid, ask: d.Ask,
+				}
+				if t, err := ticker(ref, f, d.Count, d.EventT); err == nil {
 					on.Ticker(t)
 				}
 			}

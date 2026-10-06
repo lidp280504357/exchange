@@ -16,14 +16,16 @@ import (
 // Tickers picks the ticker each symbol shows (ADR-0010): its reference
 // market's while market.reference_ticker is on for it and one has been
 // received, however old (a client tells a stalled feed by updated_at);
-// the platform's otherwise. A contract shows its index pair's reference
-// ticker until the perpetual streams arrive.
+// the platform's otherwise. A contract shows its own perpetual's (coin-M
+// design §3.2), whose futures ticker has no best bid and ask: those come
+// from the contract's reference book (UseBooks).
 type Tickers struct {
 	svc         *Service
 	feed        *ReferenceFeed // nil without a feed
 	refs        *ReferenceMap
 	flags       Flags
 	instruments ports.Instruments
+	book        func(symbol string, limit int) (bids, asks []domain.Level, ok bool)
 
 	mu     sync.Mutex
 	pushed map[string]time.Time // the reference ticker last pushed, by symbol
@@ -36,6 +38,12 @@ type Tickers struct {
 // NewTickers combines the platform's tickers with feed's; feed may be nil.
 func NewTickers(svc *Service, feed *ReferenceFeed, refs *ReferenceMap, fl Flags, instruments ports.Instruments) *Tickers {
 	return &Tickers{svc: svc, feed: feed, refs: refs, flags: fl, instruments: instruments, pushed: map[string]time.Time{}}
+}
+
+// UseBooks has the contracts' reference tickers take their best bid and
+// ask from the reference books (Books.Levels). Call it before serving.
+func (t *Tickers) UseBooks(levels func(symbol string, limit int) (bids, asks []domain.Level, ok bool)) {
+	t.book = levels
 }
 
 func (t *Tickers) on(symbol string) bool {
@@ -54,6 +62,11 @@ func (t *Tickers) reference(mapping map[string]ports.Reference, symbol string) (
 		return domain.Ticker{}, false
 	}
 	tk.Symbol = symbol
+	if ref.Market != ports.MarketSpot && t.book != nil {
+		if bids, asks, ok := t.book(symbol, 1); ok && len(bids) > 0 && len(asks) > 0 {
+			tk.Bid, tk.Ask = bids[0].Price, asks[0].Price
+		}
+	}
 	return tk, true
 }
 

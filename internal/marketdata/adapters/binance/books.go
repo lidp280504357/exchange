@@ -20,7 +20,8 @@ import (
 
 // Order books and trades (ADR-0010, ADR-0015): REST snapshots and the
 // depth@100ms and aggTrade streams, of spot pairs on the spot endpoints
-// and of perpetual contracts on the USDⓈ-M futures ones.
+// and of perpetual contracts on the futures ones of their market (USDⓈ-M
+// or COIN-M).
 
 // SnapshotLevels is how deep a book snapshot goes (a spot request weighs
 // 50 at this depth, a futures one 20).
@@ -36,14 +37,37 @@ func (s *Source) WithFutures(rest, stream string) *Source {
 	return s
 }
 
-func (s *Source) urls(futures bool) (rest, stream, prefix string, err error) {
-	if !futures {
-		return s.rest, s.stream, "/api/v3", nil
+// endpoints returns a market's REST base, REST path prefix and stream
+// base.
+func (s *Source) endpoints(market string) (rest, prefix, stream string, err error) {
+	switch market {
+	case ports.MarketSpot:
+		return s.rest, "/api/v3", s.stream, nil
+	case ports.MarketUSDM:
+		if s.futuresREST == "" || s.futuresStream == "" {
+			return "", "", "", errors.New("binance: USDⓈ-M futures endpoints are not configured")
+		}
+		return s.futuresREST, "/fapi/v1", s.futuresStream, nil
+	case ports.MarketCoinM:
+		if s.coinREST == "" || s.coinStream == "" {
+			return "", "", "", errors.New("binance: COIN-M futures endpoints are not configured")
+		}
+		return s.coinREST, "/dapi/v1", s.coinStream, nil
 	}
-	if s.futuresREST == "" || s.futuresStream == "" {
-		return "", "", "", errors.New("binance: futures endpoints are not configured")
+	return "", "", "", fmt.Errorf("binance: unknown market %q", market)
+}
+
+// market returns the market of refs, all of which must share it.
+func market(refs []ports.Reference) (string, error) {
+	if len(refs) == 0 {
+		return "", errors.New("binance: no symbols")
 	}
-	return s.futuresREST, s.futuresStream, "/fapi/v1", nil
+	for _, r := range refs[1:] {
+		if r.Market != refs[0].Market {
+			return "", fmt.Errorf("binance: %s and %s are on different markets", refs[0].Symbol, r.Symbol)
+		}
+	}
+	return refs[0].Market, nil
 }
 
 type depthRow struct {
@@ -54,8 +78,8 @@ type depthRow struct {
 
 // DepthSnapshot returns ref's book, SnapshotLevels a side at most, and the
 // update ID it stands at, in the platform's units.
-func (s *Source) DepthSnapshot(ctx context.Context, ref ports.Reference, futures bool) (int64, []domain.Level, []domain.Level, error) {
-	rest, _, prefix, err := s.urls(futures)
+func (s *Source) DepthSnapshot(ctx context.Context, ref ports.Reference) (int64, []domain.Level, []domain.Level, error) {
+	rest, prefix, _, err := s.endpoints(ref.Market)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -88,8 +112,8 @@ type aggTradeRow struct {
 }
 
 // RecentTrades returns ref's latest aggregate trades, oldest first.
-func (s *Source) RecentTrades(ctx context.Context, ref ports.Reference, futures bool, limit int) ([]domain.Trade, error) {
-	rest, _, prefix, err := s.urls(futures)
+func (s *Source) RecentTrades(ctx context.Context, ref ports.Reference, limit int) ([]domain.Trade, error) {
+	rest, prefix, _, err := s.endpoints(ref.Market)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +123,7 @@ func (s *Source) RecentTrades(ctx context.Context, ref ports.Reference, futures 
 	}
 	out := make([]domain.Trade, 0, len(rows))
 	for _, r := range rows {
-		t, err := aggTrade(ref, futures, r)
+		t, err := aggTrade(ref, r)
 		if err != nil {
 			return nil, err
 		}
@@ -109,8 +133,10 @@ func (s *Source) RecentTrades(ctx context.Context, ref ports.Reference, futures 
 }
 
 // aggTrade converts an aggregate trade: its platform ID is derived from
-// the source's, its number is the source's ID.
-func aggTrade(ref ports.Reference, futures bool, r aggTradeRow) (domain.Trade, error) {
+// the source's, its number is the source's ID. A COIN-M trade's quantity
+// is whole contracts and its quote amount their USD value (coin-M design
+// §2.4, ⑪).
+func aggTrade(ref ports.Reference, r aggTradeRow) (domain.Trade, error) {
 	p, err1 := decimal.NewFromString(r.Price)
 	q, err2 := decimal.NewFromString(r.Quantity)
 	if err1 != nil || err2 != nil {
@@ -118,8 +144,11 @@ func aggTrade(ref ports.Reference, futures bool, r aggTradeRow) (domain.Trade, e
 	}
 	conv := newConverter(ref)
 	market := "spot"
-	if futures {
+	switch ref.Market {
+	case ports.MarketUSDM:
 		market = "futures"
+	case ports.MarketCoinM:
+		market = "coinm"
 	}
 	side := "BUY"
 	if r.BuyerIsMaker {
@@ -129,11 +158,15 @@ func aggTrade(ref ports.Reference, futures bool, r aggTradeRow) (domain.Trade, e
 		return domain.Trade{}, fmt.Errorf("binance trade %s: negative ID %d", ref.Remote, r.ID)
 	}
 	price, qty := conv.price(p), conv.quantity(q)
+	quote := price.Mul(qty)
+	if ref.Market == ports.MarketCoinM {
+		quote = qty.Mul(ref.ContractSize)
+	}
 	return domain.Trade{
 		Symbol: ref.Symbol, ID: uuid.NewSHA1(tradeNamespace, []byte(market+":"+ref.Remote+":"+strconv.FormatInt(r.ID, 10))).String(),
 		Number:   uint64(r.ID), //nolint:gosec // not negative (checked above)
 		Price:    price,
-		Quantity: qty, Quote: price.Mul(qty), TakerSide: side, At: time.UnixMilli(r.Time).UTC(),
+		Quantity: qty, Quote: quote, TakerSide: side, At: time.UnixMilli(r.Time).UTC(),
 	}, nil
 }
 
@@ -168,15 +201,19 @@ type aggEvent struct {
 }
 
 // BookStream follows the depth updates (every 100 ms) and aggregate trades
-// of refs, spot or futures, and passes them to on in the platform's
-// symbols and units. Spot sends both on one combined connection; USDⓈ-M
-// futures sends the books and the trades on paths of their own, so the
-// trades have a connection of their own, kept up (reconnected with
-// backoff, each failure passed to on.Failed) for as long as the books'
-// lasts. It returns when the books' connection ends; the caller
-// reconnects.
-func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, futures bool, on ports.BookHandlers) error {
-	_, stream, _, err := s.urls(futures)
+// of refs, all of one market, and passes them to on in the platform's
+// symbols and units. Spot and COIN-M send both on one combined
+// connection; USDⓈ-M futures sends the books and the trades on paths of
+// their own, so the trades have a connection of their own, kept up
+// (reconnected with backoff, each failure passed to on.Failed) for as
+// long as the books' lasts. It returns when the books' connection ends;
+// the caller reconnects.
+func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, on ports.BookHandlers) error {
+	m, err := market(refs)
+	if err != nil {
+		return err
+	}
+	_, _, stream, err := s.endpoints(m)
 	if err != nil {
 		return err
 	}
@@ -188,9 +225,9 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, futures
 		depths, trades = append(depths, lower+"@depth@100ms"), append(trades, lower+"@aggTrade")
 		byRemote[r.Remote] = r
 	}
-	handle := func(data []byte) { s.bookMessage(data, byRemote, futures, on) }
+	handle := func(data []byte) { s.bookMessage(data, byRemote, on) }
 	// A busy book's update can be large.
-	if !futures {
+	if m != ports.MarketUSDM {
 		return s.listen(ctx, "binance book stream", stream+allStreams+strings.Join(both, "/"), 4<<20, s.idle, handle)
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -231,7 +268,7 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, futures
 const tradeIdle = 5 * time.Minute
 
 // bookMessage passes one depth update or trade of refs to on.
-func (s *Source) bookMessage(data []byte, refs map[string]ports.Reference, futures bool, on ports.BookHandlers) {
+func (s *Source) bookMessage(data []byte, refs map[string]ports.Reference, on ports.BookHandlers) {
 	var msg struct {
 		Data json.RawMessage `json:"data"`
 	}
@@ -268,7 +305,7 @@ func (s *Source) bookMessage(data []byte, refs map[string]ports.Reference, futur
 		if on.Trade == nil || json.Unmarshal(msg.Data, &ev) != nil {
 			return
 		}
-		t, err := aggTrade(ref, futures, aggTradeRow{
+		t, err := aggTrade(ref, aggTradeRow{
 			ID: ev.ID, Price: ev.Price, Quantity: ev.Quantity, Time: ev.Time, BuyerIsMaker: ev.BuyerIsMaker,
 		})
 		if err == nil {

@@ -167,6 +167,29 @@ func ImpactPrice(levels []Level, notional decimal.Decimal) (decimal.Decimal, boo
 	return decimal.Zero, false
 }
 
+// ImpactPriceInverse is the average price of trading contracts (whole
+// contracts of an inverse contract, coin-M design §2.4) against levels
+// whose quantities are contracts, best first: the contracts over the
+// coin they are worth at their levels' prices, the price a fill of them
+// averages to; false when the levels hold fewer.
+func ImpactPriceInverse(levels []Level, contracts decimal.Decimal) (decimal.Decimal, bool) {
+	if !contracts.IsPositive() {
+		return decimal.Zero, false
+	}
+	left, coin := contracts, decimal.Zero // coin per face value: Σ q ÷ p
+	for _, l := range levels {
+		if !l.Price.IsPositive() || !l.Quantity.IsPositive() {
+			continue
+		}
+		q := decimal.Min(l.Quantity, left)
+		coin, left = coin.Add(q.Div(l.Price)), left.Sub(q)
+		if !left.IsPositive() {
+			return contracts.DivRound(coin, PriceDecimals), true
+		}
+	}
+	return decimal.Zero, false
+}
+
 // Premium is (max(0, impact bid - index) - max(0, index - impact ask)) /
 // index; a side too thin for the impact notional (ok false) adds nothing.
 func Premium(index, impactBid, impactAsk decimal.Decimal, bidOK, askOK bool) decimal.Decimal {

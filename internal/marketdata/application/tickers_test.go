@@ -70,9 +70,25 @@ func TestTickersShowTheReferenceMarket(t *testing.T) {
 	if err != nil || !got.Last.Equal(d("84000")) || !got.At.Equal(at) {
 		t.Fatalf("BTC-USDT %+v %v", got, err)
 	}
-	// A contract shows its index pair's ticker under its own symbol.
-	if got, _ := rig.ticks.Ticker(ctx, "BTC-USDT-PERP"); got.Symbol != "BTC-USDT-PERP" || !got.Last.Equal(d("84000")) {
+	// A contract shows its own perpetual's ticker (coin-M design §3.2),
+	// the best bid and ask from its reference book: a futures ticker has
+	// none.
+	perp := tick("BTC-USDT-PERP", "84010", "80010", "2000000", at)
+	rig.feed.setTicker(perp)
+	if got, _ := rig.ticks.Ticker(ctx, "BTC-USDT-PERP"); got.Symbol != "BTC-USDT-PERP" || !got.Last.Equal(d("84010")) || !got.Bid.IsZero() {
 		t.Fatalf("BTC-USDT-PERP %+v", got)
+	}
+	rig.ticks.UseBooks(func(symbol string, _ int) (bids, asks []domain.Level, ok bool) {
+		if symbol != "BTC-USDT-PERP" {
+			return nil, nil, false
+		}
+		return []domain.Level{{Price: d("84009.9"), Quantity: d("1")}}, []domain.Level{{Price: d("84010.1"), Quantity: d("2")}}, true
+	})
+	if got, _ := rig.ticks.Ticker(ctx, "BTC-USDT-PERP"); !got.Bid.Equal(d("84009.9")) || !got.Ask.Equal(d("84010.1")) {
+		t.Fatalf("BTC-USDT-PERP's bid and ask %+v", got)
+	}
+	if got, _ := rig.ticks.Ticker(ctx, "BTC-USDT"); !got.Bid.IsZero() {
+		t.Fatalf("a pair's ticker keeps its own bid: %+v", got)
 	}
 	// Denied by the flag, or no reference market: the platform's.
 	if got, _ := rig.ticks.Ticker(ctx, "ETH-USDT"); !got.Last.IsZero() || !got.At.IsZero() {
@@ -123,6 +139,7 @@ func TestTickerPushSwapsThePlatformsForTheReferences(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now()
 	rig.feed.setTicker(tick("BTC-USDT", "84000", "80000", "1000000", at))
+	rig.feed.setTicker(tick("BTC-USDT-PERP", "84010", "80010", "2000000", at))
 	platform := []Update{
 		{"BTC-USDT", &marketv1.TickerUpdated{Ticker: &marketv1.Ticker{Symbol: "BTC-USDT", Last: "1"}}},
 		{"BTC-USDT", &marketv1.CandleUpdated{Candle: &marketv1.Candle{Symbol: "BTC-USDT"}}},
@@ -142,7 +159,7 @@ func TestTickerPushSwapsThePlatformsForTheReferences(t *testing.T) {
 			candles++
 		}
 	}
-	if tickers["BTC-USDT"] != "84000" || tickers["BTC-USDT-PERP"] != "84000" || tickers["ETH-BTC"] != "0.05" || candles != 1 {
+	if tickers["BTC-USDT"] != "84000" || tickers["BTC-USDT-PERP"] != "84010" || tickers["ETH-BTC"] != "0.05" || candles != 1 {
 		t.Fatalf("pushed tickers %v, %d candles", tickers, candles)
 	}
 	// Nothing newer: nothing again, and the platform's stays swapped out.

@@ -445,8 +445,12 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 			ask = asks[0].Price
 		}
 		st.basis.Add(domain.BasisSample(index, bid, ask))
-		impactBid, bidOK := domain.ImpactPrice(bids, spec.ImpactNotional)
-		impactAsk, askOK := domain.ImpactPrice(asks, spec.ImpactNotional)
+		impact := domain.ImpactPrice
+		if spec.Inverse() {
+			impact = domain.ImpactPriceInverse // the notional is contracts (coin-M §2.4)
+		}
+		impactBid, bidOK := impact(bids, spec.ImpactNotional)
+		impactAsk, askOK := impact(asks, spec.ImpactNotional)
 		st.sum = st.sum.Add(domain.Premium(index, impactBid, impactAsk, bidOK, askOK))
 		st.samples++
 		st.unsaved = true

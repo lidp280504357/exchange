@@ -47,7 +47,9 @@ func (c *Client) refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	list, err := c.c.ListContracts(ctx, &instrumentv1.ListContractsRequest{})
+	// Every contract, the coin-margined ones too (the list leaves them out
+	// unless asked, design 2026-10-06 §2.5).
+	list, err := c.c.ListContracts(ctx, &instrumentv1.ListContractsRequest{MarginType: "ALL"})
 	if err != nil {
 		return err
 	}
@@ -110,18 +112,31 @@ func toPair(p *instrumentv1.TradingPair, rank int32) (ports.Pair, error) {
 }
 
 func contract(k *instrumentv1.Contract) (ports.Contract, error) {
-	var nums [3]decimal.Decimal
-	for i, s := range []string{k.GetInterestRate(), k.GetFundingCap(), k.GetImpactNotional()} {
+	var nums [4]decimal.Decimal
+	size := k.GetContractSize()
+	if size == "" {
+		size = "0"
+	}
+	for i, s := range []string{k.GetInterestRate(), k.GetFundingCap(), k.GetImpactNotional(), size} {
 		d, err := decimal.NewFromString(s)
 		if err != nil {
-			return ports.Contract{}, fmt.Errorf("contract %s: bad funding parameter %q", k.GetSymbol(), s)
+			return ports.Contract{}, fmt.Errorf("contract %s: bad parameter %q", k.GetSymbol(), s)
 		}
 		nums[i] = d
 	}
-	return ports.Contract{
+	margin := k.GetMarginType()
+	if margin == "" {
+		margin = "USDT"
+	}
+	out := ports.Contract{
 		Symbol: k.GetSymbol(), IndexSymbol: k.GetIndexSymbol(), Status: k.GetStatus(),
 		FundingIntervalHours: k.GetFundingIntervalHours(), InterestRate: nums[0], FundingCap: nums[1], ImpactNotional: nums[2],
-	}, nil
+		MarginType: margin, ContractSize: nums[3], ReferenceSymbol: k.GetReferenceSymbol(),
+	}
+	if out.Inverse() && !out.ContractSize.IsPositive() {
+		return ports.Contract{}, fmt.Errorf("contract %s: an inverse contract without a contract size", k.GetSymbol())
+	}
+	return out, nil
 }
 
 // Symbols lists the pairs and contracts that are not delisted, sorted.

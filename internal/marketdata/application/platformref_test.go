@@ -65,7 +65,7 @@ func TestPlatformReference(t *testing.T) {
 }
 
 // The symbols charting the platform's own trades: the listed pairs without
-// a reference market and the contracts whose index pair has none; not
+// a reference market and the contracts without one of their own; not
 // known while the listing was never read, the last one read when it cannot
 // be read again (reviews AU, AV).
 func TestUnreferenced(t *testing.T) {
@@ -73,7 +73,7 @@ func TestUnreferenced(t *testing.T) {
 	list := newListing([]ports.Pair{
 		{Symbol: "BTC-USDT", Base: "BTC", Quote: "USDT", Status: "TRADING", Reference: ref("BTC-USDT", "BTCUSDT")},
 		{Symbol: "ASTRA-USDT", Base: "ASTRA", Quote: "USDT", Status: "TRADING"},
-	}, []ports.Contract{{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT"}, {Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT"}})
+	}, []ports.Contract{{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT"}, {Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT", ReferenceSymbol: "BTCUSDT"}})
 	off := &atomic.Bool{}
 	off.Store(true)
 	refs := NewReferenceMap(flakyListing{listing: list, off: off}, slog.New(slog.DiscardHandler))

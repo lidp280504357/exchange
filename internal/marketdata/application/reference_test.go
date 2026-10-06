@@ -22,6 +22,7 @@ type fakeSource struct {
 	streams   atomic.Int32
 	mu        sync.Mutex
 	followed  [][]string // the symbols of each stream
+	markets   []string   // and its market
 }
 
 func (s *fakeSource) Name() string { return "fake" }
@@ -52,7 +53,7 @@ func (s *fakeSource) Stream(ctx context.Context, refs []ports.Reference, on port
 		symbols = append(symbols, r.Symbol)
 	}
 	s.mu.Lock()
-	s.followed = append(s.followed, symbols)
+	s.followed, s.markets = append(s.followed, symbols), append(s.markets, refs[0].Market)
 	s.mu.Unlock()
 	on.Candle(domain.Candle{Symbol: refs[0].Symbol, Interval: domain.Minute1, OpenTime: domain.Minute1.Start(time.Now()), Close: d("83920")})
 	on.Ticker(domain.Ticker{Symbol: refs[0].Symbol, Last: d("83921"), Open: d("82000"), At: time.Now()})
@@ -100,6 +101,7 @@ func TestReferenceFeed(t *testing.T) {
 	src := &fakeSource{}
 	fl := &switchFlags{}
 	list := testListing()
+	list.contracts = []ports.Contract{{Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT"}} // without a perpetual to follow
 	f := NewReferenceFeed(src, store, fl, list, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	f.recheck, f.remap = 20*time.Millisecond, 50*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
@@ -172,4 +174,58 @@ func TestReferenceBackfillStopsWhereTheStreamStarted(t *testing.T) {
 	if err := f.backfill(ctx, btc, streaming.Add(-time.Minute)); err != nil || src.backfills.Load() != 1 {
 		t.Fatalf("second backfill: %v, %d calls", err, src.backfills.Load())
 	}
+}
+
+// A contract with a reference market follows its own perpetual on a
+// connection of its own (coin-M design §3.2): its candles and tickers are
+// kept under the contract, and its messages are not the spot feed's (the
+// pairs' halts look at the spot stream alone).
+func TestReferenceFeedFollowsTheContractsOnTheirMarket(t *testing.T) {
+	store := newMemStore()
+	src := &fakeSource{}
+	fl := &switchFlags{}
+	list := testListing()
+	list.pairs = list.pairs[:1] // BTC-USDT only
+	list.contracts = append(list.contracts, ports.Contract{
+		Symbol: "BTC-USD-PERP", IndexSymbol: "BTC-USDT", MarginType: "COIN", ContractSize: d("100"), ReferenceSymbol: "BTCUSD_PERP",
+	})
+	f := NewReferenceFeed(src, store, fl, list, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	f.recheck, f.remap = 20*time.Millisecond, time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { _ = f.Run(ctx); close(done) }()
+	fl.on.Store(true)
+	// One connection a market; the first of them fails and comes back.
+	eventually(t, "four streams", func() bool { return src.streams.Load() == 4 })
+	markets := map[string][]string{}
+	src.mu.Lock()
+	for i, m := range src.markets {
+		markets[m] = src.followed[i]
+	}
+	src.mu.Unlock()
+	if got := markets[ports.MarketSpot]; len(got) != 1 || got[0] != "BTC-USDT" {
+		t.Fatalf("spot %v", got)
+	}
+	if got := markets[ports.MarketUSDM]; len(got) != 1 || got[0] != "BTC-USDT-PERP" {
+		t.Fatalf("USDⓈ-M %v", got)
+	}
+	if got := markets[ports.MarketCoinM]; len(got) != 1 || got[0] != "BTC-USD-PERP" {
+		t.Fatalf("COIN-M %v", got)
+	}
+	eventually(t, "the perpetual's ticker", func() bool {
+		tk, ok := f.Ticker("BTC-USD-PERP")
+		return ok && tk.Last.Equal(d("83921"))
+	})
+	if last, _ := store.Read().References().Latest(ctx, "fake", "BTC-USDT-PERP"); last == nil || !last.Close.Equal(d("83920")) {
+		t.Fatalf("the perpetual's candles under the contract: %+v", last)
+	}
+	f.mu.Lock()
+	spot, usdm := f.received[ports.MarketSpot], f.received[ports.MarketUSDM]
+	f.mu.Unlock()
+	if spot.IsZero() || usdm.IsZero() || !f.Received().Equal(spot) {
+		t.Fatalf("received: spot %s, USDⓈ-M %s, Received %s", spot, usdm, f.Received())
+	}
+	cancel()
+	<-done
 }

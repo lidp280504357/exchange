@@ -205,7 +205,7 @@ func (b *Books) follow(ctx context.Context) map[string]ports.Reference {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for symbol, ref := range m {
-		if st, ok := b.books[symbol]; !ok || st.ref.Remote != ref.Remote || !st.ref.Multiplier.Equal(ref.Multiplier) {
+		if st, ok := b.books[symbol]; !ok || !ports.SameReference(st.ref, ref) {
 			b.books[symbol] = &bookState{ref: ref, futures: isContract(symbol), local: domain.NewLocalBook(isContract(symbol))}
 		}
 	}
@@ -222,39 +222,33 @@ func sameFollowed(a, b map[string]ports.Reference) bool {
 		return false
 	}
 	for s, r := range a {
-		if o, ok := b[s]; !ok || o.Remote != r.Remote || !o.Multiplier.Equal(r.Multiplier) {
+		if o, ok := b[s]; !ok || !ports.SameReference(o, r) {
 			return false
 		}
 	}
 	return true
 }
 
-// bookGroup is the symbols of one stream connection.
+// bookGroup is the symbols of one stream connection, all of one market.
 type bookGroup struct {
-	futures bool
-	refs    []ports.Reference
+	market string
+	refs   []ports.Reference
 }
 
-// groups splits the followed symbols by market into connections of at
-// most bookStreamsPerConn symbols, in symbol order.
+// groups splits the followed symbols by market (spot, USDⓈ-M, COIN-M)
+// into connections of at most bookStreamsPerConn symbols, in symbol
+// order.
 func groups(m map[string]ports.Reference) []bookGroup {
-	var spot, futures []ports.Reference
-	for symbol, ref := range m {
-		ref.Symbol = symbol // a contract follows its index pair's reference
-		if isContract(symbol) {
-			futures = append(futures, ref)
-		} else {
-			spot = append(spot, ref)
-		}
+	byMarket := map[string][]ports.Reference{}
+	for _, ref := range m {
+		byMarket[ref.Market] = append(byMarket[ref.Market], ref)
 	}
 	var out []bookGroup
-	for _, set := range []struct {
-		futures bool
-		refs    []ports.Reference
-	}{{false, spot}, {true, futures}} {
-		slices.SortFunc(set.refs, func(x, y ports.Reference) int { return strings.Compare(x.Symbol, y.Symbol) })
-		for chunk := range slices.Chunk(set.refs, bookStreamsPerConn) {
-			out = append(out, bookGroup{futures: set.futures, refs: chunk})
+	for _, market := range []string{ports.MarketSpot, ports.MarketUSDM, ports.MarketCoinM} {
+		refs := byMarket[market]
+		slices.SortFunc(refs, func(x, y ports.Reference) int { return strings.Compare(x.Symbol, y.Symbol) })
+		for chunk := range slices.Chunk(refs, bookStreamsPerConn) {
+			out = append(out, bookGroup{market: market, refs: chunk})
 		}
 	}
 	return out
@@ -271,7 +265,7 @@ func (b *Books) connection(ctx context.Context, g bookGroup) {
 			return
 		}
 		b.failures.Inc()
-		b.log.WarnContext(ctx, "reference book stream failed", "futures", g.futures, "symbols", len(g.refs), "error", err)
+		b.log.WarnContext(ctx, "reference book stream failed", "market", g.market, "symbols", len(g.refs), "error", err)
 		if b.now().Sub(started) > time.Minute {
 			backoff = time.Second
 		}
@@ -310,9 +304,9 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 	go func() {
 		defer wg.Done()
 		b.loadRecent(ctx, g)
-		b.loader(ctx, g.futures, byName, resync)
+		b.loader(ctx, byName, resync)
 	}()
-	err := b.src.BookStream(ctx, g.refs, g.futures, ports.BookHandlers{
+	err := b.src.BookStream(ctx, g.refs, ports.BookHandlers{
 		Depth: func(symbol string, d domain.DepthDiff) {
 			b.mu.Lock()
 			*live = b.now()
@@ -350,7 +344,7 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 		// reconnects it while the books go on.
 		Failed: func(err error) {
 			b.failures.Inc()
-			b.log.WarnContext(ctx, "reference trade stream failed", "futures", g.futures, "symbols", len(g.refs), "error", err)
+			b.log.WarnContext(ctx, "reference trade stream failed", "market", g.market, "symbols", len(g.refs), "error", err)
 		},
 	})
 	cancel()
@@ -360,7 +354,7 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 
 // loader loads the snapshots of the symbols sent on resync, one at a time
 // (the source spaces its requests), until ctx ends.
-func (b *Books) loader(ctx context.Context, futures bool, refs map[string]ports.Reference, resync chan string) {
+func (b *Books) loader(ctx context.Context, refs map[string]ports.Reference, resync chan string) {
 	// Let the stream buffer a few updates first: a snapshot must not be
 	// older than the first update (spot).
 	sleep(ctx, time.Second)
@@ -376,7 +370,7 @@ func (b *Books) loader(ctx context.Context, futures bool, refs map[string]ports.
 			continue
 		}
 		for attempt := 0; ctx.Err() == nil; attempt++ {
-			lastID, bids, asks, err := b.src.DepthSnapshot(ctx, ref, futures)
+			lastID, bids, asks, err := b.src.DepthSnapshot(ctx, ref)
 			if err == nil {
 				b.mu.Lock()
 				if st, ok := b.books[symbol]; ok {
@@ -401,7 +395,7 @@ func (b *Books) loader(ctx context.Context, futures bool, refs map[string]ports.
 // loadRecent fills the recent trades of a group's symbols (for REST).
 func (b *Books) loadRecent(ctx context.Context, g bookGroup) {
 	for _, ref := range g.refs {
-		trades, err := b.src.RecentTrades(ctx, ref, g.futures, bookRecent)
+		trades, err := b.src.RecentTrades(ctx, ref, bookRecent)
 		if err != nil {
 			if ctx.Err() == nil {
 				b.log.WarnContext(ctx, "reference trades not loaded", "symbol", ref.Symbol, "error", err)

@@ -3,7 +3,6 @@ package binance
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -30,19 +29,6 @@ func (s *Source) WithCoinFutures(rest, stream string) *Source {
 	return s
 }
 
-// futuresURLs returns a futures market's REST base, REST path prefix and
-// stream base: COIN-M's when coin is set, USDⓈ-M's otherwise.
-func (s *Source) futuresURLs(coin bool) (rest, prefix, stream string, err error) {
-	if coin {
-		if s.coinREST == "" || s.coinStream == "" {
-			return "", "", "", errors.New("binance: COIN-M futures endpoints are not configured")
-		}
-		return s.coinREST, "/dapi/v1", s.coinStream, nil
-	}
-	rest, stream, prefix, err = s.urls(true)
-	return rest, prefix, stream, err
-}
-
 // markEvent is a markPriceUpdate on a combined stream. The mark price "p"
 // and the estimated settlement price "P" differ only in case, as do "e"
 // and "E": each has its own field.
@@ -59,13 +45,17 @@ type markEvent struct {
 	} `json:"data"`
 }
 
-// MarkStream follows the markPrice@1s streams of refs' perpetuals on one
-// combined connection of the COIN-M market (coin) or the USDⓈ-M one, and
-// passes every update to on (on the connection's goroutine) in the
-// platform's symbols and units. It returns when the connection ends or
-// stays silent for the idle timeout; the caller reconnects.
-func (s *Source) MarkStream(ctx context.Context, refs []ports.Reference, coin bool, on func(domain.ReferenceMark)) error {
-	_, _, stream, err := s.futuresURLs(coin)
+// MarkStream follows the markPrice@1s streams of refs' perpetuals, all of
+// one futures market, on one combined connection, and passes every update
+// to on (on the connection's goroutine) in the platform's symbols and
+// units. It returns when the connection ends or stays silent for the idle
+// timeout; the caller reconnects.
+func (s *Source) MarkStream(ctx context.Context, refs []ports.Reference, on func(domain.ReferenceMark)) error {
+	m, err := market(refs)
+	if err != nil {
+		return err
+	}
+	_, _, stream, err := s.endpoints(m)
 	if err != nil {
 		return err
 	}
@@ -76,7 +66,7 @@ func (s *Source) MarkStream(ctx context.Context, refs []ports.Reference, coin bo
 		byRemote[r.Remote] = r
 	}
 	path := marketStreams
-	if coin {
+	if m == ports.MarketCoinM {
 		path = allStreams
 	}
 	return s.listen(ctx, "binance mark stream", stream+path+strings.Join(names, "/"), 1<<16, s.idle, func(data []byte) {
@@ -132,11 +122,15 @@ type fundingRow struct {
 // funding times in [from, to], oldest first. USDⓈ-M answers every symbol
 // in one request when the rows fit a page (one request each otherwise);
 // COIN-M wants a symbol, so one request each.
-func (s *Source) SettledFunding(ctx context.Context, refs []ports.Reference, coin bool, from, to time.Time) ([]domain.SettledFunding, error) {
+func (s *Source) SettledFunding(ctx context.Context, refs []ports.Reference, from, to time.Time) ([]domain.SettledFunding, error) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
-	rest, prefix, _, err := s.futuresURLs(coin)
+	m, err := market(refs)
+	if err != nil {
+		return nil, err
+	}
+	rest, prefix, _, err := s.endpoints(m)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +142,7 @@ func (s *Source) SettledFunding(ctx context.Context, refs []ports.Reference, coi
 	for _, r := range refs {
 		byRemote[r.Remote] = r
 	}
-	if !coin && len(refs) > 1 {
+	if m == ports.MarketUSDM && len(refs) > 1 {
 		var rows []fundingRow
 		if err := s.getAt(ctx, "funding rates", rest, prefix+"/fundingRate", window, &rows); err != nil {
 			return nil, err

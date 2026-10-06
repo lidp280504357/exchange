@@ -70,9 +70,11 @@ var initRank = map[domain.Interval]int{
 const initTimeout = 30 * time.Second
 
 // ReferenceMap tells which listed symbols show which reference market: a
-// pair its own (its reference_symbol), a contract its index pair's. The
-// mapping is cached for referenceListing; the stale one serves while the
-// listing is unavailable.
+// pair its own (its reference_symbol), a contract its own perpetual on
+// its futures market (its reference_symbol: USDⓈ-M, or COIN-M for a
+// coin-margined one; coin-M design §3.2). The mapping is cached for
+// referenceListing; the stale one serves while the listing is
+// unavailable.
 type ReferenceMap struct {
 	instruments ports.Instruments
 	log         *slog.Logger
@@ -119,8 +121,8 @@ func (r *ReferenceMap) Get(ctx context.Context) map[string]ports.Reference {
 	}
 	for _, c := range contracts {
 		perps[c.Symbol] = true
-		if ref, ok := m[c.IndexSymbol]; ok {
-			m[c.Symbol] = ref
+		if ref, ok := c.Reference(); ok {
+			m[c.Symbol] = ref // its own perpetual (coin-M design §3.2)
 		}
 	}
 	r.mu.Lock()

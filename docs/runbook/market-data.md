@@ -65,7 +65,7 @@ ssh exchange 'curl -s localhost:9090/metrics' | grep -E '^market_|kafka_consumer
 
 需求 §11.7，实施计划 §7.3 任务 3；实现见 `internal/marketdata/domain/perpetual.go`（公式）与 `application/marks.go`（每秒一轮）。
 
-- 合约（如 `BTC-USDT-PERP`）的 K 线、ticker、最近成交与深度和交易对一样，来自合约分片 derivatives-engine 的 `derivatives.trade.events` 与 `derivatives.market.depth`（见 [matching.md](matching.md#分片现货与合约)），同在上面的接口里，`/v1/market/tickers` 也包含合约。
+- 合约（如 `BTC-USDT-PERP`）的 K 线、ticker、最近成交与深度和交易对一样：平台自己的来自合约分片 derivatives-engine 的 `derivatives.trade.events` 与 `derivatives.market.depth`（见 [matching.md](matching.md#分片现货与合约)），有参考市场的显示它自己的币安永续（见下文「参考行情」），同在上面的接口里，`/v1/market/tickers` 也包含合约。行情服务读 instrument-service 的全部合约（`margin_type=ALL`，审查 EK 的 C36）：币本位合约（测试服 `PREPARE`）同样有标记价、资金费周期、参考盘口、K 线与 ticker；两站在 G4 之前只按自己的（线性）合约列表取用。
 - 每秒对每个未下线的合约：
   - **指数价**：`index_symbol`（如 `BTC-USDT`）各价源的最新现货价（参考行情，5 秒内的才算）按权重取中位数（两边权重正好各半时取两价平均），剔除偏离中位数超过 3% 的源后再取一次，8 位小数。可用源少于 `INDEX_MIN_SOURCES`（默认 2）时本轮没有指数价。平台自己的现货成交不算独立价源。价源权重 `INDEX_SOURCE_WEIGHTS`（如 `binance=1`，未列出为 1，0 表示停用）。**测试服只有币安一个源，配置为 1**；上线前按 §11.9 接入至少 3 个有授权的源。指数交易对不跟随参考市场时（平台币 ASTRA-USDT，ASTRA 设计 §5.2 与 A4 审查后的澄清；须是已读到的交易对列表里没有 `reference_symbol` 的交易对，列表还没读到时一律当作跟随，绝不改用平台盘口）唯一的价源是平台自己的市场（`platform`，一个源就够，不受 `INDEX_MIN_SOURCES` 限制），不用裸中价：取最近 60 秒的时间加权成交价（每个成交价按它作为最新价的时长加权，窗口开头沿用窗口前最后一笔），盘口中价只在买一、卖一各值 100（计价币）以上且距最近成交不超过 1% 时才与它平均；60 秒内没有成交时，合格的中价单独顶上（最近成交须在 5 分钟内），都没有时本轮没有指数价，10 秒后合约降级为只减仓；跟随参考市场的指数交易对从不改用平台盘口（那是 HOUSE 对参考盘口的复制）。
   - **标记价**：`index × (1 + basis)`，`basis` 是合约盘口中间价相对指数的偏离 `(mid − index) / index` 的 30 秒 EMA（每秒一个样本，α = 2/31，保留 12 位小数），盘口缺一边时样本为 0；`basis` 限制在 ±1% 以内，8 位小数。服务启动时 EMA 从 0 开始（标记价等于指数价）。
@@ -109,7 +109,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 - **回退**：币安的标记价超过 `MARK_SOURCE_STALE_SECONDS`（默认 10）秒没有更新，自算的价格顶上，**不进入只减仓**；指标 `market_mark_source_degraded{symbol}` 为 1，告警 `MarkPriceSourceDegraded`，日志 `reference mark price stale`；恢复后自动切回（日志 `reference mark price back`）。服务启动后的前 10 秒（流还在连接）不算陈旧。两者都没有时，才按上面的规则在 10 秒后降级为只减仓。
 - **资金费**：周期结束时间与币安的 `T` 相同时，预估费率跟随币安；周期结束后向币安 REST `fundingRate` 取该期已结算的费率与结算标记价（U 本位一次请求取全部合约，满一页 1000 条时改为逐个；币本位逐个；每 10 秒一次），最多等 2 分钟，期间该周期不结算；仍没有就用流里该期最后的预估费率（日志与指标记 `BINANCE_ESTIMATE`），再没有就用自算费率（`PLATFORM`）。币安结束周期的时间与我们不同（例如币安把该合约改成 4 小时）的周期不跟随费率，日志 `the reference market ends the funding period at another time`，此时应改合约的 `funding_interval_hours`。结算日志 `funding period settled` 带 `source`（`BINANCE`、`BINANCE_ESTIMATE`、`PLATFORM`）。
 - **打开时机**：打开开关的那一刻，标记价从自算跳到币安的（通常相差万分之几，`market_mark_reference_gap{symbol}` 实时显示自算相对币安的偏差），临界仓位可能因此被强平。按合约逐个在差距小、行情平稳时打开。
-- **来源字段**（G0 契约）：`MarkPriceUpdated.source` 与 `/v1/market/{symbol}/mark-price` 的 `source` 为 `PLATFORM`（自算）或 `BINANCE`；跟随币安时 `basis` 是币安的 (mark − index) ÷ index。`FundingRateUpdated.source` 与 `/funding-rates` 的 `source` 同理：费率来自币安时事件的 `premium` 为空、`samples` 为 0（REST 为 `"0"` 与 0）。结算记录的来源存在 `market.funding_periods.source`（迁移 market 00008，之前的记录为 `PLATFORM`）；用流里预估值结算的也记 `BINANCE`，只在日志与 `market_funding_settled_total{source="BINANCE_ESTIMATE"}` 里区分。
+- **来源字段**（G0 契约）：`MarkPriceUpdated.source` 与 `/v1/market/{symbol}/mark-price` 的 `source` 为 `PLATFORM`（自算）或 `BINANCE`；跟随币安时 `basis` 是币安的 (mark − index) ÷ index。`FundingRateUpdated.source` 与 `/funding-rates` 的 `source` 同理：费率来自币安时事件的 `premium` 为空、`samples` 为 0（REST 为 `"0"` 与 0）。结算记录的来源存在 `market.funding_periods.source`（迁移 market 00009，之前的记录为 `PLATFORM`）；用流里预估值结算的也记 `BINANCE`，只在日志与 `market_funding_settled_total{source="BINANCE_ESTIMATE"}` 里区分。
 - **审计**：`/internal/market/{symbol}/mark` 的 `mark` 带 `source`，另有 `funding_source`、`source_degraded` 与 `computed`（同一轮自算的标记价与指数价）。
 - 指标：`market_mark_source{symbol}`（1 跟随币安，0 自算）、`market_mark_source_degraded{symbol}`、`market_mark_reference_age_seconds{symbol}`（-1 表示还没有）、`market_mark_reference_gap{symbol}`、`market_mark_stream_failures_total`、`market_mark_funding_fetches_total{result}`（`found`、`pending`、`failed`）。配置：U 本位 `BINANCE_FUTURES_REST_URL`、`BINANCE_FUTURES_STREAM_URL`，币本位 `BINANCE_COINM_REST_URL`、`BINANCE_COINM_STREAM_URL`（与合约数据共用，见下文）、`MARK_SOURCE_STALE_SECONDS`。
 - 开关键 `market.reference_mark` 由 G0 契约加入已知开关；在此之前 `exchangectl flags set market.reference_mark --on --allow-symbols <合约> --force --reason …` 可先打开。
@@ -117,13 +117,14 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 ## 参考行情：跟随哪些交易对（ADR-0010）
 
+- 合约按自己的 `reference_symbol` 跟随币安永续（币本位设计 §3.2，2026-10-06 起；之前显示指数交易对的现货数据）：U 本位（`margin_type` USDT，如 `BTCUSDT`）在 `fapi`/`fstream`，币本位（COIN，如 `BTCUSD_PERP`）在 `dapi`/`dstream`；没有 `reference_symbol` 的（平台币的两个永续）显示平台数据。币本位的数量是张：ticker 与 K 线的成交量是张数，成交额是张数 × 面值（美元，不是币安给的币量），成交的计价额同样是张数 × 面值。
 - 交易对表的 `reference_symbol`（币安符号，如 `BTCUSDT`）决定是否跟随：有它的交易对都跟随，没有的（测试服只有平台币 ASTRA-USDT；ETH-BTC 自 B4 起跟随 ETHBTC）始终显示平台数据，与 `market.reference_*` 开关怎么设无关：ticker 与 24 小时统计、K 线（REST 与频道）、盘口、成交、走势图、`tickers` 频道与 `/v1/market/summary` 都来自平台自己的 `trade.events` 与引擎盘口（2026-10-02 核对，单元测试覆盖）。`reference_multiplier` 是价格倍数（1000 倍计价的币，如 `1000PEPE-USDT` ↔ `PEPEUSDT`，倍数 1000）：适配器把币安的价格乘以倍数、数量除以倍数，成交额不变，之后一切都按平台的代码与单位处理。两个字段在 `deploy/instruments/test.json` 里维护，部署时幂等同步（见 [instruments.md](instruments.md)）。
-- 行情服务每分钟重读一次映射，跟随的交易对变了就重连。每次连接先建流（每个交易对 `kline_1m` 与 `ticker` 两条，一个组合连接），同时用 REST 取一次全部 24h ticker、补齐 1 分钟 K 线（从库里最新一根到建流那一分钟，最多一天）；REST 请求间隔 200 毫秒，币安回 429/418 时按 `Retry-After` 暂停全部请求。
+- 行情服务每分钟重读一次映射，跟随的交易对或合约变了就全部重连。每个市场（现货、U 本位、币本位）一条组合连接（每个代码 `kline_1m` 与 `ticker` 两条；U 本位走 `/market/stream`），各自断线退避重连；每次连接先建流，同时用 REST 取一次 24h ticker（现货按代码列表一次取，合约市场取全部再挑）、补齐 1 分钟 K 线（从库里最新一根到建流那一分钟，最多一天，合约的存在合约代码下）；REST 请求间隔 200 毫秒，币安回 429/418 时按 `Retry-After` 暂停全部请求。行情中断保护（下文）只看现货连接。
 - 旧的环境变量 `REFERENCE_SYMBOLS` 已去掉。
 
 ## 参考 ticker（`market.reference_ticker`）
 
-开关按交易对生效（还需要 `market.reference_feed` 开着）：打开时 `GET /v1/market/tickers`、`/{symbol}/ticker`、`/summary` 与 `ticker:`、`tickers` 频道的最新价、24h 开高低、成交量、成交额、笔数、买一卖一都来自币安的 24h ticker（`<symbol>@ticker`，每秒一次），`updated_at` 是币安计算它的时间；合约显示它的指数交易对的 ticker。币安流中断时继续显示最后一条（`updated_at` 停住），客户端据此在 30 秒后显示"行情连接中断"；从未收到过参考 ticker 时显示平台自己的。开关关掉后下一次推送（500 毫秒内）恢复平台 ticker。
+开关按交易对生效（还需要 `market.reference_feed` 开着）：打开时 `GET /v1/market/tickers`、`/{symbol}/ticker`、`/summary` 与 `ticker:`、`tickers` 频道的最新价、24h 开高低、成交量、成交额、笔数、买一卖一都来自币安的 24h ticker（`<symbol>@ticker`，每秒一次），`updated_at` 是币安计算它的时间；合约显示它自己的币安永续的 ticker（期货 ticker 没有买一卖一，取自该合约的参考盘口）。币安流中断时继续显示最后一条（`updated_at` 停住），客户端据此在 30 秒后显示"行情连接中断"；从未收到过参考 ticker 时显示平台自己的。开关关掉后下一次推送（500 毫秒内）恢复平台 ticker。
 
 ## 行情中断保护（`market.halt_on_feed_loss`）
 
@@ -136,7 +137,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 用户决定（2026-09-30）：测试环境成交太少，平台自己的 K 线几乎不动，图表一律显示币安的 K 线。开关 `market.reference_kline` 按交易对生效（还需要 `market.reference_feed` 开着）：
 
-- 哪些交易对：跟随币安的交易对（有 `reference_symbol` 的，测试服是全部交易对：USDT 交易对与跟随 ETHBTC 的 ETH-BTC）用自己的参考数据，合约用它的指数交易对（BTC-USDT-PERP → BTC-USDT）。没有参考数据的交易对照常显示平台 K 线。
+- 哪些交易对：跟随币安的交易对（有 `reference_symbol` 的，测试服是全部交易对：USDT 交易对与跟随 ETHBTC 的 ETH-BTC）用自己的参考数据，合约用它自己的永续（`/fapi/v1/klines`、`/dapi/v1/klines`）。没有参考数据的交易对与合约照常显示平台 K 线。
 - 历史：`GET /v1/market/{symbol}/candles` 改为向币安取同周期的 K 线（`/api/v3/klines`，周期名与对齐方式和平台一致），同样的请求 5 秒内走缓存，已结束的历史页缓存 1 分钟；取不到时返回 `COMMON_UNAVAILABLE`。
 - 实时：参考行情收到的每条 1 分钟推送，在服务里累加成各周期的当前 K 线（开高低收、成交量、笔数），随每 500 毫秒一次的推送发到 `market.candle.events`，前端的 `candles:{symbol}:{interval}` 频道和平台 K 线一样收到；服务启动后第一次遇到进行到一半的周期，先向币安取这一根的当前值再累加。这些交易对不再推送平台自己的 K 线；ticker 见上一节，盘口与成交见下一节。
 - 测试服设置：`exchangectl flags set market.reference_kline --on --deny-symbols ETH-BTC --reason "..."`，`market.reference_ticker`、`market.halt_on_feed_loss` 同样打开。ETH-BTC 没有 `reference_symbol`，本来就显示平台数据；端到端 `marketdata.sh` 在它上面成交后检查平台 K 线与 ticker。
@@ -150,7 +151,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 - 本地盘口（`internal/marketdata/domain/localbook.go`，币安"如何正确在本地维护一个订单簿"的做法）：每个组合连接最多 25 个交易对（`<symbol>@depth@100ms` 与 `@aggTrade`），先缓存增量，再逐个用 REST 取快照（现货 `/api/v3/depth?limit=1000`，合约 `/fapi/v1/depth`），丢掉快照之前的增量；现货按 `U`/`u`、合约按 `pu` 检查连续性，断了就重新取快照（`market_reference_book_resyncs_total`）。1000 倍计价的币价格乘、数量除以倍数。
 - 可用的条件：已同步，且它的连接 5 秒内收到过消息（按连接算，冷门币盘口不变也不会被当成断流）。不可用时该交易对退回平台自己的盘口与成交（转发引擎的 `market.depth.internal`），恢复后重新发快照。
 - 发布：每 100 毫秒一轮，变化的交易对发 `DepthUpdate`（与上次发出的前 200 档比较的差异，带 `prev_sequence`），每 10 秒与刚开始显示时发 `DepthSnapshot`，没有变化时每秒一条空的 `DepthUpdate` 作心跳（`taken_at` 是连接最后收到消息的时间）。公共 sequence 按交易对递增，起点是服务启动时刻（微秒），重启后不会回退；不显示参考市场的交易对每次转发引擎快照也占一个 sequence。成交按批发 `TradesPrinted`（`market.trades`）；平台自己的成交只转发这一批里新应用的（按 sequence 判断），`trade.events` 重投时不会重复出现在成交列表里。REST 的最近成交在启动时先从币安取一次。
-- 合约的盘口与成交用币安 U 本位合约的同名符号（`fapi`/`fstream`），标记价的盘口中间价也用它。
+- 合约的盘口与成交用它的 `reference_symbol`：U 本位在 `fapi`/`fstream`，币本位在 `dapi`/`dstream`（快照 `/dapi/v1/depth`，盘口与成交在同一条 `/stream` 连接；数量是张），标记价的盘口中间价与溢价指数也用它（币本位的冲击名义是张数，冲击价按张数折算的币价值平均：张数 ÷ Σ(张 ÷ 价)）。
 - 指标：`market_reference_book_age_seconds{symbol}`（距上次变化的秒数，未同步为 -1）、`market_reference_book_resyncs_total`、`market_reference_book_stream_failures_total`；告警 `ReferenceBookStale`（不同步或 30 秒没变，持续 2 分钟）。
 - 日志：`reference book stream failed`（带交易对数，按 1 秒起、最长 1 分钟退避重连）、`reference book snapshot not loaded`、`reference books: followed symbols changed`。
 

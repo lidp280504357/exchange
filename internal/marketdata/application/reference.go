@@ -41,12 +41,14 @@ type Flags interface {
 
 // ReferenceFeed keeps the reference data while market.reference_feed is
 // on. It follows the listed pairs that have a reference market (the
-// pairs' reference_symbol): each connection starts the stream first, then
-// loads the tickers and backfills the 1m candles missed since the latest
-// stored one (at most a day) up to the stream's first minute. A failure
-// reconnects with backoff, and so does a change of the followed pairs.
-// When the flag goes off the stream stops and the data is dropped, so
-// everything built on it sees none.
+// pairs' reference_symbol) and the contracts that have one (their own
+// perpetual, coin-M design §3.2), one connection per market (spot,
+// USDⓈ-M, COIN-M): each starts the stream first, then loads the tickers
+// and backfills the 1m candles missed since the latest stored one (at
+// most a day) up to the stream's first minute. A failure reconnects that
+// market with backoff; a change of the followed symbols restarts them
+// all. When the flag goes off the streams stop and the data is dropped,
+// so everything built on it sees none.
 type ReferenceFeed struct {
 	src         ports.ReferenceSource
 	store       ports.Store
@@ -63,7 +65,7 @@ type ReferenceFeed struct {
 	followed  []ports.Reference
 	latest    map[string]Reference
 	tickers   map[string]domain.Ticker
-	received  time.Time // the stream's latest message
+	received  map[string]time.Time // each market's latest message
 	observers []func(domain.Candle)
 
 	updates *prometheus.CounterVec
@@ -80,7 +82,7 @@ func NewReferenceFeed(src ports.ReferenceSource, store ports.Store, fl Flags, in
 	f := &ReferenceFeed{
 		src: src, store: store, flags: fl, instruments: instruments, log: log, now: time.Now,
 		recheck: 10 * time.Second, remap: time.Minute,
-		latest: map[string]Reference{}, tickers: map[string]domain.Ticker{},
+		latest: map[string]Reference{}, tickers: map[string]domain.Ticker{}, received: map[string]time.Time{},
 		updates: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_reference_updates_total", Help: "Reference candle and ticker updates received, by symbol.",
 		}, []string{"symbol"}),
@@ -138,19 +140,20 @@ func (f *ReferenceFeed) Ticker(symbol string) (domain.Ticker, bool) {
 	return t, ok
 }
 
-// Followed returns the pairs the feed follows (or last followed).
+// Followed returns the pairs and contracts the feed follows (or last
+// followed).
 func (f *ReferenceFeed) Followed() []ports.Reference {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.followed
 }
 
-// Received returns when the stream last sent anything; zero while the
-// feed is off or has not connected.
+// Received returns when the spot stream (the pairs') last sent anything;
+// zero while the feed is off or has not connected.
 func (f *ReferenceFeed) Received() time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.received
+	return f.received[ports.MarketSpot]
 }
 
 func (f *ReferenceFeed) setPrice(symbol string, price decimal.Decimal, at time.Time) {
@@ -192,13 +195,18 @@ func (f *ReferenceFeed) drop() {
 	f.mu.Lock()
 	clear(f.latest)
 	clear(f.tickers)
-	f.received = time.Time{}
+	clear(f.received)
 	f.mu.Unlock()
 }
 
-// follow reads which pairs have a reference market, sorted by symbol.
+// follow reads which pairs and contracts have a reference market, sorted
+// by symbol.
 func (f *ReferenceFeed) follow(ctx context.Context) ([]ports.Reference, error) {
 	pairs, err := f.instruments.Pairs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	contracts, err := f.instruments.Contracts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +214,11 @@ func (f *ReferenceFeed) follow(ctx context.Context) ([]ports.Reference, error) {
 	for _, p := range pairs {
 		if p.Reference.Remote != "" {
 			refs = append(refs, p.Reference)
+		}
+	}
+	for _, c := range contracts {
+		if ref, ok := c.Reference(); ok {
+			refs = append(refs, ref)
 		}
 	}
 	slices.SortFunc(refs, func(a, b ports.Reference) int {
@@ -224,14 +237,11 @@ func (f *ReferenceFeed) follow(ctx context.Context) ([]ports.Reference, error) {
 }
 
 func sameRefs(a, b []ports.Reference) bool {
-	return slices.EqualFunc(a, b, func(x, y ports.Reference) bool {
-		return x.Symbol == y.Symbol && x.Remote == y.Remote && x.Multiplier.Equal(y.Multiplier)
-	})
+	return slices.EqualFunc(a, b, ports.SameReference)
 }
 
 // Run feeds until ctx ends (an app.Loop body).
 func (f *ReferenceFeed) Run(ctx context.Context) error {
-	backoff := time.Second
 	for ctx.Err() == nil {
 		if !f.enabled() {
 			f.drop()
@@ -248,19 +258,37 @@ func (f *ReferenceFeed) Run(ctx context.Context) error {
 		}
 		session, stop := context.WithCancel(ctx)
 		go f.watch(session, stop, refs)
-		started := f.now()
-		err = f.session(session, refs)
-		ended := session.Err() != nil // stopped by the watcher, not failed
-		stop()
-		if ctx.Err() != nil {
-			return nil
+		byMarket := map[string][]ports.Reference{}
+		for _, r := range refs {
+			byMarket[r.Market] = append(byMarket[r.Market], r)
 		}
-		if ended {
-			continue // the flag went off or the followed pairs changed: no backoff
+		var wg sync.WaitGroup
+		for _, set := range byMarket {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				f.market(session, set)
+			}()
+		}
+		wg.Wait() // until the watcher stops the session: the flag went off or the followed symbols changed
+		stop()
+	}
+	return nil
+}
+
+// market keeps one market's stream up until ctx ends, with backoff after
+// failures.
+func (f *ReferenceFeed) market(ctx context.Context, refs []ports.Reference) {
+	backoff := time.Second
+	for ctx.Err() == nil {
+		started := f.now()
+		err := f.session(ctx, refs)
+		if ctx.Err() != nil {
+			return
 		}
 		if err != nil {
 			f.errors.Inc()
-			f.log.WarnContext(ctx, "reference feed failed", "source", f.src.Name(), "error", err)
+			f.log.WarnContext(ctx, "reference feed failed", "source", f.src.Name(), "market", refs[0].Market, "error", err)
 		}
 		if f.now().Sub(started) > time.Minute {
 			backoff = time.Second
@@ -268,7 +296,6 @@ func (f *ReferenceFeed) Run(ctx context.Context) error {
 		sleep(ctx, backoff)
 		backoff = min(2*backoff, time.Minute)
 	}
-	return nil
 }
 
 // watch ends a session when the flag goes off or the followed pairs
@@ -289,7 +316,7 @@ func (f *ReferenceFeed) watch(session context.Context, stop context.CancelFunc, 
 		}
 		mapped = f.now()
 		if now, err := f.follow(session); err == nil && !sameRefs(now, refs) {
-			f.log.InfoContext(session, "reference feed: followed pairs changed", "pairs", len(now))
+			f.log.InfoContext(session, "reference feed: followed symbols changed", "symbols", len(now))
 			stop()
 			return
 		}
@@ -303,8 +330,8 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// session streams refs until the connection ends, loading the tickers
-// and backfilling the candles alongside.
+// session streams refs, all of one market, until the connection ends,
+// loading the tickers and backfilling the candles alongside.
 func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -318,7 +345,7 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 		Candle: func(c domain.Candle) {
 			at := f.now()
 			f.mu.Lock()
-			f.received = at
+			f.received[refs[0].Market] = at
 			f.mu.Unlock()
 			f.setPrice(c.Symbol, c.Close, at)
 			f.updates.WithLabelValues(c.Symbol).Inc()
@@ -330,7 +357,7 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 		Ticker: func(t domain.Ticker) {
 			at := f.now()
 			f.mu.Lock()
-			f.received = at
+			f.received[refs[0].Market] = at
 			f.mu.Unlock()
 			f.setTicker(t)
 			f.setPrice(t.Symbol, t.Last, at)

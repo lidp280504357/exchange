@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/skill/exchange/internal/marketdata/ports"
 )
 
 type guardRig struct {
@@ -40,7 +42,7 @@ func newGuardRig(t *testing.T) *guardRig {
 // receive notes a stream message now.
 func (r *guardRig) receive() {
 	r.feed.mu.Lock()
-	r.feed.received = r.now
+	r.feed.received[ports.MarketSpot] = r.now
 	r.feed.mu.Unlock()
 }
 

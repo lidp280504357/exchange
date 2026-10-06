@@ -21,14 +21,16 @@ import (
 // marks through on and ends it with end.
 type markCall struct {
 	refs []ports.Reference
-	coin bool
 	on   func(domain.ReferenceMark)
 	end  chan error
 }
 
+// coin reports whether the connection is COIN-M's.
+func (c markCall) coin() bool { return len(c.refs) > 0 && c.refs[0].Market == ports.MarketCoinM }
+
 type fundingAsk struct {
 	symbols  []string
-	coin     bool
+	market   string
 	from, to time.Time
 }
 
@@ -41,8 +43,8 @@ type fakeMarkSource struct {
 	fail    bool
 }
 
-func (f *fakeMarkSource) MarkStream(ctx context.Context, refs []ports.Reference, coin bool, on func(domain.ReferenceMark)) error {
-	call := markCall{refs: refs, coin: coin, on: on, end: make(chan error, 1)}
+func (f *fakeMarkSource) MarkStream(ctx context.Context, refs []ports.Reference, on func(domain.ReferenceMark)) error {
+	call := markCall{refs: refs, on: on, end: make(chan error, 1)}
 	select {
 	case f.calls <- call:
 	case <-ctx.Done():
@@ -56,12 +58,12 @@ func (f *fakeMarkSource) MarkStream(ctx context.Context, refs []ports.Reference,
 	}
 }
 
-func (f *fakeMarkSource) SettledFunding(_ context.Context, refs []ports.Reference, coin bool, from, to time.Time) ([]domain.SettledFunding, error) {
+func (f *fakeMarkSource) SettledFunding(_ context.Context, refs []ports.Reference, from, to time.Time) ([]domain.SettledFunding, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	ask := fundingAsk{coin: coin, from: from, to: to}
+	ask := fundingAsk{from: from, to: to}
 	for _, r := range refs {
-		ask.symbols = append(ask.symbols, r.Symbol)
+		ask.symbols, ask.market = append(ask.symbols, r.Symbol), r.Market
 	}
 	f.asks = append(f.asks, ask)
 	if f.fail {
@@ -87,16 +89,18 @@ func nextCall(t *testing.T, src *fakeMarkSource) markCall {
 	}
 }
 
-// The feed follows the mark price of every contract whose index pair has
-// a reference market, at the source's perpetual of the same code: USDⓈ-M
-// and COIN-M on connections of their own. It reconnects after a failure
-// and forgets the marks when the reference feed goes off.
+// The feed follows the mark price of every contract with a reference
+// market, at its own perpetual (its reference_symbol): USDⓈ-M and COIN-M
+// on connections of their own. It reconnects after a failure and forgets
+// the marks when the reference feed goes off.
 func TestMarkFeedFollowsTheContracts(t *testing.T) {
 	list := testListing()
-	list.pairs = append(list.pairs, ports.Pair{Symbol: "ETH-USDT", Base: "ETH", Quote: "USDT", Status: "TRADING", Reference: ref("ETH-USDT", "ETHUSDT")})
 	list.contracts = append(list.contracts,
-		ports.Contract{Symbol: "ETH-USDT-PERP", IndexSymbol: "ETH-USDT"}, ports.Contract{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT"},
-		ports.Contract{Symbol: "BTC-USD-PERP", IndexSymbol: "BTC-USDT"})
+		ports.Contract{Symbol: "ETH-USDT-PERP", IndexSymbol: "ETH-USDT", MarginType: "USDT", ReferenceSymbol: "ETHUSDT"},
+		ports.Contract{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT", MarginType: "USDT"},
+		ports.Contract{
+			Symbol: "BTC-USD-PERP", IndexSymbol: "BTC-USDT", MarginType: "COIN", ContractSize: d("100"), ReferenceSymbol: "BTCUSD_PERP",
+		})
 	refs := NewReferenceMap(list, slog.New(slog.DiscardHandler))
 	src := &fakeMarkSource{calls: make(chan markCall)}
 	fl := &feedOn{}
@@ -114,14 +118,15 @@ func TestMarkFeedFollowsTheContracts(t *testing.T) {
 	}()
 
 	c, coin := nextCall(t, src), nextCall(t, src)
-	if c.coin {
+	if c.coin() {
 		c, coin = coin, c
 	}
-	if c.coin || len(c.refs) != 2 || c.refs[0].Symbol != "BTC-USDT-PERP" || c.refs[0].Remote != "BTCUSDT" ||
+	if c.coin() || len(c.refs) != 2 || c.refs[0].Symbol != "BTC-USDT-PERP" || c.refs[0].Remote != "BTCUSDT" ||
 		c.refs[1].Symbol != "ETH-USDT-PERP" || c.refs[1].Remote != "ETHUSDT" {
-		t.Fatalf("USDⓈ-M followed %+v (coin %v)", c.refs, c.coin)
+		t.Fatalf("USDⓈ-M followed %+v", c.refs)
 	}
-	if !coin.coin || len(coin.refs) != 1 || coin.refs[0].Symbol != "BTC-USD-PERP" || coin.refs[0].Remote != "BTCUSD_PERP" {
+	if !coin.coin() || len(coin.refs) != 1 || coin.refs[0].Symbol != "BTC-USD-PERP" || coin.refs[0].Remote != "BTCUSD_PERP" ||
+		!coin.refs[0].ContractSize.Equal(d("100")) {
 		t.Fatalf("COIN-M followed %+v", coin.refs)
 	}
 	c.on(domain.ReferenceMark{Symbol: "BTC-USDT-PERP", Mark: d("60120"), Index: d("60060")})
@@ -157,17 +162,17 @@ func TestMarkFeedFollowsTheContracts(t *testing.T) {
 
 func TestMarkGroupsSplitTheMarkets(t *testing.T) {
 	m := map[string]ports.Reference{
-		"BTC-USDT-PERP": {Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT"},
-		"BTC-USD-PERP":  {Symbol: "BTC-USD-PERP", Remote: "BTCUSD_PERP"},
-		"ETH-USDT-PERP": {Symbol: "ETH-USDT-PERP", Remote: "ETHUSDT"},
+		"BTC-USDT-PERP": {Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Market: ports.MarketUSDM},
+		"BTC-USD-PERP":  {Symbol: "BTC-USD-PERP", Remote: "BTCUSD_PERP", Market: ports.MarketCoinM},
+		"ETH-USDT-PERP": {Symbol: "ETH-USDT-PERP", Remote: "ETHUSDT", Market: ports.MarketUSDM},
 	}
 	for i := range 450 {
 		s := "X" + decimal.NewFromInt(int64(i)).String() + "-USDT-PERP"
-		m[s] = ports.Reference{Symbol: s, Remote: "X" + decimal.NewFromInt(int64(i)).String() + "USDT"}
+		m[s] = ports.Reference{Symbol: s, Remote: "X" + decimal.NewFromInt(int64(i)).String() + "USDT", Market: ports.MarketUSDM}
 	}
 	g := markGroups(m)
-	if len(g) != 4 || g[0].coin || len(g[0].refs) != markStreamsPerConn || len(g[2].refs) != 452-2*markStreamsPerConn ||
-		!g[3].coin || len(g[3].refs) != 1 || g[3].refs[0].Symbol != "BTC-USD-PERP" {
+	if len(g) != 4 || g[0].market != ports.MarketUSDM || len(g[0].refs) != markStreamsPerConn || len(g[2].refs) != 452-2*markStreamsPerConn ||
+		g[3].market != ports.MarketCoinM || len(g[3].refs) != 1 || g[3].refs[0].Symbol != "BTC-USD-PERP" {
 		t.Fatalf("groups %d", len(g))
 	}
 }
@@ -188,7 +193,7 @@ func TestMarkFeedFetchesSettledRates(t *testing.T) {
 		t.Fatal("known before any fetch")
 	}
 	feed.FetchFunding(ctx)
-	if len(src.asks) != 1 || src.asks[0].coin || len(src.asks[0].symbols) != 1 || !src.asks[0].from.Equal(end) ||
+	if len(src.asks) != 1 || src.asks[0].market != ports.MarketUSDM || len(src.asks[0].symbols) != 1 || !src.asks[0].from.Equal(end) ||
 		!src.asks[0].to.Equal(end.Add(fundingWindow)) {
 		t.Fatalf("asked %+v", src.asks)
 	}

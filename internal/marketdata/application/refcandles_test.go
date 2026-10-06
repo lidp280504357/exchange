@@ -167,7 +167,7 @@ func testListing() listing {
 	return newListing([]ports.Pair{
 		{Symbol: "BTC-USDT", Base: "BTC", Quote: "USDT", Status: "TRADING", Rank: 1, Reference: ref("BTC-USDT", "BTCUSDT")},
 		{Symbol: "ETH-BTC", Base: "ETH", Quote: "BTC", Status: "TRADING", Rank: 2},
-	}, []ports.Contract{{Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT"}})
+	}, []ports.Contract{{Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT", MarginType: "USDT", ReferenceSymbol: "BTCUSDT"}})
 }
 
 // klineFlags has the reference feed on and reference K-lines on except for
@@ -251,6 +251,10 @@ func TestAnIntervalFirstSeenMidwayStartsFromTheSource(t *testing.T) {
 func TestReferenceCandlesReplaceThePlatformsInThePush(t *testing.T) {
 	rc := newReferenceRig(&history{})
 	rc.Observe(minute("2026-09-30T10:00:00Z", "100", "101", "99", "100.5", "1"))
+	// The contract's own perpetual (coin-M design §3.2).
+	perp := minute("2026-09-30T10:00:00Z", "100", "101", "99", "100.6", "2")
+	perp.Symbol = "BTC-USDT-PERP"
+	rc.Observe(perp)
 	platform := []Update{
 		{"BTC-USDT", &marketv1.CandleUpdated{Candle: &marketv1.Candle{Symbol: "BTC-USDT", Interval: "1m"}}},
 		{"BTC-USDT", &marketv1.TickerUpdated{Ticker: &marketv1.Ticker{Symbol: "BTC-USDT"}}},
@@ -265,7 +269,8 @@ func TestReferenceCandlesReplaceThePlatformsInThePush(t *testing.T) {
 			if m.GetCandle().GetSymbol() != u.Symbol {
 				t.Fatalf("a candle of %s pushed as %s", m.GetCandle().GetSymbol(), u.Symbol)
 			}
-			if u.Symbol != "ETH-BTC" && m.GetCandle().GetClose() != "100.5" {
+			want := map[string]string{"BTC-USDT": "100.5", "BTC-USDT-PERP": "100.6"}[u.Symbol]
+			if u.Symbol != "ETH-BTC" && m.GetCandle().GetClose() != want {
 				t.Fatalf("a platform candle of %s kept: %v", u.Symbol, m)
 			}
 			counts[u.Symbol+" candle"]++
@@ -288,7 +293,8 @@ func TestReferenceCandlesReplaceThePlatformsInThePush(t *testing.T) {
 	if out := rc.Push(context.Background(), nil); len(out) != 0 {
 		t.Fatalf("pushed again %d updates", len(out))
 	}
-	if ref, ok := rc.Serves(context.Background(), "BTC-USDT-PERP"); !ok || ref.Symbol != "BTC-USDT" || ref.Remote != "BTCUSDT" {
+	if ref, ok := rc.Serves(context.Background(), "BTC-USDT-PERP"); !ok || ref.Symbol != "BTC-USDT-PERP" || ref.Remote != "BTCUSDT" ||
+		ref.Market != ports.MarketUSDM {
 		t.Fatalf("serves %+v %v", ref, ok)
 	}
 	if _, ok := rc.Serves(context.Background(), "ETH-BTC"); ok {

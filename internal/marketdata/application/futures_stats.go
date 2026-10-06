@@ -303,21 +303,6 @@ func remoteKey(coinMargined bool, remote string) string {
 	return marginName(coinMargined) + " " + remote
 }
 
-// remoteContract is the source's perpetual of a platform contract by its
-// code: <BASE>-USDT-PERP is USDⓈ-M <BASE>USDT, <BASE>-USD-PERP COIN-M
-// <BASE>USD_PERP (the platform's codes follow the source's, 1000PEPE
-// included). The mark feed (markfeed.go) follows contracts by it; the
-// statistics use the contracts' reference_symbol.
-func remoteContract(symbol string) (coinMargined bool, remote string, ok bool) {
-	if base, found := strings.CutSuffix(symbol, "-USDT-PERP"); found && base != "" {
-		return false, base + "USDT", true
-	}
-	if base, found := strings.CutSuffix(symbol, "-USD-PERP"); found && base != "" {
-		return true, base + "USD_PERP", true
-	}
-	return false, "", false
-}
-
 // Market returns a contract's market at the source: known is false while
 // the listing was never read, followed whether the source trades it.
 func (s *FuturesStats) Market(symbol string) (m ports.FuturesMarket, known, followed bool) {

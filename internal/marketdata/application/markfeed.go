@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/marketdata/domain"
 	"github.com/skill/exchange/internal/marketdata/ports"
@@ -33,10 +32,6 @@ const (
 	// this long after its funding time.
 	fundingForget = 24 * time.Hour
 )
-
-// coinMarket reports whether a reference symbol is a COIN-M perpetual
-// (Binance's BTCUSD_PERP); USDⓈ-M perpetuals have no underscore.
-func coinMarket(remote string) bool { return strings.HasSuffix(remote, "_PERP") }
 
 // MarkFeed follows the reference market's mark prices of every contract
 // that has a reference market while market.reference_feed is on (whether
@@ -153,18 +148,14 @@ func (f *MarkFeed) Settled(symbol string, at time.Time) (domain.SettledFunding, 
 	return s, ok
 }
 
-// follow reads the followed contracts: those whose index pair has a
-// reference market, each at the source's perpetual of the same code
-// (BTC-USDT-PERP at USDⓈ-M BTCUSDT, BTC-USD-PERP at COIN-M BTCUSD_PERP,
-// 1000PEPE-USDT-PERP at 1000PEPEUSDT: no multiplier).
+// follow reads the followed contracts: those with a reference market,
+// each at its own perpetual (its reference_symbol: BTC-USDT-PERP at
+// USDⓈ-M BTCUSDT, BTC-USD-PERP at COIN-M BTCUSD_PERP).
 func (f *MarkFeed) follow(ctx context.Context) map[string]ports.Reference {
 	out := map[string]ports.Reference{}
-	for symbol := range f.refs.Get(ctx) {
-		if !isContract(symbol) {
-			continue
-		}
-		if _, remote, ok := remoteContract(symbol); ok {
-			out[symbol] = ports.Reference{Symbol: symbol, Remote: remote, Multiplier: decimal.NewFromInt(1)}
+	for symbol, ref := range f.refs.Get(ctx) {
+		if ref.Market != ports.MarketSpot {
+			out[symbol] = ref
 		}
 	}
 	f.mu.Lock()
@@ -186,25 +177,26 @@ func (f *MarkFeed) drop() {
 	f.mu.Unlock()
 }
 
-// markGroup is the contracts of one stream connection.
+// markGroup is the contracts of one stream connection, all of one
+// futures market.
 type markGroup struct {
-	coin bool
-	refs []ports.Reference
+	market string
+	refs   []ports.Reference
 }
 
 // markGroups splits the followed contracts by market into connections of
 // at most markStreamsPerConn, in symbol order.
 func markGroups(m map[string]ports.Reference) []markGroup {
-	byMarket := map[bool][]ports.Reference{}
+	byMarket := map[string][]ports.Reference{}
 	for _, ref := range m {
-		byMarket[coinMarket(ref.Remote)] = append(byMarket[coinMarket(ref.Remote)], ref)
+		byMarket[ref.Market] = append(byMarket[ref.Market], ref)
 	}
 	var out []markGroup
-	for _, coin := range []bool{false, true} {
-		refs := byMarket[coin]
+	for _, market := range []string{ports.MarketUSDM, ports.MarketCoinM} {
+		refs := byMarket[market]
 		slices.SortFunc(refs, func(x, y ports.Reference) int { return strings.Compare(x.Symbol, y.Symbol) })
 		for chunk := range slices.Chunk(refs, markStreamsPerConn) {
-			out = append(out, markGroup{coin: coin, refs: chunk})
+			out = append(out, markGroup{market: market, refs: chunk})
 		}
 	}
 	return out
@@ -264,7 +256,7 @@ func (f *MarkFeed) connection(ctx context.Context, g markGroup) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		started := f.now()
-		err := f.src.MarkStream(ctx, g.refs, g.coin, func(m domain.ReferenceMark) {
+		err := f.src.MarkStream(ctx, g.refs, func(m domain.ReferenceMark) {
 			at := f.now()
 			f.mu.Lock()
 			if _, ok := f.followed[m.Symbol]; ok {
@@ -276,7 +268,7 @@ func (f *MarkFeed) connection(ctx context.Context, g markGroup) {
 			return
 		}
 		f.failures.Inc()
-		f.log.WarnContext(ctx, "reference mark stream failed", "coin_m", g.coin, "contracts", len(g.refs), "error", err)
+		f.log.WarnContext(ctx, "reference mark stream failed", "market", g.market, "contracts", len(g.refs), "error", err)
 		if f.now().Sub(started) > time.Minute {
 			backoff = time.Second
 		}
@@ -302,8 +294,8 @@ func (f *MarkFeed) RunFunding(ctx context.Context) error {
 // market wants one), and keeps what it finds.
 func (f *MarkFeed) FetchFunding(ctx context.Context) {
 	type batch struct {
-		coin bool
-		at   time.Time
+		market string
+		at     time.Time
 	}
 	now := f.now()
 	batches := map[batch][]ports.Reference{}
@@ -314,7 +306,7 @@ func (f *MarkFeed) FetchFunding(ctx context.Context) {
 		case now.Sub(k.at) > fundingForget || !ok:
 			delete(f.wanted, k) // too old, or no longer followed
 		case !now.Before(k.at):
-			b := batch{coinMarket(ref.Remote), k.at}
+			b := batch{ref.Market, k.at}
 			batches[b] = append(batches[b], ref)
 		}
 	}
@@ -325,7 +317,7 @@ func (f *MarkFeed) FetchFunding(ctx context.Context) {
 	}
 	f.mu.Unlock()
 	for b, refs := range batches {
-		list, err := f.src.SettledFunding(ctx, refs, b.coin, b.at, b.at.Add(fundingWindow))
+		list, err := f.src.SettledFunding(ctx, refs, b.at, b.at.Add(fundingWindow))
 		if err != nil {
 			if ctx.Err() == nil {
 				f.fetches.WithLabelValues("failed").Inc()

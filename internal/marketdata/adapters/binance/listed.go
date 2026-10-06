@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"github.com/skill/exchange/internal/marketdata/ports"
 )
 
 // invalidSymbol is Binance's error code for a symbol it does not list.
@@ -16,7 +18,11 @@ const invalidSymbol = -1121
 // symbol with it before a pair uses one: a symbol Binance does not know
 // fails the batched ticker reads of every pair.
 func (s *Source) Listed(ctx context.Context, symbol string, futures bool) (bool, error) {
-	rest, _, prefix, err := s.urls(futures)
+	m := ports.MarketSpot
+	if futures {
+		m = ports.MarketUSDM
+	}
+	rest, prefix, _, err := s.endpoints(m)
 	if err != nil {
 		return false, err
 	}

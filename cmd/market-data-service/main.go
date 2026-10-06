@@ -183,6 +183,7 @@ func setup(ctx context.Context, a *app.App) error {
 	refKlines := application.NewReferenceCandles(src, flagClient, refs, a.Logger())
 	feed.Observe(refKlines.Observe)
 	tickers := application.NewTickers(svc, feed, refs, flagClient, listed)
+	tickers.UseBooks(books.Levels) // a futures ticker has no best bid and ask
 	pusher.Use(refKlines.Push)
 	pusher.Use(tickers.Push)
 	guard := application.NewFeedGuard(feed, listed, store, flagClient, a.Logger(), a.Metrics())

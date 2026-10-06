@@ -16,9 +16,11 @@ import (
 )
 
 var (
-	markBTC    = ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: decimal.NewFromInt(1)}
-	markETH    = ports.Reference{Symbol: "ETH-USDT-PERP", Remote: "ETHUSDT", Multiplier: decimal.NewFromInt(1)}
-	markBTCUSD = ports.Reference{Symbol: "BTC-USD-PERP", Remote: "BTCUSD_PERP", Multiplier: decimal.NewFromInt(1)}
+	markBTC    = ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: decimal.NewFromInt(1), Market: ports.MarketUSDM}
+	markETH    = ports.Reference{Symbol: "ETH-USDT-PERP", Remote: "ETHUSDT", Multiplier: decimal.NewFromInt(1), Market: ports.MarketUSDM}
+	markBTCUSD = ports.Reference{
+		Symbol: "BTC-USD-PERP", Remote: "BTCUSD_PERP", Multiplier: decimal.NewFromInt(1), Market: ports.MarketCoinM, ContractSize: decimal.NewFromInt(100),
+	}
 )
 
 // Mark price updates as Binance sends them: the mark "p" and the
@@ -61,7 +63,7 @@ func TestMarkStreamReadsMarkPrices(t *testing.T) {
 	defer srv.Close()
 	s := New("", "", srv.Client()).WithCoinFutures(srv.URL, "ws"+strings.TrimPrefix(srv.URL, "http"))
 	var got []domain.ReferenceMark
-	err := s.MarkStream(context.Background(), []ports.Reference{markBTCUSD}, true, func(m domain.ReferenceMark) { got = append(got, m) })
+	err := s.MarkStream(context.Background(), []ports.Reference{markBTCUSD}, func(m domain.ReferenceMark) { got = append(got, m) })
 	if err == nil {
 		t.Fatal("a closed stream is an error for the caller to reconnect")
 	}
@@ -77,13 +79,13 @@ func TestMarkStreamReadsMarkPrices(t *testing.T) {
 	if m := got[1]; m.HasRate || !m.NextFunding.IsZero() || m.Mark.String() != "85504" {
 		t.Fatalf("no rate: %+v", m)
 	}
-	if err := New("", "", srv.Client()).MarkStream(context.Background(), []ports.Reference{markBTCUSD}, true, nil); err == nil {
+	if err := New("", "", srv.Client()).MarkStream(context.Background(), []ports.Reference{markBTCUSD}, nil); err == nil {
 		t.Fatal("COIN-M without its endpoints")
 	}
 
 	usdm := New("", "", srv.Client()).WithFutures(srv.URL, "ws"+strings.TrimPrefix(srv.URL, "http"))
 	got = nil
-	err = usdm.MarkStream(context.Background(), []ports.Reference{markBTC, markETH}, false, func(m domain.ReferenceMark) { got = append(got, m) })
+	err = usdm.MarkStream(context.Background(), []ports.Reference{markBTC, markETH}, func(m domain.ReferenceMark) { got = append(got, m) })
 	if err == nil || len(got) != 1 || got[0].Symbol != "ETH-USDT-PERP" || got[0].Mark.String() != "2706.47" || got[0].FundingRate.String() != "-0.00000999" {
 		t.Fatalf("USDⓈ-M under /market: %+v %v", got, err)
 	}
@@ -126,7 +128,7 @@ func TestSettledFunding(t *testing.T) {
 	s := New("", "", srv.Client()).WithFutures(srv.URL, "wss://unused").WithCoinFutures(srv.URL, "wss://unused")
 	s.gap = 0
 	ctx := context.Background()
-	list, err := s.SettledFunding(ctx, []ports.Reference{markBTC, markETH}, false, end, end.Add(time.Minute))
+	list, err := s.SettledFunding(ctx, []ports.Reference{markBTC, markETH}, end, end.Add(time.Minute))
 	if err != nil || len(list) != 1 || paths[0] != "/fapi/v1/fundingRate?" {
 		t.Fatalf("one request for every USDⓈ-M symbol: %+v %v %v", list, err, paths)
 	}
@@ -136,14 +138,14 @@ func TestSettledFunding(t *testing.T) {
 	}
 
 	paths, full = nil, true
-	list, err = s.SettledFunding(ctx, []ports.Reference{markBTC, markETH}, false, end, end.Add(time.Minute))
+	list, err = s.SettledFunding(ctx, []ports.Reference{markBTC, markETH}, end, end.Add(time.Minute))
 	if err != nil || len(list) != 1 || list[0].Symbol != "ETH-USDT-PERP" || len(paths) != 3 ||
 		paths[1] != "/fapi/v1/fundingRate?BTCUSDT" || paths[2] != "/fapi/v1/fundingRate?ETHUSDT" {
 		t.Fatalf("a full page: one request each: %+v %v %v", list, err, paths)
 	}
 
 	paths = nil
-	list, err = s.SettledFunding(ctx, []ports.Reference{markBTCUSD}, true, end, end.Add(time.Minute))
+	list, err = s.SettledFunding(ctx, []ports.Reference{markBTCUSD}, end, end.Add(time.Minute))
 	if err != nil || len(list) != 1 || list[0].Symbol != "BTC-USD-PERP" || list[0].Rate.String() != "0.00005307" ||
 		len(paths) != 1 || paths[0] != "/dapi/v1/fundingRate?BTCUSD_PERP" {
 		t.Fatalf("COIN-M: %+v %v %v", list, err, paths)

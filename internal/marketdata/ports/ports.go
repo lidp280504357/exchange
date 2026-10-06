@@ -91,13 +91,32 @@ type ReferenceRepo interface {
 // Reference is a pair's reference market (ADR-0010): the source's symbol
 // and how its prices convert to the pair's.
 type Reference struct {
-	// Symbol is the platform pair, e.g. 1000PEPE-USDT.
+	// Symbol is the platform pair or contract, e.g. 1000PEPE-USDT.
 	Symbol string
-	// Remote is the source's symbol, e.g. PEPEUSDT.
+	// Remote is the source's symbol, e.g. PEPEUSDT, BTCUSD_PERP.
 	Remote string
 	// Multiplier is a power of ten: platform prices are the source's times
 	// it, platform quantities the source's divided by it (ADR-0014).
 	Multiplier decimal.Decimal
+	// Market is where Remote trades: MarketSpot for a pair, a futures
+	// market for a contract (coin-M design §3.2).
+	Market string
+	// ContractSize is a COIN-M contract's face value in USD: its
+	// quantities are whole contracts, their USD value quantity times it.
+	ContractSize decimal.Decimal
+}
+
+// The reference markets of a Reference.
+const (
+	MarketSpot  = ""
+	MarketUSDM  = "USDM"  // USDⓈ-M perpetuals: quantities in the base asset
+	MarketCoinM = "COINM" // COIN-M perpetuals: quantities in contracts
+)
+
+// SameReference reports whether a and b follow the same market alike.
+func SameReference(a, b Reference) bool {
+	return a.Symbol == b.Symbol && a.Remote == b.Remote && a.Multiplier.Equal(b.Multiplier) && a.Market == b.Market &&
+		a.ContractSize.Equal(b.ContractSize)
 }
 
 // StreamHandlers take a reference stream's updates, already in the
@@ -122,27 +141,28 @@ type BookHandlers struct {
 }
 
 // BookSource is the reference market's order books and trades (ADR-0010,
-// ADR-0015), of spot pairs or, futures true, of perpetual contracts.
+// ADR-0015), of spot pairs and perpetual contracts, each on its
+// reference's market.
 type BookSource interface {
 	// DepthSnapshot returns ref's book and the update ID it stands at.
-	DepthSnapshot(ctx context.Context, ref Reference, futures bool) (lastID int64, bids, asks []domain.Level, err error)
+	DepthSnapshot(ctx context.Context, ref Reference) (lastID int64, bids, asks []domain.Level, err error)
 	// RecentTrades returns ref's latest trades, oldest first.
-	RecentTrades(ctx context.Context, ref Reference, futures bool, limit int) ([]domain.Trade, error)
-	// BookStream passes every depth update and trade of refs to on until
-	// ctx ends or the connection fails.
-	BookStream(ctx context.Context, refs []Reference, futures bool, on BookHandlers) error
+	RecentTrades(ctx context.Context, ref Reference, limit int) ([]domain.Trade, error)
+	// BookStream passes every depth update and trade of refs, all of one
+	// market, to on until ctx ends or the connection fails.
+	BookStream(ctx context.Context, refs []Reference, on BookHandlers) error
 }
 
 // MarkSource is the reference market's mark prices and settled funding
-// rates of perpetual contracts (coin-M design §3.1), of its COIN-M market
-// (coin true) or its USDⓈ-M one.
+// rates of perpetual contracts (coin-M design §3.1); the refs of a call
+// are all of one futures market.
 type MarkSource interface {
 	// MarkStream passes every mark price update of refs to on, about one
 	// a second each, until ctx ends or the connection fails.
-	MarkStream(ctx context.Context, refs []Reference, coin bool, on func(domain.ReferenceMark)) error
+	MarkStream(ctx context.Context, refs []Reference, on func(domain.ReferenceMark)) error
 	// SettledFunding returns the rates refs settled with funding times in
 	// [from, to], oldest first.
-	SettledFunding(ctx context.Context, refs []Reference, coin bool, from, to time.Time) ([]domain.SettledFunding, error)
+	SettledFunding(ctx context.Context, refs []Reference, from, to time.Time) ([]domain.SettledFunding, error)
 }
 
 // Halt is a pair market-data-service halted when the reference feed was
@@ -240,8 +260,36 @@ type Contract struct {
 	// InterestRate per funding period; FundingCap bounds the rate.
 	InterestRate decimal.Decimal
 	FundingCap   decimal.Decimal
-	// ImpactNotional is the quote amount the impact prices trade.
+	// ImpactNotional is the quote amount the impact prices trade, or the
+	// contracts of an inverse contract (coin-M design §2.1).
 	ImpactNotional decimal.Decimal
+	// MarginType is USDT (linear) or COIN (inverse); ContractSize an
+	// inverse contract's face value in USD, zero for a linear one.
+	MarginType   string
+	ContractSize decimal.Decimal
+	// ReferenceSymbol is the Binance contract the contract's market data
+	// and, with market.reference_mark, its mark price follow: BTCUSDT
+	// (USDⓈ-M) or BTCUSD_PERP (COIN-M); empty when none does.
+	ReferenceSymbol string
+}
+
+// MarginCoin is an inverse (coin-margined) contract's margin type.
+const MarginCoin = "COIN"
+
+// Inverse reports whether the contract is coin-margined.
+func (c Contract) Inverse() bool { return c.MarginType == MarginCoin }
+
+// Reference is the contract's own reference market, false when it has
+// none.
+func (c Contract) Reference() (Reference, bool) {
+	if c.ReferenceSymbol == "" {
+		return Reference{}, false
+	}
+	r := Reference{Symbol: c.Symbol, Remote: c.ReferenceSymbol, Multiplier: decimal.NewFromInt(1), Market: MarketUSDM}
+	if c.Inverse() {
+		r.Market, r.ContractSize = MarketCoinM, c.ContractSize
+	}
+	return r, true
 }
 
 // FundingPeriod is a contract's premium index samples over one funding

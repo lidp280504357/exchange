@@ -49,7 +49,7 @@ func TestBookStreamPassesDepthAndTrades(t *testing.T) {
 	}
 	var depths []diff
 	var trades []domain.Trade
-	err := s.BookStream(context.Background(), []ports.Reference{btc, pepe}, false, ports.BookHandlers{
+	err := s.BookStream(context.Background(), []ports.Reference{btc, pepe}, ports.BookHandlers{
 		Depth: func(symbol string, d domain.DepthDiff) { depths = append(depths, diff{symbol, d}) },
 		Trade: func(tr domain.Trade) { trades = append(trades, tr) },
 	})
@@ -88,7 +88,7 @@ func TestRecentTradesKeepTheTakersSide(t *testing.T) {
 	defer srv.Close()
 	s := New(srv.URL, "", srv.Client())
 	s.gap = 0
-	trades, err := s.RecentTrades(context.Background(), btc, false, 2)
+	trades, err := s.RecentTrades(context.Background(), btc, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,12 +138,12 @@ func TestFuturesBookStreamSplitsBooksAndTrades(t *testing.T) {
 	}))
 	defer srv.Close()
 	s := New("", "", srv.Client()).WithFutures(srv.URL, "ws"+strings.TrimPrefix(srv.URL, "http"))
-	perp := ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: decimal.NewFromInt(1)}
+	perp := ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: decimal.NewFromInt(1), Market: ports.MarketUSDM}
 	var mu sync.Mutex
 	var got []domain.Trade
 	var depths int
 	var failed []error
-	err := s.BookStream(context.Background(), []ports.Reference{perp}, true, ports.BookHandlers{
+	err := s.BookStream(context.Background(), []ports.Reference{perp}, ports.BookHandlers{
 		Depth: func(string, domain.DepthDiff) {
 			mu.Lock()
 			depths++
