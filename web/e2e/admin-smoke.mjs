@@ -647,12 +647,15 @@ try {
       page.waitForFunction((l) => !!document.querySelector(`main table[aria-label="${l}"]`) && !document.querySelector("main [aria-busy=true]"), {
         timeout: 30000,
       }, label);
-    await go("/margin/accounts");
+    // web.sh names a user whose cross account holds 10 USDT (MARGIN_USER_ID):
+    // that account's detail, each tab rendered; without one (a run by hand)
+    // the first account that holds or owes something, when there is one.
+    const marginUser = process.env.MARGIN_USER_ID ?? "";
+    await go(marginUser ? `/margin/accounts?user_id=${marginUser}` : "/margin/accounts");
     await loaded("margin-accounts");
     await noError("the margin accounts");
-    // An account that holds or owes something, when there is one (the test
-    // server's users move funds in and out): its detail, each tab rendered.
     const account = !!(await page.$("main table[aria-label=margin-accounts] tbody tr[data-row-id]"));
+    if (marginUser && !account) throw new Error(`the cross margin account of ${marginUser} (10 USDT moved in) is not listed`);
     if (account) {
       await openRow("main table[aria-label=margin-accounts] tbody tr");
       await page.waitForSelector("[role=dialog] [data-testid=margin-account] table");

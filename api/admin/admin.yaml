@@ -5188,9 +5188,11 @@ paths:
         may be borrowed, the fee what a liquidation costs). 400 when
         nothing changes, and unless the liquidation_level is above 1 and
         under the warn_level (4 decimals) and the liquidation_fee 0 to 0.1
-        (6 decimals); the leverage is margin-service's policy (3 or 5),
-        checked when the request is approved. expected_version, a request
-        waiting already and the lapse as for an asset.
+        (6 decimals). admin-service holds the leverage to 2 to 10 (the
+        terms' column) before the request waits; which leverages are
+        allowed is margin-service's policy (3 or 5), checked when the
+        request is approved (the request fails otherwise). expected_version,
+        a request waiting already and the lapse as for an asset.
       tags: [margin]
       requestBody:
         required: true
@@ -5262,9 +5264,11 @@ paths:
         thresholds and the liquidation fee, which the pair's accounts take
         at once, and switching isolated accounts on. 400 when nothing
         changes, and unless liquidation_level is above 1 and under
-        warn_level and liquidation_fee 0 to 0.1; the leverage is
-        margin-service's policy (3, 5 or 10), checked when the request is
-        approved. 404 for a pair margin-service does not list.
+        warn_level, liquidation_fee 0 to 0.1 and the leverage 2 to 10 (the
+        terms' column); which leverages are allowed is margin-service's
+        policy (3, 5 or 10), checked when the request is approved (the
+        request fails otherwise). 404 for a pair margin-service does not
+        list.
         expected_version, a request waiting already and the lapse as for an
         asset.
       tags: [margin]

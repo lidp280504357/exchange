@@ -9,7 +9,9 @@
 # admin console (web/e2e/admin-smoke.mjs, with a throwaway administrator
 # made over ssh). The PC and mobile smokes open margin trading for their own
 # users (lib/margin-user.sh, margin.enabled put back when the script ends),
-# so the script holds the ops lock as the others that change switches.
+# so the script holds the ops lock as the others that change switches; the
+# console's smoke opens the cross margin account of a user of this script's
+# own, 10 USDT of its welcome funds moved in (and back when it is done).
 #
 #   scripts/e2e/web.sh
 set -euo pipefail
@@ -105,6 +107,30 @@ CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" node "$(dirname "$0")/../../web/e2e/p
 echo "== mobile site in the browser"
 CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$M_BASE" node "$(dirname "$0")/../../web/e2e/m-smoke.mjs"
 
+echo "== a margin account for the console"
+# The console's smoke opens a margin account's detail (margin design §8,
+# E5): this user's cross account with 10 USDT of its welcome funds, moved
+# back once the smoke is done (or when the script ends) under the same key.
+MEMAIL="e2e-console-margin-$RUN@example.com"
+register "$MEMAIL" "e2e-console-margin-$RUN" "e2e console margin $RUN"
+MARGIN_USER_ID=$(jq -r .user_id <<<"$BODY")
+MAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+bash "$MARGIN_USER_HELPER" on "$MARGIN_USER_ID"
+margin_funded() {
+  call GET /v1/account/balances "" "${MAUTH[@]}"
+  jq -e '([.balances[] | select(.asset == "USDT" and .account_type == "SPOT")][0].available // "0" | tonumber) >= 10' <<<"$BODY" >/dev/null
+}
+eventually 40 "the console's margin user has its welcome funds" margin_funded
+margin_out() {
+  call POST /v1/margin/transfer '{"direction":"OUT","account":"MARGIN_CROSS","asset":"USDT","amount":"10"}' "${MAUTH[@]}" \
+    -H "Idempotency-Key: e2e-console-margin-$RUN-out"
+}
+call POST /v1/margin/transfer '{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"10"}' "${MAUTH[@]}" \
+  -H "Idempotency-Key: e2e-console-margin-$RUN-in"
+[[ $STATUS == 200 ]] || fail "10 USDT into the console's margin account: $STATUS $BODY"
+at_exit 'margin_out >/dev/null'
+ok "a cross margin account with 10 USDT for the console ($MARGIN_USER_ID)"
+
 echo "== admin console in the browser"
 # A throwaway administrator (random password and authenticator secret on
 # stdin, never printed), disabled when the script ends; the browser signs
@@ -117,4 +143,8 @@ out=$(remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exch
 grep -q "^created .* $ADMIN_EMAIL (ADMIN)" <<<"$out" || fail "admin create: $out"
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $ADMIN_EMAIL --reason \"e2e run over\"" >/dev/null'
-ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" APP="$ADMIN_BASE" CAPTCHA_BYPASS_TOKEN="$BYPASS" node "$(dirname "$0")/../../web/e2e/admin-smoke.mjs"
+ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" APP="$ADMIN_BASE" CAPTCHA_BYPASS_TOKEN="$BYPASS" MARGIN_USER_ID="$MARGIN_USER_ID" \
+  node "$(dirname "$0")/../../web/e2e/admin-smoke.mjs"
+margin_out
+[[ $STATUS == 200 ]] || fail "the console's margin account's 10 USDT back to SPOT: $STATUS $BODY"
+ok "the console's margin account's 10 USDT back in its SPOT account"
