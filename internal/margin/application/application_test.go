@@ -42,15 +42,16 @@ type ledger struct {
 	margin map[string]map[domain.Account]map[string]*balances // user, account, asset
 	done   map[string][32]byte
 	// lent and income mirror HOUSE's side: principal lent and interest
-	// received, per asset.
-	lent, income map[string]decimal.Decimal
-	posts        int
+	// received, per asset; insurance is the insurance fund.
+	lent, income, insurance map[string]decimal.Decimal
+	posts                   int
 }
 
 func newLedger() *ledger {
 	return &ledger{
 		spot: map[string]map[string]decimal.Decimal{}, margin: map[string]map[domain.Account]map[string]*balances{},
 		done: map[string][32]byte{}, lent: map[string]decimal.Decimal{}, income: map[string]decimal.Decimal{},
+		insurance: map[string]decimal.Decimal{"USDT": decimal.RequireFromString("1000000")},
 	}
 }
 
@@ -116,13 +117,27 @@ func (l *ledger) Post(_ context.Context, p ports.Posting) ([]string, error) {
 		case domain.MoveInterest:
 			b.interest = b.interest.Add(m.Amount)
 			income[m.Asset] = income[m.Asset].Add(m.Amount)
-		case domain.MoveRepay:
+		case domain.MoveRepay, domain.MoveLiquidationRepay:
 			principal := m.Amount.Sub(m.Interest)
 			if b.free.LessThan(m.Amount) || b.interest.LessThan(m.Interest) || b.borrowed.LessThan(principal) {
 				return nil, insufficient("free, interest or principal")
 			}
 			b.free, b.interest, b.borrowed = b.free.Sub(m.Amount), b.interest.Sub(m.Interest), b.borrowed.Sub(principal)
 			lent[m.Asset] = lent[m.Asset].Sub(principal)
+		case domain.MoveInsuranceCover:
+			principal := m.Amount.Sub(m.Interest)
+			if l.insurance[m.Asset].LessThan(m.Amount) || b.interest.LessThan(m.Interest) || b.borrowed.LessThan(principal) {
+				return nil, insufficient("insurance fund, interest or principal")
+			}
+			l.insurance[m.Asset] = l.insurance[m.Asset].Sub(m.Amount)
+			b.interest, b.borrowed = b.interest.Sub(m.Interest), b.borrowed.Sub(principal)
+			lent[m.Asset] = lent[m.Asset].Sub(principal)
+		case domain.MoveLiquidationFee:
+			if b.free.LessThan(m.Amount) {
+				return nil, insufficient("free")
+			}
+			b.free = b.free.Sub(m.Amount)
+			l.insurance[m.Asset] = l.insurance[m.Asset].Add(m.Amount)
 		default:
 			return nil, apperr.Invalid("unknown move " + string(m.Type))
 		}
@@ -260,7 +275,7 @@ func (instruments) Pair(_ context.Context, symbol string) (ports.PairInfo, error
 	if !ok {
 		return ports.PairInfo{}, apperr.NotFound("no such pair")
 	}
-	return ports.PairInfo{Symbol: symbol, Base: base, Quote: quote, Status: "TRADING", TickDecimals: 2}, nil
+	return ports.PairInfo{Symbol: symbol, Base: base, Quote: quote, Status: "TRADING", TickDecimals: 2, Lot: d("0.0001")}, nil
 }
 
 type eligible struct{}

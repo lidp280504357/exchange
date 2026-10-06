@@ -313,6 +313,8 @@ type RepayRepo interface {
 	GetForUpdate(ctx context.Context, id string) (Repay, error)
 	Finish(ctx context.Context, r Repay) error
 	Pending(ctx context.Context, cutoff time.Time, limit int) ([]Repay, error)
+	// OfLiquidation returns a liquidation's repayments.
+	OfLiquidation(ctx context.Context, liquidationID string) ([]Repay, error)
 }
 
 // Charge is an hour's interest on a loan.
@@ -488,6 +490,7 @@ const (
 	TriggerAuto          = "AUTO"
 	TriggerManual        = "MANUAL"
 	LiquidationStarted   = "STARTED"
+	LiquidationShortfall = "SHORTFALL"
 	LiquidationCompleted = "COMPLETED"
 )
 
@@ -628,8 +631,11 @@ type PairInfo struct {
 	Base   string
 	Quote  string
 	Status string
-	// TickDecimals is the price's precision.
+	// TickDecimals is the price's precision; Lot the quantity's step and
+	// MaxQuantity the most one order may take (0: no bound).
 	TickDecimals int32
+	Lot          decimal.Decimal
+	MaxQuantity  decimal.Decimal
 }
 
 // Instruments reads assets and pairs (instrument-service gRPC).

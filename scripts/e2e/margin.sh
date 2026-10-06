@@ -16,7 +16,11 @@
 # loan is what the freeze lacked, the SOL lands on the margin account), and
 # a sell with AUTO_REPAY repays the loan and its interest from what it
 # brings (the settlement's automatic repayment, margin-service's loans
-# following it); invariant 5 counts the margin trades.
+# following it); invariant 5 counts the margin trades. Batch E3: with
+# 50 USDT in, 0.6 SOL bought with AUTO_BORROW, an administrators'
+# liquidation (exchangectl margin liquidate, as an approved request) sells
+# the SOL to HOUSE, repays the loan, charges the 2% fee and frees the
+# account.
 # Margin trading stays off for everyone else: the script switches
 # margin.enabled and margin.auto_borrow on for its own user only and puts
 # them back as they were when it ends, also after a failure (the
@@ -49,7 +53,16 @@ same() { jq -en --arg a "$1" --arg b "$2" '(($a | tonumber) - ($b | tonumber)) |
 # 5 seconds (flags.RefreshInterval).
 on_for_user() {
   local key=$1 user=$2 state enabled users
-  state=$(exchangectl flags show "$key" 2>/dev/null || echo '{"enabled":false,"rules":{}}')
+  # Only "not set" reads as off (review CY C16): a failed ssh would record
+  # off as the state to put back and switch the flag off for everyone.
+  if ! state=$(exchangectl flags show "$key" 2>&1); then
+    if [[ $state == *"is not set"* ]]; then
+      state='{"enabled":false,"rules":{}}'
+    else
+      echo "FAIL could not read $key: $state" >&2
+      exit 1
+    fi
+  fi
   enabled=$(jq -r .enabled <<<"$state")
   users=$(jq -r '(.rules.users.allow // []) | join(",")' <<<"$state")
   if [[ $enabled == true ]] && jq -e '.rules == {} or .rules == null' <<<"$state" >/dev/null; then
@@ -216,7 +229,30 @@ check '.cross.total_liability == "0" and .cross.margin_level == null' "nothing o
 LEFT=$(jq -r '[.cross.balances[] | select(.asset == "USDT")][0].free' <<<"$BODY")
 call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"$LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out4"
 expect 200 - "the $LEFT USDT left back to SPOT"
+
+echo "== a liquidation (E3), as an administrators' approved request"
+call POST /v1/margin/transfer '{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"50"}' "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-in3"
+expect 200 - "50 USDT into the cross account"
+eventually 30 "$SYMBOL shows a two-sided book" book
+HIGH=$(jq -r '.asks[0][0] | tonumber * 1.005 * 100 | floor / 100' <<<"$BODY")
+place "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"0.6\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_BORROW\"}"
+eventually 40 "the margin buy is FILLED against HOUSE" status_is "$ORDER" FILLED
+call GET /v1/margin/loans "" "${AUTH[@]}"
+check '(.items | length) == 1 and .items[0].asset == "USDT" and (.items[0].principal | tonumber) > 0' "a USDT loan to liquidate"
+remote "sudo docker compose $COMPOSE_FILES exec -T margin-service /app/exchangectl margin liquidate --user $USER_ID --account MARGIN_CROSS" | tail -1 | cut -c1-160 | sed 's/^/     /'
+liquidated() {
+  call GET /v1/margin/liquidations "" "${AUTH[@]}" && [[ $STATUS == 200 ]] && jq -e '.items[0].status == "COMPLETED"' <<<"$BODY" >/dev/null
+}
+eventually 90 "the liquidation completed" liquidated
+check '(.items | length) == 1 and .items[0].account == "MARGIN_CROSS" and .items[0].repaid[0].asset == "USDT" and (.items[0].repaid[0].amount | tonumber) > 0 and (.items[0].fee | tonumber) > 0 and .items[0].insurance_covered == "0" and .items[0].completed_at != null' "the SOL sold to HOUSE, the loan repaid, the 2% fee charged, nothing from the insurance fund"
+call GET /v1/margin/loans "" "${AUTH[@]}"
+check '.items == []' "nothing owed after it"
+call GET /v1/margin/accounts "" "${AUTH[@]}"
+check '.cross.status == "NORMAL" and .cross.total_liability == "0" and ([.cross.balances[] | select(.asset == "SOL")][0].free // "0" | tonumber) < 0.01' "the account free again, its SOL sold but what is under a lot"
+LEFT=$(jq -r '[.cross.balances[] | select(.asset == "USDT")][0].free' <<<"$BODY")
+call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"$LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out5"
+expect 200 - "the $LEFT USDT left after the liquidation back to SPOT"
 remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger reconcile" | grep -E "TRADE_SETTLE_MATCHES_TRADES|MARGIN_" | sed 's/^/     /'
 echo "ok   the margin trades settle in invariant 5's sums"
 remote "sudo docker compose $COMPOSE_FILES exec -T margin-service /app/exchangectl margin reconcile" | tail -1 | sed 's/^/     /'
-echo "ok   margin invariant 7 after the automatic repayment"
+echo "ok   margin invariant 7 after the automatic repayment and the liquidation"

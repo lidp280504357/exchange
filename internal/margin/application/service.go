@@ -35,9 +35,12 @@ type Service struct {
 	Instruments ports.Instruments
 	Eligibility ports.Eligibility
 	Features    ports.Features
-	Log         *slog.Logger
-	Now         func() time.Time
-	Metrics     *Metrics
+	// Trading is spot-trading-service's internal API, which a liquidation
+	// cancels the account's orders and trades with.
+	Trading ports.Trading
+	Log     *slog.Logger
+	Now     func() time.Time
+	Metrics *Metrics
 	// Touched hears of each user whose margin accounts changed (the
 	// monitor, which values them again and publishes them); may be nil.
 	Touched func(userID string)
@@ -65,6 +68,13 @@ type Metrics struct {
 	MonitorPass     prometheus.Gauge
 	Warned          prometheus.Counter
 	LiquidationsDue prometheus.Counter
+	// Liquidations counts the liquidations started, by trigger;
+	// LiquidationOldest is how long the oldest under way has run.
+	Liquidations      *prometheus.CounterVec
+	LiquidationOldest prometheus.Gauge
+	// LiquidationsShort counts the liquidations waiting for the
+	// insurance fund (SHORTFALL).
+	LiquidationsShort prometheus.Gauge
 }
 
 // NewMetrics registers the metrics with reg.
@@ -95,7 +105,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.LiquidationsDue = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "margin_liquidations_due_total", Help: "Passes that found a margin account at its liquidation level twice in a row.",
 	})
-	reg.MustRegister(m.Ops, m.InterestRun, m.Reconciled, m.LastReconcile, m.Watched, m.MonitorPass, m.Warned, m.LiquidationsDue)
+	m.Liquidations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "margin_liquidations_total", Help: "Margin liquidations started, by trigger (AUTO, MANUAL).",
+	}, []string{"trigger"})
+	m.LiquidationOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "margin_liquidation_oldest_seconds", Help: "How long the oldest margin liquidation under way has run (0 without one).",
+	})
+	m.LiquidationsShort = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "margin_liquidations_shortfall", Help: "Margin liquidations waiting for the insurance fund to hold enough of an asset.",
+	})
+	reg.MustRegister(m.Ops, m.InterestRun, m.Reconciled, m.LastReconcile, m.Watched, m.MonitorPass, m.Warned, m.LiquidationsDue,
+		m.Liquidations, m.LiquidationOldest, m.LiquidationsShort)
 	return m
 }
 
@@ -179,13 +199,15 @@ func (s *Service) catalog(ctx context.Context, r ports.Repos) (Catalog, error) {
 	return c, nil
 }
 
-// Terms returns an account's terms: the cross account's, or its pair's.
+// Terms returns an account's terms: the cross account's, or its pair's —
+// also when the pair takes no new isolated account (those open keep their
+// terms, review CY C17 ①).
 func (c Catalog) Terms(a domain.Account) (domain.Terms, error) {
 	if a.IsCross() {
 		return c.Cross, nil
 	}
 	p, ok := c.Pairs[a.Symbol]
-	if !ok || !p.Isolated {
+	if !ok {
 		return domain.Terms{}, domain.ErrNotBorrowable.WithDetail("symbol", a.Symbol)
 	}
 	return p.Terms, nil

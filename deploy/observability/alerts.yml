@@ -126,6 +126,20 @@ groups:
           summary: "the margin level monitor has not finished a pass for over a minute: no warnings, no liquidations (ledger or database down?)"
           runbook: docs/runbook/margin.md
 
+      - alert: MarginLiquidationStuck
+        expr: max by (job) (margin_liquidation_oldest_seconds) > 600
+        labels: {severity: critical}
+        annotations:
+          summary: "a margin liquidation has run for {{ $value }} seconds (exchangectl margin liquidations shows the step it waits at and why)"
+          runbook: docs/runbook/margin.md
+
+      - alert: InsuranceFundShort
+        expr: max by (job) (margin_liquidations_shortfall) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $value }} margin liquidations wait for the insurance fund to hold the asset they must cover; fund it (exchangectl ledger insurance-fund --asset ...), the next attempt goes on"
+          runbook: docs/runbook/margin.md
+
       - alert: MarginInterestStalled
         expr: max by (job) (margin_interest_last_run_timestamp_seconds) > 0 and time() - max by (job) (margin_interest_last_run_timestamp_seconds) > 7200
         labels: {severity: warning}

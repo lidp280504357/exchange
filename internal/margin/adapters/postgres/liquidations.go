@@ -105,12 +105,12 @@ func (r liquidations) list(ctx context.Context, sql string, args ...any) ([]port
 }
 
 func (r liquidations) Running(ctx context.Context) ([]ports.Liquidation, error) {
-	return r.list(ctx, `SELECT `+liquidationColumns+` FROM liquidations WHERE status = 'STARTED' ORDER BY started_at`)
+	return r.list(ctx, `SELECT `+liquidationColumns+` FROM liquidations WHERE status <> 'COMPLETED' ORDER BY started_at`)
 }
 
 func (r liquidations) RunningOf(ctx context.Context, userID string, a domain.Account) (ports.Liquidation, bool, error) {
 	return r.one(ctx, `SELECT `+liquidationColumns+` FROM liquidations WHERE user_id = $1 AND account_type = $2 AND symbol = $3
-		AND status = 'STARTED'`, userID, a.Type, a.Symbol)
+		AND status <> 'COMPLETED'`, userID, a.Type, a.Symbol)
 }
 
 func (r liquidations) ByApproval(ctx context.Context, approvalID string) (ports.Liquidation, bool, error) {

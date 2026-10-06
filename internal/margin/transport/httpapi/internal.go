@@ -47,6 +47,7 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 		r.Get("/accounts/{user_id}/{account}", h.consoleAccount)
 		r.Post("/accounts/{user_id}/{account}/freeze", h.freeze)
 		r.Post("/accounts/{user_id}/{account}/unfreeze", h.unfreeze)
+		r.Post("/accounts/{user_id}/{account}/liquidate", h.liquidate)
 	})
 }
 
@@ -491,6 +492,15 @@ func (h *Handler) consoleAccount(w http.ResponseWriter, r *http.Request) {
 			"journal_key": key,
 		})
 	}
+	liquidations, _, err := h.Svc.Liquidations(r.Context(), user, &a, "", 20)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	liqs := make([]map[string]any, 0, len(liquidations))
+	for _, l := range liquidations {
+		liqs = append(liqs, liquidationJSON(l, true))
+	}
 	acc := toConsoleAccount(d.ConsoleAccount)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"user_id": acc.UserID, "account": acc.Account, "symbol": acc.Symbol, "leverage": acc.Leverage, "status": acc.Status,
@@ -499,7 +509,7 @@ func (h *Handler) consoleAccount(w http.ResponseWriter, r *http.Request) {
 		"liquidation_price": acc.LiquidationPrice, "warned_at": acc.WarnedAt, "frozen_by": acc.FrozenBy,
 		"frozen_reason": acc.FrozenReason, "frozen_at": acc.FrozenAt, "unpriced": acc.Unpriced, "updated_at": acc.UpdatedAt,
 		"balances": balances, "loans": loans, "loan_changes": changes, "interest": charges,
-		"liquidations": []any{}, // batch E3
+		"liquidations": liqs,
 	})
 }
 
@@ -531,6 +541,38 @@ func (h *Handler) freeze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, toConsoleAccount(c))
+}
+
+// liquidate starts an account's liquidation for an approved request of
+// the administrators (MANUAL; the same approval again returns it).
+func (h *Handler) liquidate(w http.ResponseWriter, r *http.Request) {
+	by, err := adminOf(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	user, a, err := accountKey(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var body struct {
+		ApprovalID string `json:"approval_id"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if _, err := uuid.Parse(body.ApprovalID); err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("approval_id must be a UUID"))
+		return
+	}
+	l, err := h.Svc.StartLiquidation(r.Context(), user, a, ports.TriggerManual, body.ApprovalID, by)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, liquidationJSON(l, true))
 }
 
 func (h *Handler) unfreeze(w http.ResponseWriter, r *http.Request) {

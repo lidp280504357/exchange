@@ -218,6 +218,7 @@ services:
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+      TRADING_SERVICE_URL: http://spot-trading-service:8088
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

@@ -156,6 +156,10 @@ commands:
   margin terms                the margin terms in force: cross account, assets, pairs
   margin loans                the open loans and what each pool has lent
   margin reconcile            check margin invariant 7 now: the ledger's debt rows = margin-service's loans
+  margin liquidate --user ID --account MARGIN_CROSS|MARGIN_ISOLATED:<symbol> [--approval ID] [--url U]
+                              liquidate an account now, as an approved request does (in the margin-service container)
+  margin liquidations [--user ID]
+                              a user's liquidations, or every one under way, with its step and what it waits for
   udun coins                  a custodian's gateway, directly (UDUN_* from the environment, no database):
                               the merchant's coins with code, decimals, token flag and balance
   udun check-address --main-coin N --address A

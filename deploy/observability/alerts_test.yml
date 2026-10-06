@@ -254,6 +254,38 @@ tests:
               summary: "the margin level monitor has not finished a pass for over a minute: no warnings, no liquidations (ledger or database down?)"
               runbook: docs/runbook/margin.md
 
+  - interval: 1m
+    input_series:
+      - series: 'margin_liquidations_shortfall{job="margin-service"}'
+        values: '0 1 1'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: InsuranceFundShort
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: InsuranceFundShort
+        exp_alerts:
+          - exp_labels: {severity: critical, job: margin-service}
+            exp_annotations:
+              summary: "1 margin liquidations wait for the insurance fund to hold the asset they must cover; fund it (exchangectl ledger insurance-fund --asset ...), the next attempt goes on"
+              runbook: docs/runbook/margin.md
+
+  - interval: 5m
+    input_series:
+      - series: 'margin_liquidation_oldest_seconds{job="margin-service"}'
+        values: '0 300 600 900'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MarginLiquidationStuck
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MarginLiquidationStuck
+        exp_alerts:
+          - exp_labels: {severity: critical, job: margin-service}
+            exp_annotations:
+              summary: "a margin liquidation has run for 900 seconds (exchangectl margin liquidations shows the step it waits at and why)"
+              runbook: docs/runbook/margin.md
+
   - interval: 10m
     input_series:
       # An hour finished at 60 s after the epoch; none after it.

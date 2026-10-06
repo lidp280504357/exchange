@@ -106,6 +106,14 @@ func (s *Service) planTransfer(ctx context.Context, r ports.Repos, in TransferIn
 	}
 	now := s.Now()
 	if in.Direction == domain.DirectionIn {
+		if !in.Account.IsCross() {
+			// A new isolated account needs its pair open to them.
+			if _, exists, err := r.Accounts().Get(ctx, in.UserID, in.Account); err != nil {
+				return ports.Transfer{}, err
+			} else if p := cat.Pairs[in.Account.Symbol]; !exists && !p.Isolated {
+				return ports.Transfer{}, domain.ErrNotBorrowable.WithDetail("symbol", in.Account.Symbol)
+			}
+		}
 		st, err := r.Accounts().Ensure(ctx, in.UserID, in.Account, now)
 		if err != nil {
 			return ports.Transfer{}, err

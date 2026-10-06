@@ -1,16 +1,16 @@
 # 杠杆交易（margin-service）
 
-设计稿：[设计-杠杆交易-2026-10-06.md](../设计-杠杆交易-2026-10-06.md)；契约：[E0 契约草案](../设计-杠杆交易-E0契约-2026-10-06.md)、`api/openapi/margin.yaml`、`api/proto/exchange/margin/v1/`。本手册写已上线的部分：E1（账户、划转、借币、还币、整点计息、对账）与 E2（杠杆账户下单、按账户结算、自动借还）。E3（预警、强平）上线后补到这里。
+设计稿：[设计-杠杆交易-2026-10-06.md](../设计-杠杆交易-2026-10-06.md)；契约：[E0 契约草案](../设计-杠杆交易-E0契约-2026-10-06.md)、`api/openapi/margin.yaml`、`api/proto/exchange/margin/v1/`。本手册写已上线的部分：E1（账户、划转、借币、还币、整点计息、对账）、E2（杠杆账户下单、按账户结算、自动借还）、E2b（风险率监控、预警、账户推送）、C5（后台内部接口）与 E3（强平）。
 
 ## 服务
 
 | 项 | 值 |
 |---|---|
-| 进程 | `margin-service`（compose 一个实例；整点计息持数据库租约 `margin-interest`，第二个实例只会等） |
+| 进程 | `margin-service`（compose 一个实例；整点计息持数据库租约 `margin-interest`，风险率监控与强平持 `margin-monitor`，第二个实例只会等） |
 | 端口 | HTTP 8099（网关转发 `/v1/margin/*`，`assets` 与 `pairs` 免登录）、gRPC 9199（E2 起给 spot-trading-service 的 `MarginService`）、运维 9099 |
 | 库 | PostgreSQL schema `margin`（`migrations/margin`） |
-| 依赖 | ledger-service gRPC（余额与负债都在账本，ADR-0001）、instrument-service（精度、交易对）、user-service（资格）、market-data-service `GET /v1/market/tickers`（估值，每秒一次） |
-| 事件 | 发 `margin.events`（`MarginBorrowed`、`MarginRepaid`、`MarginInterestAccrued`；E3 加预警与强平） |
+| 依赖 | ledger-service gRPC（余额与负债都在账本，ADR-0001）、instrument-service（精度、交易对、lot）、user-service（资格）、market-data-service `GET /v1/market/tickers`（估值，每秒一次）、spot-trading-service 的内部接口（强平撤单与市价单，`TRADING_SERVICE_URL`） |
+| 事件 | 发 `margin.events`（`MarginBorrowed`、`MarginRepaid`、`MarginInterestAccrued`、`MarginLevelWarned`、`MarginLiquidationStarted`、`MarginLiquidationCompleted`）与 `margin.accounts`（`MarginAccountUpdated`） |
 | 开关 | `margin.enabled`（借币、划入、杠杆下单；关着时还币、划出、查询照常）、`margin.auto_borrow`（E2）、`margin.liquidation`（E3） |
 
 ## 账本里怎么记
@@ -46,7 +46,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 
 规则同 `instruments apply`：缺的建，上次由种子写的（`updated_by = file`）按文件改，后台改过的保留（输出 `kept`），`--force` 才覆盖；`--dry-run` 只列不改。逐仓阈值不写时按倍数取默认：3 倍 1.25 / 1.15，5 倍 1.20 / 1.10，10 倍 1.10 / 1.05；全仓 3 倍 1.30 / 1.10，5 倍 1.20 / 1.10；强平费 2%。
 
-查看：`exchangectl margin terms`。
+查看：`exchangectl margin terms`。后台把某交易对的逐仓关掉（`isolated = false`）后，只是不能再开新的逐仓账户，已开的照常借还、下单，按原条款计算（审查 CY C17 ①）。
 
 ## 借币与还币
 
@@ -85,9 +85,24 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 ## 风险率监控与账户推送（E2b）
 
 - 监控持数据库租约 `margin-monitor`（一次一个进程）每秒一轮：估值所有有负债或状态不是 `NORMAL` 的账户（列表每 5 秒重读），用每秒更新的价格；某用户的余额在账本或本服务的写动过它时立即重读（`ledger.events` 里带杠杆行的分录、本服务的划转/借/还/计息/冻结），否则至多 5 秒重读一次。
-- 状态：跌破预警线 `NORMAL → WARNED`，记 `warned_at`、发 `MarginLevelWarned`（`margin.events`；回到线上之前只发一次，网关推成 `margin` 频道的 `WARNING`，站内信与邮件由通知服务做）；回到预警线以上 `WARNED → NORMAL`。到强平线连续两轮交给强平（E3，受 `margin.liquidation` 控制）；估值不完整（有从未有价的资产）的账户不动状态、不强平；`FROZEN` 的账户不改状态，但到强平线照样强平；`LIQUIDATING` 由强平流程管。
+- 状态：跌破预警线 `NORMAL → WARNED`，记 `warned_at`、发 `MarginLevelWarned`（`margin.events`；回到线上之前只发一次，网关推成 `margin` 频道的 `WARNING`，站内信与邮件由通知服务做）；回到预警线的 1.01 倍以上才 `WARNED → NORMAL`（在线附近来回波动只预警一次，审查 CY）。某个用户的余额读不到时只跳过这个用户（审查 CY C17 ③）。到强平线连续两轮交给强平（E3，受 `margin.liquidation` 控制）；估值不完整（有从未有价的资产）的账户不动状态、不强平；`FROZEN` 的账户不改状态，但到强平线照样强平；`LIQUIDATING` 由强平流程管。
 - 推送：账户变化时把整个账户（`MarginAccountUpdated`：状态、风险率、阈值、总资产/总负债/净资产、逐仓强平价、各资产余额）发到主题 `margin.accounts`（按 user_id 分区，派生状态，保留 1 小时，直接生产不经 outbox，丢了由下一次补上），网关推成 `margin` 频道的 `ACCOUNT`。何时发：余额被动过、状态变了，或风险率、总资产、总负债相对上次变动超过 0.1%（价格引起），每个账户每秒至多一次；没有负债的账户只在被动过时发。
 - 指标：`margin_monitor_accounts`、`margin_monitor_last_pass_timestamp_seconds`、`margin_warnings_total`、`margin_liquidations_due_total`；告警 `MarginMonitorStalled`（超过 1 分钟没有完成一轮，critical：既不预警也不强平）。
+
+## 强平（E3）
+
+- 触发：监控到强平线连续两轮，且 `margin.liquidation` 对该用户打开（`AUTO`）；或管理员的强平申请经第二人批准后，由 admin-service 调内部接口（`MANUAL`，带 `approval_id`；同一个 `approval_id` 再调返回同一笔强平）。没有负债答 `MARGIN_NOTHING_OWED`（409），已在强平中答 `MARGIN_FROZEN`。
+- 开始时在用户锁内记一行 `liquidations`（`STARTED`），账户改为 `LIQUIDATING`（不能下单、借币、划转），发 `MarginLiquidationStarted`。之后由监控每秒推进，每一步做完就进下一步，重启后从记下的步骤接着做：
+  1. `CANCEL`：调交易服务的 `POST /internal/orders/cancel`，直到账户没有冻结；
+  2. `SELL`：账户里每种资产超出它自身负债的部分，按 lot 向下取整，对 HOUSE 发市价卖单换成报价资产（全仓是 USDT，逐仓是该交易对的报价资产），`POST /internal/orders/liquidations`。订单先记进 `liquidation_orders` 再发，发送失败就重发；交易服务按"强平 + 交易对 + 方向"幂等，拒绝的单记为 `REFUSED`，该资产留在账户里。等至少 2 秒、账户没有冻结之后，按报价资产可用余额的变化记成交额；
+  3. `BUY`：还欠的非报价资产不够还时，用报价资产按价格 ×1.02 发市价买单。报价资产先留够它自己的负债，缺口大的先买；
+  4. `FEE`：强平费 = 成交额 × 强平费率（交易对或全仓条款里的 `liquidation_fee`，默认 2%），记在报价资产上，最多收到账户剩下的报价资产为止（`LIQUIDATION_FEE` → `INSURANCE_FUND`，键 `liquidation-fee:<强平ID>`）。金额先存进这一行再记账，重试记同样的数。先收费、再还债、再由基金补（审查 CY 的决定 (b)）；
+  5. `REPAY`：每种资产用账户里的余额还自己的负债，先息后本，记成强平还款（`LIQUIDATION_REPAY`，分录 `MARGIN_LIQUIDATE`，键 `liquidation:<强平ID>:repay:<资产>`）；
+  6. `COVER`：还剩的负债由保险基金 `INSURANCE_FUND` 按该负债币种补足（`INSURANCE_COVER`，同样先息后本）。基金不允许为负，按可借资产分别注资（测试服 2026-10-06 已按各资产借贷池上限的 10% 注资，USDT 沿用合约的保险基金；上线时双人划转）。某资产不够时账本拒绝：强平状态记为 `SHORTFALL`，负债保留，告警 `InsuranceFundShort`；每分钟换一个键重试（`...:cover:<资产>:<n>`），运维给基金注资（`exchangectl ledger insurance-fund --asset <资产>`）后下一次就能完成（审查 CY 的决定 (a)）。对用户仍显示为进行中；
+  7. `SETTLE`：记下各资产还了多少（账户自己还的加上基金补的）、账户剩下什么、基金补了多少（按当时价格折成 USDT），状态 `COMPLETED`。账户回到原来的状态：管理员冻结过的仍是 `FROZEN`，否则 `NORMAL`。最后发 `MarginLiquidationCompleted`。
+- 查询：用户 `GET /v1/margin/liquidations`；后台账户详情的 `liquidations`；`exchangectl margin liquidations [--user ID]` 列出强平，含进行到哪一步、在等什么（`note`）。手工强平（测试与演练用，等同一次已批准的申请）：`exchangectl margin liquidate --user ID --account MARGIN_CROSS|MARGIN_ISOLATED:<交易对>`，在 margin-service 容器里执行。
+- 卖单的数量不超过交易对的单笔上限（每个强平、每个交易对、每个方向只有一单，超过的部分留在账户里，最后由基金补）。
+- 指标与告警：`margin_liquidations_total{trigger}`、`margin_liquidation_oldest_seconds`、`margin_liquidations_shortfall`；告警 `MarginLiquidationStuck`（一笔强平超过 10 分钟没完成，critical）、`InsuranceFundShort`（有强平在等基金，critical）——用 `exchangectl margin liquidations` 看卡在哪一步、在等什么。
 
 ## 对账
 
@@ -113,19 +128,21 @@ admin-service 经 margin-service 的 HTTP 端口调 `/internal/margin/*`（协�
 | `GET /internal/margin/pairs`、`PUT /internal/margin/pairs/{symbol}` | 各交易对的逐仓条款（`isolated`、倍数、阈值、强平费）、`accounts`（该交易对开过的逐仓账户数）、版本；PUT 倍数只能 3、5、10，`expected_version` 为 0 时新增（交易对须在 instrument-service 里，两种资产都在杠杆资产表里） |
 | `GET /internal/margin/accounts` | `status`、`account`、`symbol`、`user_id`、`limit`（1–500，默认 500）筛选；风险率最低的在前，无负债的排后（按净资产），什么都没有的账户不列；`truncated` 表示还有更多（最多估值 5,000 个账户）。每行：用户、账户、倍数、状态、风险率、阈值、总资产/总负债/净资产、逐仓强平价、`warned_at`、`frozen_by`/`frozen_reason`/`frozen_at`（只有管理员冻结时有值）、`unpriced`（持有或欠着、价格不新鲜或从未有价的资产）、`updated_at` |
 | `GET /internal/margin/accounts/{user_id}/{account}` | `account` 为 `MARGIN_CROSS` 或 `MARGIN_ISOLATED:<交易对>`；上面一行再加 `balances`（每资产可用、冻结、借入、利息、净值，`price_usdt` 为估值所用价格——不新鲜时是最近已知价、从未有价为 null，`asset_usdt`、`liability_usdt`、`haircut`、本小时 `hourly_rate`）、`loans`（含 `opened_at`）、`loan_changes`（视图 `loan_changes` 最近 50 条：借、还、利息，`kind`、`status`、`reason`、`journal_key` 为账本分录的幂等键）、`interest`（最近 50 笔，含 `PENDING`）、`liquidations`（E3 起有内容） |
-| `POST .../freeze`、`POST .../unfreeze` | 冻结：带 `reason`；`NORMAL`/`WARNED` 才能冻结，否则 409 `MARGIN_FROZEN`；冻结后不能借币、划出、下单，还币照常，计息与强平照常。解冻：只解管理员的冻结，否则 409 `MARGIN_NOT_FROZEN`；解冻后为 `NORMAL`（低于预警线时由 E3 的监控重新预警）。冻结时撤销该账户的挂单要等交易服务的内部撤单接口（E3 一并接上） |
+| `POST .../freeze`、`POST .../unfreeze` | 冻结：带 `reason`；`NORMAL`/`WARNED` 才能冻结，否则 409 `MARGIN_FROZEN`；冻结后不能借币、划出、下单，还币照常，计息与强平照常，并请交易服务撤掉该账户的挂单（`/internal/orders/cancel`；失败只记日志，冻结照样生效）。解冻：只解管理员的冻结，否则 409 `MARGIN_NOT_FROZEN`；解冻后为 `NORMAL`（低于预警线时由监控重新预警） |
+| `POST .../liquidate` | 带 `approval_id`（第二位管理员批准的申请）：按 `MANUAL` 开始强平，同一 `approval_id` 再调返回同一笔；没有负债 409 `MARGIN_NOTHING_OWED`，已在强平中 409 `MARGIN_FROZEN` |
 
 `journal_key`：借币 `margin:margin-borrow:<借款ID>:0`、其首小时利息 `margin:margin-borrow:<借款ID>:1`、还币 `margin:margin-repay:<还款ID>:0`、自动还款 `trade-repay:<成交ID>:<buyer|seller>`、整点利息 `margin-interest:<资产>:<整点 unix>[:<n>]`（记账时写进 `interest_charges.journal_key`）。迁移 margin 00004 加了 `accounts.frozen_by`/`frozen_at`、`loans.opened_at`（借款从 0 变为有欠款的时间）、`interest_charges.journal_key` 与视图 `loan_changes`。
 
 ## 测试服设置
 
-- `margin.enabled` 暂不全局打开（协调会话 2026-10-06 03:24 决定 ①）：何时打开由协调会话在本服务 E2 的 gRPC 侧与审查 CK ①–③ 的修复部署后决定。`margin.auto_borrow` 同样。
+- `margin.enabled` 已于 2026-10-06 07:06（北京时间；UTC 10-05 23:06:48）对所有人打开：审查 CR ③ 的条件是 C11 部署（7039fc5）且 margin.sh 通过（65 项），条件满足后由本会话持运维锁打开（理由写在开关历史里）。`margin.auto_borrow` 与 `margin.liquidation` 仍关着，只由脚本按用户临时打开。
 - 端到端：`scripts/e2e/margin.sh`（`task e2e` 包含）。它持运维锁，注册的用户拿到 user_id 后把这两个开关**只对这个用户**打开（加进开关的 `allow-users`，开关原本已对所有人打开时不动），结束时（含失败）还原成原来的状态；单独运行时自己取锁。
 
 ## 常用命令
 
 ```bash
 # 在 margin-service 容器里（ssh exchange 后 cd /opt/exchange/infra）
+sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T margin-service /app/exchangectl margin liquidations
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T margin-service /app/exchangectl margin terms
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T margin-service /app/exchangectl margin loans
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T margin-service /app/exchangectl margin reconcile

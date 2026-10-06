@@ -162,6 +162,11 @@ func (r repays) Finish(ctx context.Context, p ports.Repay) error {
 	return nil
 }
 
+func (r repays) OfLiquidation(ctx context.Context, liquidationID string) ([]ports.Repay, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+repayColumns+` FROM repays WHERE liquidation_id = $1 ORDER BY created_at`, liquidationID)
+	return collect(rows, err, "liquidation repayments", scanRepay)
+}
+
 func (r repays) Pending(ctx context.Context, cutoff time.Time, limit int) ([]ports.Repay, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+repayColumns+` FROM repays WHERE status = 'PENDING' AND created_at < $1
 		ORDER BY created_at LIMIT $2`, cutoff, limit)

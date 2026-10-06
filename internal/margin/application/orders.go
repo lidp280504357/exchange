@@ -56,7 +56,7 @@ type OrderOutcome struct {
 // AUTO_BORROW, what the account may borrow, and the margin level after
 // the borrow and the fill stays at or above the warning level.
 func (s *Service) CheckOrder(ctx context.Context, in OrderInput) (OrderOutcome, error) {
-	plan, err := s.planOrder(ctx, in, false)
+	plan, err := s.planOrder(ctx, in)
 	if err != nil {
 		return OrderOutcome{}, err
 	}
@@ -90,7 +90,7 @@ func (s *Service) ReserveOrder(ctx context.Context, in OrderInput) (OrderOutcome
 			return OrderOutcome{}, err
 		}
 	} else {
-		plan, err := s.planOrder(ctx, in, false)
+		plan, err := s.planOrder(ctx, in)
 		if err != nil {
 			return OrderOutcome{}, err
 		}
@@ -124,11 +124,32 @@ func (s *Service) resumeOrder(ctx context.Context, in OrderInput, b ports.Borrow
 	case ports.OpFailed:
 		return OrderOutcome{}, failure(b.Failure)
 	}
-	plan, err := s.planOrder(ctx, in, true)
+	return OrderOutcome{Borrow: b.Amount, BorrowID: b.ID, MarginLevel: s.levelAfter(ctx, in)}, nil
+}
+
+// levelAfter works out the margin level an order leaves, with what the
+// account holds now (its borrow in it); nil when it cannot (review CY
+// C17 ②: a repeat answers the borrow made, whatever the gates say now).
+func (s *Service) levelAfter(ctx context.Context, in OrderInput) *decimal.Decimal {
+	read := s.Store.Read()
+	pair, err := s.Instruments.Pair(ctx, in.Symbol)
 	if err != nil {
-		return OrderOutcome{}, err
+		return nil
 	}
-	return OrderOutcome{Borrow: b.Amount, BorrowID: b.ID, MarginLevel: plan.level}, nil
+	cat, err := s.catalog(ctx, read)
+	if err != nil {
+		return nil
+	}
+	st, err := s.standingOf(ctx, read, in.UserID)
+	if err != nil {
+		return nil
+	}
+	prices := s.Prices.Prices()
+	v := domain.Value(filled(st.of(in.Account), in, pair, decimal.Zero, cat, prices), cat.Assets, prices)
+	if level, ok := v.Level(); ok {
+		return &level
+	}
+	return nil
 }
 
 // orderKey is the key an order's borrow goes under.
@@ -167,9 +188,8 @@ type orderPlan struct {
 }
 
 // planOrder runs the checks of an order and works out its borrow and the
-// margin level it leaves; borrowed says the order's borrow is in the
-// account already (a repeat), which leaves only the level to work out.
-func (s *Service) planOrder(ctx context.Context, in OrderInput, borrowed bool) (orderPlan, error) {
+// margin level it leaves.
+func (s *Service) planOrder(ctx context.Context, in OrderInput) (orderPlan, error) {
 	if err := s.enabled(in.UserID); err != nil {
 		return orderPlan{}, err
 	}
@@ -230,7 +250,7 @@ func (s *Service) planOrder(ctx context.Context, in OrderInput, borrowed bool) (
 	}
 	plan := orderPlan{borrow: decimal.Zero}
 	free := holding(holdings, in.FreezeAsset).Free
-	if need := in.FreezeAmount.Sub(free); need.IsPositive() && !borrowed {
+	if need := in.FreezeAmount.Sub(free); need.IsPositive() {
 		if in.SideEffect != domain.SideEffectAutoBorrow {
 			return orderPlan{}, ErrInsufficient.WithDetail("asset", in.FreezeAsset).WithDetail("free", free.String())
 		}
@@ -252,7 +272,7 @@ func (s *Service) planOrder(ctx context.Context, in OrderInput, borrowed bool) (
 	v := domain.Value(after, cat.Assets, prices)
 	if level, ok := v.Level(); ok {
 		plan.level = &level
-		if level.LessThan(terms.WarnLevel) && !borrowed {
+		if level.LessThan(terms.WarnLevel) {
 			return orderPlan{}, domain.ErrLevelTooLow.WithDetail("margin_level", level.String()).
 				WithDetail("warn_level", terms.WarnLevel.String())
 		}

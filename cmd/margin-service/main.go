@@ -21,6 +21,7 @@ import (
 	"github.com/skill/exchange/internal/margin/adapters/postgres"
 	"github.com/skill/exchange/internal/margin/adapters/prices"
 	"github.com/skill/exchange/internal/margin/adapters/pushes"
+	"github.com/skill/exchange/internal/margin/adapters/trading"
 	"github.com/skill/exchange/internal/margin/adapters/users"
 	"github.com/skill/exchange/internal/margin/application"
 	"github.com/skill/exchange/internal/margin/transport/consumer"
@@ -50,6 +51,9 @@ type settings struct {
 	// MarketURL is market-data-service, whose tickers value the accounts
 	// (MARKET_DATA_SERVICE_URL).
 	MarketURL string `koanf:"market_data_service_url"`
+	// TradingURL is spot-trading-service's internal address, which a
+	// liquidation cancels orders and trades with (TRADING_SERVICE_URL).
+	TradingURL string `koanf:"trading_service_url"`
 	// ReconcileInterval is how often invariant 7 is checked
 	// (RECONCILE_INTERVAL).
 	ReconcileInterval time.Duration `koanf:"reconcile_interval"`
@@ -67,7 +71,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8099", GRPCAddr: ":9199", Postgres: pg.DefaultConfig(),
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", UserAddr: "localhost:9182",
-		MarketURL: "http://localhost:8090", ReconcileInterval: time.Hour,
+		MarketURL: "http://localhost:8090", TradingURL: "http://localhost:8088", ReconcileInterval: time.Hour,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -107,6 +111,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Instruments: instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 5*time.Second),
 		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
 		Features:    features,
+		Trading:     &trading.Client{BaseURL: cfg.TradingURL, HTTP: &http.Client{Timeout: 5 * time.Second}},
 		Log:         a.Logger(),
 		Now:         time.Now,
 		Metrics:     application.NewMetrics(a.Metrics()),
@@ -120,6 +125,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	monitor := &application.Monitor{
 		Svc: svc, Pushes: &pushes.Publisher{Pub: prod, Events: events}, Refresh: 5 * time.Second, Track: 5 * time.Second,
+		Liquidate: svc.AutoLiquidate,
 	}
 	svc.Touched = monitor.Touch
 	// The journals on margin accounts: the monitor values them again, and

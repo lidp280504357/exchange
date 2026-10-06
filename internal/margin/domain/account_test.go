@@ -41,9 +41,11 @@ func TestMayHold(t *testing.T) {
 	if !MayHold(Isolated("BTC-USDT"), pair, btc, true) || MayHold(Isolated("BTC-USDT"), pair, testTerms["ETH"], true) {
 		t.Error("isolated: the pair's two assets only")
 	}
+	// A pair switched off keeps the accounts open on it (review CY C17 ①);
+	// only the account's own pair counts.
 	closed := *pair
 	closed.Isolated = false
-	if MayHold(Isolated("BTC-USDT"), &closed, btc, true) || MayHold(Isolated("ETH-USDT"), pair, btc, true) {
-		t.Error("isolated: an open pair, its own")
+	if !MayHold(Isolated("BTC-USDT"), &closed, btc, true) || MayHold(Isolated("ETH-USDT"), pair, btc, true) {
+		t.Error("isolated: its own pair, open or switched off")
 	}
 }

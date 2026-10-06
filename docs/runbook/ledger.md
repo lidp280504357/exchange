@@ -141,7 +141,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 | `MARGIN_INTEREST` | 借币的首小时 `margin:margin-borrow:<借款ID>:1`；整点 `margin-interest:<资产>:<整点的 Unix 秒>`，第 n 块（n ≥ 1）再加 `:<n>` | 利息行 −i / `MARGIN_INTEREST_INCOME` +Σi；整点每资产每小时一笔，每笔至多 1,000 个账户，多的按账户顺序分块 |
 | `MARGIN_REPAY` | `margin:margin-repay:<还款ID>:0`；成交的自动还款 `trade-repay:<成交ID>:<buyer 或 seller>` | 资产行 −(I+P) / 利息行 +I / 负债行 +P。先息后本：I 必须等于还款额与所欠利息中较小者（`LEDGER_INTEREST_FIRST`）；多还 `LEDGER_DEBT_OVERPAID` |
 | `MARGIN_TRADE_SETTLE` | `trade:<成交ID>` | 订单在杠杆账户上时的成交结算：行与 `TRADE_SETTLE`/`HOUSE_TRADE_SETTLE` 相同，只是这一方的账户是杠杆资产行 |
-| `MARGIN_LIQUIDATE` | 批次 E3 | 强平 |
+| `MARGIN_LIQUIDATE` | `margin:margin-repay:<还款ID>:0`（强平还款与保险基金补足）、`margin:liquidation-fee:<强平ID>:0` | 强平（批次 E3）的三种动作：`LIQUIDATION_REPAY` 同 REPAY，用强平后账户里的余额还；`INSURANCE_COVER` 由 `INSURANCE_FUND` 付：基金 −(I+P)、利息行 +I、负债行 +P，同样先息后本、不能多还，基金不够时拒绝；`LIQUIDATION_FEE`：资产行 −f、`INSURANCE_FUND` +f |
 
 - `PostMargin` 一次请求可含几步（借币 = `BORROW` + 首小时 `INTEREST`），要么全记、要么全不记，每步一条 journal，请求记在 `ledger.margin_postings`：同键同内容返回原来的 journal，同键不同内容 `COMMON_IDEMPOTENCY_CONFLICT`；同键的两个请求同时到，后一个等锁后发现前一个已记账，就重放而不再动余额（审查 CJ）。
 - 成交结算（批次 E2）：`TradeExecuted` 带双方的账户类型（空为现货），订单在杠杆账户上的一方在该账户的资产行结算（逐仓的 `scope` 是成交的交易对），分录类型 `MARGIN_TRADE_SETTLE`；手续费仍记 `TRADE_FEE`，从这一方收到的资产里扣。订单带 `AUTO_REPAY` 的一方在同一事务里另记一条 `MARGIN_REPAY`（备注 `auto-repay order <订单ID> trade <交易对> <成交ID>`）：用这笔成交收到的资产（扣过手续费）还这个资产的负债，先息后本、最多还清；margin-service 消费 `ledger.events` 里的这类分录同步借款表。

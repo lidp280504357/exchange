@@ -137,9 +137,12 @@ func (m *Monitor) Pass(ctx context.Context) (int, error) {
 		h, ok := m.held[user]
 		if !ok || touched[user] || now.Sub(h.at) >= m.Refresh {
 			all, err := s.Ledger.Holdings(ctx, user)
-			if err != nil {
-				m.retouch(touched)
-				return n, err
+			if err != nil { // this user waits for the next pass, the others go on (review CY C17 ③)
+				s.Log.WarnContext(ctx, "margin monitor: holdings not read", "user_id", user, "error", err)
+				if touched[user] {
+					m.Touch(user)
+				}
+				continue
 			}
 			h = heldAt{accounts: all, at: now}
 			m.held[user] = h
@@ -169,6 +172,9 @@ func (m *Monitor) Pass(ctx context.Context) (int, error) {
 		if _, ok := users[user]; !ok {
 			delete(m.held, user)
 		}
+	}
+	if _, err := s.AdvanceLiquidations(ctx); err != nil {
+		s.Log.WarnContext(ctx, "a liquidation waits", "error", err)
 	}
 	if len(pushes) > 0 && m.Pushes != nil {
 		if err := m.Pushes.Push(ctx, pushes); err != nil {
@@ -205,16 +211,27 @@ func (m *Monitor) judge(ctx context.Context, cat Catalog, st ports.Account, v do
 	if zone != domain.ZoneLiquidate {
 		delete(m.hits, key)
 	} else if m.hits[key]++; m.hits[key] >= 2 {
-		if m.Svc.Metrics != nil {
+		if m.hits[key] == 2 && m.Svc.Metrics != nil { // once each time it reaches the line (review CY C17 ④)
 			m.Svc.Metrics.LiquidationsDue.Inc()
 		}
 		if m.Liquidate != nil {
-			delete(m.hits, key)
-			return st, m.Liquidate(ctx, st, v)
+			if err := m.Liquidate(ctx, st, v); err != nil {
+				return st, err
+			}
+			if cur, ok, err := m.Svc.Store.Read().Accounts().Get(ctx, st.UserID, st.Account); err == nil && ok {
+				st = cur // LIQUIDATING once it started
+			}
+			if st.Status == domain.StatusLiquidating {
+				return st, nil
+			}
 		}
 	}
+	// Back above the warning line by a hundredth of it, not at the line
+	// itself: a level that wavers around it warns once (review CY).
+	level, _ := v.Level()
+	recovered := zone == domain.ZoneSafe && !level.LessThan(terms.WarnLevel.Mul(decimal.RequireFromString("1.01")))
 	switch {
-	case zone == domain.ZoneSafe && st.Status == domain.StatusWarned:
+	case recovered && st.Status == domain.StatusWarned:
 		return m.setStatus(ctx, st, domain.StatusWarned, domain.StatusNormal, terms, v)
 	case zone != domain.ZoneSafe && st.Status == domain.StatusNormal:
 		return m.setStatus(ctx, st, domain.StatusNormal, domain.StatusWarned, terms, v)

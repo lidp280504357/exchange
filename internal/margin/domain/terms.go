@@ -44,7 +44,9 @@ func (p Pair) Has(asset string) bool { return asset == p.Base || asset == p.Quot
 
 // MayHold reports whether an account may hold or borrow asset: an
 // isolated account only its pair's two, the cross account any asset of
-// the margin list that counts as collateral or can be borrowed.
+// the margin list that counts as collateral or can be borrowed. A pair
+// switched off for isolated accounts keeps the ones open (no new one,
+// review CY C17 ①).
 func MayHold(a Account, p *Pair, t AssetTerms, listed bool) bool {
 	if !listed || (!t.Collateral && !t.Borrowable) {
 		return false
@@ -52,5 +54,5 @@ func MayHold(a Account, p *Pair, t AssetTerms, listed bool) bool {
 	if a.IsCross() {
 		return true
 	}
-	return p != nil && p.Isolated && p.Symbol == a.Symbol && p.Has(t.Asset)
+	return p != nil && p.Symbol == a.Symbol && p.Has(t.Asset)
 }

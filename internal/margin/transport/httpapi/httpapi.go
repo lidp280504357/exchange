@@ -471,17 +471,65 @@ func (h *Handler) interest(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next)})
 }
 
-// liquidations lists the caller's liquidations; none before batch E3.
+// liquidations lists the caller's liquidations, newest first.
 func (h *Handler) liquidations(w http.ResponseWriter, r *http.Request) {
-	if _, err := accountParam(r, false); err != nil {
+	a, err := accountParam(r, false)
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if _, err := limitParam(r); err != nil {
+	limit, err := limitParam(r)
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
+	list, next, err := h.Svc.Liquidations(r.Context(), httpx.UserID(r), a, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(list))
+	for _, l := range list {
+		items = append(items, liquidationJSON(l, false))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next)})
+}
+
+func amountsJSON(list []ports.AssetAmount) []map[string]string {
+	out := make([]map[string]string, 0, len(list))
+	for _, a := range list {
+		out = append(out, map[string]string{"asset": a.Asset, "amount": a.Amount.String()})
+	}
+	return out
+}
+
+// liquidationJSON renders a liquidation for its user (margin.yaml's
+// MarginLiquidation), or with its holder, trigger and what stayed for the
+// console.
+func liquidationJSON(l ports.Liquidation, console bool) map[string]any {
+	status := l.Status
+	if status == ports.LiquidationShortfall && !console {
+		status = ports.LiquidationStarted // under way, for its user
+	}
+	out := map[string]any{
+		"liquidation_id": l.ID, "account": string(l.Account.Type), "symbol": nullable(l.Account.Symbol), "status": status,
+		"margin_level": levelOf(l.MarginLevel), "repaid": amountsJSON(l.Repaid), "fee": l.FeeUSDT.String(),
+		"insurance_covered": l.InsuranceCovered.String(), "started_at": stamp(l.StartedAt), "completed_at": stampOf(l.CompletedAt),
+	}
+	if console {
+		out["user_id"], out["trigger"], out["approval_id"] = l.UserID, l.Trigger, nullable(l.ApprovalID)
+		out["total_asset"], out["total_liability"], out["remaining"] = l.TotalAsset.String(), l.TotalLiability.String(), amountsJSON(l.Remaining)
+		out["step"], out["note"] = l.Step, l.Note
+	}
+	return out
+}
+
+// levelOf renders a margin level; "" without one.
+func levelOf(l *decimal.Decimal) string {
+	if l == nil {
+		return ""
+	}
+	return l.String()
 }
 
 func (h *Handler) maxBorrowable(w http.ResponseWriter, r *http.Request) {

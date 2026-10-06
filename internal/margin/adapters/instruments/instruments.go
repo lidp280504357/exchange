@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 	"github.com/skill/exchange/internal/margin/ports"
 )
@@ -69,7 +71,13 @@ func (c *Client) Pair(ctx context.Context, symbol string) (ports.PairInfo, error
 	p := resp.GetPair()
 	pair := ports.PairInfo{
 		Symbol: p.GetSymbol(), Base: p.GetBaseAsset(), Quote: p.GetQuoteAsset(), Status: p.GetStatus(),
-		TickDecimals: decimalsOf(p.GetTickSize()),
+		TickDecimals: decimalsOf(p.GetTickSize()), Lot: decimal.Zero,
+	}
+	if lot, err := decimal.NewFromString(p.GetLotSize()); err == nil {
+		pair.Lot = lot
+	}
+	if most, err := decimal.NewFromString(p.GetMaxQuantity()); err == nil {
+		pair.MaxQuantity = most
 	}
 	c.mu.Lock()
 	c.pairs[symbol] = cachedPair{pair: pair, at: time.Now()}

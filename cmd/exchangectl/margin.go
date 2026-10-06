@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/margin/adapters/postgres"
@@ -51,6 +56,10 @@ func marginCmd(ctx context.Context, cfg settings, args []string, in io.Reader, o
 		return marginLoans(ctx, store, out)
 	case "reconcile":
 		return marginReconcile(ctx, cfg, store, out)
+	case "liquidate":
+		return marginLiquidate(ctx, args[1:], out)
+	case "liquidations":
+		return marginLiquidations(ctx, store, args[1:], out)
 	default:
 		return fmt.Errorf("unknown margin command %q", args[0])
 	}
@@ -137,6 +146,75 @@ func marginTerms(ctx context.Context, store ports.Store, out io.Writer) error {
 	for _, p := range pairs {
 		fmt.Fprintf(w, "%s\t%v\t%dx\t%s\t%s\t%s\n", p.Symbol, p.Isolated, p.Terms.Leverage, p.Terms.WarnLevel, p.Terms.LiquidationLevel,
 			p.Terms.LiquidationFee)
+	}
+	return w.Flush()
+}
+
+// marginLiquidate asks the running margin-service (in its container) to
+// liquidate an account now, as an approved request of the administrators
+// does: the approval defaults to a new ID, and the same one again returns
+// the liquidation it started.
+func marginLiquidate(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("margin liquidate", flag.ContinueOnError)
+	fs.SetOutput(out)
+	user := fs.String("user", "", "the user's ID")
+	account := fs.String("account", "", "MARGIN_CROSS, or MARGIN_ISOLATED:<symbol>")
+	approval := fs.String("approval", "", "the approval's ID (default: a new one)")
+	base := fs.String("url", "http://localhost:8099", "margin-service's HTTP address")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *user == "" || *account == "" {
+		fs.Usage()
+		return errors.New("--user and --account are required")
+	}
+	if *approval == "" {
+		*approval = uuid.Must(uuid.NewV7()).String()
+	}
+	body, _ := json.Marshal(map[string]string{"approval_id": *approval})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/internal/margin/accounts/%s/%s/liquidate", strings.TrimSuffix(*base, "/"), *user, *account), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Id", "cli:exchangectl")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	fmt.Fprintln(out, strings.TrimSpace(string(raw)))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("liquidate: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// marginLiquidations lists a user's liquidations, or those under way.
+func marginLiquidations(ctx context.Context, store ports.Store, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("margin liquidations", flag.ContinueOnError)
+	fs.SetOutput(out)
+	user := fs.String("user", "", "the user's ID (default: every liquidation under way)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	var list []ports.Liquidation
+	var err error
+	if *user == "" {
+		list, err = store.Read().Liquidations().Running(ctx)
+	} else {
+		list, err = store.Read().Liquidations().OfUser(ctx, *user, nil, "", 50)
+	}
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "LIQUIDATION\tUSER\tACCOUNT\tTRIGGER\tSTATUS\tSTEP\tTRADED\tFEE_USDT\tCOVERED_USDT\tSTARTED\tNOTE")
+	for _, l := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s %s\t%s\t%s\t%s\t%s\n", l.ID, l.UserID, l.Account, l.Trigger, l.Status, l.Step, l.Traded,
+			l.QuoteAsset, l.FeeUSDT, l.InsuranceCovered, l.StartedAt.UTC().Format(time.RFC3339), l.Note)
 	}
 	return w.Flush()
 }
