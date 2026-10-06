@@ -1,4 +1,5 @@
 import { dec, enumLabel, errorText, formatAmount, formatPercent, formatPrice, routes } from "@exchange/core";
+import { useIdleImport } from "@exchange/core/idle";
 import type { MarginActionKind, MarginFormInit } from "@exchange/core/margin/form";
 import { useMarginAccounts, useMarginAssets, useMarginOpen } from "@exchange/core/margin/hooks";
 import { hasDebt, isEmpty, type MarginAccount, type MarginBalance } from "@exchange/core/margin/math";
@@ -11,9 +12,11 @@ import { Appear, CardSkeleton, PRESS, RETRY, Section, TextButton } from "./parts
 import { shownDecimals, useAssetMeta, type AssetMeta } from "./parts/meta";
 import { Notice, reasonText } from "./parts/Notice";
 
-// The transfer, borrow and repay sheet loads when first opened: its form
-// (fields, selects, number inputs) is not on the page's first screen (B108).
-const MarginSheet = lazy(() => import("./parts/MarginSheet").then((m) => ({ default: m.MarginSheet })));
+// The transfer, borrow and repay sheet is not on the page's first screen
+// (its form: fields, selects, number inputs, B108): it loads once the page
+// is idle, ready before it is opened.
+const loadSheet = () => import("./parts/MarginSheet");
+const MarginSheet = lazy(() => loadSheet().then((m) => ({ default: m.MarginSheet })));
 
 type Act = (kind: MarginActionKind, init?: MarginFormInit) => void;
 
@@ -28,6 +31,7 @@ const statusTones = { NORMAL: "success", WARNED: "warn", LIQUIDATING: "danger", 
  * says so; repaying and transfers out stay available.
  */
 export default function Margin() {
+  useIdleImport(loadSheet);
   const { t } = useTranslation();
   const title = t("nav.margin");
   usePageHeader({ title, back: routes.assets }, [title]);
