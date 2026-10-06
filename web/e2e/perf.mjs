@@ -686,7 +686,9 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
   await sleep(3000);
   const bar = await orderBar(page, site, sheet);
   if (!bar) return;
-  const cross = await clickTo(page, "全仓", bar, `${bar} [data-testid="margin-level"]`);
+  // The gauge sits under the form since B120 (margin-info), beside the available balance.
+  const info = bar.replace("margin-bar", "margin-info");
+  const cross = await clickTo(page, "全仓", bar, `${info} [data-testid="margin-level"]`);
   report(`${site} order form switched to the cross account: its gauge on screen`, cross < 0 ? "no 全仓 button" : ms(cross), "≤ 200 ms", cross >= 0 && cross <= 200);
   const warm = await preloaded(page, 0);
   await sleep(500);

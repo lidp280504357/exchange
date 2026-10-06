@@ -976,13 +976,15 @@ else await f.step("P9", P9, async () => {
       { timeout: 20000 },
       `${btc.leverage}x`,
     );
-    // The terminal on the cross account: gauge, what it may borrow, the three dialogs.
+    // The terminal on the cross account: gauge, what it may borrow (under the
+    // form since B120), the three dialogs (in the bar).
     await nav(D, "/trade/BTC-USDT");
     const bar = '[data-testid="margin-bar"]';
+    const info = '#order-form [data-testid="margin-info"]';
     await D.page.waitForSelector(bar, { visible: true, timeout: 20000 });
     await D.clickButton("全仓", bar);
-    await D.page.waitForSelector(`${bar} [data-testid="margin-level"]`, { visible: true, timeout: 10000 });
-    await D.page.waitForFunction((b) => /\d/.test(document.querySelector(`${b} [data-testid="margin-borrowable"]`)?.innerText ?? ""), { timeout: 15000 }, bar);
+    await D.page.waitForSelector(`${info} [data-testid="margin-level"]`, { visible: true, timeout: 10000 });
+    await D.page.waitForFunction((i) => /\d/.test(document.querySelector(`${i} [data-testid="margin-borrowable"]`)?.innerText ?? ""), { timeout: 15000 }, info);
     for (const [link, form] of [["划转", "transfer"], ["还币", "repay"]]) {
       await D.clickButton(link, bar);
       await D.page.waitForSelector(`[role=dialog] form[data-testid="margin-${form}-form"]`, { visible: true, timeout: 10000 });
@@ -1015,7 +1017,7 @@ else await f.step("P9", P9, async () => {
     await D.clickButton("撤单");
     await openOrders(D, 0);
     await D.clickButton("现货", bar);
-    await D.page.waitForSelector(`${bar} [data-testid="margin-level"]`, { hidden: true, timeout: 10000 });
+    await D.page.waitForSelector(info, { hidden: true, timeout: 10000 });
     // The assets' margin page: the cross account with its debt, the isolated
     // section, and the debt repaid in full from the row's 还币.
     await nav(D, "/assets/margin");

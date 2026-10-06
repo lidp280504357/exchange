@@ -789,8 +789,10 @@ else await f.step("M7", M7, async () => {
     const bar = '[role=dialog] [data-testid="margin-bar"]';
     await B.page.waitForSelector(bar, { visible: true, timeout: 20000 });
     await B.clickButton("全仓", bar);
-    await B.page.waitForSelector(`${bar} [data-testid="margin-level"]`, { visible: true, timeout: 10000 });
-    await B.page.waitForFunction((b) => /\d/.test(document.querySelector(`${b} [data-testid="margin-borrowable"]`)?.innerText ?? ""), { timeout: 15000 }, bar);
+    // The gauge and what it may borrow sit under the form since B120.
+    const info = '[role=dialog] [data-testid="margin-info"]';
+    await B.page.waitForSelector(`${info} [data-testid="margin-level"]`, { visible: true, timeout: 10000 });
+    await B.page.waitForFunction((i) => /\d/.test(document.querySelector(`${i} [data-testid="margin-borrowable"]`)?.innerText ?? ""), { timeout: 15000 }, info);
     // Borrow 1 USDT from the bar's own sheet, over the order sheet; its
     // button sits under its form, in the sheet's footer.
     await B.clickButton("借币", bar);
