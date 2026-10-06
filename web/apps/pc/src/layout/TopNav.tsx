@@ -123,7 +123,7 @@ function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: s
         }
       >
         {label}
-        <ChevronDown size={14} className="transition-transform duration-[var(--t-fast)] group-hover:rotate-180" />
+        <ChevronDown size={14} className="transition-transform duration-[var(--t-fast)] group-hover:rotate-180 group-has-[:focus-visible]:rotate-180" />
       </NavLink>
       <div
         className={cn(
