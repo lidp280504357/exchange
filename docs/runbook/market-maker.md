@@ -67,11 +67,23 @@
 - 生效的额度存在库里（schema `marketmaker`：`house_caps` 一行，`house_caps_changes` 记每次改动的新值、旧值、操作人、批准人、审批号、原因与签名的键 `signed_by`；迁移 marketmaker 00001、00002）。服务第一次启动时把环境变量 `HOUSE_*` 的值存为第 1 版，之后以库里的为准，环境变量不再起作用；每 10 秒重读一次（多实例或直接改库也会跟上），本实例改的立即生效，下一轮（250 毫秒）报价就用新额度。启动日志与每次变化打 `house liquidity caps`（带 `version`）。
 - 内部接口（端口 8091，`HTTP_ADDR`；网关不转发 `/internal`，只给 admin-service，后台「HOUSE」页的「额度」卡由后台会话做（A69：双人审批 `HOUSE_CAPS`，后台审计））：
   - `GET /internal/house/caps` → `level`、`symbol`、`total`、`contract`、`safety`（USDT，十进制字符串）、`contract_leverage`（倍数）、`version`、`updated_by`、`updated_at`；
-  - `PUT /internal/house/caps` `{"level"?, "symbol"?, "total"?, "contract"?, "safety"?, "contract_leverage"?, "version", "actor", "approver"?, "approval_id"?, "reason"}`：只改给出的项，`version` 必须是读到的那一版（中间有人改过答 409 `HOUSE_CAPS_VERSION`，重读再改），数值不能为负、`contract_leverage` 要大于 0（400），`actor`、`reason` 必填；答新的一版；
+  - `PUT /internal/house/caps` `{"level"?, "symbol"?, "total"?, "contract"?, "safety"?, "contract_leverage"?, "version", "actor", "approver"?, "approval_id"?, "reason"}`：只改给出的项（在锁住库里那一行的同一个事务里套到当前值上，不是套到内存里最多 10 秒前的副本上，C47 ③），`version` 必须是读到的那一版（中间有人改过答 409 `HOUSE_CAPS_VERSION`，重读再改），`actor`、`reason` 必填、至少改一项；答新的一版。范围（C47 ②，不合答 400 `COMMON_INVALID_ARGUMENT`）：`level` ≥ 0（0 = 不限），`symbol`、`total`、`contract`、`safety` > 0，金额都不超过 10^15 USDT，`contract_leverage` 1–125；**一次改动每项最多变为原来的 10 倍或十分之一**（`level` 从 0 改成数值或改回 0 不算），超过答 400 `HOUSE_CAPS_STEP`（`details` 里有 `cap`、`from`、`to`）：多半是多打或少打了一位，要大幅调整就分几次改。环境变量 `HOUSE_*` 也要在这个范围里，否则服务不启动；
   - `GET /internal/house/caps/changes?limit=`（默认 20，最多 100）→ `items`：新的在前，每项 `version`、`caps`、`previous`（第 1 版为 null）、`actor`、`approver`、`approval_id`、`reason`、`signed_by`、`at`。
 - **改动要签名**（审查 FL，C47，照 market-sim）：`PUT` 必须带 `X-Service-Signature`（`internal/platform/svcsign`，HMAC 覆盖时间、随机数、方法、路径与正文，5 分钟内有效、同一签名只收一次），否则 401 `SERVICE_UNSIGNED`；读不要签名。两把键，每个调用方一把：`ops`（`HOUSE_CAPS_API_SECRET`，market-maker 容器里的 `exchangectl house`）与 `admin`（`HOUSE_CAPS_ADMIN_API_SECRET`，admin-service）。签名方担保正文里的 `actor`；**只有 `admin` 键能带 `approver`/`approval_id`**，其它键带了 403 `HOUSE_CAPS_APPROVAL_NEEDS_ADMIN`。缺哪把键（或不足 32 个字符），用那把签的改动一律被拒，启动日志告警，额度照库里的生效、报价不受影响。
 - 密钥：测试服在 `/opt/exchange/infra/house/caps.env`（`HOUSE_CAPS_API_SECRET`，只挂给 market-maker）与 `house/admin.env`（`HOUSE_CAPS_ADMIN_API_SECRET`，挂给 market-maker 与 admin-service），部署脚本第一次运行时生成、不打印；本机在 `.env`。
-- 手工（服务器上，在 market-maker 容器里）：读 `exchangectl house caps`、`exchangectl house changes`；改 `exchangectl house call PUT /internal/house/caps '{"safety":"2000","version":<读到的版本>,"actor":"ops:<名字>","reason":"..."}'`（`ops` 键，不能带批准人）。例：`sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-maker /app/exchangectl house caps`。
+- 手工（服务器上，在 market-maker 容器里）：读 `exchangectl house caps`、`exchangectl house changes`；改 `exchangectl house call PUT /internal/house/caps '{"safety":"2000","version":<读到的版本>,"actor":"ops:<名字>","reason":"..."}'`（`ops` 键，不能带批准人）。例：`sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-maker /app/exchangectl house caps`。本机：`scripts/ops/house.sh caps`（当前值、版本与最近改动）、`scripts/ops/house.sh caps set safety=2000 level=1000000 "原因"`（读当前版本后签名改，actor 为 `ops:<本机用户>`）。
+- 指标（C47 ④）：`market_house_cap_usdt{cap="level|symbol|total|contract|safety"}`、`market_house_contract_max_leverage`、`market_house_caps_version`（0 表示还没读到库里的）。
+
+### 各项额度的用途与改动影响（C47、A69 的说明文字）
+
+改动保存后 250 毫秒内（下一轮报价）生效；保存时版本已被别人改过会被拒，重读后再改。测试服当前值：`level`、`symbol`、`total`、`contract` 四项 500,000,000，`safety` 1,000，`contract_leverage` 10；生产首次默认见上一节。
+
+- **每档上限 `level`（USDT，≥ 0，0 = 不限）**：每个盘口每一档（含 20 档之外的合并档）最多报出的 USDT 等值数量。调低：大单要分多次才能成交完（2026-10-07 用户 5 BTC 市价平仓只成交 1.567 就是 20,000 的单档上限所致）；调高：行情突刺时 HOUSE 单笔吃的亏更大。
+- **单资产上限 `symbol`（USDT，> 0）**：HOUSE 持有某个资产（站内资产可以是负数，即卖空）的市值上限，库存本身也算；到上限后所有交易对都停止买入（或卖出）该资产。调低：热门币很快买满，用户卖不出去；调高：库存风险集中在少数资产上。
+- **总上限 `total`（USDT，> 0）**：除 USDT 以外全部现货持仓（按绝对值）合计的市值上限。调低：全站很快停止买入，所有交易对只剩一个方向；调高：整体库存风险上升。
+- **单合约上限 `contract`（USDT，> 0）**：每个合约上 HOUSE 净头寸的名义价值上限（币本位按张 × 面值），到达后该方向只减仓。调低：用户开仓被拒或只成交一部分；调高：单个合约的方向性风险增大。
+- **安全边际 `safety`（USDT，> 0）**：可充提资产（USDT、BTC、ETH）卖出时保留不卖的市值，买入时保留的计价资产余额。不能设为 0；越小越可能把可充提资产卖光（影响用户提现与对账余量）；调高则这些资产上可报的量减少。
+- **合约杠杆上限 `contract_leverage`（倍，1–125）**：HOUSE 在同一结算资产上的全部合约头寸合计 ≤ 该结算资产合约账户权益 × 倍数（HOUSE 不被强平，靠这一条限住亏损）。调低：报价量缩小，超过时只报减仓方向；调高：极端行情下 HOUSE 的合约权益可能被打穿。
 
 ## 测试服设置（一次性）
 

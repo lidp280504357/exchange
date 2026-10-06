@@ -55,8 +55,12 @@ func (m *store) Change(_ context.Context, c domain.CapsChange, at time.Time) (do
 	if m.s.Version != c.Version {
 		return domain.StoredCaps{}, domain.ErrCapsVersion
 	}
+	caps, err := c.Next(m.s.Caps)
+	if err != nil {
+		return domain.StoredCaps{}, err
+	}
 	m.last = c
-	m.s = &domain.StoredCaps{Caps: c.Caps, Version: c.Version + 1, UpdatedBy: c.Actor, UpdatedAt: at}
+	m.s = &domain.StoredCaps{Caps: caps, Version: c.Version + 1, UpdatedBy: c.Actor, UpdatedAt: at}
 	return *m.s, nil
 }
 
@@ -123,7 +127,9 @@ func serveHeader(t *testing.T, r http.Handler, key, header, method, path, body s
 // The console reads HOUSE's caps and changes some of them on the version it
 // read (review C45): the others stay, a stale version is 409, a bad
 // decimal 400. A change must be signed, and only the admin console's key
-// names an approver (review FL, C47); each change keeps the key.
+// names an approver (review FL, C47); each change keeps the key. Caps out
+// of bounds, a step of more than ten times and a change of nothing are
+// 400.
 func TestTheCapsAPI(t *testing.T) {
 	pub := application.New(application.DefaultConfig(), specs{}, house{}, noFlags{}, noKafka{}, event.NewFactory("market-maker", "test"),
 		slog.New(slog.DiscardHandler), prometheus.NewRegistry())
@@ -140,7 +146,7 @@ func TestTheCapsAPI(t *testing.T) {
 	if code != 200 || got["level"] != "20000" || got["contract_leverage"] != "10" || got["version"] != float64(1) || got["updated_by"] != "environment" {
 		t.Fatalf("get: %d %v", code, got)
 	}
-	approved := `{"level":"500000000","total":"500000000","version":1,"actor":"admin:a","approver":"admin:b","approval_id":"ap1","reason":"the user's decision"}`
+	approved := `{"level":"200000","total":"5000000","version":1,"actor":"admin:a","approver":"admin:b","approval_id":"ap1","reason":"the user's decision"}`
 	if code, got = serve(t, r, "", http.MethodPut, "/internal/house/caps", approved); code != 401 || got["code"] != "SERVICE_UNSIGNED" {
 		t.Fatalf("unsigned: %d %v", code, got)
 	}
@@ -149,10 +155,10 @@ func TestTheCapsAPI(t *testing.T) {
 		t.Fatalf("an approver signed by ops: %d %v", code, got)
 	}
 	code, got, header := serveHeader(t, r, httpapi.KeyAdmin, "", http.MethodPut, "/internal/house/caps", approved)
-	if code != 200 || got["level"] != "500000000" || got["total"] != "500000000" || got["symbol"] != "100000" || got["version"] != float64(2) {
+	if code != 200 || got["level"] != "200000" || got["total"] != "5000000" || got["symbol"] != "100000" || got["version"] != float64(2) {
 		t.Fatalf("put: %d %v", code, got)
 	}
-	if c := caps.Get().Caps; !c.Level.Equal(decimal.NewFromInt(500000000)) {
+	if c := caps.Get().Caps; !c.Level.Equal(decimal.NewFromInt(200000)) {
 		t.Fatalf("in force: %+v", c)
 	}
 	if st.last.SignedBy != httpapi.KeyAdmin || st.last.Approver != "admin:b" {
@@ -171,8 +177,18 @@ func TestTheCapsAPI(t *testing.T) {
 	if code, _ = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"level":"-1","version":2,"actor":"a","reason":"r"}`); code != 400 {
 		t.Fatalf("below zero: %d", code)
 	}
-	if code, _ = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"contract_leverage":"0","version":2,"actor":"a","reason":"r"}`); code != 400 {
-		t.Fatalf("no leverage: %d", code)
+	for _, bad := range []string{`"contract_leverage":"0"`, `"contract_leverage":"126"`, `"symbol":"0"`, `"safety":"0"`, `"total":"2e15"`} {
+		if code, got = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{`+bad+`,"version":2,"actor":"a","reason":"r"}`); code != 400 ||
+			got["code"] != "COMMON_INVALID_ARGUMENT" {
+			t.Fatalf("out of bounds %s: %d %v", bad, code, got)
+		}
+	}
+	if code, got = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"symbol":"1000001","version":2,"actor":"a","reason":"r"}`); code != 400 ||
+		got["code"] != "HOUSE_CAPS_STEP" {
+		t.Fatalf("more than ten times: %d %v", code, got)
+	}
+	if code, got = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"version":2,"actor":"a","reason":"r"}`); code != 400 {
+		t.Fatalf("nothing to change: %d %v", code, got)
 	}
 	if code, got = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"safety":"2000","version":2,"actor":"ops:x","reason":"r"}`); code != 200 ||
 		got["version"] != float64(3) || st.last.SignedBy != httpapi.KeyOps {

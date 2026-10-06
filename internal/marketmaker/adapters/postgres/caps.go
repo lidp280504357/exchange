@@ -92,8 +92,9 @@ func (s *Store) Seed(ctx context.Context, caps domain.Caps, actor string, at tim
 	return out, nil
 }
 
-// Change replaces the stored caps when they are still c.Version and keeps
-// the change.
+// Change applies c to the stored caps when they are still c.Version (the
+// row locked, so the caps it is applied to are those it replaces) and
+// keeps the change.
 func (s *Store) Change(ctx context.Context, c domain.CapsChange, at time.Time) (domain.StoredCaps, error) {
 	var out domain.StoredCaps
 	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
@@ -104,14 +105,18 @@ func (s *Store) Change(ctx context.Context, c domain.CapsChange, at time.Time) (
 		if err != nil {
 			return err
 		}
-		next := cur.Version + 1
-		out, err = scanCaps(tx.QueryRow(ctx, `UPDATE house_caps SET level = $1, symbol = $2, total = $3, contract = $4, safety = $5,
-			contract_leverage = $6, version = $7, updated_by = $8, updated_at = $9 RETURNING `+capsColumns,
-			c.Caps.Level, c.Caps.Symbol, c.Caps.Total, c.Caps.Contract, c.Caps.Safety, c.Caps.ContractLeverage, next, c.Actor, at))
+		caps, err := c.Next(cur.Caps)
 		if err != nil {
 			return err
 		}
-		body, err := json.Marshal(toJSON(c.Caps))
+		next := cur.Version + 1
+		out, err = scanCaps(tx.QueryRow(ctx, `UPDATE house_caps SET level = $1, symbol = $2, total = $3, contract = $4, safety = $5,
+			contract_leverage = $6, version = $7, updated_by = $8, updated_at = $9 RETURNING `+capsColumns,
+			caps.Level, caps.Symbol, caps.Total, caps.Contract, caps.Safety, caps.ContractLeverage, next, c.Actor, at))
+		if err != nil {
+			return err
+		}
+		body, err := json.Marshal(toJSON(caps))
 		if err != nil {
 			return err
 		}

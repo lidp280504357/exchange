@@ -115,26 +115,32 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, ErrApprovalNeedsAdmin)
 		return
 	}
-	caps := h.Caps.Get().Caps
-	for name, f := range map[string]struct {
-		in  *string
-		out *decimal.Decimal
+	// Only the caps given: the store applies them to the caps it locks.
+	var patch domain.CapsPatch
+	for _, f := range []struct {
+		name string
+		in   *string
+		out  **decimal.Decimal
 	}{
-		"level": {b.Level, &caps.Level}, "symbol": {b.Symbol, &caps.Symbol}, "total": {b.Total, &caps.Total},
-		"contract": {b.Contract, &caps.Contract}, "safety": {b.Safety, &caps.Safety}, "contract_leverage": {b.ContractLeverage, &caps.ContractLeverage},
+		{"level", b.Level, &patch.Level},
+		{"symbol", b.Symbol, &patch.Symbol},
+		{"total", b.Total, &patch.Total},
+		{"contract", b.Contract, &patch.Contract},
+		{"safety", b.Safety, &patch.Safety},
+		{"contract_leverage", b.ContractLeverage, &patch.ContractLeverage},
 	} {
 		if f.in == nil {
 			continue
 		}
 		v, err := decimal.NewFromString(*f.in)
 		if err != nil {
-			httpx.WriteError(w, r, apperr.Invalid(name+" must be a decimal string"))
+			httpx.WriteError(w, r, apperr.Invalid(f.name+" must be a decimal string"))
 			return
 		}
-		*f.out = v
+		*f.out = &v
 	}
 	s, err := h.Caps.Change(r.Context(), domain.CapsChange{
-		Caps: caps, Version: b.Version, Actor: b.Actor, Approver: b.Approver, ApprovalID: b.ApprovalID, Reason: b.Reason,
+		Patch: patch, Version: b.Version, Actor: b.Actor, Approver: b.Approver, ApprovalID: b.ApprovalID, Reason: b.Reason,
 		SignedBy: signedBy,
 	})
 	if err != nil {

@@ -42,23 +42,39 @@ func TestHouseCaps(t *testing.T) {
 		t.Fatalf("seeded again %+v %v", s, err)
 	}
 
-	big := domain.Caps{Level: d("500000000"), Symbol: d("500000000"), Total: d("500000000"), Contract: d("500000000"), Safety: d("1000"), ContractLeverage: d("10")}
-	if _, err := store.Change(ctx, domain.CapsChange{Caps: big, Version: 2, Actor: "a", Reason: "r"}, at); apperr.From(err).Code != "HOUSE_CAPS_VERSION" {
+	ten := domain.CapsPatch{Level: ptr("200000"), Symbol: ptr("20000000"), Total: ptr("200000000"), Contract: ptr("50000000")}
+	if _, err := store.Change(ctx, domain.CapsChange{Patch: ten, Version: 2, Actor: "a", Reason: "r"}, at); apperr.From(err).Code != "HOUSE_CAPS_VERSION" {
 		t.Fatalf("a stale version: %v", err)
 	}
+	// Applied to the locked row (review FL, C47): more than ten times is
+	// refused there, and nothing changes.
+	if _, err := store.Change(ctx, domain.CapsChange{Patch: domain.CapsPatch{Level: ptr("500000000")}, Version: 1, Actor: "a", Reason: "r"}, at); apperr.From(err).Code != "HOUSE_CAPS_STEP" {
+		t.Fatalf("a step too large: %v", err)
+	}
 	s, err = store.Change(ctx, domain.CapsChange{
-		Caps: big, Version: 1, Actor: "admin:a", Approver: "admin:b", ApprovalID: "ap1", Reason: "the user's decision", SignedBy: "admin",
+		Patch: ten, Version: 1, Actor: "admin:a", Approver: "admin:b", ApprovalID: "ap1", Reason: "the user's decision", SignedBy: "admin",
 	}, at.Add(time.Minute))
-	if err != nil || s.Version != 2 || !s.Caps.Level.Equal(d("500000000")) || s.UpdatedBy != "admin:a" {
+	if err != nil || s.Version != 2 || !s.Caps.Level.Equal(d("200000")) || !s.Caps.Safety.Equal(d("1000")) || s.UpdatedBy != "admin:a" {
 		t.Fatalf("changed %+v %v", s, err)
 	}
-	if got, ok, err := store.Caps(ctx); err != nil || !ok || got.Version != 2 || !got.Caps.Total.Equal(d("500000000")) {
+	// A second change of another cap keeps the first's.
+	s, err = store.Change(ctx, domain.CapsChange{Patch: domain.CapsPatch{Safety: ptr("2000")}, Version: 2, Actor: "ops:x", Reason: "r", SignedBy: "ops"},
+		at.Add(2*time.Minute))
+	if err != nil || s.Version != 3 || !s.Caps.Level.Equal(d("200000")) || !s.Caps.Safety.Equal(d("2000")) {
+		t.Fatalf("changed again %+v %v", s, err)
+	}
+	if got, ok, err := store.Caps(ctx); err != nil || !ok || got.Version != 3 || !got.Caps.Total.Equal(d("200000000")) {
 		t.Fatalf("read %+v %v %v", got, ok, err)
 	}
 	list, err := store.Changes(ctx, 10)
-	if err != nil || len(list) != 2 || list[0].Version != 2 || list[0].Previous == nil || !list[0].Previous.Level.Equal(d("20000")) ||
-		list[0].Approver != "admin:b" || list[0].ApprovalID != "ap1" || list[0].SignedBy != "admin" || list[1].Previous != nil ||
-		list[1].Actor != "environment" || list[1].SignedBy != "" {
+	if err != nil || len(list) != 3 || list[1].Version != 2 || list[1].Previous == nil || !list[1].Previous.Level.Equal(d("20000")) ||
+		list[1].Approver != "admin:b" || list[1].ApprovalID != "ap1" || list[1].SignedBy != "admin" || list[0].SignedBy != "ops" ||
+		!list[0].Previous.Safety.Equal(d("1000")) || list[2].Previous != nil || list[2].Actor != "environment" || list[2].SignedBy != "" {
 		t.Fatalf("changes %+v %v", list, err)
 	}
+}
+
+func ptr(s string) *decimal.Decimal {
+	v := d(s)
+	return &v
 }

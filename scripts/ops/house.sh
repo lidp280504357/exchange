@@ -16,6 +16,13 @@
 #                               coin when coin-margined);
 #                               audited adjustments, needs
 #                               ledger.manual_adjustment. Idempotent.
+#   scripts/ops/house.sh caps   HOUSE's caps in force, their version and the
+#                               latest changes (market-maker's internal API).
+#   scripts/ops/house.sh caps set NAME=VALUE... REASON
+#                               change caps (level, symbol, total, contract,
+#                               safety in USDT; contract_leverage), signed
+#                               with the ops key: no approver, each moved at
+#                               most ten times up or down.
 #   scripts/ops/house.sh flags  public books and charts from Binance everywhere
 #                               (market.reference_depth, market.reference_kline)
 #                               and HOUSE on every pair listed now that follows
@@ -78,7 +85,8 @@ seed)
   done
   # The coin-margined contracts settle in their coin (coin-margined design
   # 2026-10-06 §2.3): HOUSE's BTC and ETH FUTURES accounts, each about
-  # 500,000 USD (ten times that is HOUSE_CONTRACT_CAP), and the insurance
+  # 500,000 USD (at HOUSE_CONTRACT_LEVERAGE 10, room for about 5,000,000 USD
+  # of positions settled in the coin), and the insurance
   # fund's rows of the three coins (the coordinator's 20:45 decision 7:
   # BTC +2 and ETH +40 on what margin trading put there, ASTRA 10% of a
   # coin-margined contract's 1,000,000 USD).
@@ -93,13 +101,16 @@ seed)
       --reason "insurance fund of the coin-margined contracts" --key "seed-insurance-coinm-$asset-$version"
   done
   # Every further contract HOUSE quotes (one with a reference market,
-  # coin-margined design §3.4, batch G1c) brings 10% of its
-  # HOUSE_CONTRACT_CAP (5,000,000 USD, the cap at 10x) of margin once,
-  # keyed by the contract: USDT for a USDT-margined one; its coin at the
-  # mark price for a coin-margined one, whose coin's insurance fund gets
-  # 100,000 USD of it once too. The four above are seeded already. A coin
-  # amount follows the mark price: run again later it differs, and its key
-  # answers COMMON_IDEMPOTENCY_CONFLICT, which says the seed was done.
+  # coin-margined design §3.4, batch G1c) brings 500,000 USD of margin
+  # once, keyed by the contract: USDT for a USDT-margined one; its coin at
+  # the mark price for a coin-margined one, whose coin's insurance fund
+  # gets 100,000 USD of it once too. The amounts are the test server's
+  # choice, not derived from the caps (review FL, C47 5: the caps change at
+  # runtime): at HOUSE_CONTRACT_LEVERAGE 10 each adds 5,000,000 USD of room
+  # to the positions its settlement account's contracts share. The four
+  # above are seeded already. A coin amount follows the mark price: run
+  # again later it differs, and its key answers COMMON_IDEMPOTENCY_CONFLICT,
+  # which says the seed was done (so does a reason worded since).
   once() {
     local out
     out=$(ctl "$@" </dev/null 2>&1) && { echo "$out"; return 0; }
@@ -115,16 +126,40 @@ seed)
     case "$symbol" in BTC-USDT-PERP | ETH-USDT-PERP | BTC-USD-PERP | ETH-USD-PERP) continue ;; esac
     if [[ $margin != COIN ]]; then
       once ledger-service ledger house-margin --amount 500000 \
-        --reason "HOUSE contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1"
+        --reason "HOUSE contract margin: 500,000 USD for $symbol (G1c)" --key "seed-house-margin-$symbol-v1"
       continue
     fi
     mark="$(curl -fsS "$API/v1/market/$symbol/mark-price" | jq -r '.mark_price // empty')"
     [[ -n $mark ]] || { echo "$symbol has no mark price: skipped, seed again later" >&2; continue; }
     once ledger-service ledger house-margin --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 500000 / m }')" \
-      --reason "HOUSE coin-margined contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1"
+      --reason "HOUSE coin-margined contract margin: 500,000 USD for $symbol (G1c)" --key "seed-house-margin-$symbol-v1"
     once ledger-service ledger insurance-fund --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 100000 / m }')" \
       --reason "insurance fund of the coin-margined contracts (G1c)" --key "seed-insurance-coinm-$settle-v1"
   done < <(jq -r '.contracts[] | select((.reference_symbol // "") != "") | [.symbol, .margin_type, .settle_asset] | @tsv' <<<"$contracts")
+  ;;
+caps)
+  # HOUSE's caps at runtime (review C45, C47): market-maker's internal API,
+  # through exchangectl in its container, whose changes carry the ops key:
+  # no approver (the console's two-person change is A69), each cap moved at
+  # most ten times up or down.
+  if [[ ${2:-} != set ]]; then
+    ctl market-maker house caps
+    ctl market-maker house changes
+    exit 0
+  fi
+  shift 2
+  (($# >= 2)) || { echo "usage: scripts/ops/house.sh caps set NAME=VALUE... REASON" >&2; exit 2; }
+  reason=${*: -1}
+  version=$(ctl market-maker house caps 2>/dev/null | jq -r .version)
+  body=$(jq -n --argjson v "$version" --arg a "ops:$(whoami)" --arg r "$reason" '{version: $v, actor: $a, reason: $r}')
+  for kv in "${@:1:$#-1}"; do
+    case ${kv%%=*} in
+    level | symbol | total | contract | safety | contract_leverage) ;;
+    *) echo "unknown cap ${kv%%=*}: level, symbol, total, contract, safety or contract_leverage" >&2; exit 2 ;;
+    esac
+    body=$(jq --arg n "${kv%%=*}" --arg v "${kv#*=}" '.[$n] = $v' <<<"$body")
+  done
+  ctl market-maker house call PUT /internal/house/caps "$body"
   ;;
 flags)
   # The pairs and contracts as listed now, not test.json: one listed from
@@ -174,7 +209,7 @@ show)
   ssh exchange "cd $INFRA && set -a && . ./.env && set +a && sudo docker compose exec -T postgres psql -U \"\$POSTGRES_USER\" -d exchange -At -c \"SELECT asset, available FROM ledger.accounts WHERE account_type = 'MARKET_MAKER' ORDER BY asset\""
   ;;
 *)
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac

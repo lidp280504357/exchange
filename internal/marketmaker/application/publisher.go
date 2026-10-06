@@ -117,8 +117,9 @@ type Publisher struct {
 	// how many times the equity they may be worth (ContractLeverage); its
 	// coin-margined accounts' equity (in the coin and in USD) and
 	// positions' worth, for the assets in coinAssets.
-	equity, worth, leverage                 prometheus.Gauge
+	equity, worth, leverage, capsVersion    prometheus.Gauge
 	coinEquity, coinEquityUSD, coinExposure *prometheus.GaugeVec
+	capGauge                                *prometheus.GaugeVec
 	coinAssets                              []string
 }
 
@@ -183,15 +184,22 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 			Name: "market_house_coin_contract_exposure_usdt",
 			Help: "What HOUSE's positions settled in a coin are worth together, in USD (contracts x face value).",
 		}, []string{"asset"}),
+		capGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_house_cap_usdt",
+			Help: "HOUSE's caps in force, in USDT: level, symbol, total, contract and safety (contract_leverage: market_house_contract_max_leverage).",
+		}, []string{"cap"}),
+		capsVersion: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "market_house_caps_version", Help: "The version of HOUSE's caps in force (0 before the stored ones are read).",
+		}),
 	}
-	p.leverage.Set(cfg.Caps.ContractLeverage.InexactFloat64())
+	p.showCaps(cfg.Caps, 0)
 	// Not a number until HOUSE's contract account is read: 0 would say its
 	// equity is gone (HouseContractEquityGone) while derivatives-service
 	// was only not reached yet.
 	p.equity.Set(math.NaN())
 	p.worth.Set(math.NaN())
 	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures, p.equity, p.worth, p.leverage, p.coinEquity,
-		p.coinEquityUSD, p.coinExposure)
+		p.coinEquityUSD, p.coinExposure, p.capGauge, p.capsVersion)
 	return p
 }
 
@@ -273,11 +281,22 @@ func (p *Publisher) OnStatus(symbol, to string) {
 
 // SetCaps replaces HOUSE's caps from the next round on (runtime caps,
 // Caps).
-func (p *Publisher) SetCaps(caps domain.Caps) {
+func (p *Publisher) SetCaps(caps domain.Caps, version int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cfg.Caps = caps
+	p.showCaps(caps, version)
+}
+
+// showCaps sets the caps' gauges (review FL, C47).
+func (p *Publisher) showCaps(caps domain.Caps, version int64) {
 	p.leverage.Set(caps.ContractLeverage.InexactFloat64())
+	for name, v := range map[string]decimal.Decimal{
+		"level": caps.Level, "symbol": caps.Symbol, "total": caps.Total, "contract": caps.Contract, "safety": caps.Safety,
+	} {
+		p.capGauge.WithLabelValues(name).Set(v.InexactFloat64())
+	}
+	p.capsVersion.Set(float64(version))
 }
 
 // OnHouseFill takes a trade HOUSE made on symbol (trade.events,

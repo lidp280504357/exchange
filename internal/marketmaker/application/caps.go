@@ -53,8 +53,9 @@ func (c *Caps) Get() domain.StoredCaps {
 	return c.current
 }
 
-// Change checks, stores and applies a change; one made on caps that changed
-// meanwhile is refused (domain.ErrCapsVersion).
+// Change checks, stores and applies a change: the store applies it to the
+// caps it locks (out of bounds or too large a step is refused there); one
+// made on caps that changed meanwhile is refused (domain.ErrCapsVersion).
 func (c *Caps) Change(ctx context.Context, ch domain.CapsChange) (domain.StoredCaps, error) {
 	if err := ch.Validate(); err != nil {
 		return domain.StoredCaps{}, err
@@ -64,16 +65,18 @@ func (c *Caps) Change(ctx context.Context, ch domain.CapsChange) (domain.StoredC
 		return domain.StoredCaps{}, err
 	}
 	c.log.InfoContext(ctx, "house caps changed", "version", stored.Version, "actor", ch.Actor, "approver", ch.Approver,
-		"approval_id", ch.ApprovalID, "reason", ch.Reason)
+		"approval_id", ch.ApprovalID, "reason", ch.Reason, "signed_by", ch.SignedBy)
 	c.apply(ctx, stored)
 	return stored, nil
 }
 
-// Changes returns the latest changes, newest first.
+// Changes returns the latest changes, newest first: 20 unless told, at
+// most 100.
 func (c *Caps) Changes(ctx context.Context, limit int) ([]domain.CapsRecord, error) {
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 {
 		limit = 20
 	}
+	limit = min(limit, 100)
 	return c.store.Changes(ctx, limit)
 }
 
@@ -111,7 +114,7 @@ func (c *Caps) apply(ctx context.Context, stored domain.StoredCaps) {
 	if !newer {
 		return
 	}
-	c.pub.SetCaps(stored.Caps)
+	c.pub.SetCaps(stored.Caps, stored.Version)
 	cp := stored.Caps
 	c.log.InfoContext(ctx, "house liquidity caps", "version", stored.Version, "level", cp.Level.String(), "symbol", cp.Symbol.String(),
 		"total", cp.Total.String(), "contract", cp.Contract.String(), "safety", cp.Safety.String(),

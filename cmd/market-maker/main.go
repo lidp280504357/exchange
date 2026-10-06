@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -75,12 +76,29 @@ type settings struct {
 
 func (s *settings) Validate() error {
 	var errs []error
-	for name, v := range map[string]string{
-		"HOUSE_LEVEL_CAP": s.LevelCap, "HOUSE_SYMBOL_CAP": s.SymbolCap, "HOUSE_TOTAL_CAP": s.TotalCap,
-		"HOUSE_CONTRACT_CAP": s.ContractCap, "HOUSE_SAFETY": s.Safety, "HOUSE_CONTRACT_LEVERAGE": s.ContractLeverage,
+	var caps domain.Caps
+	for _, f := range []struct {
+		name, v string
+		out     *decimal.Decimal
+	}{
+		{"HOUSE_LEVEL_CAP", s.LevelCap, &caps.Level},
+		{"HOUSE_SYMBOL_CAP", s.SymbolCap, &caps.Symbol},
+		{"HOUSE_TOTAL_CAP", s.TotalCap, &caps.Total},
+		{"HOUSE_CONTRACT_CAP", s.ContractCap, &caps.Contract},
+		{"HOUSE_SAFETY", s.Safety, &caps.Safety},
+		{"HOUSE_CONTRACT_LEVERAGE", s.ContractLeverage, &caps.ContractLeverage},
 	} {
-		if d, err := decimal.NewFromString(v); err != nil || d.IsNegative() {
-			errs = append(errs, errors.New(name+" must be a decimal not below zero"))
+		d, err := decimal.NewFromString(f.v)
+		if err != nil {
+			errs = append(errs, errors.New(f.name+" must be a decimal"))
+			continue
+		}
+		*f.out = d
+	}
+	if len(errs) == 0 {
+		// The first caps stored keep to the bounds of a change (C47).
+		if err := caps.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("HOUSE_*: %w", err))
 		}
 	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)

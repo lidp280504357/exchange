@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	"github.com/skill/exchange/internal/marketmaker/domain"
 	"github.com/skill/exchange/internal/platform/apperr"
@@ -45,8 +47,12 @@ func (m *memCaps) Change(_ context.Context, c domain.CapsChange, at time.Time) (
 		return domain.StoredCaps{}, domain.ErrCapsVersion
 	}
 	prev := m.stored.Caps
-	m.stored = &domain.StoredCaps{Caps: c.Caps, Version: c.Version + 1, UpdatedBy: c.Actor, UpdatedAt: at}
-	m.changes = append(m.changes, domain.CapsRecord{Version: m.stored.Version, Caps: c.Caps, Previous: &prev, Actor: c.Actor, Reason: c.Reason, At: at})
+	caps, err := c.Next(prev)
+	if err != nil {
+		return domain.StoredCaps{}, err
+	}
+	m.stored = &domain.StoredCaps{Caps: caps, Version: c.Version + 1, UpdatedBy: c.Actor, UpdatedAt: at}
+	m.changes = append(m.changes, domain.CapsRecord{Version: m.stored.Version, Caps: caps, Previous: &prev, Actor: c.Actor, Reason: c.Reason, At: at})
 	return *m.stored, nil
 }
 
@@ -90,15 +96,14 @@ func TestRuntimeCaps(t *testing.T) {
 		t.Fatalf("20,000 a level: %v", books)
 	}
 
-	bigger := env
-	bigger.Level = d("25000.5")
-	if _, err := caps.Change(ctx, domain.CapsChange{Caps: bigger, Version: 3, Actor: "a", Reason: "r"}); apperr.From(err).Code != "HOUSE_CAPS_VERSION" {
+	bigger := domain.CapsPatch{Level: ptr(d("25000.5"))}
+	if _, err := caps.Change(ctx, domain.CapsChange{Patch: bigger, Version: 3, Actor: "a", Reason: "r"}); apperr.From(err).Code != "HOUSE_CAPS_VERSION" {
 		t.Fatalf("a stale version: %v", err)
 	}
-	if _, err := caps.Change(ctx, domain.CapsChange{Caps: bigger, Version: 1, Reason: "r"}); apperr.From(err).Code != "COMMON_INVALID_ARGUMENT" {
+	if _, err := caps.Change(ctx, domain.CapsChange{Patch: bigger, Version: 1, Reason: "r"}); apperr.From(err).Code != "COMMON_INVALID_ARGUMENT" {
 		t.Fatalf("no actor: %v", err)
 	}
-	stored, err := caps.Change(ctx, domain.CapsChange{Caps: bigger, Version: 1, Actor: "admin:a", Approver: "admin:b", ApprovalID: "ap1", Reason: "deeper levels"})
+	stored, err := caps.Change(ctx, domain.CapsChange{Patch: bigger, Version: 1, Actor: "admin:a", Approver: "admin:b", ApprovalID: "ap1", Reason: "deeper levels"})
 	if err != nil || stored.Version != 2 || caps.Get().Version != 2 {
 		t.Fatalf("changed: %+v %v", stored, err)
 	}
@@ -108,14 +113,13 @@ func TestRuntimeCaps(t *testing.T) {
 	}
 
 	// Another instance changes them: the next read brings them.
-	elsewhere := bigger
-	elsewhere.Contract = d("7")
-	if _, err := store.Change(ctx, domain.CapsChange{Caps: elsewhere, Version: 2, Actor: "elsewhere", Reason: "r"}, time.Now()); err != nil {
+	elsewhere := domain.CapsPatch{Contract: ptr(d("70000"))}
+	if _, err := store.Change(ctx, domain.CapsChange{Patch: elsewhere, Version: 2, Actor: "elsewhere", Reason: "r"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	s, _, _ := store.Caps(ctx)
 	caps.apply(ctx, s)
-	if got := caps.Get(); got.Version != 3 || !got.Caps.Contract.Equal(d("7")) {
+	if got := caps.Get(); got.Version != 3 || !got.Caps.Contract.Equal(d("70000")) || !got.Caps.Level.Equal(d("25000.5")) {
 		t.Fatalf("read again: %+v", got)
 	}
 	list, err := caps.Changes(ctx, 0)
@@ -123,3 +127,5 @@ func TestRuntimeCaps(t *testing.T) {
 		t.Fatalf("changes %+v %v", list, err)
 	}
 }
+
+func ptr(v decimal.Decimal) *decimal.Decimal { return &v }
