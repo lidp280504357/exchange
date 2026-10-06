@@ -429,16 +429,26 @@ const routeTo = (page, path, selector) =>
     selector,
   );
 
+// The built chunk of the margin dialog (PC) and of the margin sheet (phone),
+// which the margin page and the terminals preload while idle (core's
+// useIdleImport).
+const DIALOG_CHUNK = /\/(MarginDialog|MarginSheet)-[^/]*\.js$/;
+
 /**
  * margin measures margin trading on a site, as a new account with 20 USDT
  * in its cross account, signed in through the form: the margin accounts
- * page loaded afresh (its LCP, and the JavaScript it fetched, compressed,
- * against the first-screen budget); reached again from the assets
+ * page loaded afresh (its LCP; the entry JavaScript, what index.html
+ * names, against the first-screen budget of §12.1 (review DV, B114); all
+ * the JavaScript fetched by its first screen, reported beside the assets
+ * overview's, with the dialog's chunks that load while the page is idle
+ * left out and reported on their own); reached again from the assets
  * overview (the route budget: content within 200 ms); on the terminal,
- * the order form switched to the cross account (its gauge on screen, the
- * same budget), the borrow dialog opened the first time (a lazy chunk; no
- * budget, reported), and a minute of streaming in margin mode (the
- * terminal's long-task budget). Skipped when margin trading is not open
+ * reached by a link, the order form switched to the cross account (its
+ * gauge on screen, the same budget), the borrow dialog opened once its
+ * chunks are in (no budget, reported) and a minute of streaming in margin
+ * mode (the terminal's long-task budget); and the terminal loaded afresh
+ * on the cross account: when it preloads the dialog's chunks, and the
+ * dialog opened then (reported). Skipped when margin trading is not open
  * to new accounts.
  */
 async function margin(browser, { site, base, device, budgets, sheet }) {
@@ -482,6 +492,60 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
   }
 }
 
+// The borrow dialog's form, on both sites.
+const BORROW_FORM = 'form[data-testid="margin-borrow-form"]';
+
+// orderBar finds the order form's margin bar, opening the order sheet on
+// the phone; reports and returns null without one.
+async function orderBar(page, site, sheet) {
+  const bar = '[data-testid="margin-bar"]';
+  if (!sheet) {
+    await page.waitForSelector(bar, { visible: true, timeout: 30000 });
+    return bar;
+  }
+  const opened = await clickTo(page, "买入 BTC", "", `[role=dialog] ${bar}`);
+  if (opened < 0 || opened === Infinity) {
+    report(`${site} the order sheet`, opened < 0 ? "no 买入 BTC button" : "no margin bar", "found", false);
+    return null;
+  }
+  await sleep(800); // the sheet slides in
+  return `[role=dialog] ${bar}`;
+}
+
+// preloaded waits (15 s at most) until every chunk of the batch that asked
+// for the dialog's chunk is in, and tells, from since (a time in the
+// page), when the batch was asked for and when the last chunk it fetched
+// came in, and how many it fetched; null when no such batch completed.
+const preloaded = (page, since) =>
+  page.evaluate(
+    (dialog, since) =>
+      new Promise((resolve) => {
+        const t = performance.now();
+        const check = () => {
+          const batch = window.__perfPreloads.find((b) => b.hrefs.some((h) => new RegExp(dialog).test(h)));
+          const entries = new Map(performance.getEntriesByType("resource").map((r) => [r.name, r]));
+          if (batch?.hrefs.every((h) => entries.has(h))) {
+            const fetched = batch.hrefs.map((h) => entries.get(h)).filter((r) => r.startTime >= batch.at - 100);
+            resolve({ asked: batch.at - since, in: Math.max(batch.at, ...fetched.map((r) => r.responseEnd)) - since, files: fetched.length });
+          } else if (performance.now() - t > 15000) resolve(null);
+          else setTimeout(check, 20);
+        };
+        check();
+      }),
+    DIALOG_CHUNK.source,
+    since,
+  );
+
+// closeBorrow closes the borrow dialog and waits for its form to go.
+async function closeBorrow(page) {
+  await page.keyboard.press("Escape");
+  await page.waitForFunction((form) => !document.querySelector(form), { timeout: 10000 }, BORROW_FORM);
+  await sleep(1000);
+}
+
+// at tells a time from the preload's start, before or after it.
+const at = (v) => `${ms(Math.abs(v))} ${v < 0 ? "before" : "after"}`;
+
 /** marginPages takes the measurements of margin() on a page of a fresh context. */
 async function marginPages(page, { site, base, user, password, budgets, sheet }) {
   await page.goto(`${base}/login?next=%2Fassets`, { waitUntil: "networkidle2", timeout: 60000 });
@@ -490,11 +554,30 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => location.pathname === "/assets", { timeout: 30000 });
 
-  // A page loaded afresh: its LCP, and the JavaScript fetched (compressed,
-  // as served) by the frame that first showed selector, its first screen.
-  // One poller, registered once, notes when the selector of its document's
-  // page first shows, and stops.
+  // Noted in every document: the scripts it has once index.html is parsed
+  // and before they run (index.html's module script and modulepreload
+  // tags, and the links its route preload adds for the address); each
+  // batch of modulepreload links added later (a dynamic import asks for
+  // its chunk and the chunks that one imports in one go), which tells the
+  // dialog's idle preload apart; and the frame on which the selector of
+  // the document's page first shows (one poller, registered once, that
+  // stops then). The resource buffer is raised so that no fetch goes
+  // unrecorded.
   await page.evaluateOnNewDocument((byPath) => {
+    performance.setResourceTimingBufferSize(10000);
+    window.__perfParsed = null;
+    window.__perfPreloads = [];
+    document.addEventListener("readystatechange", () => {
+      if (document.readyState !== "interactive" || window.__perfParsed) return;
+      window.__perfParsed = [...document.querySelectorAll('script[type="module"][src], link[rel="modulepreload"]')].map((n) => n.src || n.href);
+      new MutationObserver((records) => {
+        const hrefs = records
+          .flatMap((r) => [...r.addedNodes])
+          .filter((n) => n.nodeName === "LINK" && n.rel === "modulepreload")
+          .map((n) => n.href);
+        if (hrefs.length) window.__perfPreloads.push({ at: performance.now(), hrefs });
+      }).observe(document.head, { childList: true });
+    });
     window.__perfShown = {};
     const sel = byPath[location.pathname];
     if (!sel) return;
@@ -504,38 +587,87 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
     };
     requestAnimationFrame(check);
   }, { "/assets": '[data-testid="assets-total"]', "/assets/margin": '[data-testid="margin-account-MARGIN_CROSS"]' });
+  // A page loaded afresh: its LCP and the JavaScript fetched (compressed,
+  // as served): the entry's, what index.html itself names (its module
+  // script and modulepreload tags, the same on every address: the measure
+  // of §12.1's first-screen budget, review DV); what its route preload
+  // adds for the address; everything by the frame that first showed
+  // selector, its first screen, but the dialog's idle preload; and that
+  // preload, with when it was asked for, from the first screen. The wait
+  // after the first screen outlasts the idle preload's (core's
+  // IDLE_WITHIN, 3 s after the load event).
   const fresh = async (path, selector) => {
     await page.goto(`${base}${path}`, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(selector, { visible: true, timeout: 30000 });
-    await sleep(1500);
-    return page.evaluate((sel) => {
-      const shown = window.__perfShown?.[sel] ?? Infinity;
-      const js = performance.getEntriesByType("resource").filter((r) => /\.js($|\?)/.test(new URL(r.name).pathname) && r.responseEnd <= shown);
-      return {
-        lcp: window.__perf.lcp ?? null,
-        kb: js.reduce((s, r) => s + (r.encodedBodySize || 0), 0) / 1024,
-        files: js.length,
-        largest: js
-          .sort((a, b) => b.encodedBodySize - a.encodedBodySize)
-          .slice(0, 12)
-          .map((r) => `${new URL(r.name).pathname.split("/").pop()} ${(r.encodedBodySize / 1024).toFixed(1)}`),
-      };
-    }, selector);
+    await sleep(3500);
+    return page.evaluate(
+      async (sel, dialog) => {
+        const shown = window.__perfShown?.[sel] ?? Infinity;
+        const js = performance.getEntriesByType("resource").filter((r) => /\.js($|\?)/.test(new URL(r.name).pathname));
+        const file = (r) => `${new URL(r.name).pathname.split("/").pop()} ${(r.encodedBodySize / 1024).toFixed(1)}`;
+        const sum = (list) => ({
+          kb: list.reduce((s, r) => s + (r.encodedBodySize || 0), 0) / 1024,
+          files: list.length,
+          largest: [...list]
+            .sort((a, b) => b.encodedBodySize - a.encodedBodySize)
+            .slice(0, 12)
+            .map(file),
+        });
+        // index.html as served, the same document on every address: the
+        // tags it names, not the links its route preload adds as it runs.
+        const html = new DOMParser().parseFromString(await (await fetch("/", { cache: "no-store" })).text(), "text/html");
+        const named = new Set(
+          [...html.querySelectorAll('script[type="module"][src], link[rel="modulepreload"]')].map(
+            (n) => new URL(n.getAttribute("src") ?? n.getAttribute("href"), location.href).href,
+          ),
+        );
+        const routed = new Set((window.__perfParsed ?? []).filter((h) => !named.has(h)));
+        // The batch with the dialog's chunk, and what it fetched: a chunk
+        // fetched before it was asked for is the page's own.
+        const batch = window.__perfPreloads.find((b) => b.hrefs.some((h) => new RegExp(dialog).test(h)));
+        const asked = new Set(batch?.hrefs ?? []);
+        const idle = batch ? js.filter((r) => asked.has(r.name) && r.startTime >= batch.at - 100) : [];
+        return {
+          lcp: window.__perf.lcp ?? null,
+          entry: sum(js.filter((r) => named.has(r.name))),
+          route: sum(js.filter((r) => routed.has(r.name))),
+          first: sum(js.filter((r) => r.responseEnd <= shown && !idle.includes(r))),
+          idle: { ...sum(idle), at: batch ? batch.at - shown : null },
+        };
+      },
+      selector,
+      DIALOG_CHUNK.source,
+    );
   };
   // The assets overview first, for comparison: the same shell and session.
   const overview = await fresh("/assets", '[data-testid="assets-total"]');
   const account = '[data-testid="margin-account-MARGIN_CROSS"]';
   const load = await fresh("/assets/margin", account);
   if (process.env.PERF_DEBUG) {
-    console.log(`     ${site} overview's largest first-screen files (KB): ${overview.largest.join(", ")}`);
-    console.log(`     ${site} margin page's largest first-screen files (KB): ${load.largest.join(", ")}`);
+    console.log(`     ${site} entry files (KB): ${load.entry.largest.join(", ")}`);
+    console.log(`     ${site} overview's route preload (KB): ${overview.route.largest.join(", ")}`);
+    console.log(`     ${site} overview's largest first-screen files (KB): ${overview.first.largest.join(", ")}`);
+    console.log(`     ${site} margin page's largest first-screen files (KB): ${load.first.largest.join(", ")}`);
+    console.log(`     ${site} margin page's idle preload (KB): ${load.idle.largest.join(", ")}`);
   }
   report(`${site} margin page loaded afresh: LCP`, load.lcp === null ? "none" : ms(load.lcp), `≤ ${budgets.lcp} ms`, load.lcp !== null && load.lcp <= budgets.lcp);
   report(
-    `${site} margin page loaded afresh: JavaScript by its first screen (${load.files} files, compressed as served; the assets overview's ${overview.kb.toFixed(0)} KB in ${overview.files})`,
-    `${load.kb.toFixed(0)} KB`,
+    `${site} entry JavaScript, what index.html names (${load.entry.files} files, compressed as served; the same on every address, the overview's ${overview.entry.kb.toFixed(0)} KB)`,
+    `${load.entry.kb.toFixed(0)} KB`,
     `≤ ${budgets.js} KB`,
-    load.kb <= budgets.js,
+    load.entry.kb <= budgets.js,
+  );
+  report(
+    `${site} margin page loaded afresh: all JavaScript by its first screen, the idle preload left out (${load.first.files} files, ${load.route.kb.toFixed(0)} KB by its route preload; the assets overview's ${overview.first.kb.toFixed(0)} KB in ${overview.first.files}, ${overview.route.kb.toFixed(0)} KB by its route preload)`,
+    `${load.first.kb.toFixed(0)} KB`,
+    "— (reported)",
+    true,
+  );
+  report(
+    `${site} margin page: the dialog's chunks preloaded while idle (${load.idle.files} files)`,
+    load.idle.at === null ? "none" : `${load.idle.kb.toFixed(0)} KB, asked for ${at(load.idle.at)} the first screen`,
+    "— (reported)",
+    load.idle.at !== null,
   );
 
   // Back from the overview by a link: the cached accounts at once.
@@ -544,30 +676,26 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
   const route = await routeTo(page, "/assets/margin", account);
   report(`${site} assets overview to the margin page: accounts on screen`, ms(route), "≤ 200 ms", route <= 200);
 
-  // The terminal: the order form on the cross account.
+  // The terminal, reached by a link (the accounts cached): the order form
+  // on the cross account; the borrow dialog opened once its chunks are in
+  // (the margin page preloaded them in this document; review DV ⑤), as a
+  // user would a moment later.
   await routeTo(page, "/trade/BTC-USDT", "[data-book-row]");
   await sleep(3000);
-  let bar = '[data-testid="margin-bar"]';
-  if (sheet) {
-    const opened = await clickTo(page, "买入 BTC", "", '[role=dialog] [data-testid="margin-bar"]');
-    if (opened < 0 || opened === Infinity) {
-      report(`${site} the order sheet`, opened < 0 ? "no 买入 BTC button" : "no margin bar", "found", false);
-      return;
-    }
-    bar = `[role=dialog] ${bar}`;
-    await sleep(800); // the sheet slides in
-  }
-  const level = `${bar} [data-testid="margin-level"]`;
-  const cross = await clickTo(page, "全仓", bar, level);
+  const bar = await orderBar(page, site, sheet);
+  if (!bar) return;
+  const cross = await clickTo(page, "全仓", bar, `${bar} [data-testid="margin-level"]`);
   report(`${site} order form switched to the cross account: its gauge on screen`, cross < 0 ? "no 全仓 button" : ms(cross), "≤ 200 ms", cross >= 0 && cross <= 200);
-  // The dialog's chunk loads while the terminal is idle on a margin
-  // account: opened as a user would, a moment after choosing the account.
-  await sleep(2500);
-  const borrow = await clickTo(page, "借币", bar, 'form[data-testid="margin-borrow-form"]');
-  report(`${site} borrow dialog first opened, 2.5 s after the cross account was chosen: its form on screen`, borrow < 0 ? "no 借币 button" : ms(borrow), "— (reported)", borrow >= 0 && borrow !== Infinity);
-  await page.keyboard.press("Escape");
-  await page.waitForFunction(() => !document.querySelector('form[data-testid="margin-borrow-form"]'), { timeout: 10000 });
-  await sleep(1000);
+  const warm = await preloaded(page, 0);
+  await sleep(500);
+  const borrow = await clickTo(page, "借币", bar, BORROW_FORM);
+  report(
+    `${site} borrow dialog opened, its chunks in${warm ? "" : " (not within 15 s)"}: its form on screen`,
+    borrow < 0 ? "no 借币 button" : ms(borrow),
+    "— (reported)",
+    warm !== null && borrow >= 0 && borrow !== Infinity,
+  );
+  await closeBorrow(page);
 
   // A minute of streaming in margin mode.
   const from = await page.evaluate(() => performance.now());
@@ -579,6 +707,33 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
     `≤ ${budgets.longTasks}`,
     tasks.length <= budgets.longTasks,
   );
+
+  // The terminal loaded afresh, the cross account remembered: the dialog's
+  // chunks are not in this document, and the order form preloads them
+  // while idle (core's useIdleImport: within IDLE_WITHIN after the load
+  // event; on the phone once its order sheet is open); then the dialog
+  // opened.
+  await page.goto(`${base}/trade/BTC-USDT`, { waitUntil: "networkidle2", timeout: 60000 });
+  await page.waitForSelector("[data-book-row]", { timeout: 30000 });
+  const since = await page.evaluate((s) => (s ? performance.now() : performance.getEntriesByType("navigation")[0].loadEventEnd), Boolean(sheet));
+  const again = await orderBar(page, site, sheet);
+  if (!again) return;
+  const cold = await preloaded(page, since);
+  report(
+    `${site} terminal loaded afresh on the cross account: the dialog's chunks preloaded while idle${cold ? ` (${cold.files} fetched)` : ""}`,
+    cold ? `asked for ${at(cold.asked)}, in ${at(cold.in)} ${sheet ? "the order sheet was opened" : "the load event"}` : "not within 15 s",
+    "— (reported)",
+    cold !== null,
+  );
+  await sleep(500);
+  const opened = await clickTo(page, "借币", again, BORROW_FORM);
+  report(
+    `${site} terminal loaded afresh: borrow dialog opened, its chunks preloaded: its form on screen`,
+    opened < 0 ? "no 借币 button" : ms(opened),
+    "— (reported)",
+    cold !== null && opened >= 0 && opened !== Infinity,
+  );
+  await closeBorrow(page);
 }
 
 const PC_DEVICE = { viewport: { width: 1440, height: 900 } };
