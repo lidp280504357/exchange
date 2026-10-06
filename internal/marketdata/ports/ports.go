@@ -260,6 +260,9 @@ type FundingPeriod struct {
 	MarkPrice    decimal.Decimal
 	IndexPrice   decimal.Decimal
 	SettledAt    time.Time
+	// Source is where the settled rate came from: PLATFORM (the samples)
+	// or BINANCE (coin-M design §3.1).
+	Source string
 }
 
 // FundingRepo stores the funding periods.

@@ -109,9 +109,13 @@ func TestMarksFollowTheReferenceMarket(t *testing.T) {
 	r.stream("60120", "60060", "0.00023", period)
 
 	// The flag off: self-computed, the gap to the market watched.
+	r.pub.take(t)
 	r.tick(false)
+	if m := lastMark(t, published(t, r)); m == nil || m.GetSource() != MarkSourcePlatform || m.GetMarkPrice() != "60000" {
+		t.Fatalf("published %v", m)
+	}
 	p, _ := r.marks.Latest(perp.Symbol)
-	if p.Source != SourceComputed || !p.Mark.Equal(d("60000")) || !p.Computed.Equal(d("60000")) || p.SourceDegraded {
+	if p.Source != MarkSourcePlatform || !p.Mark.Equal(d("60000")) || !p.Computed.Equal(d("60000")) || p.SourceDegraded {
 		t.Fatalf("the flag off: %+v", p)
 	}
 	if got := gauge(t, r.marks.gap, perp.Symbol); got > -0.0019 || got < -0.0021 {
@@ -126,13 +130,26 @@ func TestMarksFollowTheReferenceMarket(t *testing.T) {
 	r.pub.take(t)
 	r.tick(false)
 	p, _ = r.marks.Latest(perp.Symbol)
-	if p.Source != SourceReference || !p.Mark.Equal(d("60120")) || !p.Index.Equal(d("60060")) || !p.FundingRate.Equal(d("0.00023")) ||
+	if p.Source != MarkSourceBinance || !p.Mark.Equal(d("60120")) || !p.Index.Equal(d("60060")) || !p.FundingRate.Equal(d("0.00023")) ||
 		!p.Computed.Equal(d("60000")) || !p.ComputedIndex.Equal(d("60000")) {
 		t.Fatalf("following: %+v", p)
 	}
-	m := lastMark(t, published(t, r))
-	if m == nil || m.GetMarkPrice() != "60120" || m.GetIndexPrice() != "60060" || m.GetFundingRate() != "0.00023" {
+	msgs := published(t, r)
+	// The basis is Binance's mark over its index: 60 / 60060.
+	m := lastMark(t, msgs)
+	if m == nil || m.GetMarkPrice() != "60120" || m.GetIndexPrice() != "60060" || m.GetFundingRate() != "0.00023" ||
+		m.GetSource() != MarkSourceBinance || m.GetBasis() != "0.000999000999" {
 		t.Fatalf("published %v", m)
+	}
+	var estimate *marketv1.FundingRateUpdated
+	for _, msg := range msgs {
+		if f, ok := msg.(*marketv1.FundingRateUpdated); ok {
+			estimate = f
+		}
+	}
+	if estimate == nil || estimate.GetSource() != MarkSourceBinance || estimate.GetFundingRate() != "0.00023" ||
+		estimate.GetPremium() != "" || estimate.GetSamples() != 0 {
+		t.Fatalf("the estimate when its source changed: %v", estimate)
 	}
 	if gauge(t, r.marks.source, perp.Symbol) != 1 {
 		t.Fatal("the source gauge")
@@ -143,12 +160,12 @@ func TestMarksFollowTheReferenceMarket(t *testing.T) {
 	for range 10 {
 		r.tick(true)
 	}
-	if p, _ := r.marks.Latest(perp.Symbol); p.Source != SourceReference || p.SourceDegraded {
+	if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourceBinance || p.SourceDegraded {
 		t.Fatalf("a 10-second-old reference mark still followed: %+v", p)
 	}
 	r.tick(true)
 	p, _ = r.marks.Latest(perp.Symbol)
-	if p.Source != SourceComputed || !p.Mark.Equal(d("60000")) || !p.SourceDegraded || p.Degraded {
+	if p.Source != MarkSourcePlatform || !p.Mark.Equal(d("60000")) || !p.SourceDegraded || p.Degraded {
 		t.Fatalf("the market stale: %+v", p)
 	}
 	if gauge(t, r.marks.sourceDegraded, perp.Symbol) != 1 || gauge(t, r.marks.source, perp.Symbol) != 0 {
@@ -179,7 +196,7 @@ func TestMarksFollowTheReferenceMarket(t *testing.T) {
 	// the market, recovered.
 	r.tick(false)
 	p, _ = r.marks.Latest(perp.Symbol)
-	if p.Source != SourceReference || p.SourceDegraded || p.Degraded || !p.Computed.IsZero() {
+	if p.Source != MarkSourceBinance || p.SourceDegraded || p.Degraded || !p.Computed.IsZero() {
 		t.Fatalf("the market back: %+v", p)
 	}
 	recovered := false
@@ -210,7 +227,7 @@ func TestMarksFollowTheReferenceMarket(t *testing.T) {
 	for range 20 {
 		r.tick(true)
 	}
-	if p, _ := r.marks.Latest(perp.Symbol); p.Source != SourceComputed || p.SourceDegraded || !p.Mark.Equal(d("60010")) {
+	if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourcePlatform || p.SourceDegraded || !p.Mark.Equal(d("60010")) {
 		t.Fatalf("the flag off again: %+v", p)
 	}
 }
@@ -223,7 +240,7 @@ func TestMarksGiveTheReferenceStreamTimeToConnect(t *testing.T) {
 	for range 10 {
 		r.tick(true)
 	}
-	if p, _ := r.marks.Latest(perp.Symbol); p.Source != SourceComputed || p.SourceDegraded {
+	if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourcePlatform || p.SourceDegraded {
 		t.Fatalf("the first 10 seconds: %+v", p)
 	}
 	r.tick(true)
@@ -272,11 +289,12 @@ func TestFundingSettlesAtTheReferenceMarketsRate(t *testing.T) {
 		r.ref.mu.Unlock()
 		r.tick(false)
 		f := settled(t, r)
-		if f == nil || f.GetFundingRate() != "0.00021" || f.GetMarkPrice() != "60095.5" || !f.GetFundingTime().AsTime().Equal(end) {
+		if f == nil || f.GetFundingRate() != "0.00021" || f.GetMarkPrice() != "60095.5" || !f.GetFundingTime().AsTime().Equal(end) ||
+			f.GetSource() != MarkSourceBinance || f.GetPremium() != "" || f.GetSamples() != 0 {
 			t.Fatalf("settled %v", f)
 		}
 		list, _ := r.marks.Settled(context.Background(), perp.Symbol, time.Time{}, end.Add(time.Hour), 10)
-		if len(list) != 1 || !list[0].Rate.Equal(d("0.00021")) || !list[0].MarkPrice.Equal(d("60095.5")) {
+		if len(list) != 1 || !list[0].Rate.Equal(d("0.00021")) || !list[0].MarkPrice.Equal(d("60095.5")) || list[0].Source != MarkSourceBinance {
 			t.Fatalf("history %+v", list)
 		}
 		// The next period's estimate is the market's.
@@ -302,7 +320,7 @@ func TestFundingSettlesAtTheReferenceMarketsRate(t *testing.T) {
 		}
 		r.tick(false)
 		f := settled(t, r)
-		if f == nil || f.GetFundingRate() != "0.00019" || f.GetMarkPrice() != "60110" {
+		if f == nil || f.GetFundingRate() != "0.00019" || f.GetMarkPrice() != "60110" || f.GetSource() != MarkSourceBinance {
 			t.Fatalf("settled %v", f)
 		}
 	})
@@ -315,12 +333,13 @@ func TestFundingSettlesAtTheReferenceMarketsRate(t *testing.T) {
 		for range 60 {
 			r.tick(false)
 		}
-		if p, _ := r.marks.Latest(perp.Symbol); !p.FundingRate.Equal(d("0.0001")) || p.Source != SourceReference {
+		if p, _ := r.marks.Latest(perp.Symbol); !p.FundingRate.Equal(d("0.0001")) || p.Source != MarkSourceBinance {
 			t.Fatalf("the market's rate followed for a period it ends elsewhere: %+v", p)
 		}
 		r.tick(false)
 		f := settled(t, r)
-		if f == nil || f.GetFundingRate() != "0.0001" || r.ref.asked[end] != 0 {
+		if f == nil || f.GetFundingRate() != "0.0001" || r.ref.asked[end] != 0 || f.GetSource() != MarkSourcePlatform ||
+			f.GetPremium() != "0.0005" || f.GetSamples() != 59 {
 			t.Fatalf("settled %v; asked %v", f, r.ref.asked)
 		}
 	})

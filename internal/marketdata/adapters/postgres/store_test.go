@@ -133,19 +133,31 @@ func TestFundingPeriods(t *testing.T) {
 	if err != nil || len(done) != 1 {
 		t.Fatalf("settled %+v, %v", done, err)
 	}
-	if p := done[0]; !p.Settled || p.Samples != 60 || !p.Rate.Equal(d("0.0001")) || !p.MarkPrice.Equal(d("60010.5")) || p.SettledAt.IsZero() {
+	if p := done[0]; !p.Settled || p.Samples != 60 || !p.Rate.Equal(d("0.0001")) || !p.MarkPrice.Equal(d("60010.5")) || p.SettledAt.IsZero() ||
+		p.Source != "PLATFORM" {
 		t.Fatalf("settled period %+v", p)
 	}
 	if none, err := r.Settled(ctx, "BTC-USDT-PERP", t8.Add(time.Second), t16.Add(time.Hour), 10); err != nil || len(none) != 0 {
 		t.Fatalf("from after the period: %+v, %v", none, err)
 	}
-	// A period that never saved samples settles in one step.
+	// A period that never saved samples settles in one step, here at
+	// Binance's rate (coin-M design §3.1).
 	fresh := ports.FundingPeriod{
-		Symbol: "ETH-USDT-PERP", FundingTime: t8, Rate: d("0.0001"), Premium: d("0"), InterestRate: d("0.0001"),
-		MarkPrice: d("2500"), IndexPrice: d("2500"),
+		Symbol: "ETH-USDT-PERP", FundingTime: t8, Rate: d("0.00012"), Premium: d("0"), InterestRate: d("0.0001"),
+		MarkPrice: d("2500"), IndexPrice: d("2500"), Source: "BINANCE",
 	}
 	if ok, err := r.Settle(ctx, fresh); err != nil || !ok {
 		t.Fatalf("settle without samples: %v, %v", ok, err)
+	}
+	if got, err := r.Settled(ctx, "ETH-USDT-PERP", time.Time{}, t16, 1); err != nil || len(got) != 1 || got[0].Source != "BINANCE" ||
+		!got[0].Rate.Equal(d("0.00012")) {
+		t.Fatalf("Binance's rate: %+v, %v", got, err)
+	}
+	if ok, err := r.Settle(ctx, ports.FundingPeriod{
+		Symbol: "SOL-USDT-PERP", FundingTime: t8, Rate: d("0"), Premium: d("0"), InterestRate: d("0"),
+		MarkPrice: d("1"), IndexPrice: d("1"), Source: "ELSEWHERE",
+	}); err == nil || ok {
+		t.Fatal("a source other than PLATFORM and BINANCE was stored")
 	}
 	if open, err := r.Unsettled(ctx); err != nil || len(open) != 1 || !open[0].FundingTime.Equal(t16) {
 		t.Fatalf("still unsettled %+v, %v", open, err)

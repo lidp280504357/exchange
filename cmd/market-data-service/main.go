@@ -201,7 +201,7 @@ func setup(ctx context.Context, a *app.App) error {
 	a.Add("reference marks", app.Loop(refMarks.Run))
 	a.Add("reference funding", app.Loop(refMarks.RunFunding))
 	marks.FollowReference(refMarks, func(symbol string) bool {
-		return refMarks.Follows(symbol) && flagClient.Enabled(application.FlagReferenceMark, flags.Subject{Symbol: symbol})
+		return refMarks.Follows(symbol) && flagClient.Enabled(flags.KeyReferenceMark, flags.Subject{Symbol: symbol})
 	}, time.Duration(cfg.MarkSourceStaleSeconds)*time.Second)
 	a.Add("contract prices", app.Loop(marks.Run))
 	// The contracts' data panel (design 2026-10-06 §3.3).

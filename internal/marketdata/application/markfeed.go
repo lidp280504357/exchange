@@ -34,11 +34,6 @@ const (
 	fundingForget = 24 * time.Hour
 )
 
-// FlagReferenceMark has a contract follow the reference market's mark
-// price, per symbol (coin-M design §3.1): flags.KeyReferenceMark once the
-// G0 contracts add it to the known flags.
-const FlagReferenceMark = "market.reference_mark"
-
 // coinMarket reports whether a reference symbol is a COIN-M perpetual
 // (Binance's BTCUSD_PERP); USDⓈ-M perpetuals have no underscore.
 func coinMarket(remote string) bool { return strings.HasSuffix(remote, "_PERP") }

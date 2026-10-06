@@ -509,13 +509,19 @@ type markJSON struct {
 	NextFundingTime string  `json:"next_funding_time"`
 	Degraded        bool    `json:"degraded"`
 	UpdatedAt       *string `json:"updated_at"`
+	// PLATFORM or BINANCE (design 2026-10-06 §3.1).
+	Source string `json:"source"`
 }
 
 func toMarkJSON(p application.MarkPrice) markJSON {
+	source := p.Source
+	if source == "" {
+		source = application.MarkSourcePlatform
+	}
 	return markJSON{
 		Symbol: p.Symbol, IndexSymbol: p.IndexSymbol, MarkPrice: price(p.Mark), IndexPrice: price(p.Index),
 		FundingRate: p.FundingRate.String(), InterestRate: p.InterestRate.String(),
-		NextFundingTime: p.NextFunding.UTC().Format(time.RFC3339), Degraded: p.Degraded, UpdatedAt: stamp(p.At),
+		NextFundingTime: p.NextFunding.UTC().Format(time.RFC3339), Degraded: p.Degraded, UpdatedAt: stamp(p.At), Source: source,
 	}
 }
 
@@ -552,7 +558,7 @@ func (h *Handler) markInternal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"mark": toMarkJSON(p), "basis": p.Basis.String(), "premium": p.Premium.String(), "samples": p.Samples,
-		"components": comps, "source": p.Source, "source_degraded": p.SourceDegraded,
+		"components": comps, "funding_source": p.FundingSource, "source_degraded": p.SourceDegraded,
 		"computed": map[string]*string{"mark_price": price(p.Computed), "index_price": price(p.ComputedIndex)},
 	})
 }
@@ -566,6 +572,7 @@ type fundingJSON struct {
 	InterestRate string `json:"interest_rate"`
 	Samples      int64  `json:"samples"`
 	SettledAt    string `json:"settled_at"`
+	Source       string `json:"source"`
 }
 
 func (h *Handler) fundingRates(w http.ResponseWriter, r *http.Request) {
@@ -598,11 +605,18 @@ func (h *Handler) fundingRates(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]fundingJSON, 0, len(list))
 	for _, p := range list {
-		out = append(out, fundingJSON{
+		f := fundingJSON{
 			FundingTime: p.FundingTime.UTC().Format(time.RFC3339), FundingRate: p.Rate.String(), MarkPrice: p.MarkPrice.String(),
 			IndexPrice: p.IndexPrice.String(), Premium: p.Premium.String(), InterestRate: p.InterestRate.String(),
-			Samples: p.Samples, SettledAt: p.SettledAt.UTC().Format(time.RFC3339Nano),
-		})
+			Samples: p.Samples, SettledAt: p.SettledAt.UTC().Format(time.RFC3339Nano), Source: p.Source,
+		}
+		if f.Source == application.MarkSourceBinance {
+			f.Premium, f.Samples = "0", 0 // Binance's rate: not from these samples
+		}
+		if f.Source == "" {
+			f.Source = application.MarkSourcePlatform
+		}
+		out = append(out, f)
 	}
 	live(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": s, "funding_rates": out})

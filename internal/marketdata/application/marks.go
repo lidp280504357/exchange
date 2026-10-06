@@ -43,14 +43,16 @@ const (
 // are usable than required.
 const ReasonIndexSources = "INDEX_SOURCES"
 
-// Where a contract's prices came from (coin-M design §3.1): the reference
-// market's mark price, or the self-computed one.
+// Where a contract's prices and funding rates came from (coin-M design
+// §3.1, the source of MarkPriceUpdated and FundingRateUpdated): computed
+// here, or the Binance contract's the contract follows.
 const (
-	SourceReference = "REFERENCE"
-	SourceComputed  = "COMPUTED"
-	// SourceReferenceEstimate is a period settled at the last rate the
-	// reference market estimated for it, its settled rate not found.
-	SourceReferenceEstimate = "REFERENCE_ESTIMATE"
+	MarkSourcePlatform = "PLATFORM"
+	MarkSourceBinance  = "BINANCE"
+	// settledEstimate labels, in metrics and logs, a period settled at the
+	// last rate Binance estimated for it, its settled rate not found in
+	// time; its source is BINANCE.
+	settledEstimate = "BINANCE_ESTIMATE"
 )
 
 const (
@@ -61,6 +63,9 @@ const (
 	// settleWait is how long an ended period of a contract that follows
 	// the reference market waits for the rate the market settled.
 	settleWait = 2 * time.Minute
+	// basisDecimals is the precision of the basis while it is Binance's
+	// (that of the self-computed one, domain's ratio precision).
+	basisDecimals = 12
 )
 
 // ReferenceMarks is the reference market's mark prices and settled rates
@@ -100,10 +105,12 @@ type MarkPrice struct {
 	// Degraded is set once SystemDegraded went out, until the mark price
 	// is back.
 	Degraded bool
-	// Source is where Mark and Index came from (SourceReference or
-	// SourceComputed); Computed and ComputedIndex are the self-computed
-	// prices of the same tick, zero when they could not be computed.
+	// Source is where Mark, Index and Basis came from (MarkSourcePlatform
+	// or MarkSourceBinance), FundingSource where FundingRate did;
+	// Computed and ComputedIndex are the self-computed prices of the same
+	// tick, zero when they could not be computed.
 	Source        string
+	FundingSource string
 	Computed      decimal.Decimal
 	ComputedIndex decimal.Decimal
 	// SourceDegraded is set while market.reference_mark is on for the
@@ -207,6 +214,7 @@ type contractMarks struct {
 	refApart map[time.Time]bool
 
 	pushedRate   decimal.Decimal
+	pushedSource string
 	pushedPeriod time.Time
 	pushedAt     time.Time
 }
@@ -452,12 +460,15 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 	fresh := follow || computed
 	switch {
 	case follow:
-		st.latest.Mark, st.latest.Index, st.latest.Source = ref.Mark, ref.Index, SourceReference
+		// The basis is Binance's mark over its index.
+		st.latest.Mark, st.latest.Index, st.latest.Source = ref.Mark, ref.Index, MarkSourceBinance
+		st.latest.Basis = ref.Mark.Sub(ref.Index).DivRound(ref.Index, basisDecimals)
 	case computed:
-		st.latest.Mark, st.latest.Index, st.latest.Source = st.latest.Computed, index, SourceComputed
+		st.latest.Mark, st.latest.Index, st.latest.Source = st.latest.Computed, index, MarkSourcePlatform
+		st.latest.Basis = st.basis.EMA
 	}
 	if fresh {
-		st.latest.Basis, st.latest.Components, st.latest.At = st.basis.EMA, comps, now
+		st.latest.Components, st.latest.At = comps, now
 		m.recovered(ctx, st)
 	} else {
 		m.checkDegraded(ctx, st, now, fmt.Sprintf("%d of the %d index sources required are usable", included, need))
@@ -470,22 +481,30 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 
 	st.latest.Premium = domain.AveragePremium(st.sum, st.samples)
 	st.latest.FundingRate = domain.FundingRate(st.latest.Premium, spec.InterestRate, spec.FundingCap)
+	st.latest.FundingSource = MarkSourcePlatform
 	if r, ok := st.refRates[st.period]; ok && follow {
-		st.latest.FundingRate = r
+		st.latest.FundingRate, st.latest.FundingSource = r, MarkSourceBinance
 	}
 	st.latest.Samples, st.latest.NextFunding = st.samples, st.period
 	if fresh {
 		out = append(out, Update{spec.Symbol, &marketv1.MarkPriceUpdated{
-			Symbol: spec.Symbol, MarkPrice: st.latest.Mark.String(), IndexPrice: st.latest.Index.String(), Basis: st.basis.EMA.String(),
+			Symbol: spec.Symbol, MarkPrice: st.latest.Mark.String(), IndexPrice: st.latest.Index.String(), Basis: st.latest.Basis.String(),
 			FundingRate: st.latest.FundingRate.String(), NextFundingTime: timestamppb.New(st.period), ComputedAt: timestamppb.New(now),
+			Source: st.latest.Source,
 		}})
 	}
-	if !st.latest.FundingRate.Equal(st.pushedRate) || !st.period.Equal(st.pushedPeriod) || now.Sub(st.pushedAt) >= fundingPush {
-		out = append(out, Update{spec.Symbol, &marketv1.FundingRateUpdated{
+	if !st.latest.FundingRate.Equal(st.pushedRate) || st.latest.FundingSource != st.pushedSource || !st.period.Equal(st.pushedPeriod) ||
+		now.Sub(st.pushedAt) >= fundingPush {
+		msg := &marketv1.FundingRateUpdated{
 			Symbol: spec.Symbol, FundingRate: st.latest.FundingRate.String(), Premium: st.latest.Premium.String(),
 			InterestRate: spec.InterestRate.String(), Samples: st.samples, FundingTime: timestamppb.New(st.period),
-		}})
-		st.pushedRate, st.pushedPeriod, st.pushedAt = st.latest.FundingRate, st.period, now
+			Source: st.latest.FundingSource,
+		}
+		if msg.Source == MarkSourceBinance {
+			msg.Premium, msg.Samples = "", 0 // not what the rate came from
+		}
+		out = append(out, Update{spec.Symbol, msg})
+		st.pushedRate, st.pushedSource, st.pushedPeriod, st.pushedAt = st.latest.FundingRate, st.latest.FundingSource, st.period, now
 	}
 	if st.unsaved && now.Sub(st.savedAt) >= fundingSave {
 		if err := m.savePeriod(ctx, st, now); err != nil {
@@ -622,14 +641,14 @@ func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([
 		p.Premium = domain.AveragePremium(p.PremiumSum, p.Samples)
 		p.InterestRate = st.spec.InterestRate
 		p.Rate = domain.FundingRate(p.Premium, p.InterestRate, st.spec.FundingCap)
-		p.MarkPrice, p.IndexPrice = st.latest.Mark, st.latest.Index
-		source := SourceComputed
+		p.MarkPrice, p.IndexPrice, p.Source = st.latest.Mark, st.latest.Index, MarkSourcePlatform
+		how := MarkSourcePlatform
 		if m.followsFunding(st, p.FundingTime) {
 			s, found := m.refMarks.Settled(p.Symbol, p.FundingTime)
 			estimate, estimated := st.refRates[p.FundingTime]
 			switch {
 			case found:
-				p.Rate, source = s.Rate, SourceReference
+				p.Rate, p.Source, how = s.Rate, MarkSourceBinance, MarkSourceBinance
 				if s.Mark.IsPositive() {
 					p.MarkPrice = s.Mark
 				}
@@ -637,7 +656,7 @@ func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([
 				done = false
 				continue
 			case estimated:
-				p.Rate, source = estimate, SourceReferenceEstimate
+				p.Rate, p.Source, how = estimate, MarkSourceBinance, settledEstimate
 			}
 		}
 		ok, err := m.store.Read().Funding().Settle(ctx, p)
@@ -647,14 +666,18 @@ func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([
 		if !ok {
 			continue
 		}
-		m.settled.WithLabelValues(source).Inc()
+		m.settled.WithLabelValues(how).Inc()
 		m.log.InfoContext(ctx, "funding period settled", "symbol", p.Symbol, "funding_time", p.FundingTime,
-			"rate", p.Rate.String(), "source", source, "samples", p.Samples, "mark_price", p.MarkPrice.String())
-		out = append(out, Update{p.Symbol, &marketv1.FundingRateUpdated{
+			"rate", p.Rate.String(), "source", how, "samples", p.Samples, "mark_price", p.MarkPrice.String())
+		final := &marketv1.FundingRateUpdated{
 			Symbol: p.Symbol, FundingRate: p.Rate.String(), Premium: p.Premium.String(), InterestRate: p.InterestRate.String(),
 			Samples: p.Samples, FundingTime: timestamppb.New(p.FundingTime), Final: true,
-			MarkPrice: p.MarkPrice.String(), IndexPrice: p.IndexPrice.String(),
-		}})
+			MarkPrice: p.MarkPrice.String(), IndexPrice: p.IndexPrice.String(), Source: p.Source,
+		}
+		if p.Source == MarkSourceBinance {
+			final.Premium, final.Samples = "", 0
+		}
+		out = append(out, Update{p.Symbol, final})
 	}
 	return out, done, nil
 }

@@ -331,7 +331,7 @@ func (r funding) Save(ctx context.Context, p ports.FundingPeriod) error {
 
 const fundingColumns = `symbol, funding_time, premium_sum, samples, settled_at IS NOT NULL, coalesce(funding_rate, 0),
 	coalesce(premium, 0), coalesce(interest_rate, 0), coalesce(mark_price, 0), coalesce(index_price, 0),
-	coalesce(settled_at, 'epoch')`
+	coalesce(settled_at, 'epoch'), source`
 
 func (r funding) query(ctx context.Context, sql string, args ...any) ([]ports.FundingPeriod, error) {
 	rows, err := r.q.Query(ctx, sql, args...)
@@ -343,7 +343,7 @@ func (r funding) query(ctx context.Context, sql string, args ...any) ([]ports.Fu
 	for rows.Next() {
 		var p ports.FundingPeriod
 		if err := rows.Scan(&p.Symbol, &p.FundingTime, &p.PremiumSum, &p.Samples, &p.Settled, &p.Rate, &p.Premium,
-			&p.InterestRate, &p.MarkPrice, &p.IndexPrice, &p.SettledAt); err != nil {
+			&p.InterestRate, &p.MarkPrice, &p.IndexPrice, &p.SettledAt, &p.Source); err != nil {
 			return nil, fmt.Errorf("load funding periods: %w", err)
 		}
 		p.FundingTime, p.SettledAt = p.FundingTime.UTC(), p.SettledAt.UTC()
@@ -360,13 +360,17 @@ func (r funding) Unsettled(ctx context.Context) ([]ports.FundingPeriod, error) {
 }
 
 func (r funding) Settle(ctx context.Context, p ports.FundingPeriod) (bool, error) {
+	source := p.Source
+	if source == "" {
+		source = "PLATFORM"
+	}
 	tag, err := r.q.Exec(ctx, `INSERT INTO funding_periods (symbol, funding_time, premium_sum, samples, funding_rate, premium,
-			interest_rate, mark_price, index_price, settled_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+			interest_rate, mark_price, index_price, source, settled_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 		ON CONFLICT (symbol, funding_time) DO UPDATE SET premium_sum = $3, samples = $4, funding_rate = $5, premium = $6,
-			interest_rate = $7, mark_price = $8, index_price = $9, settled_at = now(), updated_at = now()
+			interest_rate = $7, mark_price = $8, index_price = $9, source = $10, settled_at = now(), updated_at = now()
 		WHERE funding_periods.settled_at IS NULL`,
-		p.Symbol, p.FundingTime, p.PremiumSum, p.Samples, p.Rate, p.Premium, p.InterestRate, p.MarkPrice, p.IndexPrice)
+		p.Symbol, p.FundingTime, p.PremiumSum, p.Samples, p.Rate, p.Premium, p.InterestRate, p.MarkPrice, p.IndexPrice, source)
 	if err != nil {
 		return false, fmt.Errorf("settle funding period: %w", err)
 	}
