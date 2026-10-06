@@ -88,14 +88,15 @@ func nextCall(t *testing.T, src *fakeMarkSource) markCall {
 }
 
 // The feed follows the mark price of every contract whose index pair has
-// a reference market, on the USDⓈ-M market (a COIN-M symbol on its own
-// connection), reconnects after a failure and forgets the marks when the
-// reference feed goes off.
+// a reference market, at the source's perpetual of the same code: USDⓈ-M
+// and COIN-M on connections of their own. It reconnects after a failure
+// and forgets the marks when the reference feed goes off.
 func TestMarkFeedFollowsTheContracts(t *testing.T) {
 	list := testListing()
 	list.pairs = append(list.pairs, ports.Pair{Symbol: "ETH-USDT", Base: "ETH", Quote: "USDT", Status: "TRADING", Reference: ref("ETH-USDT", "ETHUSDT")})
 	list.contracts = append(list.contracts,
-		ports.Contract{Symbol: "ETH-USDT-PERP", IndexSymbol: "ETH-USDT"}, ports.Contract{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT"})
+		ports.Contract{Symbol: "ETH-USDT-PERP", IndexSymbol: "ETH-USDT"}, ports.Contract{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT"},
+		ports.Contract{Symbol: "BTC-USD-PERP", IndexSymbol: "BTC-USDT"})
 	refs := NewReferenceMap(list, slog.New(slog.DiscardHandler))
 	src := &fakeMarkSource{calls: make(chan markCall)}
 	fl := &feedOn{}
@@ -112,10 +113,16 @@ func TestMarkFeedFollowsTheContracts(t *testing.T) {
 		<-done
 	}()
 
-	c := nextCall(t, src)
+	c, coin := nextCall(t, src), nextCall(t, src)
+	if c.coin {
+		c, coin = coin, c
+	}
 	if c.coin || len(c.refs) != 2 || c.refs[0].Symbol != "BTC-USDT-PERP" || c.refs[0].Remote != "BTCUSDT" ||
-		c.refs[1].Symbol != "ETH-USDT-PERP" {
-		t.Fatalf("followed %+v (coin %v)", c.refs, c.coin)
+		c.refs[1].Symbol != "ETH-USDT-PERP" || c.refs[1].Remote != "ETHUSDT" {
+		t.Fatalf("USDⓈ-M followed %+v (coin %v)", c.refs, c.coin)
+	}
+	if !coin.coin || len(coin.refs) != 1 || coin.refs[0].Symbol != "BTC-USD-PERP" || coin.refs[0].Remote != "BTCUSD_PERP" {
+		t.Fatalf("COIN-M followed %+v", coin.refs)
 	}
 	c.on(domain.ReferenceMark{Symbol: "BTC-USDT-PERP", Mark: d("60120"), Index: d("60060")})
 	c.on(domain.ReferenceMark{Symbol: "SOL-USDT-PERP", Mark: d("1")}) // not followed

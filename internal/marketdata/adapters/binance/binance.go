@@ -381,28 +381,10 @@ func (s *Source) Stream(ctx context.Context, refs []ports.Reference, on ports.St
 		names = append(names, lower+"@kline_1m", lower+"@ticker")
 		byRemote[r.Remote] = r
 	}
-	conn, resp, err := websocket.Dial(ctx, s.stream+"/stream?streams="+strings.Join(names, "/"), &websocket.DialOptions{HTTPClient: s.client})
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	if err != nil {
-		return fmt.Errorf("binance stream: %w", err)
-	}
-	defer func() { _ = conn.CloseNow() }()
-	conn.SetReadLimit(1 << 16)
-	for {
-		read, cancel := context.WithTimeout(ctx, s.idle)
-		_, data, err := conn.Read(read)
-		cancel()
-		if err != nil {
-			if ctx.Err() == nil && errors.Is(read.Err(), context.DeadlineExceeded) {
-				return fmt.Errorf("binance stream: nothing received for %s", s.idle)
-			}
-			return fmt.Errorf("binance stream: %w", err)
-		}
+	return s.listen(ctx, "binance stream", s.stream+allStreams+strings.Join(names, "/"), 1<<16, s.idle, func(data []byte) {
 		var ev streamEvent
 		if err := json.Unmarshal(data, &ev); err != nil {
-			continue
+			return
 		}
 		switch ev.Data.Event {
 		case "kline":
@@ -419,6 +401,44 @@ func (s *Source) Stream(ctx context.Context, refs []ports.Reference, on ports.St
 				}
 			}
 		}
+	})
+}
+
+// Combined stream paths. Binance's USDⓈ-M futures market serves its
+// streams by category (found 2026-10-06): the order books under /public,
+// trades, mark prices, klines and tickers under /market, and its old
+// /stream path the books only; COIN-M futures and spot serve them all
+// under /stream.
+const (
+	allStreams    = "/stream?streams="
+	publicStreams = "/public/stream?streams="
+	marketStreams = "/market/stream?streams="
+)
+
+// listen follows one combined stream connection at url, passing every
+// message to handle on its goroutine, until ctx ends, the connection
+// fails or stays silent for idle; the caller reconnects.
+func (s *Source) listen(ctx context.Context, what, url string, limit int64, idle time.Duration, handle func([]byte)) error {
+	conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPClient: s.client})
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	conn.SetReadLimit(limit)
+	for {
+		read, cancel := context.WithTimeout(ctx, idle)
+		_, data, err := conn.Read(read)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil && errors.Is(read.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("%s: nothing received for %s", what, idle)
+			}
+			return fmt.Errorf("%s: %w", what, err)
+		}
+		handle(data)
 	}
 }
 

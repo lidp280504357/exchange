@@ -53,10 +53,10 @@ type settings struct {
 	BinanceFuturesREST   string `koanf:"binance_futures_rest_url"`
 	BinanceFuturesStream string `koanf:"binance_futures_stream_url"`
 	// The coin-margined contracts' market data comes from Binance COIN-M
-	// futures at BINANCE_COIN_FUTURES_REST_URL and
-	// BINANCE_COIN_FUTURES_STREAM_URL.
-	BinanceCoinFuturesREST   string `koanf:"binance_coin_futures_rest_url"`
-	BinanceCoinFuturesStream string `koanf:"binance_coin_futures_stream_url"`
+	// futures at BINANCE_COINM_REST_URL and BINANCE_COINM_STREAM_URL (the
+	// data panel's too, futures_stats.go).
+	BinanceCoinMREST   string `koanf:"binance_coinm_rest_url"`
+	BinanceCoinMStream string `koanf:"binance_coinm_stream_url"`
 	// MarkSourceStaleSeconds is how old the reference market's mark price
 	// of a contract that follows it (market.reference_mark) may be before
 	// the self-computed one stands in (MARK_SOURCE_STALE_SECONDS, coin-M
@@ -109,7 +109,7 @@ func setup(ctx context.Context, a *app.App) error {
 		HTTPAddr: ":8090", Postgres: pg.DefaultConfig(), InstrumentAddr: "localhost:9184",
 		BinanceREST: "https://data-api.binance.vision", BinanceStream: "wss://data-stream.binance.vision",
 		BinanceFuturesREST: "https://fapi.binance.com", BinanceFuturesStream: "wss://fstream.binance.com",
-		BinanceCoinFuturesREST: "https://dapi.binance.com", BinanceCoinFuturesStream: "wss://dstream.binance.com",
+		BinanceCoinMREST: "https://dapi.binance.com", BinanceCoinMStream: "wss://dstream.binance.com",
 		IndexMinSources: 2, MarkSourceStaleSeconds: 10,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -148,7 +148,7 @@ func setup(ctx context.Context, a *app.App) error {
 	// market.reference_feed is on.
 	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second}).
 		WithFutures(cfg.BinanceFuturesREST, cfg.BinanceFuturesStream).
-		WithCoinFutures(cfg.BinanceCoinFuturesREST, cfg.BinanceCoinFuturesStream)
+		WithCoinFutures(cfg.BinanceCoinMREST, cfg.BinanceCoinMStream)
 	refs := application.NewReferenceMap(listed, a.Logger())
 	// A minute without a trade of a symbol no reference market follows is
 	// stored flat when its next trade is applied (coordinator 2026-10-04),

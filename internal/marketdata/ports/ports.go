@@ -116,6 +116,9 @@ type BookHandlers struct {
 	Depth func(symbol string, d domain.DepthDiff)
 	// Trade gets every (aggregate) trade.
 	Trade func(domain.Trade)
+	// Failed, when set, gets the failures of a trade connection the
+	// source keeps up of its own (it reconnects; the books go on).
+	Failed func(error)
 }
 
 // BookSource is the reference market's order books and trades (ADR-0010,

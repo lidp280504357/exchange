@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/marketdata/domain"
 	"github.com/skill/exchange/internal/marketdata/ports"
@@ -157,13 +158,18 @@ func (f *MarkFeed) Settled(symbol string, at time.Time) (domain.SettledFunding, 
 	return s, ok
 }
 
-// follow reads the followed contracts.
+// follow reads the followed contracts: those whose index pair has a
+// reference market, each at the source's perpetual of the same code
+// (BTC-USDT-PERP at USDⓈ-M BTCUSDT, BTC-USD-PERP at COIN-M BTCUSD_PERP,
+// 1000PEPE-USDT-PERP at 1000PEPEUSDT: no multiplier).
 func (f *MarkFeed) follow(ctx context.Context) map[string]ports.Reference {
 	out := map[string]ports.Reference{}
-	for symbol, ref := range f.refs.Get(ctx) {
-		if isContract(symbol) {
-			ref.Symbol = symbol // a contract maps to its index pair's reference
-			out[symbol] = ref
+	for symbol := range f.refs.Get(ctx) {
+		if !isContract(symbol) {
+			continue
+		}
+		if _, remote, ok := remoteContract(symbol); ok {
+			out[symbol] = ports.Reference{Symbol: symbol, Remote: remote, Multiplier: decimal.NewFromInt(1)}
 		}
 	}
 	f.mu.Lock()

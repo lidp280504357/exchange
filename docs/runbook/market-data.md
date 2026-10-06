@@ -110,8 +110,9 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 - **资金费**：周期结束时间与币安的 `T` 相同时，预估费率跟随币安；周期结束后向币安 REST `fundingRate` 取该期已结算的费率与结算标记价（U 本位一次请求取全部合约，满一页 1000 条时改为逐个；币本位逐个；每 10 秒一次），最多等 2 分钟，期间该周期不结算；仍没有就用流里该期最后的预估费率（来源 `REFERENCE_ESTIMATE`），再没有就用自算费率（`COMPUTED`）。币安结束周期的时间与我们不同（例如币安把该合约改成 4 小时）的周期不跟随费率，日志 `the reference market ends the funding period at another time`，此时应改合约的 `funding_interval_hours`。结算日志 `funding period settled` 带 `source`（`REFERENCE`、`REFERENCE_ESTIMATE`、`COMPUTED`）。
 - **打开时机**：打开开关的那一刻，标记价从自算跳到币安的（通常相差万分之几，`market_mark_reference_gap{symbol}` 实时显示自算相对币安的偏差），临界仓位可能因此被强平。按合约逐个在差距小、行情平稳时打开。
 - **审计**：`/internal/market/{symbol}/mark` 另有 `source`（`REFERENCE` 或 `COMPUTED`）、`source_degraded` 与 `computed`（同一轮自算的标记价与指数价）。
-- 指标：`market_mark_source{symbol}`（1 跟随币安，0 自算）、`market_mark_source_degraded{symbol}`、`market_mark_reference_age_seconds{symbol}`（-1 表示还没有）、`market_mark_reference_gap{symbol}`、`market_mark_stream_failures_total`、`market_mark_funding_fetches_total{result}`（`found`、`pending`、`failed`）。配置：`BINANCE_COIN_FUTURES_REST_URL`、`BINANCE_COIN_FUTURES_STREAM_URL`（默认 `https://dapi.binance.com`、`wss://dstream.binance.com`）、`MARK_SOURCE_STALE_SECONDS`。
-- 开关键 `market.reference_mark` 由 G0 契约加入已知开关（`exchangectl flags set` 只认已知键）；在此之前代码已部署但不会跟随。
+- 指标：`market_mark_source{symbol}`（1 跟随币安，0 自算）、`market_mark_source_degraded{symbol}`、`market_mark_reference_age_seconds{symbol}`（-1 表示还没有）、`market_mark_reference_gap{symbol}`、`market_mark_stream_failures_total`、`market_mark_funding_fetches_total{result}`（`found`、`pending`、`failed`）。配置：U 本位 `BINANCE_FUTURES_REST_URL`、`BINANCE_FUTURES_STREAM_URL`，币本位 `BINANCE_COINM_REST_URL`、`BINANCE_COINM_STREAM_URL`（与合约数据共用，见下文）、`MARK_SOURCE_STALE_SECONDS`。
+- 开关键 `market.reference_mark` 由 G0 契约加入已知开关；在此之前 `exchangectl flags set market.reference_mark --on --allow-symbols <合约> --force --reason …` 可先打开。
+- 演练：`scripts/fault/mark-source-outage.sh`（只断到 `fstream` 的流量：约 10 秒后自算顶上、合约不降级，恢复后切回，见 [testing.md](testing.md)）。
 
 ## 参考行情：跟随哪些交易对（ADR-0010）
 
@@ -144,6 +145,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 开关按交易对生效（还需要 `market.reference_feed` 开着；测试服对全部跟随的交易对打开，见 `scripts/ops/house.sh flags`）。打开时该交易对的公共盘口（REST 深度、`depth:` 频道）与公共成交（REST trades、`trades:` 频道）都是币安的；HOUSE 按同一份盘口提供流动性（[market-maker.md](market-maker.md)），所以用户看到的就是能成交的价格。
 
+- 币安 U 本位合约的推送按类别分路径（2026-10-06 实测）：盘口在 `/public/stream`（旧的 `/stream` 也只剩盘口），成交、标记价、K 线与 ticker 只在 `/market/stream`；币本位 `dstream` 与现货仍全在 `/stream`。所以合约的盘口与成交是两条连接：盘口连接断了整组重来（盘口重新取快照）；成交连接由适配器自己保持，断了退避重连（1 秒起，最长 30 秒，5 分钟没有成交也重连），盘口不受影响，日志 `reference trade stream failed`，同样计入 `market_reference_book_stream_failures_total`。
 - 本地盘口（`internal/marketdata/domain/localbook.go`，币安"如何正确在本地维护一个订单簿"的做法）：每个组合连接最多 25 个交易对（`<symbol>@depth@100ms` 与 `@aggTrade`），先缓存增量，再逐个用 REST 取快照（现货 `/api/v3/depth?limit=1000`，合约 `/fapi/v1/depth`），丢掉快照之前的增量；现货按 `U`/`u`、合约按 `pu` 检查连续性，断了就重新取快照（`market_reference_book_resyncs_total`）。1000 倍计价的币价格乘、数量除以倍数。
 - 可用的条件：已同步，且它的连接 5 秒内收到过消息（按连接算，冷门币盘口不变也不会被当成断流）。不可用时该交易对退回平台自己的盘口与成交（转发引擎的 `market.depth.internal`），恢复后重新发快照。
 - 发布：每 100 毫秒一轮，变化的交易对发 `DepthUpdate`（与上次发出的前 200 档比较的差异，带 `prev_sequence`），每 10 秒与刚开始显示时发 `DepthSnapshot`，没有变化时每秒一条空的 `DepthUpdate` 作心跳（`taken_at` 是连接最后收到消息的时间）。公共 sequence 按交易对递增，起点是服务启动时刻（微秒），重启后不会回退；不显示参考市场的交易对每次转发引擎快照也占一个 sequence。成交按批发 `TradesPrinted`（`market.trades`）；平台自己的成交只转发这一批里新应用的（按 sequence 判断），`trade.events` 重投时不会重复出现在成交列表里。REST 的最近成交在启动时先从币安取一次。

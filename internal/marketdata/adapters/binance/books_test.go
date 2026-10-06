@@ -2,12 +2,17 @@ package binance
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
+	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/marketdata/domain"
 	"github.com/skill/exchange/internal/marketdata/ports"
@@ -89,5 +94,81 @@ func TestRecentTradesKeepTheTakersSide(t *testing.T) {
 	}
 	if len(trades) != 2 || trades[0].TakerSide != "BUY" || trades[1].TakerSide != "SELL" {
 		t.Fatalf("trades %+v", trades)
+	}
+}
+
+// USDⓈ-M futures sends the books under /public and the trades under
+// /market: the trades' connection is kept up of its own (a failure is
+// reported and retried), and the stream ends with the books' connection.
+func TestFuturesBookStreamSplitsBooksAndTrades(t *testing.T) {
+	var trades atomic.Int32
+	booksDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		streams := r.URL.Query().Get("streams")
+		switch {
+		case r.URL.Path == "/public/stream" && streams == "btcusdt@depth@100ms":
+		case r.URL.Path == "/market/stream" && streams == "btcusdt@aggTrade":
+		default:
+			http.Error(w, "bad path "+r.URL.Path+" "+streams, http.StatusBadRequest)
+			return
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		if r.URL.Path == "/market/stream" {
+			n := trades.Add(1)
+			msg := fmt.Sprintf(`{"stream":"btcusdt@aggTrade","data":{"e":"aggTrade","E":1791289872650,"a":%d,"s":"BTCUSDT","p":"86117.80","q":"0.008","nq":"0.008","f":1,"l":1,"T":1791289872533,"m":true,"st":1}}`, n)
+			_ = conn.Write(r.Context(), websocket.MessageText, []byte(msg))
+			if n == 1 {
+				_ = conn.Close(websocket.StatusGoingAway, "the first trade connection ends")
+				return
+			}
+			<-r.Context().Done()
+			return
+		}
+		_ = conn.Write(r.Context(), websocket.MessageText,
+			[]byte(`{"stream":"btcusdt@depth@100ms","data":{"e":"depthUpdate","E":1791289902050,"T":1791289902049,"s":"BTCUSDT","ps":"BTCUSDT","U":1,"u":2,"pu":0,"b":[["86000.0","1"]],"a":[]}}`))
+		select {
+		case <-booksDone:
+		case <-time.After(5 * time.Second):
+		}
+		_ = conn.Close(websocket.StatusGoingAway, "the books' connection ends")
+	}))
+	defer srv.Close()
+	s := New("", "", srv.Client()).WithFutures(srv.URL, "ws"+strings.TrimPrefix(srv.URL, "http"))
+	perp := ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: decimal.NewFromInt(1)}
+	var mu sync.Mutex
+	var got []domain.Trade
+	var depths int
+	var failed []error
+	err := s.BookStream(context.Background(), []ports.Reference{perp}, true, ports.BookHandlers{
+		Depth: func(string, domain.DepthDiff) {
+			mu.Lock()
+			depths++
+			mu.Unlock()
+		},
+		Trade: func(tr domain.Trade) {
+			mu.Lock()
+			got = append(got, tr)
+			if len(got) == 2 {
+				close(booksDone)
+			}
+			mu.Unlock()
+		},
+		Failed: func(err error) {
+			mu.Lock()
+			failed = append(failed, err)
+			mu.Unlock()
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "binance book stream") {
+		t.Fatalf("the stream ends with the books' connection: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if depths != 1 || len(got) != 2 || got[0].Symbol != "BTC-USDT-PERP" || got[1].Number != 2 || len(failed) != 1 {
+		t.Fatalf("%d depth updates, trades %+v, failures %v", depths, got, failed)
 	}
 }

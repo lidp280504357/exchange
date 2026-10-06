@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/marketdata/domain"
@@ -76,37 +75,23 @@ func (s *Source) MarkStream(ctx context.Context, refs []ports.Reference, coin bo
 		names = append(names, strings.ToLower(r.Remote)+"@markPrice@1s")
 		byRemote[r.Remote] = r
 	}
-	conn, resp, err := websocket.Dial(ctx, stream+"/stream?streams="+strings.Join(names, "/"), &websocket.DialOptions{HTTPClient: s.client})
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+	path := marketStreams
+	if coin {
+		path = allStreams
 	}
-	if err != nil {
-		return fmt.Errorf("binance mark stream: %w", err)
-	}
-	defer func() { _ = conn.CloseNow() }()
-	conn.SetReadLimit(1 << 16)
-	for {
-		read, cancel := context.WithTimeout(ctx, s.idle)
-		_, data, err := conn.Read(read)
-		cancel()
-		if err != nil {
-			if ctx.Err() == nil && errors.Is(read.Err(), context.DeadlineExceeded) {
-				return fmt.Errorf("binance mark stream: nothing received for %s", s.idle)
-			}
-			return fmt.Errorf("binance mark stream: %w", err)
-		}
+	return s.listen(ctx, "binance mark stream", stream+path+strings.Join(names, "/"), 1<<16, s.idle, func(data []byte) {
 		var ev markEvent
 		if json.Unmarshal(data, &ev) != nil || ev.Data.Event != "markPriceUpdate" {
-			continue
+			return
 		}
 		ref, ok := byRemote[ev.Data.Symbol]
 		if !ok {
-			continue
+			return
 		}
 		if m, err := referenceMark(ref, ev); err == nil {
 			on(m)
 		}
-	}
+	})
 }
 
 // referenceMark converts a markPriceUpdate; a rate of "" (a delivery

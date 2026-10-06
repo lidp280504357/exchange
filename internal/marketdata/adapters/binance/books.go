@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
@@ -168,82 +168,111 @@ type aggEvent struct {
 }
 
 // BookStream follows the depth updates (every 100 ms) and aggregate trades
-// of refs on one combined connection, spot or futures, and passes them to
-// on (on the connection's goroutine) in the platform's symbols and units.
-// It returns when the connection ends; the caller reconnects.
+// of refs, spot or futures, and passes them to on in the platform's
+// symbols and units. Spot sends both on one combined connection; USDⓈ-M
+// futures sends the books and the trades on paths of their own, so the
+// trades have a connection of their own, kept up (reconnected with
+// backoff, each failure passed to on.Failed) for as long as the books'
+// lasts. It returns when the books' connection ends; the caller
+// reconnects.
 func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, futures bool, on ports.BookHandlers) error {
 	_, stream, _, err := s.urls(futures)
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, 2*len(refs))
+	var both, depths, trades []string
 	byRemote := make(map[string]ports.Reference, len(refs))
 	for _, r := range refs {
 		lower := strings.ToLower(r.Remote)
-		names = append(names, lower+"@depth@100ms", lower+"@aggTrade")
+		both = append(both, lower+"@depth@100ms", lower+"@aggTrade")
+		depths, trades = append(depths, lower+"@depth@100ms"), append(trades, lower+"@aggTrade")
 		byRemote[r.Remote] = r
 	}
-	conn, resp, err := websocket.Dial(ctx, stream+"/stream?streams="+strings.Join(names, "/"), &websocket.DialOptions{HTTPClient: s.client})
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+	handle := func(data []byte) { s.bookMessage(data, byRemote, futures, on) }
+	// A busy book's update can be large.
+	if !futures {
+		return s.listen(ctx, "binance book stream", stream+allStreams+strings.Join(both, "/"), 4<<20, s.idle, handle)
 	}
-	if err != nil {
-		return fmt.Errorf("binance book stream: %w", err)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		backoff := time.Second
+		for ctx.Err() == nil {
+			started := time.Now()
+			err := s.listen(ctx, "binance trade stream", stream+marketStreams+strings.Join(trades, "/"), 1<<20, tradeIdle, handle)
+			if ctx.Err() != nil {
+				return
+			}
+			if on.Failed != nil {
+				on.Failed(err)
+			}
+			if time.Since(started) > time.Minute {
+				backoff = time.Second
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(backoff):
+			}
+			backoff = min(2*backoff, 30*time.Second)
+		}
+	}()
+	err = s.listen(ctx, "binance book stream", stream+publicStreams+strings.Join(depths, "/"), 4<<20, s.idle, handle)
+	cancel()
+	wg.Wait()
+	return err
+}
+
+// tradeIdle ends a futures trade connection silent for this long: a group
+// of quiet contracts may see no trade for a while, and the books do not
+// depend on it.
+const tradeIdle = 5 * time.Minute
+
+// bookMessage passes one depth update or trade of refs to on.
+func (s *Source) bookMessage(data []byte, refs map[string]ports.Reference, futures bool, on ports.BookHandlers) {
+	var msg struct {
+		Data json.RawMessage `json:"data"`
 	}
-	defer func() { _ = conn.CloseNow() }()
-	conn.SetReadLimit(4 << 20) // a busy book's update can be large
-	for {
-		read, cancel := context.WithTimeout(ctx, s.idle)
-		_, data, err := conn.Read(read)
-		cancel()
-		if err != nil {
-			if ctx.Err() == nil && errors.Is(read.Err(), context.DeadlineExceeded) {
-				return fmt.Errorf("binance book stream: nothing received for %s", s.idle)
-			}
-			return fmt.Errorf("binance book stream: %w", err)
+	// Every key the header's fields match regardless of case needs a field
+	// of its own: without EventTime, "E" (a number) would land in Event and
+	// fail the whole message.
+	var head struct {
+		Event     string `json:"e"`
+		EventTime int64  `json:"E"`
+		Symbol    string `json:"s"`
+	}
+	if json.Unmarshal(data, &msg) != nil || json.Unmarshal(msg.Data, &head) != nil {
+		return
+	}
+	ref, ok := refs[head.Symbol]
+	if !ok {
+		return
+	}
+	switch head.Event {
+	case "depthUpdate":
+		var ev depthEvent
+		if on.Depth == nil || json.Unmarshal(msg.Data, &ev) != nil {
+			return
 		}
-		var msg struct {
-			Data json.RawMessage `json:"data"`
+		conv := newConverter(ref)
+		bids, err1 := conv.levels(ev.Bids)
+		asks, err2 := conv.levels(ev.Asks)
+		if err1 != nil || err2 != nil {
+			return
 		}
-		// Every key the header's fields match regardless of case needs a
-		// field of its own: without EventTime, "E" (a number) would land in
-		// Event and fail the whole message.
-		var head struct {
-			Event     string `json:"e"`
-			EventTime int64  `json:"E"`
-			Symbol    string `json:"s"`
+		on.Depth(ref.Symbol, domain.DepthDiff{First: ev.First, Last: ev.Last, Prev: ev.Prev, Bids: bids, Asks: asks})
+	case "aggTrade":
+		var ev aggEvent
+		if on.Trade == nil || json.Unmarshal(msg.Data, &ev) != nil {
+			return
 		}
-		if json.Unmarshal(data, &msg) != nil || json.Unmarshal(msg.Data, &head) != nil {
-			continue
-		}
-		ref, ok := byRemote[head.Symbol]
-		if !ok {
-			continue
-		}
-		switch head.Event {
-		case "depthUpdate":
-			var ev depthEvent
-			if on.Depth == nil || json.Unmarshal(msg.Data, &ev) != nil {
-				continue
-			}
-			conv := newConverter(ref)
-			bids, err1 := conv.levels(ev.Bids)
-			asks, err2 := conv.levels(ev.Asks)
-			if err1 != nil || err2 != nil {
-				continue
-			}
-			on.Depth(ref.Symbol, domain.DepthDiff{First: ev.First, Last: ev.Last, Prev: ev.Prev, Bids: bids, Asks: asks})
-		case "aggTrade":
-			var ev aggEvent
-			if on.Trade == nil || json.Unmarshal(msg.Data, &ev) != nil {
-				continue
-			}
-			t, err := aggTrade(ref, futures, aggTradeRow{
-				ID: ev.ID, Price: ev.Price, Quantity: ev.Quantity, Time: ev.Time, BuyerIsMaker: ev.BuyerIsMaker,
-			})
-			if err == nil {
-				on.Trade(t)
-			}
+		t, err := aggTrade(ref, futures, aggTradeRow{
+			ID: ev.ID, Price: ev.Price, Quantity: ev.Quantity, Time: ev.Time, BuyerIsMaker: ev.BuyerIsMaker,
+		})
+		if err == nil {
+			on.Trade(t)
 		}
 	}
 }

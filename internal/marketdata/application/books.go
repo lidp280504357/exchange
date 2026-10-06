@@ -346,6 +346,12 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 			}
 			b.mu.Unlock()
 		},
+		// The futures trades' connection of their own failed; the source
+		// reconnects it while the books go on.
+		Failed: func(err error) {
+			b.failures.Inc()
+			b.log.WarnContext(ctx, "reference trade stream failed", "futures", g.futures, "symbols", len(g.refs), "error", err)
+		},
 	})
 	cancel()
 	wg.Wait()
