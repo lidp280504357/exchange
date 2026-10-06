@@ -2,8 +2,10 @@
 # Perpetual contracts end to end (implementation plan §7.3): the contract
 # specifications (task 1), the index price, mark price and funding (task
 # 3) over REST and WebSocket, and every contract's public book: Binance
-# futures' (ADR-0015), which HOUSE offers. Every contract goes to 125x on
-# the same seven-tier ladder. The mark price needs the reference feed (flag
+# futures' (ADR-0015), which HOUSE offers. Every linear contract goes to
+# 125x on the same seven-tier ladder; the coin-margined ones (design
+# 2026-10-06 §2.1, listed with ?margin_type=COIN) carry Binance COIN-M's
+# face values and ladders. The mark price needs the reference feed (flag
 # market.reference_feed, on in the test environment); the books need
 # market.reference_depth to allow the contracts.
 #
@@ -24,6 +26,24 @@ check '.index_symbol == "BTC-USDT" and .funding_interval_hours == 8' "its index 
 check '[.risk_tiers[] | [.max_notional, .max_leverage, .mmr]] == [["50000",125,"0.004"],["250000",100,"0.005"],["1000000",50,"0.01"],["5000000",20,"0.025"],["20000000",10,"0.05"],["50000000",5,"0.1"],["100000000",2,"0.125"]]' "the risk limit ladder: 125x to 50,000 USDT, down to 2x"
 call GET /v1/market/contracts/BTC-USDT ""
 expect 404 COMMON_NOT_FOUND "a pair is not a contract"
+
+echo "== coin-margined contracts (design 2026-10-06 §2.1, G0)"
+call GET /v1/market/contracts ""
+check 'all(.contracts[]; .margin_type == "USDT" and .settle_asset == .quote_asset and .contract_size == "0")' "the default list keeps to the linear contracts, settled in their quote asset"
+call GET "/v1/market/contracts?margin_type=COIN" ""
+expect 200 - "the coin-margined contracts"
+check '[.contracts[].symbol] | sort == ["ASTRA-USD-PERP","BTC-USD-PERP","ETH-USD-PERP"]' "BTC, ETH and ASTRA, as the linear ones"
+check 'all(.contracts[]; .margin_type == "COIN" and .quote_asset == "USD" and .settle_asset == .base_asset and .lot_size == "1" and .index_symbol == (.base_asset + "-USDT"))' "quoted in USD, settled in their coin, whole contracts, the USDT index"
+check '[.contracts[] | [.symbol, .contract_size]] | sort == [["ASTRA-USD-PERP","10"],["BTC-USD-PERP","100"],["ETH-USD-PERP","10"]]' "face values of 100 and 10 USD"
+call GET "/v1/market/contracts?margin_type=ALL" ""
+check '(.contracts | length) >= 6 and ([.contracts[].margin_type] | unique == ["COIN","USDT"])' "ALL lists both kinds"
+call GET "/v1/market/contracts?margin_type=USDC" ""
+expect 400 COMMON_INVALID_ARGUMENT "an unknown margin type"
+call GET /v1/market/contracts/btc-usd-perp ""
+expect 200 - "one coin-margined contract by its symbol"
+check '.reference_symbol == "BTCUSD_PERP" and (.risk_tiers | length) == 10 and .max_leverage == 125 and .risk_tiers[0].max_notional == "5"' "Binance COIN-M's ladder: 125x to 5 BTC"
+call GET /v1/market/contracts/ETH-USD-PERP ""
+check '.max_leverage == 100 and .risk_tiers[0].max_notional == "15" and .tick_size == "0.01"' "ETH's: 100x to 15 ETH, the linear contract's tick"
 
 echo "== mark price and funding"
 marked() {
