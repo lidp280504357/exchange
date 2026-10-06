@@ -176,6 +176,8 @@ type recordPub struct {
 	mu   sync.Mutex
 	recs []kafka.Record
 	err  error
+	// fails is how many publishes fail before they go through.
+	fails int
 }
 
 func (p *recordPub) Publish(_ context.Context, recs ...kafka.Record) error {
@@ -183,6 +185,10 @@ func (p *recordPub) Publish(_ context.Context, recs ...kafka.Record) error {
 	defer p.mu.Unlock()
 	if p.err != nil {
 		return p.err
+	}
+	if p.fails > 0 {
+		p.fails--
+		return errors.New("broker unreachable")
 	}
 	p.recs = append(p.recs, recs...)
 	return nil
@@ -512,7 +518,14 @@ func TestFuturesStatsRelaysLiquidations(t *testing.T) {
 	if err := s.flush(ctx); err != nil || len(pub.recs) != 2 {
 		t.Fatalf("an empty flush: %v, %d published", err, len(pub.recs))
 	}
-	// A failed publish is counted; the liquidations are dropped.
+	// A publish that fails once goes out on the second try (review EN).
+	s.sleep = func(context.Context, time.Duration) {}
+	pub.fails = 1
+	s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "BUY", Price: d("1"), AvgPrice: d("1"), Filled: d("2"), At: at.Add(30 * time.Second)})
+	if err := s.flush(ctx); err != nil || len(pub.recs) != 3 {
+		t.Fatalf("published again: %v, %d published", err, len(pub.recs))
+	}
+	// One that fails twice is counted; the liquidations are dropped.
 	pub.err = errors.New("redpanda down")
 	s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "BUY", Price: d("1"), AvgPrice: d("1"), Filled: d("1"), At: at.Add(time.Minute)})
 	if err := s.flush(ctx); err == nil {

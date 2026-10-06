@@ -633,6 +633,12 @@ drain:
 	err := s.repo.AddLiquidations(ctx, list)
 	if err == nil {
 		err = s.publish(ctx, list)
+		if err != nil && ctx.Err() == nil {
+			// Stored but not published: once more after a moment (review
+			// EN), the channel and ClickHouse would miss them.
+			s.sleep(ctx, liquidationsFlush)
+			err = s.publish(ctx, list)
+		}
 	}
 	if err != nil {
 		count("failed")
