@@ -308,3 +308,55 @@ export async function menuOnTop(page, label) {
   await page.evaluate(() => window.scrollTo(0, 0));
   if (covered) throw new Error(`the ${label} menu's first item is under ${covered}`);
 }
+
+/**
+ * legendClear waits (20 s at most) for the candle chart within scope to
+ * have drawn its candles, then for its highest candle to start below its
+ * legend (5 s more at most, for the chart to redraw with the room it
+ * leaves), and tells, in page pixels, where the legend ends and where the
+ * highest candle starts, with the share of the pane left for the legend
+ * (the plot's data-legend-room) and whether the candle is clear. The
+ * legend sits over the plot and the candles' scale leaves room for it
+ * (B116); the highest candle is the topmost row of the chart's pane with
+ * a pixel in the rise or fall colour, as drawn on its canvas (the
+ * crosshair is on another).
+ */
+export async function legendClear(page, scope = "") {
+  const measure = () =>
+    page.evaluate((scope) => {
+      const plot = document.querySelector(`${scope} [data-testid="candle-plot"]`);
+      const legend = document.querySelector(`${scope} [data-testid="candle-legend"]`);
+      if (!plot || !legend || legend.offsetHeight === 0) return null;
+      const canvases = [...plot.querySelectorAll("canvas")];
+      if (canvases.length === 0) return null;
+      // The pane's canvas is the largest; its crosshair layer, as large, comes after it.
+      const pane = canvases.reduce((a, c) => (c.width * c.height > a.width * a.height ? c : a));
+      const probe = document.createElement("canvas").getContext("2d");
+      const rgb = (css) => {
+        probe.clearRect(0, 0, 1, 1);
+        probe.fillStyle = css;
+        probe.fillRect(0, 0, 1, 1);
+        return [...probe.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+      };
+      const root = getComputedStyle(document.documentElement);
+      const colours = ["--up", "--down"].map((v) => rgb(root.getPropertyValue(v).trim()));
+      const box = pane.getBoundingClientRect();
+      const data = pane.getContext("2d").getImageData(0, 0, pane.width, pane.height).data;
+      for (let y = 0; y < pane.height; y++) {
+        for (let x = 0; x < pane.width; x++) {
+          const i = (y * pane.width + x) * 4;
+          if (colours.some(([r, g, b]) => Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b) < 24)) {
+            const legendBottom = Math.round(legend.getBoundingClientRect().bottom);
+            const candleTop = Math.round(box.top + (y * box.height) / pane.height);
+            return { legendBottom, candleTop, clear: candleTop >= legendBottom, room: plot.dataset.legendRoom ?? "", legendHeight: legend.offsetHeight };
+          }
+        }
+      }
+      return null;
+    }, scope);
+  let last = null;
+  for (const end = Date.now() + 20000; !last && Date.now() < end; await sleep(250)) last = await measure();
+  if (!last) throw new Error("the candle chart drew no candles within 20 s");
+  for (const end = Date.now() + 5000; !last.clear && Date.now() < end; await sleep(250)) last = (await measure()) ?? last;
+  return last;
+}

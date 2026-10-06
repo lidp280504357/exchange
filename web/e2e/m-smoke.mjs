@@ -13,7 +13,7 @@
 // the futures terminal, notifications, devices, help, the language switch
 // and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
-import { ok, sleep, start } from "./lib.mjs";
+import { legendClear, ok, sleep, start } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.astras.vip" : APP);
@@ -220,6 +220,29 @@ try {
   await waitText("标记价格");
   await waitText("资金费率");
   ok("the futures terminal shows the mark price and the funding countdown");
+  // The candle charts start below their legends (B116: the legend sits over
+  // the plot, and the candles' scale leaves room for it).
+  const clearOf = async (where) => {
+    const l = await legendClear(page);
+    if (!l.clear) {
+      throw new Error(`${where}: the highest candle starts at ${l.candleTop}px, under the legend that ends at ${l.legendBottom}px (${l.legendHeight}px high, room ${l.room})`);
+    }
+    return `${where}: legend ${l.legendHeight}px, the highest candle ${l.candleTop - l.legendBottom}px below it`;
+  };
+  const futuresChart = await clearOf("the futures terminal");
+  // The coin page's daily candles (the user's report: three lines of
+  // legend over a 232 px pane covered the highest candles).
+  await go("/coin/ETH");
+  const daily = await page.waitForFunction(
+    () => [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "1日" && b.offsetParent !== null) ?? false,
+    { timeout: 20000 },
+  );
+  if ((await daily.evaluate((b) => b.getAttribute("data-state"))) !== "on") await daily.click();
+  // Daily candles are dated without a time in the legend.
+  await page.waitForFunction(() => /^\d{4}-\d{2}-\d{2}(?!\s*\d{1,2}:\d{2})/.test(document.querySelector('[data-testid="candle-legend"]')?.innerText ?? ""), {
+    timeout: 20000,
+  });
+  ok(`the candle charts start below their legends (${futuresChart}; ${await clearOf("the ETH coin page, daily")})`);
 
   // 8. Notifications, devices, the help centre.
   await go("/notifications");

@@ -13,7 +13,7 @@
 // the language switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { menuOnTop, ok, start } from "./lib.mjs";
+import { legendClear, menuOnTop, ok, start } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -313,6 +313,22 @@ try {
   await waitText("标记价格");
   await waitText("资金费率");
   ok("the futures terminal shows the mark price and the funding countdown");
+  // The candle charts start below their legends (B116: the legend sits over
+  // the plot, and the candles' scale leaves room for it).
+  const clearOf = async (where) => {
+    const l = await legendClear(page);
+    if (!l.clear) {
+      throw new Error(`${where}: the highest candle starts at ${l.candleTop}px, under the legend that ends at ${l.legendBottom}px (${l.legendHeight}px high, room ${l.room})`);
+    }
+    return `${where}: legend ${l.legendHeight}px, the highest candle ${l.candleTop - l.legendBottom}px below it`;
+  };
+  const futuresChart = await clearOf("the futures terminal at 1440 × 900");
+  // The coin page at 1024 wide, where its chart is narrowest.
+  await page.setViewport({ width: 1024, height: 768 });
+  await go("/coin/BTC");
+  const coinChart = await clearOf("the BTC coin page at 1024 × 768");
+  await page.setViewport({ width: 1440, height: 900 });
+  ok(`the candle charts start below their legends (${futuresChart}; ${coinChart})`);
 
   // 8. Notifications, devices, the help centre.
   await go("/notifications");
