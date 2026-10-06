@@ -512,6 +512,25 @@ export async function spotAvailable(base, token, asset) {
   return res.body.balances.find((b) => b.asset === asset)?.available ?? "0";
 }
 
+/** places is how many decimals a step of the grid has ("0.00001" has 5). */
+const places = (step) => (String(step).split(".")[1] ?? "").replace(/0+$/, "").length;
+
+/**
+ * budgetBuy is a limit buy of symbol 5% under last spending about budget of
+ * the quote, on the pair's tick and lot grid and at least its minimum
+ * notional: { price, quantity } as an order form takes them. A fixed
+ * quantity would cost more than the funds a step moved once the price rose.
+ */
+export async function budgetBuy(base, symbol, last, budget) {
+  const res = await api(base, "GET", `/v1/market/pairs/${symbol}`);
+  if (res.status !== 200) throw new Error(`/v1/market/pairs/${symbol}: ${res.status}`);
+  const { tick_size: tick, lot_size: lot, min_notional: minNotional } = res.body;
+  const price = Math.floor((last * 0.95) / Number(tick)) * Number(tick);
+  let lots = Math.floor(budget / price / Number(lot));
+  if (lots * Number(lot) * price < Number(minNotional)) lots = Math.ceil(Number(minNotional) / price / Number(lot));
+  return { price: price.toFixed(places(tick)), quantity: (lots * Number(lot)).toFixed(places(lot)) };
+}
+
 /** cancelOrders cancels every active spot order of the account: a step that placed one leaves none behind. */
 export async function cancelOrders(base, who) {
   const token = await signInApi(base, who);

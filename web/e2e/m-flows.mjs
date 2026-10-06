@@ -13,8 +13,8 @@
 // (flows-lib.mjs); real devices, iOS autofill and how a gesture feels stay
 // on the manual list.
 import {
-  api, cancelOrders, code, colorsOf, contrastIssues, decimalIssues, flows, fmtTime, inboxCount, listDecimals, longAnimations, overflowX, PHONE_ANDROID,
-  PHONE_IOS, phone, register, scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, textAligned, truncatedWithoutHint, wsWatch,
+  api, budgetBuy, cancelOrders, code, colorsOf, contrastIssues, decimalIssues, flows, fmtTime, inboxCount, listDecimals, longAnimations, overflowX,
+  PHONE_ANDROID, PHONE_IOS, phone, register, scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, textAligned, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
@@ -693,31 +693,38 @@ for (const [name, device] of [["iPhone", PHONE_IOS], ["Android", PHONE_ANDROID]]
 const M7 =
   "margin: the market list tags isolated pairs; the order sheet trades from the cross account with its gauge and what it may borrow, borrows from its own sheet, its order is tagged 全仓; the assets' margin page shows both kinds of account and repays everything";
 
-/** marginCall writes to the margin API as the flows' account, each with its own idempotency key. */
-async function marginCall(path, body) {
+/** marginAs is the margin API as the flows' account, signed in once (each sign-in counts against the IP and the device). */
+async function marginAs() {
   const token = await signInApi(API, user);
-  const r = await api(API, "POST", path, body, { Authorization: `Bearer ${token}`, "Idempotency-Key": `mflows-${Date.now()}-${Math.random()}` });
-  if (r.status !== 200) throw new Error(`${path} ${JSON.stringify(body)}: ${r.status} ${JSON.stringify(r.body)}`);
-  return r.body;
+  const auth = { Authorization: `Bearer ${token}` };
+  return {
+    token,
+    auth,
+    /** cross is the cross account and its USDT. */
+    async cross() {
+      const r = await api(API, "GET", "/v1/margin/accounts", undefined, auth);
+      if (r.status !== 200) throw new Error(`/v1/margin/accounts: ${r.status}`);
+      return { account: r.body.cross, usdt: r.body.cross.balances.find((b) => b.asset === "USDT") };
+    },
+    /** post writes, each with its own idempotency key. */
+    async post(path, body) {
+      const r = await api(API, "POST", path, body, { ...auth, "Idempotency-Key": `mflows-${Date.now()}-${Math.random()}` });
+      if (r.status !== 200) throw new Error(`${path} ${JSON.stringify(body)}: ${r.status} ${JSON.stringify(r.body)}`);
+      return r.body;
+    },
+  };
 }
 
-/** crossUSDT is the flows' account's USDT in its cross margin account (undefined without one). */
-async function crossUSDT() {
-  const token = await signInApi(API, user);
-  const r = await api(API, "GET", "/v1/margin/accounts", undefined, { Authorization: `Bearer ${token}` });
-  if (r.status !== 200) throw new Error(`/v1/margin/accounts: ${r.status}`);
-  return { account: r.body.cross, usdt: r.body.cross.balances.find((b) => b.asset === "USDT") };
-}
-
-/** marginCleared cancels the account's orders, repays its cross debts and moves its USDT back to spot; its failure does not hide the step's own. */
+/** marginCleared cancels the account's orders, repays the cross account and moves its USDT back to spot; its failure does not hide the step's own. */
 async function marginCleared() {
   try {
     await cancelOrders(API, user);
-    if (Number((await crossUSDT()).usdt?.borrowed ?? 0) > 0 || Number((await crossUSDT()).usdt?.interest ?? 0) > 0) {
-      await marginCall("/v1/margin/repay", { account: "MARGIN_CROSS", asset: "USDT", amount: "ALL" });
-    }
-    const free = (await crossUSDT()).usdt?.free ?? "0";
-    if (Number(free) > 0) await marginCall("/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: free });
+    const m = await marginAs();
+    const { usdt } = await m.cross();
+    if (!usdt) return;
+    if (Number(usdt.borrowed) > 0 || Number(usdt.interest) > 0) await m.post("/v1/margin/repay", { account: "MARGIN_CROSS", asset: "USDT", amount: "ALL" });
+    const free = (await m.cross()).usdt?.free ?? "0";
+    if (Number(free) > 0) await m.post("/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: free });
   } catch (e) {
     console.log(`     clearing the cross margin account: ${e.message}`);
   }
@@ -740,11 +747,13 @@ async function formSheet(tab, form) {
 const ordersTab = (tab, n) =>
   tab.page.waitForFunction((want) => [...document.querySelectorAll("[role=tab]")].some((el) => el.innerText.replace(/\s+/g, "") === want), { timeout: 20000 }, `当前委托(${n})`);
 
-// "" when margin trading is open to the flows' account with 25 USDT to move, else why M7 cannot run.
+// "" when margin trading is open to the flows' account (MARGIN_TRADE: its
+// status, then margin.enabled) and it has the 25 USDT the step moves and
+// trades with, else why M7 cannot run.
 async function marginClosed() {
-  const token = await signInApi(API, user);
-  if (Number(await spotAvailable(API, token, "USDT")) < 25) return "the account has under 25 USDT (no welcome funds?)";
-  const r = await api(API, "GET", "/v1/user/eligibility?feature=MARGIN_TRADE", undefined, { Authorization: `Bearer ${token}` });
+  const m = await marginAs();
+  if (Number(await spotAvailable(API, m.token, "USDT")) < 25) return "the account has under 25 USDT (no welcome funds?)";
+  const r = await api(API, "GET", "/v1/user/eligibility?feature=MARGIN_TRADE", undefined, m.auth);
   if (r.status !== 200) return `the eligibility could not be read (${r.status})`;
   return r.body.allowed ? "" : `margin trading is not open to the account (${r.body.reason_code})`;
 }
@@ -752,14 +761,16 @@ async function marginClosed() {
 const noMargin = await marginClosed();
 if (noMargin) f.skip("M7", M7, noMargin);
 else await f.step("M7", M7, async () => {
-  const pairs = await api(API, "GET", "/v1/margin/pairs");
-  if (pairs.status !== 200) throw new Error(`/v1/margin/pairs: ${pairs.status}`);
-  const btc = pairs.body.items.find((p) => p.symbol === "BTC-USDT");
-  if (!btc?.isolated) throw new Error("BTC-USDT takes no isolated margin account");
-  // 20 USDT into the cross account over the API: the smokes move funds through the sheets.
-  await marginCall("/v1/margin/transfer", { direction: "IN", account: "MARGIN_CROSS", asset: "USDT", amount: "20" });
-  const B = await signedInTab("margin", phone(390));
+  let B;
   try {
+    const pairs = await api(API, "GET", "/v1/margin/pairs");
+    if (pairs.status !== 200) throw new Error(`/v1/margin/pairs: ${pairs.status}`);
+    const btc = pairs.body.items.find((p) => p.symbol === "BTC-USDT");
+    if (!btc?.isolated) throw new Error("BTC-USDT takes no isolated margin account");
+    // 20 USDT into the cross account over the API: the smokes move funds through the sheets.
+    const m = await marginAs();
+    await m.post("/v1/margin/transfer", { direction: "IN", account: "MARGIN_CROSS", asset: "USDT", amount: "20" });
+    B = await signedInTab("margin", phone(390));
     // The market list: the pair's isolated leverage beside its name.
     await nav(B, "/markets");
     await B.page.waitForFunction(
@@ -777,23 +788,25 @@ else await f.step("M7", M7, async () => {
     await B.clickButton("全仓", bar);
     await B.page.waitForSelector(`${bar} [data-testid="margin-level"]`, { visible: true, timeout: 10000 });
     await B.page.waitForFunction((b) => /\d/.test(document.querySelector(`${b} [data-testid="margin-borrowable"]`)?.innerText ?? ""), { timeout: 15000 }, bar);
-    // Borrow 1 USDT from the bar's own sheet, over the order sheet.
+    // Borrow 1 USDT from the bar's own sheet, over the order sheet; its
+    // button sits under its form, in the sheet's footer.
     await B.clickButton("借币", bar);
     const borrow = 'form[data-testid="margin-borrow-form"]';
     await formSheet(B, borrow);
     await B.page.waitForFunction((f) => document.querySelector(f)?.innerText.includes("USDT"), { timeout: 10000 }, borrow);
     await B.typeInto(`${borrow} input[inputmode="decimal"]`, "1");
-    // The sheet's button sits under its form, in the sheet's footer.
     await B.clickButton("确认借币", "[role=dialog]");
     await B.waitText("已借入 1 USDT");
     await B.page.waitForSelector(borrow, { hidden: true, timeout: 10000 });
-    const owed = await crossUSDT();
+    const owed = await m.cross();
     if (Number(owed.usdt?.borrowed) !== 1 || owed.account.margin_level === null) throw new Error(`after the borrow: ${JSON.stringify(owed.account)}`);
-    // A limit buy from the cross account, 5% under the last price, rests tagged 全仓; then cancelled.
+    // A limit buy from the cross account of about 15 USDT (of the 21 it
+    // holds, whatever the price) rests tagged 全仓; then cancelled.
     await B.page.waitForFunction(() => Number(document.querySelector('[role=dialog] input[aria-label="价格"]')?.value.replace(/,/g, "")) > 0, { timeout: 20000 });
     const last = await B.page.$eval('[role=dialog] input[aria-label="价格"]', (el) => Number(el.value.replace(/,/g, "")));
-    await B.typeInto('[role=dialog] input[aria-label="价格"]', (Math.floor(last * 0.95 * 100) / 100).toFixed(2));
-    await B.typeInto('[role=dialog] input[aria-label="数量"]', "0.0002");
+    const order = await budgetBuy(API, "BTC-USDT", last, 15);
+    await B.typeInto('[role=dialog] input[aria-label="价格"]', order.price);
+    await B.typeInto('[role=dialog] input[aria-label="数量"]', order.quantity);
     await B.clickButton("买入 BTC", "[role=dialog]");
     await B.clickButton("确认", "[role=dialog]");
     await B.page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
@@ -817,13 +830,13 @@ else await f.step("M7", M7, async () => {
     await B.page.waitForSelector(repay, { hidden: true, timeout: 10000 });
     const until = Date.now() + 15_000;
     for (;;) {
-      const { usdt } = await crossUSDT();
+      const { usdt } = await m.cross();
       if (usdt && Number(usdt.borrowed) === 0 && Number(usdt.interest) === 0) break;
       if (Date.now() > until) throw new Error(`still owed after 还币 in full: ${JSON.stringify(usdt)}`);
       await new Promise((r) => setTimeout(r, 1000));
     }
   } finally {
-    await B.close();
+    await B?.close();
     await marginCleared();
   }
 });
