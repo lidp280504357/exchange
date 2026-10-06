@@ -13,7 +13,7 @@ info:
     contract_size USD (a fraction is DERIV_CONTRACTS_NOT_INTEGER), prices
     are in USD, and the amounts of positions, fills and funding are in the
     base asset (the inverse formulas of design §2.2); trading them needs
-    derivatives.coin_m as well, from batch G1. A futures account asked for
+    derivatives.coin_m as well (USER_NOT_ELIGIBLE). A futures account asked for
     in an asset no contract settles in is DERIV_SETTLE_ASSET_MISMATCH.
     Opening orders need the derivatives.trading switch and an eligible
     account, stay within the risk limit of their leverage and reserve
@@ -41,7 +41,7 @@ paths:
           in: query
           description: >-
             The settlement asset whose FUTURES account to show (USDT by default; BTC, ETH, ASTRA for the
-            coin-margined contracts, from batch G1); one no contract settles in is DERIV_SETTLE_ASSET_MISMATCH.
+            coin-margined contracts); one no contract settles in is DERIV_SETTLE_ASSET_MISMATCH.
           schema:
             type: string
             default: USDT
@@ -591,7 +591,8 @@ components:
     ContractPosition:
       type: object
       required: [position_id, symbol, position_side, quantity, entry_price, mark_price, notional, unrealized_pnl, margin,
-        margin_mode, leverage, maintenance_margin, liquidation_price, realized_pnl, funding, updated_at]
+        margin_mode, leverage, maintenance_margin, liquidation_price, realized_pnl, funding, updated_at, settle_asset, contracts,
+        value_coin, value_usd]
       properties:
         position_id:
           type: string
@@ -639,27 +640,26 @@ components:
           format: date-time
         settle_asset:
           type: string
-          description: The asset margin, PnL and funding are in (from batch G1, which makes it required).
+          description: The asset margin, PnL and funding are in.
         contracts:
           description: >-
-            Signed, as quantity: whole contracts of a coin-margined contract; null for a linear one
-            (from batch G1).
+            Signed, as quantity: whole contracts of a coin-margined contract; null for a linear one.
           $ref: './market.yaml#/components/schemas/NullableDecimal'
         value_coin:
           description: >-
             A coin-margined position's value in its settlement asset at the mark price, |contracts| x
-            contract_size / mark; null for a linear one or before the first mark price (from batch G1).
+            contract_size / mark; null for a linear one or before the first mark price.
           $ref: './market.yaml#/components/schemas/NullableDecimal'
         value_usd:
           description: >-
             The position's value in USD: |contracts| x contract_size for a coin-margined one, notional for a
-            linear one (from batch G1).
+            linear one (null before the first mark price).
           $ref: './market.yaml#/components/schemas/NullableDecimal'
     ContractOrder:
       type: object
       required: [order_id, client_order_id, symbol, side, position_side, type, time_in_force, price, quantity, reduce_only,
         leverage, margin_mode, status, filled_quantity, average_price, fee, realized_pnl, reserved, cancel_requested,
-        cancel_reason, reject_reason, created_at, updated_at]
+        cancel_reason, reject_reason, created_at, updated_at, settle_asset]
       properties:
         order_id:
           type: string
@@ -721,7 +721,7 @@ components:
           format: date-time
         settle_asset:
           type: string
-          description: The asset the order's margin and fee are in (from batch G1, which makes it required).
+          description: The asset the order's margin and fee are in.
     ConditionalOrder:
       type: object
       required: [conditional_id, symbol, position_side, side, kind, trigger_price, trigger_by, order_type, price, quantity,
@@ -772,7 +772,7 @@ components:
           format: date-time
     FundingPayment:
       type: object
-      required: [symbol, funding_time, position_side, quantity, funding_rate, mark_price, amount]
+      required: [symbol, funding_time, position_side, quantity, funding_rate, mark_price, amount, settle_asset]
       properties:
         symbol:
           type: string
@@ -794,11 +794,11 @@ components:
           $ref: './market.yaml#/components/schemas/Decimal'
         settle_asset:
           type: string
-          description: The asset amount is in (from batch G1, which makes it required).
+          description: The asset amount is in.
     ContractFill:
       type: object
       required: [trade_id, order_id, symbol, side, position_side, role, price, quantity, closed_quantity, fee, realized_pnl,
-        liquidation, settled, executed_at]
+        liquidation, settled, executed_at, settle_asset]
       properties:
         trade_id:
           type: string
@@ -839,4 +839,4 @@ components:
           format: date-time
         settle_asset:
           type: string
-          description: The asset fee and realized_pnl are in (from batch G1, which makes it required).
+          description: The asset fee and realized_pnl are in.

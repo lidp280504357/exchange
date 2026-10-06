@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,16 +38,35 @@ var perp = domain.Contract{
 	MakerFeeRate: d("0.0002"), TakerFeeRate: d("0.0005"), Status: domain.StatusTrading, QuoteDecimals: 6, BaseDecimals: 8,
 }
 
-type instruments struct{}
-
-func (instruments) Contract(_ context.Context, symbol string) (domain.Contract, error) {
-	if symbol != perp.Symbol {
-		return domain.Contract{}, apperr.NotFound("no such contract")
-	}
-	return perp, nil
+// coinPerp is a coin-margined contract (coin-M design §2.1): 100 USD
+// contracts settled in BTC.
+var coinPerp = domain.Contract{
+	Symbol: "BTC-USD-PERP", Base: "BTC", Quote: "USD", TickSize: d("0.1"), LotSize: d("1"), MinQuantity: d("1"),
+	MaxQuantity: d("60000"), MinNotional: d("100"), PriceBand: d("0.05"), FundingIntervalHours: 8, ContractSize: d("100"),
+	Tiers: []domain.RiskTier{
+		{MaxNotional: d("5"), MaxLeverage: 125, MMR: d("0.004")},
+		{MaxNotional: d("10"), MaxLeverage: 100, MMR: d("0.005")},
+	},
+	MakerFeeRate: d("0.0002"), TakerFeeRate: d("0.0005"), Status: domain.StatusTrading, QuoteDecimals: 8, BaseDecimals: 8,
 }
 
-func (instruments) Contracts(context.Context) ([]domain.Contract, error) {
+// instruments lists perp, and coinPerp too when coin is set.
+type instruments struct{ coin bool }
+
+func (i instruments) Contract(_ context.Context, symbol string) (domain.Contract, error) {
+	switch {
+	case symbol == perp.Symbol:
+		return perp, nil
+	case symbol == coinPerp.Symbol && i.coin:
+		return coinPerp, nil
+	}
+	return domain.Contract{}, apperr.NotFound("no such contract")
+}
+
+func (i instruments) Contracts(context.Context) ([]domain.Contract, error) {
+	if i.coin {
+		return []domain.Contract{perp, coinPerp}, nil
+	}
 	return []domain.Contract{perp}, nil
 }
 
@@ -58,54 +78,86 @@ func (r rates) Rate(_ context.Context, symbol string, at time.Time) (decimal.Dec
 	return v[0], v[1], ok, nil
 }
 
-type eligible struct{}
+// eligible allows every feature but those denied.
+type eligible struct{ deny map[string]bool }
 
-func (eligible) Check(context.Context, string, string, string) (bool, string, error) {
+func (e eligible) Check(_ context.Context, _, feature, _ string) (bool, string, error) {
+	if e.deny[feature] {
+		return false, "USER_NOT_ELIGIBLE", nil
+	}
 	return true, "", nil
 }
 
 // ledger is an in-memory FUTURES ledger with the ledger's semantics:
 // idempotent keys, exact freezes, capped charges with the insurance fund
-// behind them.
+// behind them. USDT's balances are kept by user, its books in the fields;
+// another asset's by user|asset (account) and in coins.
 type ledger struct {
 	mu                  sync.Mutex
 	available, frozen   map[string]decimal.Decimal
 	pnlClearing, feeRev decimal.Decimal
 	insurance, funding  decimal.Decimal
+	coins               map[string]*books
 	done                map[string][]domain.Outcome
 }
+
+// books are an asset's system accounts.
+type books struct{ pnlClearing, feeRev, insurance, funding decimal.Decimal }
 
 func newLedger() *ledger {
 	return &ledger{
 		available: map[string]decimal.Decimal{}, frozen: map[string]decimal.Decimal{}, insurance: d("1000000"),
-		done: map[string][]domain.Outcome{},
+		coins: map[string]*books{}, done: map[string][]domain.Outcome{},
 	}
 }
 
-func (l *ledger) Freeze(_ context.Context, key, user, _ string, amount decimal.Decimal, _ string) error {
+// account is where user's balances of asset are kept.
+func account(user, asset string) string {
+	if asset == "" || asset == "USDT" {
+		return user
+	}
+	return user + "|" + asset
+}
+
+// booksOf returns an asset's system accounts: USDT's are the fields.
+func (l *ledger) booksOf(asset string) (pnl, fee, ins, fund *decimal.Decimal) {
+	if asset == "" || asset == "USDT" {
+		return &l.pnlClearing, &l.feeRev, &l.insurance, &l.funding
+	}
+	b, ok := l.coins[asset]
+	if !ok {
+		b = &books{}
+		l.coins[asset] = b
+	}
+	return &b.pnlClearing, &b.feeRev, &b.insurance, &b.funding
+}
+
+func (l *ledger) Freeze(_ context.Context, key, user, asset string, amount decimal.Decimal, _ string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, ok := l.done[key]; ok {
 		return nil
 	}
-	if l.available[user].LessThan(amount) {
+	a := account(user, asset)
+	if l.available[a].LessThan(amount) {
 		return apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
 	}
-	l.available[user], l.frozen[user] = l.available[user].Sub(amount), l.frozen[user].Add(amount)
+	l.available[a], l.frozen[a] = l.available[a].Sub(amount), l.frozen[a].Add(amount)
 	l.done[key] = nil
 	return nil
 }
 
-func (l *ledger) Unfreeze(_ context.Context, key, user, _ string, amount decimal.Decimal, _ string) error {
+func (l *ledger) Unfreeze(_ context.Context, key, user, asset string, amount decimal.Decimal, _ string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, ok := l.done[key]; ok {
 		return nil
 	}
-	if l.frozen[user].LessThan(amount) {
+	a := account(user, asset)
+	if l.frozen[a].LessThan(amount) {
 		return apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient frozen")
 	}
-	l.frozen[user], l.available[user] = l.frozen[user].Sub(amount), l.available[user].Add(amount)
+	l.frozen[a], l.available[a] = l.frozen[a].Sub(amount), l.available[a].Add(amount)
 	l.done[key] = nil
 	return nil
 }
@@ -116,7 +168,9 @@ func (l *ledger) Settle(_ context.Context, r ports.SettleRequest) ([]domain.Outc
 	if out, ok := l.done[r.IdemKey]; ok {
 		return out, nil
 	}
-	avail, frozen, pnl, fee, ins, fund := l.available[r.UserID], l.frozen[r.UserID], l.pnlClearing, l.feeRev, l.insurance, l.funding
+	a := account(r.UserID, r.Asset)
+	pnlP, feeP, insP, fundP := l.booksOf(r.Asset)
+	avail, frozen, pnl, fee, ins, fund := l.available[a], l.frozen[a], *pnlP, *feeP, *insP, *fundP
 	out := make([]domain.Outcome, len(r.Moves))
 	for i, m := range r.Moves {
 		out[i] = domain.Outcome{User: decimal.Zero, Insurance: decimal.Zero, Waived: decimal.Zero}
@@ -163,21 +217,24 @@ func (l *ledger) Settle(_ context.Context, r ports.SettleRequest) ([]domain.Outc
 			return nil, apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
 		}
 	}
-	l.available[r.UserID], l.frozen[r.UserID], l.pnlClearing, l.feeRev, l.insurance, l.funding = avail, frozen, pnl, fee, ins, fund
+	l.available[a], l.frozen[a] = avail, frozen
+	*pnlP, *feeP, *insP, *fundP = pnl, fee, ins, fund
 	l.done[r.IdemKey] = out
 	return out, nil
 }
 
-func (l *ledger) Balance(_ context.Context, user, _ string) (ports.Balance, error) {
+func (l *ledger) Balance(_ context.Context, user, asset string) (ports.Balance, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return ports.Balance{Available: l.available[user], Frozen: l.frozen[user]}, nil
+	a := account(user, asset)
+	return ports.Balance{Available: l.available[a], Frozen: l.frozen[a]}, nil
 }
 
-func (l *ledger) PnLClearing(context.Context, string) (decimal.Decimal, error) {
+func (l *ledger) PnLClearing(_ context.Context, asset string) (decimal.Decimal, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.pnlClearing, nil
+	pnl, _, _, _ := l.booksOf(asset)
+	return *pnl, nil
 }
 
 // testMarks are the rig's mark prices. On PostgreSQL over the network a
@@ -213,12 +270,13 @@ func (m *testMarks) Mark(symbol string) (ports.Mark, bool) {
 }
 
 type rig struct {
-	svc    *application.Service
-	store  ports.Store
-	ledger *ledger
-	book   *testMarks
-	rates  rates
-	seq    int64
+	svc      *application.Service
+	store    ports.Store
+	ledger   *ledger
+	book     *testMarks
+	rates    rates
+	eligible eligible
+	seq      int64
 }
 
 // setup runs on PostgreSQL when TEST_POSTGRES_DSN is set (task
@@ -227,7 +285,7 @@ func setup(t *testing.T) *rig {
 	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
-	r := &rig{ledger: newLedger(), book: newTestMarks(), rates: rates{}}
+	r := &rig{ledger: newLedger(), book: newTestMarks(), rates: rates{}, eligible: eligible{deny: map[string]bool{}}}
 	if os.Getenv("TEST_POSTGRES_DSN") == "" {
 		r.store = newMemStore()
 	} else {
@@ -242,7 +300,7 @@ func setup(t *testing.T) *rig {
 	}
 	r.book.Set(perp.Symbol, d("60000"), time.Now())
 	r.svc = &application.Service{
-		Store: r.store, Ledger: r.ledger, Instruments: instruments{}, Eligibility: eligible{}, Marks: r.book, Rates: r.rates,
+		Store: r.store, Ledger: r.ledger, Instruments: instruments{}, Eligibility: r.eligible, Marks: r.book, Rates: r.rates,
 		Log: log, Now: time.Now, Metrics: application.NewMetrics(prometheus.NewRegistry()),
 	}
 	return r
@@ -274,7 +332,7 @@ func (r *rig) trade(t *testing.T, maker, taker domain.Order, price string) {
 	}
 	r.seq++
 	tr := application.Trade{
-		ID: uuid.Must(uuid.NewV7()).String(), Symbol: perp.Symbol, Seq: r.seq, Price: d(price), Qty: maker.Qty,
+		ID: uuid.Must(uuid.NewV7()).String(), Symbol: maker.Symbol, Seq: r.seq, Price: d(price), Qty: maker.Qty,
 		BuyerOrderID: buy.ID, BuyerUserID: buy.UserID, SellerOrderID: sell.ID, SellerUserID: sell.UserID,
 		BuyerIsMaker: buy.ID == maker.ID, At: time.Now(),
 	}
@@ -305,21 +363,27 @@ func (r *rig) position(t *testing.T, user string) domain.Position {
 	return list[0].Position
 }
 
-func (r *rig) reconcile(t *testing.T) {
+func (r *rig) reconcile(t *testing.T, assets ...string) {
 	t.Helper()
-	results, err := (&application.Reconciler{Svc: r.svc, Asset: "USDT"}).Run(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, res := range results {
-		if len(res.Mismatches) > 0 {
-			t.Fatalf("%s: %+v", res.Check, res.Mismatches)
+	for _, asset := range append([]string{"USDT"}, assets...) {
+		results, err := (&application.Reconciler{Svc: r.svc, Asset: asset}).Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, res := range results {
+			if len(res.Mismatches) > 0 {
+				t.Fatalf("%s %s: %+v", asset, res.Check, res.Mismatches)
+			}
 		}
 	}
 	// Every user's frozen balance is their orders' reservations and their
 	// positions' margin.
-	for user, frozen := range r.ledger.frozen {
-		sum, err := r.svc.Account(context.Background(), user, "USDT")
+	for key, frozen := range r.ledger.frozen {
+		user, asset, coin := strings.Cut(key, "|")
+		if !coin {
+			asset = "USDT"
+		}
+		sum, err := r.svc.Account(context.Background(), user, asset)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -790,7 +854,7 @@ func TestACrossAccountIsLiquidatedTogether(t *testing.T) {
 		t.Fatalf("estimate %+v %v", views, err)
 	}
 	r.monitor(t, "61100")
-	if at, err := r.store.Read().Cross().WarnedAt(ctx, alice); err != nil || at.IsZero() {
+	if at, err := r.store.Read().Cross().WarnedAt(ctx, alice, "USDT"); err != nil || at.IsZero() {
 		t.Fatalf("cross warning %v %v", at, err)
 	}
 	r.monitor(t, "61200")
@@ -937,7 +1001,7 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{}); err != nil || len(list) != 2 || list[1].UserID != bob {
 		t.Fatalf("HOUSE last %+v %v", list, err)
 	}
-	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, time.Now()); err != nil {
+	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, "USDT", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 1 || list[0].UserID != alice || list[0].WarnedAt.IsZero() {
@@ -947,7 +1011,7 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{UserID: alice}); err != nil || len(list) != 1 || list[0].WarnedAt.IsZero() {
 		t.Fatalf("every position, the account warned %+v %v", list, err)
 	}
-	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, time.Time{}); err != nil {
+	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, "USDT", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	r.svc.HouseUser = ""

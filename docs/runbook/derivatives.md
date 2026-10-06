@@ -112,6 +112,17 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 
 部署会重启 market-data-service，标记价可能中断超过 10 秒，合约因此进入只减仓（2026-10-01 有一次 ETH-USDT-PERP 停在只减仓几个小时，直到端到端测试失败才发现）。`deploy/server-update.sh` 最后等 20 秒，解除部署期间开始、原因为 `INDEX_SOURCES` 或 `MARK_PRICE_STALE` 的只减仓，解除人记为 `deploy-<版本>`（`exchangectl` 读 `EXCHANGECTL_ACTOR`）；价源若真断了，10 秒后又会只减仓。部署之外开始的只减仓仍须人工解除。
 
+## 币本位合约（反向合约，币本位设计 2026-10-06 §2，批次 G1）
+
+- 规格（G0）：`margin_type` 为 `COIN`、`settle_asset` 为基础资产（BTC、ETH、ASTRA）、`contract_size` 为面值（美元：BTC 100、其它 10），以 USD 计价。服务读 instrument-service 的全部合约（`margin_type=ALL`），金额精度取结算资产的（BTC、ETH 8 位）。
+- 账户：每个结算资产一个 `FUTURES` 账户（USDT、BTC、ETH、ASTRA），冻结、结算、资金费、保证金划转、全仓权益与全仓预警都按（用户, 结算资产）分开；`GET /v1/derivatives/account?asset=BTC` 看该资产的账户（缺省 USDT，不是任何合约结算资产的为 `DERIV_SETTLE_ASSET_MISMATCH`）；全仓预警记在 `cross_accounts`（迁移 derivatives 00006 起主键为（用户, 资产））。划入 FUTURES 用现有划转按资产划。
+- 下单：数量是整数张（有小数为 `DERIV_CONTRACTS_NOT_INTEGER`），价格是美元；开仓还要资格 `COIN_M_TRADE`（开关 `derivatives.coin_m`，按用户或地区，关着为 `USER_NOT_ELIGIBLE`）。买单按 min(限价, 标记价) 预留、卖单按限价（价格越低占用的币越多，与 U 本位相反）。
+- 公式（`domain/contract.go`、`position.go`）：价值 V(P) = 张数 × 面值 ÷ P；每笔成交的币价值按结算资产精度四舍五入一次，双方同值，成本、已实现盈亏、`PNL_CLEARING` 都用它；未实现盈亏多头 = 成本 − V(P)，空头取反；维持保证金 = V(P) × 维持率 − 抵扣（档位按币计的名义价值，与币安 COIN-M 的 `qtyCap` 同口径）；逐仓强平价多头 Q×S×(1+r) ÷ (M + D + 成本)，空头 Q×S×(1−r) ÷ (成本 − M − D)（分母 ≤ 0 时没有强平价，破产价同理，强平单与 ADL 以标记价兜底）；资金费 = |张数| × 面值 × |费率| ÷ 标记价（付方向上、收方向下）；手续费按未舍入的币价值 × 费率向上。
+- 不变量 6 按资产：反向合约的成本方向相反，`PNL_CLEARING` + U 本位 Σ多头成本 − Σ空头成本 − 币本位 Σ多头成本 + Σ空头成本 = 0。
+- 结算：账本 `SettleFutures` 按资产；HOUSE 的 BTC/ETH 不能为负，亏损超过余额的部分由同一资产的保险基金补，基金不够时整笔拒绝、不入账（账本集成测试 `TestCoinSettledFutures`）。保险基金与杠杆交易共用 `INSURANCE_FUND` 的同一行（协调会话 20:45 决定 ⑦）。
+- 事件与推送：`Position`、`FillSettled` 带 `settle_asset`、`contract_size`，`LiquidationWarning`、`LiquidationFilled`、`AdlExecuted` 带 `settle_asset`（全仓预警的是该账户的资产）；发给引擎的 `PlaceOrder` 带两者，引擎的 `TradeExecuted` 也带，币本位成交的 `quote_quantity` 是张数 × 面值（美元），订单的 `filled_quote` 仍是价格 × 数量之和（平均价由它算）。网关的 `orders`（受理时）、`fills`、`positions`、`risk` 推送带 `settle_asset`，合约成交的 `fee_asset` 是结算资产。ClickHouse 的 `trades`、`derivatives_positions`、`derivatives_fills`、`derivatives_funding` 记 `settle_asset`，币本位成交的 `notional` 是美元价值。
+- REST：仓位多了 `settle_asset`、`contracts`（币本位的有符号张数，线性为 null）、`value_coin`（币本位按标记价的币价值）、`value_usd`（币本位张数 × 面值，线性为名义价值）；订单、成交、资金费记录带 `settle_asset`。
+
 ## 对账（不变量 6）
 
 每小时（`RECONCILE_INTERVAL`，启动 1 分钟后先跑一次），持有成交处理锁，结果写 `derivatives.reconciliation_runs`，指标 `derivatives_reconcile_mismatches{check}`，告警 `DerivativesReconciliationMismatch`：
@@ -119,7 +130,7 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 | 检查 | 含义 |
 |---|---|
 | `POSITIONS_BALANCED` | 每个合约多头总量 = 空头总量 |
-| `PNL_CLEARING_MATCHES_POSITIONS` | 账本 `PNL_CLEARING`（USDT）+ Σ多头成本 − Σ空头成本 = 0 |
+| `PNL_CLEARING_MATCHES_POSITIONS` | 按结算资产：账本 `PNL_CLEARING` + U 本位 Σ多头成本 − Σ空头成本 − 币本位 Σ多头成本 + Σ空头成本 = 0（反向合约的成本方向相反，见下节） |
 | `NO_PENDING_SETTLEMENTS` | 没有等账本记账的结算 |
 
 手工：`exchangectl derivatives reconcile`（直接读两边的库，成交在途时可能有瞬时差异）。账本侧另有 `FUNDING_BATCHES_BALANCED`、`PNL_CLEARING_ONLY_PNL`（见 [ledger.md](ledger.md#对账)）。

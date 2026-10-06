@@ -205,6 +205,13 @@ var (
 		"the position is being liquidated")
 	ErrMarginTooLarge = apperr.New(apperr.KindUnprocessable, "DERIV_MARGIN_REDUCE_TOO_LARGE",
 		"the position would keep less than its initial margin")
+	// ErrContractsNotInteger: a coin-margined contract trades whole
+	// contracts (coin-M design §2.5).
+	ErrContractsNotInteger = apperr.New(apperr.KindInvalid, "DERIV_CONTRACTS_NOT_INTEGER",
+		"a coin-margined contract's quantity is a whole number of contracts")
+	// ErrSettleAssetMismatch: the asset is no contract's settlement asset.
+	ErrSettleAssetMismatch = apperr.New(apperr.KindInvalid, "DERIV_SETTLE_ASSET_MISMATCH",
+		"no contract is settled in the asset")
 	ErrClosePending = apperr.New(apperr.KindConflict, "DERIV_CLOSE_PENDING",
 		"the position's closing orders are being canceled; close it again in a moment")
 )

@@ -200,10 +200,10 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		if err := r.Fills().Insert(ctx, plan.Fill); err != nil {
 			return err
 		}
-		if err := r.Emit(ctx, event.TopicDerivPosition, fillProto(plan.Fill), "user", userID); err != nil {
+		if err := r.Emit(ctx, event.TopicDerivPosition, fillProto(c, plan.Fill), "user", userID); err != nil {
 			return err
 		}
-		if msg := liquidationEvent(o, plan.Fill, liquidated); msg != nil {
+		if msg := liquidationEvent(c, o, plan.Fill, liquidated); msg != nil {
 			if err := r.Emit(ctx, event.TopicDerivLiquidation, msg, "user", userID); err != nil {
 				return err
 			}
@@ -316,12 +316,12 @@ func (s *Service) addMargin(ctx context.Context, r ports.Repos, userID, position
 	return nil
 }
 
-func fillProto(f domain.Fill) *derivativesv1.FillSettled {
+func fillProto(c domain.Contract, f domain.Fill) *derivativesv1.FillSettled {
 	return &derivativesv1.FillSettled{
 		TradeId: f.TradeID, OrderId: f.OrderID, UserId: f.UserID, Symbol: f.Symbol, Side: string(f.Side),
 		PositionSide: string(f.PositionSide), Maker: f.Maker, Price: f.Price.String(), Quantity: f.Qty.String(),
 		ClosedQuantity: f.ClosedQty.String(), Fee: f.Fee.String(), RealizedPnl: f.RealizedPnL.String(),
-		Liquidation: f.Liquidation, ExecutedAt: timestamppb.New(f.ExecutedAt),
+		Liquidation: f.Liquidation, ExecutedAt: timestamppb.New(f.ExecutedAt), SettleAsset: c.Settle(), ContractSize: sizeOf(c),
 	}
 }
 

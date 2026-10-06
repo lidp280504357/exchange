@@ -82,7 +82,7 @@ func TestProjectTradesAndOrders(t *testing.T) {
 	if u := m.updates[2]; u[4] != statusCanceled || u[8] != "USER" {
 		t.Fatalf("cancel row %v", u)
 	}
-	if tr := m.trades[0]; tr[9] != "SELL" || tr[4] != uint64(12) || tr[14] != true {
+	if tr := m.trades[0]; tr[10] != "SELL" || tr[5] != uint64(12) || tr[15] != true || tr[4] != "" {
 		t.Fatalf("trade row %v", tr)
 	}
 	s := m.touched["ETH-BTC"]
@@ -175,13 +175,13 @@ func TestProjectDerivatives(t *testing.T) {
 		t.Fatalf("%d trades, %d fills, %d funding, %d positions, %d liquidations", len(m.trades), len(m.fills), len(m.funding),
 			len(m.positions), len(m.liquidations))
 	}
-	if f := m.fills[0]; !f[9].(decimal.Decimal).Equal(decimal.NewFromInt(30000)) || !f[11].(decimal.Decimal).Equal(decimal.NewFromInt(15)) {
+	if f := m.fills[0]; !f[10].(decimal.Decimal).Equal(decimal.NewFromInt(30000)) || !f[12].(decimal.Decimal).Equal(decimal.NewFromInt(15)) {
 		t.Fatalf("fill row %v", f)
 	}
-	if p := m.positions[0]; p[13] != uint64(4) || !p[5].(*decimal.Decimal).Equal(decimal.NewFromInt(60000)) || p[9] != int32(50) {
+	if p := m.positions[0]; p[14] != uint64(4) || !p[6].(*decimal.Decimal).Equal(decimal.NewFromInt(60000)) || p[10] != int32(50) {
 		t.Fatalf("position row %v", p)
 	}
-	if f := m.funding[0]; !f[8].(decimal.Decimal).Equal(decimal.RequireFromString("-1.5")) || !f[5].(time.Time).Equal(at.Truncate(time.Hour)) {
+	if f := m.funding[0]; !f[9].(decimal.Decimal).Equal(decimal.RequireFromString("-1.5")) || !f[6].(time.Time).Equal(at.Truncate(time.Hour)) {
 		t.Fatalf("funding row %v", f)
 	}
 	kinds := []string{}
@@ -328,5 +328,35 @@ func TestProjectMargin(t *testing.T) {
 	}
 	if err := m.add(delivery(t, event.TopicMargin, &marginv1.MarginInterestAccrued{InterestId: "nope"}, at)); !errors.Is(err, errMalformed) {
 		t.Fatalf("malformed interest: %v", err)
+	}
+}
+
+// A coin-margined contract's rows carry its settlement asset, and a fill's
+// notional is its contracts' USD value (coin-margined design 2026-10-06
+// §2.5): 3 contracts of 100 USD, not 3 x 60000.
+func TestProjectCoinMargined(t *testing.T) {
+	at := time.Date(2026, 10, 6, 8, 0, 3, 0, time.UTC)
+	user := uuid.NewString()
+	var m readModels
+	for _, d := range []kafka.Delivery{
+		delivery(t, event.TopicDerivTrade, &tradev1.TradeExecuted{
+			TradeId: uuid.NewString(), Symbol: "BTC-USD-PERP", Sequence: 1, Price: "60000", Quantity: "3", QuoteQuantity: "300",
+			BuyerOrderId: uuid.NewString(), BuyerUserId: user, SellerOrderId: uuid.NewString(), SellerUserId: uuid.NewString(),
+			SettleAsset: "BTC", ContractSize: "100",
+		}, at),
+		delivery(t, event.TopicDerivPosition, &derivativesv1.FillSettled{
+			TradeId: uuid.NewString(), OrderId: uuid.NewString(), UserId: user, Symbol: "BTC-USD-PERP", Side: "BUY", PositionSide: "BOTH",
+			Price: "60000", Quantity: "3", Fee: "0.000003", RealizedPnl: "0", ExecutedAt: timestamppb.New(at), SettleAsset: "BTC", ContractSize: "100",
+		}, at),
+	} {
+		if err := m.add(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tr := m.trades[0]; tr[4] != "BTC" || !tr[9].(decimal.Decimal).Equal(decimal.NewFromInt(300)) {
+		t.Fatalf("trade row %v", tr)
+	}
+	if f := m.fills[0]; f[4] != "BTC" || !f[10].(decimal.Decimal).Equal(decimal.NewFromInt(300)) {
+		t.Fatalf("fill row %v", f)
 	}
 }

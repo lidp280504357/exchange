@@ -646,9 +646,9 @@ type cross repos
 
 func (r repos) Cross() ports.CrossRepo { return cross(r) }
 
-func (r cross) WarnedAt(ctx context.Context, userID string) (time.Time, error) {
+func (r cross) WarnedAt(ctx context.Context, userID, asset string) (time.Time, error) {
 	var at *time.Time
-	err := r.q.QueryRow(ctx, `SELECT warned_at FROM cross_accounts WHERE user_id = $1`, userID).Scan(&at)
+	err := r.q.QueryRow(ctx, `SELECT warned_at FROM cross_accounts WHERE user_id = $1 AND asset = $2`, userID, asset).Scan(&at)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && at == nil) {
 		return time.Time{}, nil
 	}
@@ -658,27 +658,27 @@ func (r cross) WarnedAt(ctx context.Context, userID string) (time.Time, error) {
 	return *at, nil
 }
 
-func (r cross) Warned(ctx context.Context) (map[string]time.Time, error) {
-	rows, err := r.q.Query(ctx, `SELECT user_id::text, warned_at FROM cross_accounts WHERE warned_at IS NOT NULL`)
+func (r cross) Warned(ctx context.Context) (map[ports.CrossAccount]time.Time, error) {
+	rows, err := r.q.Query(ctx, `SELECT user_id::text, asset, warned_at FROM cross_accounts WHERE warned_at IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("list warned cross accounts: %w", err)
 	}
 	defer rows.Close()
-	out := map[string]time.Time{}
+	out := map[ports.CrossAccount]time.Time{}
 	for rows.Next() {
-		var user string
+		var a ports.CrossAccount
 		var at time.Time
-		if err := rows.Scan(&user, &at); err != nil {
+		if err := rows.Scan(&a.UserID, &a.Asset, &at); err != nil {
 			return nil, fmt.Errorf("scan warned cross account: %w", err)
 		}
-		out[user] = at
+		out[a] = at
 	}
 	return out, rows.Err()
 }
 
-func (r cross) SetWarnedAt(ctx context.Context, userID string, at time.Time) error {
-	if _, err := r.q.Exec(ctx, `INSERT INTO cross_accounts (user_id, warned_at) VALUES ($1, $2)
-		ON CONFLICT (user_id) DO UPDATE SET warned_at = $2, updated_at = now()`, userID, nullTime(at)); err != nil {
+func (r cross) SetWarnedAt(ctx context.Context, userID, asset string, at time.Time) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO cross_accounts (user_id, asset, warned_at) VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, asset) DO UPDATE SET warned_at = $3, updated_at = now()`, userID, asset, nullTime(at)); err != nil {
 		return fmt.Errorf("save cross account: %w", err)
 	}
 	return nil

@@ -35,7 +35,7 @@ type memState struct {
 	contracts map[string]ports.ContractState
 	rounds    map[string]domain.FundingRound
 	payments  map[string]domain.FundingPayment
-	warned    map[string]time.Time
+	warned    map[ports.CrossAccount]time.Time
 	conds     map[string]domain.Conditional
 	events    []proto.Message
 	runs      int
@@ -45,7 +45,7 @@ func newMemStore() *memStore {
 	return &memStore{st: memState{
 		settings: map[string]domain.Settings{}, orders: map[string]domain.Order{}, positions: map[string]domain.Position{},
 		fills: map[string]domain.Fill{}, pending: map[string]ports.PendingSettlement{}, contracts: map[string]ports.ContractState{},
-		rounds: map[string]domain.FundingRound{}, payments: map[string]domain.FundingPayment{}, warned: map[string]time.Time{},
+		rounds: map[string]domain.FundingRound{}, payments: map[string]domain.FundingPayment{}, warned: map[ports.CrossAccount]time.Time{},
 		conds: map[string]domain.Conditional{},
 	}}
 }
@@ -454,20 +454,20 @@ func (r memFunding) OfUser(_ context.Context, userID, symbol, _ string, limit in
 
 type memCross memRepos
 
-func (r memCross) WarnedAt(_ context.Context, userID string) (time.Time, error) {
-	return r.st.warned[userID], nil
+func (r memCross) WarnedAt(_ context.Context, userID, asset string) (time.Time, error) {
+	return r.st.warned[ports.CrossAccount{UserID: userID, Asset: asset}], nil
 }
 
-func (r memCross) SetWarnedAt(_ context.Context, userID string, at time.Time) error {
-	r.st.warned[userID] = at
+func (r memCross) SetWarnedAt(_ context.Context, userID, asset string, at time.Time) error {
+	r.st.warned[ports.CrossAccount{UserID: userID, Asset: asset}] = at
 	return nil
 }
 
-func (r memCross) Warned(context.Context) (map[string]time.Time, error) {
-	out := map[string]time.Time{}
-	for user, at := range r.st.warned {
+func (r memCross) Warned(context.Context) (map[ports.CrossAccount]time.Time, error) {
+	out := map[ports.CrossAccount]time.Time{}
+	for a, at := range r.st.warned {
 		if !at.IsZero() {
-			out[user] = at
+			out[a] = at
 		}
 	}
 	return out, nil

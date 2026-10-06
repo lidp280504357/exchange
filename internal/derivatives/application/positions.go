@@ -18,6 +18,10 @@ import (
 // PositionView is an open position at the mark price.
 type PositionView struct {
 	domain.Position
+	// Settle is the contract's settlement asset; ContractSize its face
+	// value when it is coin-margined, zero otherwise.
+	Settle       string
+	ContractSize decimal.Decimal
 	// Entry is the average entry price (Position.EntryPrice).
 	Entry decimal.Decimal
 	// Mark is the latest mark price, zero before the first; the figures
@@ -52,7 +56,7 @@ func (s *Service) Positions(ctx context.Context, userID, symbol string) ([]Posit
 		if err != nil {
 			return nil, err
 		}
-		v := PositionView{Position: p, Entry: p.EntryPrice(c)}
+		v := PositionView{Position: p, Entry: p.EntryPrice(c), Settle: c.Settle(), ContractSize: c.ContractSize}
 		if m, _ := s.Marks.Mark(p.Symbol); m.Price.IsPositive() {
 			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(c, m.Price), p.MaintenanceMargin(c, m.Price)
 			v.Value = p.Notional(c, m.Price)
@@ -320,6 +324,9 @@ func (s *Service) AdjustMargin(ctx context.Context, userID, symbol string, side 
 
 // Account sums up the user's FUTURES account at the latest mark prices.
 func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Summary, error) {
+	if err := s.checkSettleAsset(ctx, asset); err != nil {
+		return domain.Summary{}, err
+	}
 	bal, err := s.Ledger.Balance(ctx, userID, asset)
 	if err != nil {
 		return domain.Summary{}, err
@@ -355,7 +362,11 @@ func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Sum
 			sum.CrossUnrealizedPnL = sum.CrossUnrealizedPnL.Add(u)
 		}
 	}
-	orders, err := r.Orders().Unreleased(ctx, userID)
+	unreleased, err := r.Orders().Unreleased(ctx, userID)
+	if err != nil {
+		return domain.Summary{}, err
+	}
+	orders, err := s.settledIn(ctx, unreleased, asset)
 	if err != nil {
 		return domain.Summary{}, err
 	}
@@ -363,6 +374,30 @@ func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Sum
 		sum.OrderMargin = sum.OrderMargin.Add(o.Unreleased())
 	}
 	return sum, nil
+}
+
+// SettleAsset returns the asset the contract is settled in.
+func (s *Service) SettleAsset(ctx context.Context, symbol string) (string, error) {
+	c, err := s.Instruments.Contract(ctx, symbol)
+	if err != nil {
+		return "", err
+	}
+	return c.Settle(), nil
+}
+
+// checkSettleAsset refuses an asset no contract is settled in
+// (DERIV_SETTLE_ASSET_MISMATCH): it has no FUTURES account here.
+func (s *Service) checkSettleAsset(ctx context.Context, asset string) error {
+	list, err := s.Instruments.Contracts(ctx)
+	if err != nil {
+		return err
+	}
+	for _, c := range list {
+		if c.Settle() == asset {
+			return nil
+		}
+	}
+	return domain.ErrSettleAssetMismatch.WithDetail("asset", asset)
 }
 
 // CrossUnrealizedPnL is the unrealized result of the user's cross
@@ -506,8 +541,8 @@ func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]Positi
 		if err != nil {
 			return nil, false, err
 		}
-		v := PositionView{Position: p, Entry: p.EntryPrice(c)}
-		if at, ok := warned[p.UserID]; ok && p.MarginMode == domain.Cross && v.WarnedAt.IsZero() {
+		v := PositionView{Position: p, Entry: p.EntryPrice(c), Settle: c.Settle(), ContractSize: c.ContractSize}
+		if at, ok := warned[ports.CrossAccount{UserID: p.UserID, Asset: c.Settle()}]; ok && p.MarginMode == domain.Cross && v.WarnedAt.IsZero() {
 			v.WarnedAt = at
 		}
 		ratio := decimal.Zero

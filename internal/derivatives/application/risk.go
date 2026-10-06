@@ -147,7 +147,7 @@ func (s *Service) checkCross(ctx context.Context, userID, asset string, position
 		return err
 	}
 	equity, maintenance := domain.CrossEquity(bal.Available, orders, positions, contracts, marks)
-	warned, err := s.Store.Read().Cross().WarnedAt(ctx, userID)
+	warned, err := s.Store.Read().Cross().WarnedAt(ctx, userID, asset)
 	if err != nil {
 		return err
 	}
@@ -157,24 +157,28 @@ func (s *Service) checkCross(ctx context.Context, userID, asset string, position
 	case domain.MarginWarning:
 		if warned.IsZero() {
 			return s.Store.Tx(ctx, func(r ports.Repos) error {
-				if err := r.Cross().SetWarnedAt(ctx, userID, s.Now()); err != nil {
+				if err := r.Cross().SetWarnedAt(ctx, userID, asset, s.Now()); err != nil {
 					return err
 				}
 				return r.Emit(ctx, event.TopicDerivLiquidation, &derivativesv1.LiquidationWarning{
 					UserId: userID, Cross: true, MarginBalance: equity.String(), MaintenanceMargin: maintenance.String(),
-					At: timestamppb.New(s.Now()),
+					At: timestamppb.New(s.Now()), SettleAsset: asset,
 				}, "user", userID)
 			})
 		}
 	default:
 		if !warned.IsZero() && domain.Recovered(equity, maintenance) {
-			return s.Store.Tx(ctx, func(r ports.Repos) error { return r.Cross().SetWarnedAt(ctx, userID, time.Time{}) })
+			return s.Store.Tx(ctx, func(r ports.Repos) error { return r.Cross().SetWarnedAt(ctx, userID, asset, time.Time{}) })
 		}
 	}
 	return nil
 }
 
 func (s *Service) warnPosition(ctx context.Context, p domain.Position, balance, maintenance decimal.Decimal) error {
+	c, err := s.Instruments.Contract(ctx, p.Symbol)
+	if err != nil {
+		return err
+	}
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
 		if err := r.LockUser(ctx, p.UserID); err != nil {
 			return err
@@ -190,7 +194,7 @@ func (s *Service) warnPosition(ctx context.Context, p domain.Position, balance, 
 		s.step("warning")
 		return r.Emit(ctx, event.TopicDerivLiquidation, &derivativesv1.LiquidationWarning{
 			UserId: p.UserID, Symbol: p.Symbol, PositionSide: string(p.Side), MarginBalance: balance.String(),
-			MaintenanceMargin: maintenance.String(), At: timestamppb.New(s.Now()),
+			MaintenanceMargin: maintenance.String(), At: timestamppb.New(s.Now()), SettleAsset: c.Settle(),
 		}, "user", p.UserID)
 	})
 }
@@ -380,18 +384,20 @@ func (s *Service) deleverage(ctx context.Context, c domain.Contract, p domain.Po
 }
 
 // liquidationEvent is the event a settled fill of a taken-over position,
-// or of an auto-deleveraged counterparty, adds; nil for other fills.
-func liquidationEvent(o domain.Order, f domain.Fill, liquidated bool) proto.Message {
+// or of an auto-deleveraged counterparty, of contract c adds; nil for
+// other fills.
+func liquidationEvent(c domain.Contract, o domain.Order, f domain.Fill, liquidated bool) proto.Message {
 	switch {
 	case o.Kind == domain.KindLiquidation || (o.Kind == domain.KindADL && liquidated):
 		return &derivativesv1.LiquidationFilled{
 			UserId: f.UserID, Symbol: f.Symbol, PositionSide: string(f.PositionSide), TradeId: f.TradeID, Price: f.Price.String(),
 			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), InsurancePaid: f.Insurance.String(), Adl: o.Kind == domain.KindADL,
+			SettleAsset: c.Settle(),
 		}
 	case o.Kind == domain.KindADL:
 		return &derivativesv1.AdlExecuted{
 			UserId: f.UserID, Symbol: f.Symbol, PositionSide: string(f.PositionSide), TradeId: f.TradeID, Price: f.Price.String(),
-			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(),
+			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), SettleAsset: c.Settle(),
 		}
 	}
 	return nil

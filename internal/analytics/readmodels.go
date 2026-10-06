@@ -45,9 +45,9 @@ var ReadModelTopics = []string{
 }
 
 const (
-	insertTrades = `INSERT INTO trades (trade_id, symbol, base_asset, quote_asset, trade_number, sequence, price, quantity,
-		quote_quantity, taker_side, buyer_order_id, buyer_user_id, seller_order_id, seller_user_id, buyer_is_maker, buyer_fee,
-		seller_fee, house_side, executed_at)`
+	insertTrades = `INSERT INTO trades (trade_id, symbol, base_asset, quote_asset, settle_asset, trade_number, sequence, price,
+		quantity, quote_quantity, taker_side, buyer_order_id, buyer_user_id, seller_order_id, seller_user_id, buyer_is_maker,
+		buyer_fee, seller_fee, house_side, executed_at)`
 	insertOrders = `INSERT INTO orders (order_id, client_order_id, user_id, symbol, side, type, time_in_force, price, quantity,
 		quote_amount, frozen_asset, frozen_amount, accepted_at)`
 	insertOrderUpdates = `INSERT INTO order_updates (order_id, user_id, symbol, sequence, status, filled_quantity, filled_quote,
@@ -56,12 +56,12 @@ const (
 		block_number, amount, status, unclaimed, reason, confirmations, required_confirmations, journal_id, updated_at, version)`
 	insertWithdrawals = `INSERT INTO wallet_withdrawals (withdrawal_id, user_id, asset, network, address, amount, fee, status,
 		internal, tx_hash, confirmations, required_confirmations, risk_reasons, reject_reason, updated_at, version)`
-	insertPositions = `INSERT INTO derivatives_positions (position_id, user_id, symbol, position_side, quantity, entry_price,
-		entry_cost, margin, margin_mode, leverage, realized_pnl, funding, updated_at, version)`
-	insertDerivFills = `INSERT INTO derivatives_fills (trade_id, order_id, user_id, symbol, side, position_side, maker, price,
-		quantity, notional, closed_quantity, fee, realized_pnl, liquidation, executed_at)`
-	insertFunding = `INSERT INTO derivatives_funding (position_id, user_id, symbol, position_side, margin_mode, funding_time,
-		funding_rate, mark_price, amount, settled_at)`
+	insertPositions = `INSERT INTO derivatives_positions (position_id, user_id, symbol, settle_asset, position_side, quantity,
+		entry_price, entry_cost, margin, margin_mode, leverage, realized_pnl, funding, updated_at, version)`
+	insertDerivFills = `INSERT INTO derivatives_fills (trade_id, order_id, user_id, symbol, settle_asset, side, position_side, maker,
+		price, quantity, notional, closed_quantity, fee, realized_pnl, liquidation, executed_at)`
+	insertFunding = `INSERT INTO derivatives_funding (position_id, user_id, symbol, settle_asset, position_side, margin_mode,
+		funding_time, funding_rate, mark_price, amount, settled_at)`
 	insertLiquidations = `INSERT INTO derivatives_liquidations (event_id, kind, user_id, symbol, position_side, cross_margin, adl,
 		trade_id, price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin,
 		occurred_at)`
@@ -263,7 +263,8 @@ func (m *readModels) addTrade(t *tradev1.TradeExecuted, at time.Time) error {
 		return err
 	}
 	m.trades = append(m.trades, []any{
-		tradeID, t.GetSymbol(), t.GetBaseAsset(), t.GetQuoteAsset(), t.GetTradeNumber(), t.GetSequence(), price, qty, quote,
+		tradeID, t.GetSymbol(), t.GetBaseAsset(), t.GetQuoteAsset(), t.GetSettleAsset(), t.GetTradeNumber(), t.GetSequence(), price, qty,
+		quote,
 		enum(t.GetTakerSide().String(), "SIDE_"), buyerOrder, buyer, sellerOrder, seller, t.GetBuyerIsMaker(), buyerFee, sellerFee,
 		houseSide(t), at,
 	})
@@ -445,8 +446,8 @@ func (m *readModels) addPosition(p *derivativesv1.Position, at time.Time) error 
 		return fmt.Errorf("%w: position version %d", errMalformed, p.GetVersion())
 	}
 	m.positions = append(m.positions, []any{
-		positionID, userID, p.GetSymbol(), p.GetPositionSide(), qty, entryPrice, entryCost, margin, p.GetMarginMode(), p.GetLeverage(),
-		pnl, funding, at, uint64(p.GetVersion()), //nolint:gosec // checked non-negative above
+		positionID, userID, p.GetSymbol(), p.GetSettleAsset(), p.GetPositionSide(), qty, entryPrice, entryCost, margin, p.GetMarginMode(),
+		p.GetLeverage(), pnl, funding, at, uint64(p.GetVersion()), //nolint:gosec // checked non-negative above
 	})
 	return nil
 }
@@ -470,12 +471,20 @@ func (m *readModels) addDerivFill(f *derivativesv1.FillSettled) error {
 	check(err)
 	pnl, err := amount(f.GetRealizedPnl())
 	check(err)
+	// A coin-margined fill's notional is its contracts' USD value
+	// (coin-margined design 2026-10-06 §2.5).
+	notional := price.Mul(qty)
+	if s := f.GetContractSize(); s != "" && s != "0" {
+		size, err := amount(s)
+		check(err)
+		notional = qty.Mul(size)
+	}
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
 	m.fills = append(m.fills, []any{
-		tradeID, orderID, userID, f.GetSymbol(), f.GetSide(), f.GetPositionSide(), f.GetMaker(), price, qty, price.Mul(qty), closed, fee,
-		pnl, f.GetLiquidation(), f.GetExecutedAt().AsTime(),
+		tradeID, orderID, userID, f.GetSymbol(), f.GetSettleAsset(), f.GetSide(), f.GetPositionSide(), f.GetMaker(), price, qty, notional,
+		closed, fee, pnl, f.GetLiquidation(), f.GetExecutedAt().AsTime(),
 	})
 	return nil
 }
@@ -491,7 +500,8 @@ func (m *readModels) addFunding(e *derivativesv1.FundingPaid, at time.Time) erro
 		return err
 	}
 	m.funding = append(m.funding, []any{
-		positionID, userID, p.GetSymbol(), p.GetPositionSide(), p.GetMarginMode(), e.GetFundingTime().AsTime(), rate, mark, amt, at,
+		positionID, userID, p.GetSymbol(), p.GetSettleAsset(), p.GetPositionSide(), p.GetMarginMode(), e.GetFundingTime().AsTime(), rate,
+		mark, amt, at,
 	})
 	return nil
 }

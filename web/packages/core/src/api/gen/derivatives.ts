@@ -310,14 +310,14 @@ export interface components {
             funding: components["schemas"]["Decimal"];
             /** Format: date-time */
             updated_at: string;
-            /** @description The asset margin, PnL and funding are in (from batch G1, which makes it required). */
-            settle_asset?: string;
-            /** @description Signed, as quantity: whole contracts of a coin-margined contract; null for a linear one (from batch G1). */
-            contracts?: components["schemas"]["NullableDecimal"];
-            /** @description A coin-margined position's value in its settlement asset at the mark price, |contracts| x contract_size / mark; null for a linear one or before the first mark price (from batch G1). */
-            value_coin?: components["schemas"]["NullableDecimal"];
-            /** @description The position's value in USD: |contracts| x contract_size for a coin-margined one, notional for a linear one (from batch G1). */
-            value_usd?: components["schemas"]["NullableDecimal"];
+            /** @description The asset margin, PnL and funding are in. */
+            settle_asset: string;
+            /** @description Signed, as quantity: whole contracts of a coin-margined contract; null for a linear one. */
+            contracts: components["schemas"]["NullableDecimal"];
+            /** @description A coin-margined position's value in its settlement asset at the mark price, |contracts| x contract_size / mark; null for a linear one or before the first mark price. */
+            value_coin: components["schemas"]["NullableDecimal"];
+            /** @description The position's value in USD: |contracts| x contract_size for a coin-margined one, notional for a linear one (null before the first mark price). */
+            value_usd: components["schemas"]["NullableDecimal"];
         };
         ContractOrder: {
             /** Format: uuid */
@@ -355,8 +355,8 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-            /** @description The asset the order's margin and fee are in (from batch G1, which makes it required). */
-            settle_asset?: string;
+            /** @description The asset the order's margin and fee are in. */
+            settle_asset: string;
         };
         ConditionalOrder: {
             /** Format: uuid */
@@ -402,8 +402,8 @@ export interface components {
             mark_price: components["schemas"]["Decimal"];
             /** @description Received (positive) or paid. */
             amount: components["schemas"]["Decimal"];
-            /** @description The asset amount is in (from batch G1, which makes it required). */
-            settle_asset?: string;
+            /** @description The asset amount is in. */
+            settle_asset: string;
         };
         ContractFill: {
             /** Format: uuid */
@@ -429,8 +429,8 @@ export interface components {
             settled: boolean;
             /** Format: date-time */
             executed_at: string;
-            /** @description The asset fee and realized_pnl are in (from batch G1, which makes it required). */
-            settle_asset?: string;
+            /** @description The asset fee and realized_pnl are in. */
+            settle_asset: string;
         };
         Error: {
             /**
@@ -479,7 +479,7 @@ export interface operations {
     getDerivativesAccount: {
         parameters: {
             query?: {
-                /** @description The settlement asset whose FUTURES account to show (USDT by default; BTC, ETH, ASTRA for the coin-margined contracts, from batch G1); one no contract settles in is DERIV_SETTLE_ASSET_MISMATCH. */
+                /** @description The settlement asset whose FUTURES account to show (USDT by default; BTC, ETH, ASTRA for the coin-margined contracts); one no contract settles in is DERIV_SETTLE_ASSET_MISMATCH. */
                 asset?: string;
             };
             header?: never;

@@ -153,13 +153,19 @@ type ConditionalRepo interface {
 
 // CrossRepo stores the warnings of cross accounts.
 type CrossRepo interface {
-	// WarnedAt returns when the user's cross account was warned, zero when
-	// it is not.
-	WarnedAt(ctx context.Context, userID string) (time.Time, error)
-	SetWarnedAt(ctx context.Context, userID string, at time.Time) error
-	// Warned returns the users whose cross account is warned now, with
-	// when.
-	Warned(ctx context.Context) (map[string]time.Time, error)
+	// WarnedAt returns when the user's cross account in asset was warned,
+	// zero when it is not (a user has one cross account per settlement
+	// asset, coin-M design §2.3).
+	WarnedAt(ctx context.Context, userID, asset string) (time.Time, error)
+	SetWarnedAt(ctx context.Context, userID, asset string, at time.Time) error
+	// Warned returns the cross accounts warned now, with when.
+	Warned(ctx context.Context) (map[CrossAccount]time.Time, error)
+}
+
+// CrossAccount is a user's cross account in one settlement asset.
+type CrossAccount struct {
+	UserID string
+	Asset  string
 }
 
 // RunRepo records the reconciliation runs.

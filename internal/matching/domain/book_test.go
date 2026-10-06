@@ -184,6 +184,37 @@ func TestFeesAndTrades(t *testing.T) {
 	}
 }
 
+// A coin-margined contract trades whole contracts: a trade's quote amount
+// is their USD value (coin-margined design 2026-10-06 §2.5) and carries
+// the contract's settlement asset and size, while the orders' filled quote
+// stays price x quantity, their average price's sum. A snapshot keeps the
+// contract fields of a resting order.
+func TestCoinMarginedTrades(t *testing.T) {
+	inverse := func(user string, side Side, price, qty string) Order {
+		o := limit(user, side, price, qty)
+		o.Symbol, o.BaseAsset, o.QuoteAsset, o.LotSize = "BTC-USD-PERP", "BTC", "USD", d("1")
+		o.MakerFeeRate, o.TakerFeeRate, o.SettleAsset, o.ContractSize = d("0"), d("0"), "BTC", d("100")
+		return o
+	}
+	b := NewBook("BTC-USD-PERP")
+	b.Place(inverse("m", Sell, "60000.5", "7"))
+	b = Restore(b.Snapshot())
+	evs := b.Place(inverse("t", Buy, "60001", "3"))
+	tr := evs[0].Trade
+	if !tr.Quote.Equal(d("300")) || tr.SettleAsset != "BTC" || !tr.ContractSize.Equal(d("100")) || !tr.Quantity.Equal(d("3")) {
+		t.Fatalf("trade: %+v", tr)
+	}
+	if len(evs) != 3 || !evs[1].FilledQuote.Equal(d("180001.5")) || !evs[2].FilledQuote.Equal(d("180001.5")) {
+		t.Fatalf("the orders' filled quote: %s", summary(evs))
+	}
+	// A linear contract's and a spot trade's quote stay price x quantity.
+	b = NewBook("BTC-USDT")
+	b.Place(limit("m", Sell, "60000", "0.5"))
+	if tr := b.Place(limit("t", Buy, "60000", "0.5"))[0].Trade; !tr.Quote.Equal(d("30000")) || tr.SettleAsset != "" || !tr.ContractSize.IsZero() {
+		t.Fatalf("a linear trade: %+v", tr)
+	}
+}
+
 func TestCancel(t *testing.T) {
 	b := NewBook("BTC-USDT")
 	o := limit("a", Buy, "59000", "0.1")

@@ -128,6 +128,15 @@ func (s *Service) checkOpening(ctx context.Context, r ports.Repos, c domain.Cont
 	if !allowed {
 		return apperr.New(apperr.KindForbidden, reason, "contract trading is not available to this account now")
 	}
+	if c.Inverse() { // derivatives.coin_m too (design 2026-10-06 §2.5)
+		allowed, reason, err := s.Eligibility.Check(ctx, o.UserID, FeatureCoinM, o.Symbol)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return apperr.New(apperr.KindForbidden, reason, "coin-margined contracts are not available to this account now")
+		}
+	}
 	if err := domain.CheckRiskLimit(c, o, held, active, mark); err != nil {
 		return err
 	}
@@ -410,7 +419,7 @@ func toProto(o domain.Order, c domain.Contract) *orderv1.Order {
 		Type: orderv1.OrderType_ORDER_TYPE_LIMIT, TimeInForce: tifs[o.TimeInForce], Price: o.Price.String(), Quantity: o.Qty.String(),
 		SelfTradePrevention: orderv1.SelfTradePrevention_SELF_TRADE_PREVENTION_CANCEL_NEWEST, MakerFeeRate: "0", TakerFeeRate: "0",
 		BaseDecimals: c.BaseDecimals, QuoteDecimals: c.QuoteDecimals, TickSize: c.TickSize.String(), LotSize: c.LotSize.String(),
-		BaseAsset: c.Base, QuoteAsset: c.Quote,
+		BaseAsset: c.Base, QuoteAsset: c.Quote, SettleAsset: c.Settle(), ContractSize: sizeOf(c),
 	}
 }
 

@@ -170,7 +170,7 @@ func (b *Book) houseFill(u *Order, userMaker bool, house string, price, qty deci
 	b.Trades++
 	t := &Trade{
 		ID: tradeID(b.Symbol, seq), Number: b.Trades, Symbol: b.Symbol, BaseAsset: u.BaseAsset, QuoteAsset: u.QuoteAsset, Seq: seq,
-		Price: price, Quantity: qty, Quote: quote,
+		Price: price, Quantity: qty, Quote: u.tradeQuote(quote, qty), SettleAsset: u.SettleAsset, ContractSize: u.ContractSize,
 	}
 	houseTakes := Buy // the side of whoever came in: the user, or HOUSE's update
 	if u.Side == Buy {

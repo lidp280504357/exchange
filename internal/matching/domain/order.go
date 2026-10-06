@@ -85,6 +85,13 @@ type Order struct {
 	// each side on its account. Empty for orders from before them.
 	AccountType string `json:"account_type,omitempty"`
 	SideEffect  string `json:"side_effect,omitempty"`
+	// SettleAsset and ContractSize describe a contract order (coin-margined
+	// design 2026-10-06 §2.5): a coin-margined contract's quantities are
+	// whole contracts of ContractSize USD, and its trades' quote amounts
+	// their USD value. Empty for spot orders; ContractSize zero for a
+	// linear contract.
+	SettleAsset  string          `json:"settle_asset,omitempty"`
+	ContractSize decimal.Decimal `json:"contract_size,omitzero"`
 
 	Filled      decimal.Decimal `json:"filled"`       // base
 	FilledQuote decimal.Decimal `json:"filled_quote"` // quote exchanged
@@ -95,6 +102,16 @@ type Order struct {
 	// At is when the order's command was issued: a reference book older
 	// than the order by more than RefMaxAge does not serve it.
 	At time.Time `json:"at,omitzero"`
+}
+
+// tradeQuote is a trade's quote amount: price x qty (quote), or a
+// coin-margined contract's contracts' USD value. The order's FilledQuote
+// stays price x qty, the sum its average price is read from.
+func (o *Order) tradeQuote(quote, qty decimal.Decimal) decimal.Decimal {
+	if o.ContractSize.IsPositive() {
+		return qty.Mul(o.ContractSize)
+	}
+	return quote
 }
 
 // Remaining is the base quantity still open (not for market buys, which

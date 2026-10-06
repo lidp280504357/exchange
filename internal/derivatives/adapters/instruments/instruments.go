@@ -38,6 +38,17 @@ func (c *Client) followed(ctx context.Context, indexSymbol string) (bool, error)
 	return resp.GetPair().GetReferenceSymbol() != "", nil
 }
 
+// marginCoin is a coin-margined contract's margin type.
+const marginCoin = "COIN"
+
+// sizeOf is a contract's face value, "0" for a linear one.
+func sizeOf(k *instrumentv1.Contract) string {
+	if s := k.GetContractSize(); s != "" {
+		return s
+	}
+	return "0"
+}
+
 type cached struct {
 	contract domain.Contract
 	at       time.Time
@@ -70,9 +81,10 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Contract, 
 	return ct, nil
 }
 
-// Contracts lists every contract.
+// Contracts lists every contract, the coin-margined ones too (the list
+// leaves them out unless asked, design 2026-10-06 §2.5).
 func (c *Client) Contracts(ctx context.Context) ([]domain.Contract, error) {
-	resp, err := c.c.ListContracts(ctx, &instrumentv1.ListContractsRequest{})
+	resp, err := c.c.ListContracts(ctx, &instrumentv1.ListContractsRequest{MarginType: "ALL"})
 	if err != nil {
 		return nil, err
 	}
@@ -106,12 +118,19 @@ func (c *Client) assetDecimals(ctx context.Context, asset string) (int32, error)
 	return n, nil
 }
 
+// convert reads a contract. Amounts are in its settlement asset, whose
+// precision QuoteDecimals is: the quote's (USDT) of a linear contract, the
+// base's of a coin-margined one, quoted in USD, which is no asset.
 func (c *Client) convert(ctx context.Context, k *instrumentv1.Contract) (domain.Contract, error) {
 	base, err := c.assetDecimals(ctx, k.GetBaseAsset())
 	if err != nil {
 		return domain.Contract{}, err
 	}
-	quote, err := c.assetDecimals(ctx, k.GetQuoteAsset())
+	settle := k.GetSettleAsset()
+	if settle == "" {
+		settle = k.GetQuoteAsset() // a contract from before the coin-margined ones
+	}
+	quote, err := c.assetDecimals(ctx, settle)
 	if err != nil {
 		return domain.Contract{}, err
 	}
@@ -135,12 +154,17 @@ func (c *Client) convert(ctx context.Context, k *instrumentv1.Contract) (domain.
 		{&ct.PriceBand, k.GetPriceBand()},
 		{&ct.MakerFeeRate, k.GetMakerFeeRate()},
 		{&ct.TakerFeeRate, k.GetTakerFeeRate()},
+		{&ct.ContractSize, sizeOf(k)},
 	} {
 		v, err := decimal.NewFromString(f.src)
 		if err != nil {
 			return domain.Contract{}, fmt.Errorf("contract %s: bad decimal %q: %w", k.GetSymbol(), f.src, err)
 		}
 		*f.dst = v
+	}
+	if (k.GetMarginType() == marginCoin) != ct.Inverse() || ct.Settle() != settle {
+		return domain.Contract{}, fmt.Errorf("contract %s: margin type %q, contract size %s and settlement asset %s do not agree",
+			k.GetSymbol(), k.GetMarginType(), ct.ContractSize, settle)
 	}
 	for _, t := range k.GetRiskTiers() {
 		n, err1 := decimal.NewFromString(t.GetMaxNotional())

@@ -298,6 +298,10 @@ func (b *Book) canFill(o *Order, ref *Reference) bool {
 // returning the trade and the resting order's change.
 func (b *Book) fill(taker, maker *Order, price, qty decimal.Decimal) []Event {
 	quote := price.Mul(qty)
+	contract := taker
+	if contract.SettleAsset == "" {
+		contract = maker
+	}
 	buyer, seller := taker, maker
 	if taker.Side == Sell {
 		buyer, seller = maker, taker
@@ -315,7 +319,8 @@ func (b *Book) fill(taker, maker *Order, price, qty decimal.Decimal) []Event {
 	b.Trades++
 	t := &Trade{
 		ID: tradeID(b.Symbol, seq), Number: b.Trades, Symbol: b.Symbol, BaseAsset: taker.BaseAsset, QuoteAsset: taker.QuoteAsset, Seq: seq,
-		Price: price, Quantity: qty, Quote: quote, TakerSide: taker.Side,
+		Price: price, Quantity: qty, Quote: contract.tradeQuote(quote, qty), TakerSide: taker.Side,
+		SettleAsset: contract.SettleAsset, ContractSize: contract.ContractSize,
 		BuyOrderID: buyer.ID, BuyUserID: buyer.UserID, SellOrderID: seller.ID, SellUserID: seller.UserID,
 		BuyAccountType: buyer.AccountType, SellAccountType: seller.AccountType,
 		BuySideEffect: buyer.SideEffect, SellSideEffect: seller.SideEffect,

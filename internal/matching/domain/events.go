@@ -57,14 +57,16 @@ type Trade struct {
 	ID string
 	// Number counts the symbol's trades from 1: a gap downstream means a
 	// missing trade.
-	Number       uint64
-	Symbol       string
-	BaseAsset    string
-	QuoteAsset   string
-	Seq          int64
-	Price        decimal.Decimal
-	Quantity     decimal.Decimal
-	Quote        decimal.Decimal // Price x Quantity
+	Number     uint64
+	Symbol     string
+	BaseAsset  string
+	QuoteAsset string
+	Seq        int64
+	Price      decimal.Decimal
+	Quantity   decimal.Decimal
+	// Quote is Price x Quantity; a coin-margined contract's is the
+	// contracts' USD value, Quantity x ContractSize.
+	Quote        decimal.Decimal
 	TakerSide    Side
 	BuyOrderID   string
 	BuyUserID    string
@@ -75,6 +77,10 @@ type Trade struct {
 	SellerFee    decimal.Decimal // quote
 	// BuyerLimit is the buy order's limit price, zero for a market buy.
 	BuyerLimit decimal.Decimal
+	// SettleAsset and ContractSize are the contract's (Order's), for a
+	// contract trade.
+	SettleAsset  string
+	ContractSize decimal.Decimal
 	// HouseSide is the side HOUSE took when the trade was against its
 	// reference liquidity, "" between users. HOUSE's order ID is empty and
 	// its fee zero (ADR-0015).

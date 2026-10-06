@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,7 +22,8 @@ import (
 // gateway attaches.
 type Handler struct {
 	Svc *application.Service
-	// Asset is the settlement asset of the contracts (USDT).
+	// Asset is the account the account endpoint shows when not asked for
+	// another settlement asset (USDT).
 	Asset string
 }
 
@@ -84,7 +86,11 @@ type accountJSON struct {
 }
 
 func (h *Handler) account(w http.ResponseWriter, r *http.Request) {
-	s, err := h.Svc.Account(r.Context(), httpx.UserID(r), h.Asset)
+	asset := strings.ToUpper(r.URL.Query().Get("asset"))
+	if asset == "" {
+		asset = h.Asset // USDT, the account from before the coin-margined contracts
+	}
+	s, err := h.Svc.Account(r.Context(), httpx.UserID(r), asset)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -168,6 +174,12 @@ type positionJSON struct {
 	RealizedPnL       string  `json:"realized_pnl"`
 	Funding           string  `json:"funding"`
 	UpdatedAt         string  `json:"updated_at"`
+	// The settlement asset; a coin-margined position's contracts (signed)
+	// and value in coin and USD, the USD value of a linear one (G0 §3).
+	SettleAsset string  `json:"settle_asset"`
+	Contracts   *string `json:"contracts"`
+	ValueCoin   *string `json:"value_coin"`
+	ValueUSD    *string `json:"value_usd"`
 }
 
 func optional(d decimal.Decimal) *string {
@@ -184,11 +196,24 @@ func toPositionJSON(v application.PositionView) positionJSON {
 		PositionID: p.ID, Symbol: p.Symbol, PositionSide: string(p.Side), Quantity: p.Qty.String(), EntryPrice: v.Entry.String(),
 		MarkPrice: optional(v.Mark), Margin: p.Margin.String(), MarginMode: string(p.MarginMode), Leverage: p.Leverage,
 		LiquidationPrice: optional(v.LiquidationPrice), RealizedPnL: p.RealizedPnL.String(), Funding: p.Funding.String(),
-		UpdatedAt: stamp(p.UpdatedAt),
+		UpdatedAt: stamp(p.UpdatedAt), SettleAsset: v.Settle,
+	}
+	if out.SettleAsset == "" {
+		out.SettleAsset = "USDT"
+	}
+	inverse := v.ContractSize.IsPositive()
+	if inverse {
+		contracts, usd := p.Qty.String(), p.Qty.Abs().Mul(v.ContractSize).String()
+		out.Contracts, out.ValueUSD = &contracts, &usd
 	}
 	if v.Mark.IsPositive() {
 		n, u, m := v.Value.String(), v.UnrealizedPnL.String(), v.MaintenanceMargin.String()
 		out.Notional, out.UnrealizedPnL, out.MaintenanceMargin = &n, &u, &m
+		if inverse {
+			out.ValueCoin = &n
+		} else {
+			out.ValueUSD = &n
+		}
 	}
 	return out
 }
@@ -265,6 +290,31 @@ type orderJSON struct {
 	RejectReason    *string `json:"reject_reason"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
+	SettleAsset     string  `json:"settle_asset"`
+}
+
+// settles reads, once each, the settlement assets of the contracts an
+// answer names; USDT, the linear contracts', when one cannot be read.
+type settles struct {
+	ctx   context.Context
+	svc   *application.Service
+	cache map[string]string
+}
+
+func (h *Handler) settles(ctx context.Context) *settles {
+	return &settles{ctx: ctx, svc: h.Svc, cache: map[string]string{}}
+}
+
+func (s *settles) of(symbol string) string {
+	if a, ok := s.cache[symbol]; ok {
+		return a
+	}
+	a, err := s.svc.SettleAsset(s.ctx, symbol)
+	if err != nil || a == "" {
+		a = "USDT"
+	}
+	s.cache[symbol] = a
+	return a
 }
 
 func text(s string) *string {
@@ -274,14 +324,14 @@ func text(s string) *string {
 	return &s
 }
 
-func toOrderJSON(o domain.Order) orderJSON {
+func toOrderJSON(o domain.Order, settle string) orderJSON {
 	out := orderJSON{
 		OrderID: o.ID, ClientOrderID: o.ClientOrderID, Symbol: o.Symbol, Side: string(o.Side), PositionSide: string(o.PositionSide),
 		Type: string(o.Type), TimeInForce: string(o.TimeInForce), Price: o.Price.String(), Quantity: o.Qty.String(),
 		ReduceOnly: o.ReduceOnly, Leverage: o.Leverage, MarginMode: string(o.MarginMode), Status: string(o.Status),
 		FilledQuantity: o.Filled.String(), Fee: o.Fee.String(), RealizedPnL: o.RealizedPnL.String(), Reserved: o.Unreleased().String(),
 		CancelRequested: o.CancelRequested, CancelReason: text(o.CancelReason), RejectReason: text(o.RejectReason), CreatedAt: stamp(o.CreatedAt),
-		UpdatedAt: stamp(o.UpdatedAt),
+		UpdatedAt: stamp(o.UpdatedAt), SettleAsset: settle,
 	}
 	if o.Filled.IsPositive() {
 		avg := o.FilledQuote.DivRound(o.Filled, 8).String()
@@ -324,7 +374,7 @@ func (h *Handler) place(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusAccepted, toOrderJSON(o))
+	httpx.WriteJSON(w, http.StatusAccepted, toOrderJSON(o, h.settles(r.Context()).of(o.Symbol)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -336,8 +386,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]orderJSON, 0, len(list))
+	settle := h.settles(r.Context())
 	for _, o := range list {
-		out = append(out, toOrderJSON(o))
+		out = append(out, toOrderJSON(o, settle.of(o.Symbol)))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})
 }
@@ -348,7 +399,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o))
+	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o, h.settles(r.Context()).of(o.Symbol)))
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
@@ -357,7 +408,7 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusAccepted, toOrderJSON(o))
+	httpx.WriteJSON(w, http.StatusAccepted, toOrderJSON(o, h.settles(r.Context()).of(o.Symbol)))
 }
 
 func (h *Handler) cancelAll(w http.ResponseWriter, r *http.Request) {
@@ -384,6 +435,7 @@ type fillJSON struct {
 	Liquidation    bool   `json:"liquidation"`
 	Settled        bool   `json:"settled"`
 	ExecutedAt     string `json:"executed_at"`
+	SettleAsset    string `json:"settle_asset"`
 }
 
 func (h *Handler) fills(w http.ResponseWriter, r *http.Request) {
@@ -395,6 +447,7 @@ func (h *Handler) fills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]fillJSON, 0, len(list))
+	settle := h.settles(r.Context())
 	for _, f := range list {
 		role := "TAKER"
 		if f.Maker {
@@ -404,6 +457,7 @@ func (h *Handler) fills(w http.ResponseWriter, r *http.Request) {
 			TradeID: f.TradeID, OrderID: f.OrderID, Symbol: f.Symbol, Side: string(f.Side), PositionSide: string(f.PositionSide),
 			Role: role, Price: f.Price.String(), Quantity: f.Qty.String(), ClosedQuantity: f.ClosedQty.String(), Fee: f.Fee.String(),
 			RealizedPnL: f.RealizedPnL.String(), Liquidation: f.Liquidation, Settled: f.Settled, ExecutedAt: stamp(f.ExecutedAt),
+			SettleAsset: settle.of(f.Symbol),
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})
@@ -417,6 +471,7 @@ type fundingJSON struct {
 	FundingRate  string `json:"funding_rate"`
 	MarkPrice    string `json:"mark_price"`
 	Amount       string `json:"amount"`
+	SettleAsset  string `json:"settle_asset"`
 }
 
 func (h *Handler) funding(w http.ResponseWriter, r *http.Request) {
@@ -428,10 +483,11 @@ func (h *Handler) funding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]fundingJSON, 0, len(list))
+	settle := h.settles(r.Context())
 	for _, p := range list {
 		out = append(out, fundingJSON{
 			Symbol: p.Symbol, FundingTime: p.FundingTime.UTC().Format(time.RFC3339), PositionSide: string(p.Side), Quantity: p.Qty.String(),
-			FundingRate: p.Rate.String(), MarkPrice: p.Mark.String(), Amount: p.Amount.String(),
+			FundingRate: p.Rate.String(), MarkPrice: p.Mark.String(), Amount: p.Amount.String(), SettleAsset: settle.of(p.Symbol),
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})
@@ -558,7 +614,7 @@ func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o))
+	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o, h.settles(r.Context()).of(o.Symbol)))
 }
 
 // marginStates names the margin states for the console.

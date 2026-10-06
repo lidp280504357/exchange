@@ -61,7 +61,7 @@ func fromProto(p *orderv1.Order) (domain.Order, error) {
 		Side: sides[p.GetSide()], Type: types[p.GetType()], TimeInForce: tifs[p.GetTimeInForce()],
 		STP: stps[p.GetSelfTradePrevention()], BaseDecimals: p.GetBaseDecimals(), QuoteDecimals: p.GetQuoteDecimals(),
 		BaseAsset: p.GetBaseAsset(), QuoteAsset: p.GetQuoteAsset(),
-		AccountType: p.GetAccountType(), SideEffect: p.GetSideEffect(),
+		AccountType: p.GetAccountType(), SideEffect: p.GetSideEffect(), SettleAsset: p.GetSettleAsset(),
 	}
 	if o.ID == "" || o.UserID == "" || o.Symbol == "" || o.Side == "" || o.Type == "" || o.TimeInForce == "" {
 		return domain.Order{}, fmt.Errorf("order %q lacks its identity, side, type or time in force", o.ID)
@@ -86,6 +86,7 @@ func fromProto(p *orderv1.Order) (domain.Order, error) {
 		{&o.TakerFeeRate, p.GetTakerFeeRate(), "taker_fee_rate"},
 		{&o.Protection, p.GetProtectionPrice(), "protection_price"},
 		{&o.LotSize, p.GetLotSize(), "lot_size"},
+		{&o.ContractSize, p.GetContractSize(), "contract_size"},
 	} {
 		if f.src == "" {
 			continue
@@ -171,6 +172,10 @@ func (e *Engine) output(ctx context.Context, ev domain.Event) (ports.Output, err
 			TradeNumber:      t.Number,
 			BuyerAccountType: t.BuyAccountType, SellerAccountType: t.SellAccountType,
 			BuyerSideEffect: t.BuySideEffect, SellerSideEffect: t.SellSideEffect,
+			SettleAsset: t.SettleAsset,
+		}
+		if t.ContractSize.IsPositive() {
+			m.ContractSize = t.ContractSize.String()
 		}
 		if !t.BuyerLimit.IsZero() {
 			m.BuyerLimitPrice = t.BuyerLimit.String()

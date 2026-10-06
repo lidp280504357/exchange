@@ -26,6 +26,10 @@ import (
 // user-service also checks the derivatives.trading flag for it).
 const FeatureDerivatives = "DERIVATIVES_TRADE"
 
+// FeatureCoinM is the eligibility an opening order on a coin-margined
+// contract needs as well (derivatives.coin_m, design 2026-10-06 §2.5).
+const FeatureCoinM = "COIN_M_TRADE"
+
 // Service runs contract trading.
 type Service struct {
 	Store       ports.Store
@@ -169,12 +173,22 @@ func (s *Service) settledIn(ctx context.Context, orders []domain.Order, asset st
 	return out, nil
 }
 
+// sizeOf is the contract size events carry: an inverse contract's face
+// value, empty for a linear contract (G0 contract §5).
+func sizeOf(c domain.Contract) string {
+	if c.Inverse() {
+		return c.ContractSize.String()
+	}
+	return ""
+}
+
 // positionProto renders a position of contract c for events.
 func positionProto(c domain.Contract, p domain.Position) *derivativesv1.Position {
 	out := &derivativesv1.Position{
 		PositionId: p.ID, UserId: p.UserID, Symbol: p.Symbol, PositionSide: string(p.Side), Quantity: p.Qty.String(),
 		EntryCost: p.EntryCost.String(), Margin: p.Margin.String(), MarginMode: string(p.MarginMode), Leverage: p.Leverage,
 		RealizedPnl: p.RealizedPnL.String(), Funding: p.Funding.String(), Version: p.Version,
+		SettleAsset: c.Settle(), ContractSize: sizeOf(c),
 	}
 	if !p.Flat() {
 		out.EntryPrice = p.EntryPrice(c).String()

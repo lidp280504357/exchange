@@ -384,6 +384,8 @@ func (o Order) checkQuantity(c Contract) error {
 	switch {
 	case !o.Qty.IsPositive():
 		return apperr.Invalid("the order needs a positive quantity")
+	case c.Inverse() && !o.Qty.IsInteger():
+		return ErrContractsNotInteger
 	case !o.Qty.Mod(c.LotSize).IsZero():
 		return apperr.New(apperr.KindInvalid, "INSTRUMENT_PRECISION", fmt.Sprintf("the quantity must be a multiple of the lot size %s", c.LotSize))
 	case o.Qty.LessThan(c.MinQuantity) || o.Qty.GreaterThan(c.MaxQuantity):

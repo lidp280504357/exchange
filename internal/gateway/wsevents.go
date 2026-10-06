@@ -72,6 +72,9 @@ type orderData struct {
 	// margin account the order trades from (margin design 2026-10-06).
 	Account    string `json:"account,omitempty"`
 	SideEffect string `json:"side_effect,omitempty"`
+	// SettleAsset comes with a contract order's acceptance: the asset its
+	// margin and fee are in (coin-margined design 2026-10-06 §2.5).
+	SettleAsset string `json:"settle_asset,omitempty"`
 }
 
 // fillData is one side of a trade on "fills". A contract's fill has no
@@ -93,6 +96,8 @@ type fillData struct {
 	ClosedQuantity string `json:"closed_quantity,omitempty"`
 	RealizedPnL    string `json:"realized_pnl,omitempty"`
 	Liquidation    bool   `json:"liquidation,omitempty"`
+	// SettleAsset is a contract fill's settlement asset, its fee's.
+	SettleAsset string `json:"settle_asset,omitempty"`
 }
 
 // positionData is a contract position change on "positions": event is
@@ -113,6 +118,10 @@ type positionData struct {
 	// Amount is the margin added (MARGIN) or the funding received (FUNDING,
 	// negative when paid).
 	Amount string `json:"amount,omitempty"`
+	// SettleAsset is the asset the amounts are in; ContractSize a
+	// coin-margined contract's face value (quantity is contracts).
+	SettleAsset  string `json:"settle_asset,omitempty"`
+	ContractSize string `json:"contract_size,omitempty"`
 }
 
 // riskData is a liquidation step on "risk": event is WARNING, STARTED,
@@ -130,6 +139,9 @@ type riskData struct {
 	Price             string `json:"price,omitempty"`
 	Quantity          string `json:"quantity,omitempty"`
 	RealizedPnL       string `json:"realized_pnl,omitempty"`
+	// SettleAsset is the asset the amounts are in: a cross warning's is
+	// the cross account's.
+	SettleAsset string `json:"settle_asset,omitempty"`
 }
 
 // marginPush is a message of "margin" (api/openapi/margin.yaml
@@ -304,7 +316,7 @@ func positionOf(p *derivativesv1.Position, ev string) positionData {
 	return positionData{
 		Event: ev, PositionID: p.GetPositionId(), Symbol: p.GetSymbol(), PositionSide: p.GetPositionSide(), Quantity: p.GetQuantity(),
 		EntryPrice: p.GetEntryPrice(), Margin: p.GetMargin(), MarginMode: p.GetMarginMode(), Leverage: p.GetLeverage(),
-		RealizedPnL: p.GetRealizedPnl(), Funding: p.GetFunding(),
+		RealizedPnL: p.GetRealizedPnl(), Funding: p.GetFunding(), SettleAsset: p.GetSettleAsset(), ContractSize: p.GetContractSize(),
 	}
 }
 
@@ -477,7 +489,7 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 				OrderID: o.GetOrderId(), ClientOrderID: o.GetClientOrderId(), Symbol: o.GetSymbol(), Status: "NEW",
 				Side: sideName(o.GetSide()), Type: strings.TrimPrefix(o.GetType().String(), "ORDER_TYPE_"),
 				Price: o.GetPrice(), Quantity: o.GetQuantity(), QuoteAmount: o.GetQuoteAmount(),
-				Account: o.GetAccountType(), SideEffect: o.GetSideEffect(),
+				Account: o.GetAccountType(), SideEffect: o.GetSideEffect(), SettleAsset: o.GetSettleAsset(),
 			})
 		case p.MessageIs(&rejected):
 			if err := p.UnmarshalTo(&rejected); err != nil {
@@ -636,7 +648,7 @@ func derivativesOf(h *Hub, p interface {
 		}
 		h.Publish(warning.GetUserId(), "risk", riskData{
 			Event: "WARNING", Symbol: warning.GetSymbol(), PositionSide: warning.GetPositionSide(), Cross: warning.GetCross(),
-			MarginBalance: warning.GetMarginBalance(), MaintenanceMargin: warning.GetMaintenanceMargin(),
+			MarginBalance: warning.GetMarginBalance(), MaintenanceMargin: warning.GetMaintenanceMargin(), SettleAsset: warning.GetSettleAsset(),
 		})
 	case p.MessageIs(&started):
 		if err := p.UnmarshalTo(&started); err != nil {
@@ -646,7 +658,7 @@ func derivativesOf(h *Hub, p interface {
 		h.Publish(pos.GetUserId(), "risk", riskData{
 			Event: "STARTED", Symbol: pos.GetSymbol(), PositionSide: pos.GetPositionSide(), Cross: started.GetCross(),
 			MarginBalance: started.GetMarginBalance(), MaintenanceMargin: started.GetMaintenanceMargin(), MarkPrice: started.GetMarkPrice(),
-			Quantity: pos.GetQuantity(),
+			Quantity: pos.GetQuantity(), SettleAsset: pos.GetSettleAsset(),
 		})
 	case p.MessageIs(&liquid):
 		if err := p.UnmarshalTo(&liquid); err != nil {
@@ -654,7 +666,7 @@ func derivativesOf(h *Hub, p interface {
 		}
 		h.Publish(liquid.GetUserId(), "risk", riskData{
 			Event: "LIQUIDATED", Symbol: liquid.GetSymbol(), PositionSide: liquid.GetPositionSide(), TradeID: liquid.GetTradeId(),
-			Price: liquid.GetPrice(), Quantity: liquid.GetQuantity(), RealizedPnL: liquid.GetRealizedPnl(),
+			Price: liquid.GetPrice(), Quantity: liquid.GetQuantity(), RealizedPnL: liquid.GetRealizedPnl(), SettleAsset: liquid.GetSettleAsset(),
 		})
 	case p.MessageIs(&adl):
 		if err := p.UnmarshalTo(&adl); err != nil {
@@ -662,7 +674,7 @@ func derivativesOf(h *Hub, p interface {
 		}
 		h.Publish(adl.GetUserId(), "risk", riskData{
 			Event: "ADL", Symbol: adl.GetSymbol(), PositionSide: adl.GetPositionSide(), TradeID: adl.GetTradeId(), Price: adl.GetPrice(),
-			Quantity: adl.GetQuantity(), RealizedPnL: adl.GetRealizedPnl(),
+			Quantity: adl.GetQuantity(), RealizedPnL: adl.GetRealizedPnl(), SettleAsset: adl.GetSettleAsset(),
 		})
 	case p.MessageIs(&opened):
 		if err := p.UnmarshalTo(&opened); err != nil {
@@ -712,11 +724,16 @@ func derivativesOf(h *Hub, p interface {
 		if fill.GetMaker() {
 			role = "MAKER"
 		}
+		settle := fill.GetSettleAsset()
+		if settle == "" {
+			settle = "USDT" // a fill from before the coin-margined contracts
+		}
 		h.Publish(fill.GetUserId(), "fills", fillData{
 			TradeID: fill.GetTradeId(), OrderID: fill.GetOrderId(), Symbol: fill.GetSymbol(), Side: fill.GetSide(), Role: role,
-			Price: fill.GetPrice(), Quantity: fill.GetQuantity(), FeeAsset: "USDT", Fee: fill.GetFee(),
+			Price: fill.GetPrice(), Quantity: fill.GetQuantity(), FeeAsset: settle, Fee: fill.GetFee(),
 			ExecutedAt: fill.GetExecutedAt().AsTime().UTC().Format(time.RFC3339Nano), PositionSide: fill.GetPositionSide(),
 			ClosedQuantity: fill.GetClosedQuantity(), RealizedPnL: fill.GetRealizedPnl(), Liquidation: fill.GetLiquidation(),
+			SettleAsset: settle,
 		})
 	default:
 		return false, nil
