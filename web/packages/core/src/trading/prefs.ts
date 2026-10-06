@@ -52,8 +52,17 @@ export const useTerminalPrefs = create<TerminalPrefs>()(
       visit: (symbol) => set((s) => ({ recent: [symbol, ...s.recent.filter((x) => x !== symbol)].slice(0, 6) })),
     }),
     // A side effect stays for the visit only: a borrow is never made by a
-    // choice remembered from another day.
-    { name: "exchange.terminal", version: 1, partialize: ({ sideEffect: _, ...kept }) => kept },
+    // choice remembered from another day. Version 1 kept it: the migration
+    // drops what an older build stored (review CW2, B99).
+    {
+      name: "exchange.terminal",
+      version: 2,
+      partialize: ({ sideEffect: _, ...kept }) => kept,
+      migrate: (persisted) => {
+        const { sideEffect: _, ...kept } = (persisted ?? {}) as Partial<TerminalPrefs>;
+        return kept as TerminalPrefs;
+      },
+    },
   ),
 );
 

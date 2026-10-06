@@ -1,4 +1,5 @@
 import { useQueries, type QueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { marginApi, unwrap } from "../api/client";
 import { ApiError } from "../api/errors";
 import { accountKeys } from "../assets/hooks";
@@ -75,8 +76,9 @@ export function spendable(owner: Pick<MarginAccount, "balances"> | undefined, as
 }
 
 /**
- * useMarginSupport tells whether margin trading is open to the caller and
- * which margin accounts the pair trades from.
+ * useMarginSupport tells whether margin trading is open to the caller,
+ * which margin accounts the pair trades from and which assets may be
+ * borrowed (lends: what may be borrowed of the others is not asked).
  */
 export function useMarginSupport(pair: { symbol: string; base_asset: string; quote_asset: string }) {
   const open = useMarginOpen();
@@ -84,7 +86,8 @@ export function useMarginSupport(pair: { symbol: string; base_asset: string; quo
   const assets = useMarginAssets(open.open);
   const pairs = useMarginPairs(open.open);
   const support = marginSupport(pair, assets.data, pairs.data?.items);
-  return { open: open.open, support, supported: support.cross || support.isolated !== null };
+  const lends = useMemo(() => new Set((assets.data ?? []).filter((a) => a.borrowable).map((a) => a.asset)), [assets.data]);
+  return { open: open.open, support, supported: support.cross || support.isolated !== null, lends };
 }
 
 /**
@@ -110,7 +113,7 @@ export function useMarginTrade(
   effect: SideEffect,
 ) {
   const signedIn = useSession(selectSignedIn);
-  const { open, support, supported } = useMarginSupport(pair);
+  const { open, support, supported, lends } = useMarginSupport(pair);
   const pairs = useMarginPairs(open);
   const margin = account !== "SPOT";
   const accounts = useMarginAccounts({ enabled: margin, poll: margin });
@@ -126,7 +129,7 @@ export function useMarginTrade(
             params: { query: { account: account === "SPOT" ? "MARGIN_CROSS" : account, asset, symbol: symbol || undefined } },
           }),
         ),
-      enabled: signedIn && borrow,
+      enabled: signedIn && borrow && lends.has(asset),
       staleTime: 5_000,
       refetchInterval: borrow ? 10_000 : (false as const),
       retry: retryServerErrors,

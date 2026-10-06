@@ -115,7 +115,7 @@ export function errorText(err: unknown): string {
 // may have several messages for different details; the first whose
 // details all came is used, so the more specific comes first (a transfer
 // out's MARGIN_LEVEL_TOO_LOW carries max_transferable besides the levels).
-const detailMessages: Record<string, { key: string; fields: Record<string, number | null> }[]> = {
+const detailMessages: Record<string, { key: string; fields: Record<string, number | null>; when?: (details: Record<string, unknown>) => boolean }[]> = {
   DERIV_RISK_LIMIT_EXCEEDED: [{ key: "DERIV_RISK_LIMIT_EXCEEDED", fields: { max_notional: 0, notional: 2, leverage: null } }],
   MARGIN_LIMIT: [{ key: "MARGIN_LIMIT", fields: { max_borrowable: null } }],
   MARGIN_POOL_EMPTY: [{ key: "MARGIN_POOL_EMPTY", fields: { pool_available: null } }],
@@ -125,15 +125,16 @@ const detailMessages: Record<string, { key: string; fields: Record<string, numbe
   ],
   // A transfer out of a margin account: what may leave.
   LEDGER_INSUFFICIENT_BALANCE: [{ key: "LEDGER_INSUFFICIENT_BALANCE_OUT", fields: { max_transferable: null } }],
-  // AUTO_BORROW while margin.auto_borrow is off (its only flag).
-  MARGIN_DISABLED: [{ key: "MARGIN_DISABLED_AUTO_BORROW", fields: { flag: null } }],
+  // AUTO_BORROW while margin.auto_borrow is off: the terminals set the side
+  // effect back to NONE (margin/trade.ts afterMarginOrder).
+  MARGIN_DISABLED: [{ key: "MARGIN_DISABLED_AUTO_BORROW", fields: {}, when: (d) => d.flag === "margin.auto_borrow" }],
 };
 
 /** withDetails is the error's message with its details, when it has one and they all came. */
 function withDetails(err: ApiError): string | null {
-  for (const { key, fields } of detailMessages[err.code] ?? []) {
+  for (const { key, fields, when } of detailMessages[err.code] ?? []) {
     const full = `errorDetails.${key}`;
-    if (!i18n.exists(full)) continue;
+    if (!i18n.exists(full) || (when && !when(err.details))) continue;
     const values: Record<string, string> = {};
     let complete = true;
     for (const [k, decimals] of Object.entries(fields)) {

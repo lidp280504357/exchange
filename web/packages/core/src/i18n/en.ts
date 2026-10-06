@@ -107,6 +107,6 @@ export const en = {
     MARGIN_LEVEL_TOO_LOW: "The margin level would be {{margin_level}}, under the warning level {{warn_level}}",
     MARGIN_LEVEL_TOO_LOW_OUT: "The margin level would fall under the warning level: at most {{max_transferable}} may leave now",
     LEDGER_INSUFFICIENT_BALANCE_OUT: "Insufficient available balance: at most {{max_transferable}} may leave now",
-    MARGIN_DISABLED_AUTO_BORROW: "Auto-borrow is not open yet: set borrowing to normal",
+    MARGIN_DISABLED_AUTO_BORROW: "Auto-borrow is not open yet: borrowing is back to normal",
   },
 };

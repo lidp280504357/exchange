@@ -64,12 +64,13 @@ export function SpotOrderSheet({
   const chosen = useTerminalPrefs((s) => s.tradeAccount);
   const effect = useTerminalPrefs((s) => s.sideEffect);
   const setPrefs = useTerminalPrefs((s) => s.set);
-  const { open: marginOpen, support } = useMarginSupport(pair);
+  const { open: marginOpen, support, lends } = useMarginSupport(pair);
   const account = signedIn ? tradeAccountFor(chosen, marginOpen, support) : "SPOT";
   const margin = useMarginTrade(pair, account, effect);
   const spends = freezeAsset(pair, side);
+  // Only an asset the platform lends is asked for (another answers 422).
   const borrowable = useMaxBorrowable(
-    account === "SPOT" ? "MARGIN_CROSS" : account, account === "MARGIN_ISOLATED" ? pair.symbol : "", spends, account !== "SPOT",
+    account === "SPOT" ? "MARGIN_CROSS" : account, account === "MARGIN_ISOLATED" ? pair.symbol : "", spends, account !== "SPOT" && lends.has(spends),
   );
   // The margin sheet open, and its coin: what the side spends.
   const [act, setActState] = useState<{ kind: MarginActionKind; asset: string } | null>(null);

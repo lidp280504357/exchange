@@ -28,7 +28,9 @@ describe("error messages", () => {
     const short = new ApiError(422, "LEDGER_INSUFFICIENT_BALANCE", "", { max_transferable: "3" });
     expect(errorText(short)).toBe("可用余额不足：现在最多可划出 3");
     expect(errorText(new ApiError(422, "LEDGER_INSUFFICIENT_BALANCE", "", { order_id: "o1" }))).toBe("可用余额不足");
-    expect(errorText(new ApiError(403, "MARGIN_DISABLED", "", { flag: "margin.auto_borrow" }))).toBe("自动借款暂未开放，请把借还方式改为普通");
+    expect(errorText(new ApiError(403, "MARGIN_DISABLED", "", { flag: "margin.auto_borrow" }))).toBe("自动借款暂未开放，借还方式已改为普通");
     expect(errorText(new ApiError(403, "MARGIN_DISABLED", ""))).toBe("杠杆交易暂未开放");
+    // Only margin.auto_borrow is about the side effect.
+    expect(errorText(new ApiError(403, "MARGIN_DISABLED", "", { flag: "margin.enabled" }))).toBe("杠杆交易暂未开放");
   });
 });
