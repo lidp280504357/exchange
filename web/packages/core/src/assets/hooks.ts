@@ -23,7 +23,7 @@ export type Balance = AccountSchemas["schemas"]["Balance"];
 export type LedgerEntry = AccountSchemas["schemas"]["LedgerEntry"];
 export type Transfer = AccountSchemas["schemas"]["Transfer"];
 export type FuturesAccount = DerivativesSchemas["schemas"]["FuturesAccount"];
-export type Feature = "SPOT_TRADE" | "DERIVATIVES_TRADE" | "DEPOSIT" | "WITHDRAW" | "TRANSFER" | "MARGIN_TRADE";
+export type Feature = "SPOT_TRADE" | "DERIVATIVES_TRADE" | "DEPOSIT" | "WITHDRAW" | "TRANSFER" | "MARGIN_TRADE" | "COIN_M_TRADE";
 
 export const accountKeys = {
   balances: qk.balances,

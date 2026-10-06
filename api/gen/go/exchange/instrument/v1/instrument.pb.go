@@ -1013,9 +1013,12 @@ func (x *RiskTier) GetMmr() string {
 	return ""
 }
 
-// Contract is a linear perpetual future settled in its quote asset,
-// e.g. BTC-USDT-PERP (requirements §5.8). Quantities are in the base
-// asset; prices, margin, fees and PnL in the quote asset.
+// Contract is a perpetual future (requirements §5.8): a linear one
+// settled in its quote asset, e.g. BTC-USDT-PERP, with quantities in the
+// base asset and prices, margin, fees and PnL in the quote asset; or an
+// inverse (coin-margined) one, e.g. BTC-USD-PERP (design 2026-10-06 §2.1),
+// priced in USD, its quantities whole contracts of contract_size USD each,
+// margin, fees and PnL in the base asset it settles in.
 type Contract struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Symbol string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
@@ -1043,10 +1046,22 @@ type Contract struct {
 	MakerFeeRate   string `protobuf:"bytes,18,opt,name=maker_fee_rate,json=makerFeeRate,proto3" json:"maker_fee_rate,omitempty"`
 	TakerFeeRate   string `protobuf:"bytes,19,opt,name=taker_fee_rate,json=takerFeeRate,proto3" json:"taker_fee_rate,omitempty"`
 	// PREPARE, TRADING, HALT, CANCEL_ONLY or DELISTED.
-	Status        string `protobuf:"bytes,20,opt,name=status,proto3" json:"status,omitempty"`
-	Version       int64  `protobuf:"varint,21,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Status  string `protobuf:"bytes,20,opt,name=status,proto3" json:"status,omitempty"`
+	Version int64  `protobuf:"varint,21,opt,name=version,proto3" json:"version,omitempty"`
+	// USDT for a linear contract, COIN for an inverse one.
+	MarginType string `protobuf:"bytes,22,opt,name=margin_type,json=marginType,proto3" json:"margin_type,omitempty"`
+	// The asset margin, fees, funding and PnL are in: the quote asset
+	// (USDT) of a linear contract, the base asset of an inverse one.
+	SettleAsset string `protobuf:"bytes,23,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	// An inverse contract's face value in USD, e.g. "100"; "0" for a linear
+	// contract, whose quantities are in the base asset.
+	ContractSize string `protobuf:"bytes,24,opt,name=contract_size,json=contractSize,proto3" json:"contract_size,omitempty"`
+	// The Binance contract the contract's market data and, with
+	// market.reference_mark, its mark price follow: BTCUSDT (USDⓈ-M) or
+	// BTCUSD_PERP (COIN-M); empty when none does (the platform coin's).
+	ReferenceSymbol string `protobuf:"bytes,25,opt,name=reference_symbol,json=referenceSymbol,proto3" json:"reference_symbol,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Contract) Reset() {
@@ -1224,6 +1239,34 @@ func (x *Contract) GetVersion() int64 {
 		return x.Version
 	}
 	return 0
+}
+
+func (x *Contract) GetMarginType() string {
+	if x != nil {
+		return x.MarginType
+	}
+	return ""
+}
+
+func (x *Contract) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *Contract) GetContractSize() string {
+	if x != nil {
+		return x.ContractSize
+	}
+	return ""
+}
+
+func (x *Contract) GetReferenceSymbol() string {
+	if x != nil {
+		return x.ReferenceSymbol
+	}
+	return ""
 }
 
 type FeeSchedule struct {
@@ -1990,7 +2033,12 @@ func (x *GetContractResponse) GetContract() *Contract {
 }
 
 type ListContractsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// USDT (or empty) lists the linear contracts, COIN the inverse ones,
+	// ALL both. Empty keeps the clients from before the inverse contracts
+	// on the linear ones until they read the new fields (design 2026-10-06
+	// §2.5).
+	MarginType    string `protobuf:"bytes,1,opt,name=margin_type,json=marginType,proto3" json:"margin_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2023,6 +2071,13 @@ func (x *ListContractsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ListContractsRequest.ProtoReflect.Descriptor instead.
 func (*ListContractsRequest) Descriptor() ([]byte, []int) {
 	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ListContractsRequest) GetMarginType() string {
+	if x != nil {
+		return x.MarginType
+	}
+	return ""
 }
 
 type ListContractsResponse struct {
@@ -2290,7 +2345,7 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\bRiskTier\x12!\n" +
 	"\fmax_notional\x18\x01 \x01(\tR\vmaxNotional\x12!\n" +
 	"\fmax_leverage\x18\x02 \x01(\x05R\vmaxLeverage\x12\x10\n" +
-	"\x03mmr\x18\x03 \x01(\tR\x03mmr\"\xd8\x05\n" +
+	"\x03mmr\x18\x03 \x01(\tR\x03mmr\"\xec\x06\n" +
 	"\bContract\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1d\n" +
@@ -2318,7 +2373,12 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x0emaker_fee_rate\x18\x12 \x01(\tR\fmakerFeeRate\x12$\n" +
 	"\x0etaker_fee_rate\x18\x13 \x01(\tR\ftakerFeeRate\x12\x16\n" +
 	"\x06status\x18\x14 \x01(\tR\x06status\x12\x18\n" +
-	"\aversion\x18\x15 \x01(\x03R\aversion\"\x87\x01\n" +
+	"\aversion\x18\x15 \x01(\x03R\aversion\x12\x1f\n" +
+	"\vmargin_type\x18\x16 \x01(\tR\n" +
+	"marginType\x12!\n" +
+	"\fsettle_asset\x18\x17 \x01(\tR\vsettleAsset\x12#\n" +
+	"\rcontract_size\x18\x18 \x01(\tR\fcontractSize\x12)\n" +
+	"\x10reference_symbol\x18\x19 \x01(\tR\x0freferenceSymbol\"\x87\x01\n" +
 	"\vFeeSchedule\x12\x12\n" +
 	"\x04tier\x18\x01 \x01(\tR\x04tier\x12$\n" +
 	"\x0emaker_fee_rate\x18\x02 \x01(\tR\fmakerFeeRate\x12$\n" +
@@ -2371,8 +2431,10 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x12GetContractRequest\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\"S\n" +
 	"\x13GetContractResponse\x12<\n" +
-	"\bcontract\x18\x01 \x01(\v2 .exchange.instrument.v1.ContractR\bcontract\"\x16\n" +
-	"\x14ListContractsRequest\"W\n" +
+	"\bcontract\x18\x01 \x01(\v2 .exchange.instrument.v1.ContractR\bcontract\"7\n" +
+	"\x14ListContractsRequest\x12\x1f\n" +
+	"\vmargin_type\x18\x01 \x01(\tR\n" +
+	"marginType\"W\n" +
 	"\x15ListContractsResponse\x12>\n" +
 	"\tcontracts\x18\x01 \x03(\v2 .exchange.instrument.v1.ContractR\tcontracts\"}\n" +
 	"\x18SetContractStatusRequest\x12\x16\n" +

@@ -1,11 +1,20 @@
 openapi: 3.1.0
 info:
   title: Exchange perpetual contracts API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    USDT perpetual contracts (requirements §5.8, §11.7): settings per
-    contract, orders, positions and margin. Margin, fees and profit are in
-    the FUTURES account (USDT; fund it with POST /v1/account/transfers).
+    Perpetual contracts (requirements §5.8, §11.7): settings per contract,
+    orders, positions and margin. Margin, fees and profit are in the
+    FUTURES account of the contract's settlement asset (settle_asset of
+    GET /v1/market/contracts: USDT for the linear contracts; the base
+    asset, BTC, ETH or ASTRA, for the coin-margined ones, design
+    2026-10-06 §2; fund it with POST /v1/account/transfers in that asset).
+    On a coin-margined contract quantities are whole contracts of
+    contract_size USD (a fraction is DERIV_CONTRACTS_NOT_INTEGER), prices
+    are in USD, and the amounts of positions, fills and funding are in the
+    base asset (the inverse formulas of design §2.2); trading them needs
+    derivatives.coin_m as well, from batch G1. A futures account asked for
+    in an asset no contract settles in is DERIV_SETTLE_ASSET_MISMATCH.
     Opening orders need the derivatives.trading switch and an eligible
     account, stay within the risk limit of their leverage and reserve
     initial margin plus the taker fee (price x quantity / leverage and
@@ -25,8 +34,17 @@ paths:
   /v1/derivatives/account:
     get:
       operationId: getDerivativesAccount
-      summary: The caller's FUTURES account at the mark prices
+      summary: The caller's FUTURES account of an asset at the mark prices
       tags: [derivatives]
+      parameters:
+        - name: asset
+          in: query
+          description: >-
+            The settlement asset whose FUTURES account to show (USDT by default; BTC, ETH, ASTRA for the
+            coin-margined contracts, from batch G1); one no contract settles in is DERIV_SETTLE_ASSET_MISMATCH.
+          schema:
+            type: string
+            default: USDT
       responses:
         '200':
           description: The account.
@@ -173,8 +191,10 @@ paths:
         the leverage's cap; details max_notional, leverage and notional),
         DERIV_INSUFFICIENT_MARGIN (the available balance less the cross
         positions' unrealized loss), ORDER_TOO_MANY_OPEN or the USER_
-        eligibility codes. A client_order_id repeated with the same order
-        returns that order.
+        eligibility codes; on a coin-margined contract also
+        DERIV_CONTRACTS_NOT_INTEGER (a fraction of a contract) and, while
+        derivatives.coin_m is off for the caller, USER_NOT_ELIGIBLE. A
+        client_order_id repeated with the same order returns that order.
       tags: [derivatives]
       parameters:
         - name: Idempotency-Key
@@ -210,6 +230,7 @@ paths:
                 price:
                   $ref: './market.yaml#/components/schemas/Decimal'
                 quantity:
+                  description: In the base asset, or whole contracts of a coin-margined contract (DERIV_CONTRACTS_NOT_INTEGER).
                   $ref: './market.yaml#/components/schemas/Decimal'
                 reduce_only:
                   type: boolean
@@ -524,7 +545,8 @@ components:
       properties:
         asset:
           type: string
-          examples: [USDT]
+          description: The settlement asset the account and its amounts are in.
+          examples: [USDT, BTC]
         wallet_balance:
           description: available + frozen.
           $ref: './market.yaml#/components/schemas/Decimal'
@@ -615,6 +637,24 @@ components:
         updated_at:
           type: string
           format: date-time
+        settle_asset:
+          type: string
+          description: The asset margin, PnL and funding are in (from batch G1, which makes it required).
+        contracts:
+          description: >-
+            Signed, as quantity: whole contracts of a coin-margined contract; null for a linear one
+            (from batch G1).
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        value_coin:
+          description: >-
+            A coin-margined position's value in its settlement asset at the mark price, |contracts| x
+            contract_size / mark; null for a linear one or before the first mark price (from batch G1).
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        value_usd:
+          description: >-
+            The position's value in USD: |contracts| x contract_size for a coin-margined one, notional for a
+            linear one (from batch G1).
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
     ContractOrder:
       type: object
       required: [order_id, client_order_id, symbol, side, position_side, type, time_in_force, price, quantity, reduce_only,
@@ -679,6 +719,9 @@ components:
         updated_at:
           type: string
           format: date-time
+        settle_asset:
+          type: string
+          description: The asset the order's margin and fee are in (from batch G1, which makes it required).
     ConditionalOrder:
       type: object
       required: [conditional_id, symbol, position_side, side, kind, trigger_price, trigger_by, order_type, price, quantity,
@@ -749,6 +792,9 @@ components:
         amount:
           description: Received (positive) or paid.
           $ref: './market.yaml#/components/schemas/Decimal'
+        settle_asset:
+          type: string
+          description: The asset amount is in (from batch G1, which makes it required).
     ContractFill:
       type: object
       required: [trade_id, order_id, symbol, side, position_side, role, price, quantity, closed_quantity, fee, realized_pnl,
@@ -779,7 +825,7 @@ components:
           description: Of the quantity, what closed a position.
           $ref: './market.yaml#/components/schemas/Decimal'
         fee:
-          description: In the settlement asset (USDT).
+          description: In the settlement asset (settle_asset; USDT for a linear contract).
           $ref: './market.yaml#/components/schemas/Decimal'
         realized_pnl:
           $ref: './market.yaml#/components/schemas/Decimal'
@@ -791,3 +837,6 @@ components:
         executed_at:
           type: string
           format: date-time
+        settle_asset:
+          type: string
+          description: The asset fee and realized_pnl are in (from batch G1, which makes it required).

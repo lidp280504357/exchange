@@ -44,8 +44,12 @@ type Position struct {
 	// Since the position opened.
 	RealizedPnl string `protobuf:"bytes,11,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
 	// Funding received (positive) or paid.
-	Funding       string `protobuf:"bytes,12,opt,name=funding,proto3" json:"funding,omitempty"`
-	Version       int64  `protobuf:"varint,13,opt,name=version,proto3" json:"version,omitempty"`
+	Funding string `protobuf:"bytes,12,opt,name=funding,proto3" json:"funding,omitempty"`
+	Version int64  `protobuf:"varint,13,opt,name=version,proto3" json:"version,omitempty"`
+	// The asset margin, PnL and funding are in, and an inverse contract's
+	// face value in USD ("0" or empty for a linear one); from batch G1.
+	SettleAsset   string `protobuf:"bytes,14,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	ContractSize  string `protobuf:"bytes,15,opt,name=contract_size,json=contractSize,proto3" json:"contract_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -169,6 +173,20 @@ func (x *Position) GetVersion() int64 {
 		return x.Version
 	}
 	return 0
+}
+
+func (x *Position) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *Position) GetContractSize() string {
+	if x != nil {
+		return x.ContractSize
+	}
+	return ""
 }
 
 // PositionOpened: a fill opened a position that was flat.
@@ -552,8 +570,12 @@ type FillSettled struct {
 	RealizedPnl    string                 `protobuf:"bytes,12,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
 	Liquidation    bool                   `protobuf:"varint,13,opt,name=liquidation,proto3" json:"liquidation,omitempty"`
 	ExecutedAt     *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=executed_at,json=executedAt,proto3" json:"executed_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The asset fee and realized_pnl are in, and an inverse contract's face
+	// value in USD ("0" or empty for a linear one); from batch G1.
+	SettleAsset   string `protobuf:"bytes,15,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	ContractSize  string `protobuf:"bytes,16,opt,name=contract_size,json=contractSize,proto3" json:"contract_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FillSettled) Reset() {
@@ -684,6 +706,20 @@ func (x *FillSettled) GetExecutedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *FillSettled) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *FillSettled) GetContractSize() string {
+	if x != nil {
+		return x.ContractSize
+	}
+	return ""
+}
+
 // LiquidationWarning: a position's (isolated) or the cross positions'
 // margin balance is at most 1.2 times the maintenance margin.
 type LiquidationWarning struct {
@@ -696,8 +732,11 @@ type LiquidationWarning struct {
 	MarginBalance     string                 `protobuf:"bytes,5,opt,name=margin_balance,json=marginBalance,proto3" json:"margin_balance,omitempty"`
 	MaintenanceMargin string                 `protobuf:"bytes,6,opt,name=maintenance_margin,json=maintenanceMargin,proto3" json:"maintenance_margin,omitempty"`
 	At                *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=at,proto3" json:"at,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The asset of the margin balance: the cross account's or the
+	// position's settlement asset; from batch G1.
+	SettleAsset   string `protobuf:"bytes,8,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LiquidationWarning) Reset() {
@@ -777,6 +816,13 @@ func (x *LiquidationWarning) GetAt() *timestamppb.Timestamp {
 		return x.At
 	}
 	return nil
+}
+
+func (x *LiquidationWarning) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
 }
 
 // LiquidationStarted: the liquidation engine took a position over (its
@@ -880,6 +926,8 @@ type LiquidationFilled struct {
 	// What the insurance fund paid of the loss.
 	InsurancePaid string `protobuf:"bytes,8,opt,name=insurance_paid,json=insurancePaid,proto3" json:"insurance_paid,omitempty"`
 	Adl           bool   `protobuf:"varint,9,opt,name=adl,proto3" json:"adl,omitempty"`
+	// The asset realized_pnl and insurance_paid are in; from batch G1.
+	SettleAsset   string `protobuf:"bytes,10,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -977,17 +1025,26 @@ func (x *LiquidationFilled) GetAdl() bool {
 	return false
 }
 
+func (x *LiquidationFilled) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
 // AdlExecuted: an auto-deleveraging closed part of a counterparty's
 // position at the liquidated position's price.
 type AdlExecuted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Symbol        string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
-	PositionSide  string                 `protobuf:"bytes,3,opt,name=position_side,json=positionSide,proto3" json:"position_side,omitempty"`
-	TradeId       string                 `protobuf:"bytes,4,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
-	Price         string                 `protobuf:"bytes,5,opt,name=price,proto3" json:"price,omitempty"`
-	Quantity      string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
-	RealizedPnl   string                 `protobuf:"bytes,7,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	UserId       string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol       string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	PositionSide string                 `protobuf:"bytes,3,opt,name=position_side,json=positionSide,proto3" json:"position_side,omitempty"`
+	TradeId      string                 `protobuf:"bytes,4,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	Price        string                 `protobuf:"bytes,5,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity     string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	RealizedPnl  string                 `protobuf:"bytes,7,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
+	// The asset realized_pnl is in; from batch G1.
+	SettleAsset   string `protobuf:"bytes,8,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1071,11 +1128,18 @@ func (x *AdlExecuted) GetRealizedPnl() string {
 	return ""
 }
 
+func (x *AdlExecuted) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
 var File_exchange_derivatives_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"$exchange/derivatives/v1/events.proto\x12\x17exchange.derivatives.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x89\x03\n" +
+	"$exchange/derivatives/v1/events.proto\x12\x17exchange.derivatives.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd1\x03\n" +
 	"\bPosition\x12\x1f\n" +
 	"\vposition_id\x18\x01 \x01(\tR\n" +
 	"positionId\x12\x17\n" +
@@ -1094,7 +1158,9 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	" \x01(\x05R\bleverage\x12!\n" +
 	"\frealized_pnl\x18\v \x01(\tR\vrealizedPnl\x12\x18\n" +
 	"\afunding\x18\f \x01(\tR\afunding\x12\x18\n" +
-	"\aversion\x18\r \x01(\x03R\aversion\"j\n" +
+	"\aversion\x18\r \x01(\x03R\aversion\x12!\n" +
+	"\fsettle_asset\x18\x0e \x01(\tR\vsettleAsset\x12#\n" +
+	"\rcontract_size\x18\x0f \x01(\tR\fcontractSize\"j\n" +
 	"\x0ePositionOpened\x12=\n" +
 	"\bposition\x18\x01 \x01(\v2!.exchange.derivatives.v1.PositionR\bposition\x12\x19\n" +
 	"\btrade_id\x18\x02 \x01(\tR\atradeId\"\x83\x01\n" +
@@ -1118,7 +1184,7 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\ffunding_rate\x18\x03 \x01(\tR\vfundingRate\x12\x1d\n" +
 	"\n" +
 	"mark_price\x18\x04 \x01(\tR\tmarkPrice\x12\x16\n" +
-	"\x06amount\x18\x05 \x01(\tR\x06amount\"\xb2\x03\n" +
+	"\x06amount\x18\x05 \x01(\tR\x06amount\"\xfa\x03\n" +
 	"\vFillSettled\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\x12\x19\n" +
 	"\border_id\x18\x02 \x01(\tR\aorderId\x12\x17\n" +
@@ -1135,7 +1201,9 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\frealized_pnl\x18\f \x01(\tR\vrealizedPnl\x12 \n" +
 	"\vliquidation\x18\r \x01(\bR\vliquidation\x12;\n" +
 	"\vexecuted_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"executedAt\"\x82\x02\n" +
+	"executedAt\x12!\n" +
+	"\fsettle_asset\x18\x0f \x01(\tR\vsettleAsset\x12#\n" +
+	"\rcontract_size\x18\x10 \x01(\tR\fcontractSize\"\xa5\x02\n" +
 	"\x12LiquidationWarning\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
@@ -1143,7 +1211,8 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\x05cross\x18\x04 \x01(\bR\x05cross\x12%\n" +
 	"\x0emargin_balance\x18\x05 \x01(\tR\rmarginBalance\x12-\n" +
 	"\x12maintenance_margin\x18\x06 \x01(\tR\x11maintenanceMargin\x12*\n" +
-	"\x02at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"\x89\x02\n" +
+	"\x02at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12!\n" +
+	"\fsettle_asset\x18\b \x01(\tR\vsettleAsset\"\x89\x02\n" +
 	"\x12LiquidationStarted\x12=\n" +
 	"\bposition\x18\x01 \x01(\v2!.exchange.derivatives.v1.PositionR\bposition\x12\x14\n" +
 	"\x05cross\x18\x02 \x01(\bR\x05cross\x12\x1d\n" +
@@ -1151,7 +1220,7 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"mark_price\x18\x03 \x01(\tR\tmarkPrice\x12)\n" +
 	"\x10bankruptcy_price\x18\x04 \x01(\tR\x0fbankruptcyPrice\x12%\n" +
 	"\x0emargin_balance\x18\x05 \x01(\tR\rmarginBalance\x12-\n" +
-	"\x12maintenance_margin\x18\x06 \x01(\tR\x11maintenanceMargin\"\x92\x02\n" +
+	"\x12maintenance_margin\x18\x06 \x01(\tR\x11maintenanceMargin\"\xb5\x02\n" +
 	"\x11LiquidationFilled\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
@@ -1161,7 +1230,9 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\bquantity\x18\x06 \x01(\tR\bquantity\x12!\n" +
 	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnl\x12%\n" +
 	"\x0einsurance_paid\x18\b \x01(\tR\rinsurancePaid\x12\x10\n" +
-	"\x03adl\x18\t \x01(\bR\x03adl\"\xd3\x01\n" +
+	"\x03adl\x18\t \x01(\bR\x03adl\x12!\n" +
+	"\fsettle_asset\x18\n" +
+	" \x01(\tR\vsettleAsset\"\xf6\x01\n" +
 	"\vAdlExecuted\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
@@ -1169,7 +1240,8 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\btrade_id\x18\x04 \x01(\tR\atradeId\x12\x14\n" +
 	"\x05price\x18\x05 \x01(\tR\x05price\x12\x1a\n" +
 	"\bquantity\x18\x06 \x01(\tR\bquantity\x12!\n" +
-	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnlB\xf4\x01\n" +
+	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnl\x12!\n" +
+	"\fsettle_asset\x18\b \x01(\tR\vsettleAssetB\xf4\x01\n" +
 	"\x1bcom.exchange.derivatives.v1B\vEventsProtoP\x01ZJgithub.com/skill/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
 
 var (

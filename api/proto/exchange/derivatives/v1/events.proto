@@ -5,8 +5,12 @@ package exchange.derivatives.v1;
 import "google/protobuf/timestamp.proto";
 
 // Events of derivatives-service (requirements §8.1), keyed by user_id.
-// Amounts are decimal strings in the settlement asset (USDT); quantities
-// in the base asset.
+// Amounts are decimal strings in the contract's settlement asset
+// (settle_asset: USDT for a linear contract, the base asset for an
+// inverse one, design 2026-10-06 §2.5); quantities in the base asset, or
+// whole contracts of an inverse contract (contract_size USD each). Events
+// from before the inverse contracts leave settle_asset and contract_size
+// empty: read them as USDT and a linear contract.
 //
 //   derivatives.position.events     PositionOpened, PositionChanged,
 //                                   PositionClosed, MarginAdjusted,
@@ -40,6 +44,10 @@ message Position {
   // Funding received (positive) or paid.
   string funding = 12;
   int64 version = 13;
+  // The asset margin, PnL and funding are in, and an inverse contract's
+  // face value in USD ("0" or empty for a linear one); from batch G1.
+  string settle_asset = 14;
+  string contract_size = 15;
 }
 
 // PositionOpened: a fill opened a position that was flat.
@@ -105,6 +113,10 @@ message FillSettled {
   string realized_pnl = 12;
   bool liquidation = 13;
   google.protobuf.Timestamp executed_at = 14;
+  // The asset fee and realized_pnl are in, and an inverse contract's face
+  // value in USD ("0" or empty for a linear one); from batch G1.
+  string settle_asset = 15;
+  string contract_size = 16;
 }
 
 // Liquidations (§11.7) on derivatives.liquidation.events, keyed by user_id.
@@ -120,6 +132,9 @@ message LiquidationWarning {
   string margin_balance = 5;
   string maintenance_margin = 6;
   google.protobuf.Timestamp at = 7;
+  // The asset of the margin balance: the cross account's or the
+  // position's settlement asset; from batch G1.
+  string settle_asset = 8;
 }
 
 // LiquidationStarted: the liquidation engine took a position over (its
@@ -147,6 +162,8 @@ message LiquidationFilled {
   // What the insurance fund paid of the loss.
   string insurance_paid = 8;
   bool adl = 9;
+  // The asset realized_pnl and insurance_paid are in; from batch G1.
+  string settle_asset = 10;
 }
 
 // AdlExecuted: an auto-deleveraging closed part of a counterparty's
@@ -159,4 +176,6 @@ message AdlExecuted {
   string price = 5;
   string quantity = 6;
   string realized_pnl = 7;
+  // The asset realized_pnl is in; from batch G1.
+  string settle_asset = 8;
 }

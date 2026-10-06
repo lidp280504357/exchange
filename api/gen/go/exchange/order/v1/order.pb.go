@@ -277,7 +277,13 @@ type Order struct {
 	// A margin order's side effect: NONE, AUTO_BORROW (borrowed before the
 	// freeze), AUTO_REPAY (the ledger repays the debt of the asset its fills
 	// bring, in the settlement). Empty reads as NONE.
-	SideEffect    string `protobuf:"bytes,22,opt,name=side_effect,json=sideEffect,proto3" json:"side_effect,omitempty"`
+	SideEffect string `protobuf:"bytes,22,opt,name=side_effect,json=sideEffect,proto3" json:"side_effect,omitempty"`
+	// A contract order's settlement asset (Contract.settle_asset) and an
+	// inverse contract's face value in USD, its quantity then whole
+	// contracts (design 2026-10-06 §2.5, from batch G1). Empty for spot
+	// orders; contract_size empty or "0" for a linear contract.
+	SettleAsset   string `protobuf:"bytes,23,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	ContractSize  string `protobuf:"bytes,24,opt,name=contract_size,json=contractSize,proto3" json:"contract_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -466,11 +472,25 @@ func (x *Order) GetSideEffect() string {
 	return ""
 }
 
+func (x *Order) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *Order) GetContractSize() string {
+	if x != nil {
+		return x.ContractSize
+	}
+	return ""
+}
+
 var File_exchange_order_v1_order_proto protoreflect.FileDescriptor
 
 const file_exchange_order_v1_order_proto_rawDesc = "" +
 	"\n" +
-	"\x1dexchange/order/v1/order.proto\x12\x11exchange.order.v1\"\xce\x06\n" +
+	"\x1dexchange/order/v1/order.proto\x12\x11exchange.order.v1\"\x96\a\n" +
 	"\x05Order\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12&\n" +
 	"\x0fclient_order_id\x18\x02 \x01(\tR\rclientOrderId\x12\x17\n" +
@@ -497,7 +517,9 @@ const file_exchange_order_v1_order_proto_rawDesc = "" +
 	"quoteAsset\x12!\n" +
 	"\faccount_type\x18\x15 \x01(\tR\vaccountType\x12\x1f\n" +
 	"\vside_effect\x18\x16 \x01(\tR\n" +
-	"sideEffect*9\n" +
+	"sideEffect\x12!\n" +
+	"\fsettle_asset\x18\x17 \x01(\tR\vsettleAsset\x12#\n" +
+	"\rcontract_size\x18\x18 \x01(\tR\fcontractSize*9\n" +
 	"\x04Side\x12\x14\n" +
 	"\x10SIDE_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bSIDE_BUY\x10\x01\x12\r\n" +

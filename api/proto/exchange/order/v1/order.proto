@@ -84,4 +84,10 @@ message Order {
   // freeze), AUTO_REPAY (the ledger repays the debt of the asset its fills
   // bring, in the settlement). Empty reads as NONE.
   string side_effect = 22;
+  // A contract order's settlement asset (Contract.settle_asset) and an
+  // inverse contract's face value in USD, its quantity then whole
+  // contracts (design 2026-10-06 §2.5, from batch G1). Empty for spot
+  // orders; contract_size empty or "0" for a linear contract.
+  string settle_asset = 23;
+  string contract_size = 24;
 }

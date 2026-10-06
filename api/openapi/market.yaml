@@ -13,9 +13,12 @@ info:
     decimal strings (ADR-0008): clients must not parse them into floating
     point. Live updates come over the WebSocket channels tickers,
     ticker:, depth:, trades: and candles:, and for perpetual contracts
-    mark-price: and funding: (§7.3). Contracts (BTC-USDT-PERP) have
-    tickers, depth, trades and candles like pairs; their charts and
-    tickers follow their index pair's reference market.
+    mark-price:, funding: and liquidations: (§7.3; liquidations: pushes
+    the reference market's forced orders on the contract as Liquidation,
+    design 2026-10-06 §3.3, from batch G3b). Contracts (BTC-USDT-PERP, and
+    the coin-margined BTC-USD-PERP) have tickers, depth, trades and
+    candles like pairs; their charts and tickers follow their index pair's
+    reference market.
 servers:
   - url: https://astras.vip
 tags:
@@ -122,13 +125,25 @@ paths:
   /v1/market/contracts:
     get:
       operationId: listContracts
-      summary: USDT perpetual contracts (delisted ones excluded)
+      summary: Perpetual contracts of a margin type (delisted ones excluded)
       description: |
         Linear perpetuals settled in USDT (requirements §5.8, §11.7):
         quantities in the base asset; price, margin, fees and PnL in USDT.
-        A position's leverage and maintenance margin rate come from the
-        risk tier its notional falls in.
+        Coin-margined (inverse) perpetuals (design 2026-10-06 §2.1), e.g.
+        BTC-USD-PERP: prices in USD, quantities whole contracts of
+        contract_size USD, margin, fees and PnL in the base asset they
+        settle in. A position's leverage and maintenance margin rate come
+        from the risk tier its notional falls in. margin_type picks the
+        kind; without it the list keeps to the linear contracts, as before
+        the coin-margined ones.
       tags: [market]
+      parameters:
+        - name: margin_type
+          in: query
+          schema:
+            type: string
+            enum: [USDT, COIN, ALL]
+            default: USDT
       responses:
         '200':
           description: Every listed contract.
@@ -147,7 +162,7 @@ paths:
   /v1/market/contracts/{symbol}:
     get:
       operationId: getContract
-      summary: One perpetual contract, delisted ones included
+      summary: One perpetual contract of either margin type, delisted ones included
       tags: [market]
       parameters:
         - name: symbol
@@ -275,6 +290,32 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/Decimal'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/futures/overview:
+    get:
+      operationId: getFuturesOverview
+      summary: Every listed contract's mark price, funding, open interest and day
+      description: |
+        The contracts of both margin types with their mark and index
+        prices, the funding estimate, the open interest from Binance (null
+        for a contract without a reference market) and the 24-hour change
+        and volume of their tickers (design 2026-10-06 §3.3). Needs
+        market.futures_data; off, 404 COMMON_NOT_FOUND. From batch G3b.
+      tags: [market]
+      responses:
+        '200':
+          description: One item per listed contract.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contracts]
+                properties:
+                  contracts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FuturesOverviewItem'
         default:
           $ref: './common.yaml#/components/responses/Error'
   /v1/market/{symbol}/ticker:
@@ -439,6 +480,64 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FundingRate'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/futures-data:
+    get:
+      operationId: getFuturesData
+      summary: A contract's futures statistics from Binance, oldest first
+      description: |
+        Binance's statistics of the Binance contract the contract follows
+        (reference_symbol; design 2026-10-06 §3.3): open interest, the long
+        and short shares of all accounts and of the top traders' accounts
+        and positions, the takers' buy and sell volume, the basis and the
+        settled funding rates, kept 30 days. Each point carries the fields
+        of its metric (FuturesDataPoint). A contract without a reference
+        has none (an empty list). Needs market.futures_data; off, the
+        answer is 404 COMMON_NOT_FOUND, as for a symbol that is no
+        contract. From batch G3b.
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: metric
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [open_interest, long_short_account, top_long_short_account, top_long_short_position, taker_ratio, basis, funding]
+        - name: period
+          in: query
+          description: The points' spacing; funding has one point per settlement whatever the period.
+          schema:
+            type: string
+            enum: [5m, 15m, 1h, 4h, 1d]
+            default: 5m
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 30
+      responses:
+        '200':
+          description: The points.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, metric, period, points]
+                properties:
+                  symbol:
+                    type: string
+                  metric:
+                    type: string
+                  period:
+                    type: string
+                  points:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FuturesDataPoint'
         default:
           $ref: './common.yaml#/components/responses/Error'
   /v1/market/{symbol}/candles:
@@ -621,7 +720,9 @@ components:
       properties:
         max_notional:
           type: string
-          description: Largest position notional (USDT) of the tier.
+          description: >-
+            Largest position notional of the tier, in the settlement asset: USDT, or the base
+            asset of a coin-margined contract (contracts x contract_size / mark price).
         max_leverage:
           type: integer
         mmr:
@@ -631,11 +732,11 @@ components:
       type: object
       required: [symbol, type, base_asset, quote_asset, index_symbol, tick_size, lot_size, min_quantity, max_quantity, min_notional,
         price_band, max_leverage, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional, maker_fee_rate,
-        taker_fee_rate, status]
+        taker_fee_rate, status, margin_type, settle_asset, contract_size, reference_symbol]
       properties:
         symbol:
           type: string
-          examples: [BTC-USDT-PERP]
+          examples: [BTC-USDT-PERP, BTC-USD-PERP]
         type:
           type: string
           enum: [PERPETUAL]
@@ -643,19 +744,22 @@ components:
           type: string
         quote_asset:
           type: string
+          description: USDT, or USD for a coin-margined contract (USD is no asset).
         index_symbol:
           type: string
-          description: The spot market whose reference prices make the index.
+          description: The spot market whose reference prices make the index (the USDT pair, also for a coin-margined contract).
         tick_size:
           type: string
         lot_size:
           type: string
+          description: In the base asset, or whole contracts ("1") of a coin-margined contract.
         min_quantity:
           type: string
         max_quantity:
           type: string
         min_notional:
           type: string
+          description: In USDT, or USD for a coin-margined contract (one contract's face value).
         price_band:
           type: string
           description: Largest deviation of a limit price from the mark price, as a fraction.
@@ -675,6 +779,7 @@ components:
           type: string
         impact_notional:
           type: string
+          description: In USDT, or in contracts of a coin-margined contract (10,000 USD of them).
         maker_fee_rate:
           type: string
         taker_fee_rate:
@@ -682,6 +787,135 @@ components:
         status:
           type: string
           enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        margin_type:
+          type: string
+          enum: [USDT, COIN]
+          description: USDT for a linear contract, COIN for a coin-margined (inverse) one.
+        settle_asset:
+          type: string
+          description: The asset margin, fees, funding and PnL are in (the FUTURES account of that asset).
+          examples: [USDT, BTC]
+        contract_size:
+          type: string
+          description: A coin-margined contract's face value in USD (100 for BTC, 10 for the others); "0" for a linear contract.
+        reference_symbol:
+          type: [string, 'null']
+          description: >-
+            The Binance contract the contract's market data and, with market.reference_mark, its mark
+            price follow: BTCUSDT (USDⓈ-M) or BTCUSD_PERP (COIN-M); null when none does (the platform
+            coin's).
+    FuturesDataPoint:
+      type: object
+      description: |
+        One point of a contract's futures statistics, with the fields of
+        its metric (decimal strings; quantities in the base asset, or
+        contracts of a coin-margined contract; values in USD):
+        open_interest: open_interest, open_interest_value;
+        long_short_account and top_long_short_account: long_share,
+        short_share (fractions of the accounts), ratio;
+        top_long_short_position: long_share, short_share (fractions of the
+        positions), ratio; taker_ratio: buy_volume, sell_volume, ratio;
+        basis: futures_price, index_price, basis, basis_rate,
+        annualized_basis_rate; funding: funding_rate, mark_price.
+      required: [time]
+      properties:
+        time:
+          type: string
+          format: date-time
+        open_interest:
+          $ref: '#/components/schemas/Decimal'
+        open_interest_value:
+          $ref: '#/components/schemas/Decimal'
+        long_share:
+          $ref: '#/components/schemas/Decimal'
+        short_share:
+          $ref: '#/components/schemas/Decimal'
+        ratio:
+          $ref: '#/components/schemas/Decimal'
+        buy_volume:
+          $ref: '#/components/schemas/Decimal'
+        sell_volume:
+          $ref: '#/components/schemas/Decimal'
+        futures_price:
+          $ref: '#/components/schemas/Decimal'
+        index_price:
+          $ref: '#/components/schemas/Decimal'
+        basis:
+          $ref: '#/components/schemas/Decimal'
+        basis_rate:
+          $ref: '#/components/schemas/Decimal'
+        annualized_basis_rate:
+          $ref: '#/components/schemas/Decimal'
+        funding_rate:
+          $ref: '#/components/schemas/Decimal'
+        mark_price:
+          $ref: '#/components/schemas/Decimal'
+    FuturesOverviewItem:
+      type: object
+      required: [symbol, margin_type, settle_asset, mark_price, index_price, funding_rate, next_funding_time, open_interest,
+        open_interest_value, change, quote_volume]
+      properties:
+        symbol:
+          type: string
+        margin_type:
+          type: string
+          enum: [USDT, COIN]
+        settle_asset:
+          type: string
+        mark_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        index_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        funding_rate:
+          description: The running period's estimate.
+          $ref: '#/components/schemas/NullableDecimal'
+        next_funding_time:
+          type: [string, 'null']
+          format: date-time
+        open_interest:
+          description: Binance's, in the base asset or contracts; null without a reference market.
+          $ref: '#/components/schemas/NullableDecimal'
+        open_interest_value:
+          description: The open interest's value in USD.
+          $ref: '#/components/schemas/NullableDecimal'
+        change:
+          description: The ticker's 24-hour change as a fraction (Ticker.change).
+          $ref: '#/components/schemas/NullableDecimal'
+        quote_volume:
+          description: The ticker's 24-hour volume in USD (USDT).
+          $ref: '#/components/schemas/NullableDecimal'
+    Liquidation:
+      type: object
+      description: |
+        A forced order of the reference market on a contract (design
+        2026-10-06 §3.3), pushed on the public WebSocket channel
+        liquidations:{symbol} as Binance streams them (at most one a second
+        per contract, not all of them). From batch G3b.
+      required: [symbol, side, price, average_price, quantity, filled_quantity, value_usd, status, traded_at]
+      properties:
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+          description: The forced order's side; SELL closed a long.
+        price:
+          $ref: '#/components/schemas/Decimal'
+        average_price:
+          $ref: '#/components/schemas/Decimal'
+        quantity:
+          description: In the base asset, or contracts of a coin-margined contract.
+          $ref: '#/components/schemas/Decimal'
+        filled_quantity:
+          $ref: '#/components/schemas/Decimal'
+        value_usd:
+          $ref: '#/components/schemas/Decimal'
+        status:
+          type: string
+          enum: [FILLED, PARTIALLY_FILLED]
+        traded_at:
+          type: string
+          format: date-time
     TradingPair:
       type: object
       required: [symbol, base_asset, quote_asset, base_name, rank, categories, tick_size, lot_size, price_decimals, qty_decimals,
@@ -827,6 +1061,13 @@ components:
           type: [string, 'null']
           format: date-time
           description: When the prices were computed.
+        source:
+          type: string
+          enum: [PLATFORM, BINANCE]
+          description: >-
+            PLATFORM (computed here) or BINANCE (the Binance contract's mark and index prices and
+            estimated rate, while market.reference_mark is on for the contract; design 2026-10-06 §3.1,
+            from batch G3a, which makes it required).
     FundingRate:
       type: object
       required: [funding_time, funding_rate, mark_price, index_price, premium, interest_rate, samples, settled_at]
@@ -848,10 +1089,14 @@ components:
         samples:
           type: integer
           format: int64
-          description: Premium index samples in the period (one a second).
+          description: Premium index samples in the period (one a second); 0 for a rate taken from Binance.
         settled_at:
           type: string
           format: date-time
+        source:
+          type: string
+          enum: [PLATFORM, BINANCE]
+          description: Where the settled rate came from (design 2026-10-06 §3.1, from batch G3a).
     PriceLevel:
       type: array
       description: '[price, quantity]'

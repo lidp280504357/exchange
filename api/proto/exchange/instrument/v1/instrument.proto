@@ -194,9 +194,12 @@ message RiskTier {
   string mmr = 3;
 }
 
-// Contract is a linear perpetual future settled in its quote asset,
-// e.g. BTC-USDT-PERP (requirements §5.8). Quantities are in the base
-// asset; prices, margin, fees and PnL in the quote asset.
+// Contract is a perpetual future (requirements §5.8): a linear one
+// settled in its quote asset, e.g. BTC-USDT-PERP, with quantities in the
+// base asset and prices, margin, fees and PnL in the quote asset; or an
+// inverse (coin-margined) one, e.g. BTC-USD-PERP (design 2026-10-06 §2.1),
+// priced in USD, its quantities whole contracts of contract_size USD each,
+// margin, fees and PnL in the base asset it settles in.
 message Contract {
   string symbol = 1;
   // PERPETUAL.
@@ -225,6 +228,18 @@ message Contract {
   // PREPARE, TRADING, HALT, CANCEL_ONLY or DELISTED.
   string status = 20;
   int64 version = 21;
+  // USDT for a linear contract, COIN for an inverse one.
+  string margin_type = 22;
+  // The asset margin, fees, funding and PnL are in: the quote asset
+  // (USDT) of a linear contract, the base asset of an inverse one.
+  string settle_asset = 23;
+  // An inverse contract's face value in USD, e.g. "100"; "0" for a linear
+  // contract, whose quantities are in the base asset.
+  string contract_size = 24;
+  // The Binance contract the contract's market data and, with
+  // market.reference_mark, its mark price follow: BTCUSDT (USDⓈ-M) or
+  // BTCUSD_PERP (COIN-M); empty when none does (the platform coin's).
+  string reference_symbol = 25;
 }
 
 message FeeSchedule {
@@ -304,7 +319,13 @@ message GetContractResponse {
   Contract contract = 1;
 }
 
-message ListContractsRequest {}
+message ListContractsRequest {
+  // USDT (or empty) lists the linear contracts, COIN the inverse ones,
+  // ALL both. Empty keeps the clients from before the inverse contracts
+  // on the linear ones until they read the new fields (design 2026-10-06
+  // §2.5).
+  string margin_type = 1;
+}
 
 message ListContractsResponse {
   repeated Contract contracts = 1;

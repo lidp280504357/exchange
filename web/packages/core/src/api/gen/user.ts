@@ -196,7 +196,8 @@ export interface operations {
     getEligibility: {
         parameters: {
             query: {
-                feature: "SPOT_TRADE" | "DERIVATIVES_TRADE" | "DEPOSIT" | "WITHDRAW" | "TRANSFER" | "MARGIN_TRADE";
+                /** @description COIN_M_TRADE is trading the coin-margined perpetuals (derivatives.coin_m, design 2026-10-06 §2.5). */
+                feature: "SPOT_TRADE" | "DERIVATIVES_TRADE" | "DEPOSIT" | "WITHDRAW" | "TRANSFER" | "MARGIN_TRADE" | "COIN_M_TRADE";
                 asset?: string;
                 symbol?: string;
             };

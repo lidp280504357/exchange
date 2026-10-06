@@ -61,6 +61,12 @@ for entry in "${BUSINESS[@]}"; do
   ensure "$NS$name.dlq" 1 30
 done
 
+# 币安合约的强平单（LiquidationOccurred，设计 2026-10-06 §3.3，G3b 发布）：网关的 liquidations 频道实时推送，
+# analytics 写进 ClickHouse futures_liquidations（保留 7 天），topic 本身只保留 1 天
+ensure "${NS}market.liquidations" 3 1
+ensure "${NS}market.liquidations.retry" 1 7
+ensure "${NS}market.liquidations.dlq" 1 30
+
 # 撮合引擎输入命令，需要可重放，保留 30 天（现货与合约分片各一个）
 ensure "${NS}order.commands" 3 30
 ensure "${NS}derivatives.order.commands" 3 30

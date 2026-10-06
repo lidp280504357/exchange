@@ -53,4 +53,12 @@ message TradeExecuted {
   string seller_account_type = 21;
   string buyer_side_effect = 22;
   string seller_side_effect = 23;
+  // A contract trade's settlement asset and an inverse contract's face
+  // value in USD (design 2026-10-06 §2.5, from batch G1): on an inverse
+  // contract quantity is whole contracts and quote_quantity their USD
+  // value, quantity x contract_size; the value in the settlement asset is
+  // quote_quantity / price. Empty for spot trades; contract_size empty or
+  // "0" for a linear contract.
+  string settle_asset = 24;
+  string contract_size = 25;
 }

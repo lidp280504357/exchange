@@ -80,11 +80,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * USDT perpetual contracts (delisted ones excluded)
+         * Perpetual contracts of a margin type (delisted ones excluded)
          * @description Linear perpetuals settled in USDT (requirements §5.8, §11.7):
          *     quantities in the base asset; price, margin, fees and PnL in USDT.
-         *     A position's leverage and maintenance margin rate come from the
-         *     risk tier its notional falls in.
+         *     Coin-margined (inverse) perpetuals (design 2026-10-06 §2.1), e.g.
+         *     BTC-USD-PERP: prices in USD, quantities whole contracts of
+         *     contract_size USD, margin, fees and PnL in the base asset they
+         *     settle in. A position's leverage and maintenance margin rate come
+         *     from the risk tier its notional falls in. margin_type picks the
+         *     kind; without it the list keeps to the linear contracts, as before
+         *     the coin-margined ones.
          */
         get: operations["listContracts"];
         put?: never;
@@ -102,7 +107,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One perpetual contract, delisted ones included */
+        /** One perpetual contract of either margin type, delisted ones included */
         get: operations["getContract"];
         put?: never;
         post?: never;
@@ -167,6 +172,30 @@ export interface paths {
          *     for five minutes. A pair without candles is left out.
          */
         get: operations["getSparklines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/futures/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every listed contract's mark price, funding, open interest and day
+         * @description The contracts of both margin types with their mark and index
+         *     prices, the funding estimate, the open interest from Binance (null
+         *     for a contract without a reference market) and the 24-hour change
+         *     and volume of their tickers (design 2026-10-06 §3.3). Needs
+         *     market.futures_data; off, 404 COMMON_NOT_FOUND. From batch G3b.
+         */
+        get: operations["getFuturesOverview"];
         put?: never;
         post?: never;
         delete?: never;
@@ -279,6 +308,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/{symbol}/futures-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A contract's futures statistics from Binance, oldest first
+         * @description Binance's statistics of the Binance contract the contract follows
+         *     (reference_symbol; design 2026-10-06 §3.3): open interest, the long
+         *     and short shares of all accounts and of the top traders' accounts
+         *     and positions, the takers' buy and sell volume, the basis and the
+         *     settled funding rates, kept 30 days. Each point carries the fields
+         *     of its metric (FuturesDataPoint). A contract without a reference
+         *     has none (an empty list). Needs market.futures_data; off, the
+         *     answer is 404 COMMON_NOT_FOUND, as for a symbol that is no
+         *     contract. From batch G3b.
+         */
+        get: operations["getFuturesData"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/{symbol}/candles": {
         parameters: {
             query?: never;
@@ -372,25 +429,31 @@ export interface components {
             profile_version: number;
         };
         RiskTier: {
-            /** @description Largest position notional (USDT) of the tier. */
+            /** @description Largest position notional of the tier, in the settlement asset: USDT, or the base asset of a coin-margined contract (contracts x contract_size / mark price). */
             max_notional: string;
             max_leverage: number;
             /** @description Maintenance margin rate, liquidation fee included. */
             mmr: string;
         };
         Contract: {
-            /** @example BTC-USDT-PERP */
+            /**
+             * @example BTC-USDT-PERP
+             * @example BTC-USD-PERP
+             */
             symbol: string;
             /** @enum {string} */
             type: "PERPETUAL";
             base_asset: string;
+            /** @description USDT, or USD for a coin-margined contract (USD is no asset). */
             quote_asset: string;
-            /** @description The spot market whose reference prices make the index. */
+            /** @description The spot market whose reference prices make the index (the USDT pair, also for a coin-margined contract). */
             index_symbol: string;
             tick_size: string;
+            /** @description In the base asset, or whole contracts ("1") of a coin-margined contract. */
             lot_size: string;
             min_quantity: string;
             max_quantity: string;
+            /** @description In USDT, or USD for a coin-margined contract (one contract's face value). */
             min_notional: string;
             /** @description Largest deviation of a limit price from the mark price, as a fraction. */
             price_band: string;
@@ -401,11 +464,101 @@ export interface components {
             /** @description Per funding interval. */
             interest_rate: string;
             funding_cap: string;
+            /** @description In USDT, or in contracts of a coin-margined contract (10,000 USD of them). */
             impact_notional: string;
             maker_fee_rate: string;
             taker_fee_rate: string;
             /** @enum {string} */
             status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            /**
+             * @description USDT for a linear contract, COIN for a coin-margined (inverse) one.
+             * @enum {string}
+             */
+            margin_type: "USDT" | "COIN";
+            /**
+             * @description The asset margin, fees, funding and PnL are in (the FUTURES account of that asset).
+             * @example USDT
+             * @example BTC
+             */
+            settle_asset: string;
+            /** @description A coin-margined contract's face value in USD (100 for BTC, 10 for the others); "0" for a linear contract. */
+            contract_size: string;
+            /** @description The Binance contract the contract's market data and, with market.reference_mark, its mark price follow: BTCUSDT (USDⓈ-M) or BTCUSD_PERP (COIN-M); null when none does (the platform coin's). */
+            reference_symbol: string | null;
+        };
+        /**
+         * @description One point of a contract's futures statistics, with the fields of
+         *     its metric (decimal strings; quantities in the base asset, or
+         *     contracts of a coin-margined contract; values in USD):
+         *     open_interest: open_interest, open_interest_value;
+         *     long_short_account and top_long_short_account: long_share,
+         *     short_share (fractions of the accounts), ratio;
+         *     top_long_short_position: long_share, short_share (fractions of the
+         *     positions), ratio; taker_ratio: buy_volume, sell_volume, ratio;
+         *     basis: futures_price, index_price, basis, basis_rate,
+         *     annualized_basis_rate; funding: funding_rate, mark_price.
+         */
+        FuturesDataPoint: {
+            /** Format: date-time */
+            time: string;
+            open_interest?: components["schemas"]["Decimal"];
+            open_interest_value?: components["schemas"]["Decimal"];
+            long_share?: components["schemas"]["Decimal"];
+            short_share?: components["schemas"]["Decimal"];
+            ratio?: components["schemas"]["Decimal"];
+            buy_volume?: components["schemas"]["Decimal"];
+            sell_volume?: components["schemas"]["Decimal"];
+            futures_price?: components["schemas"]["Decimal"];
+            index_price?: components["schemas"]["Decimal"];
+            basis?: components["schemas"]["Decimal"];
+            basis_rate?: components["schemas"]["Decimal"];
+            annualized_basis_rate?: components["schemas"]["Decimal"];
+            funding_rate?: components["schemas"]["Decimal"];
+            mark_price?: components["schemas"]["Decimal"];
+        };
+        FuturesOverviewItem: {
+            symbol: string;
+            /** @enum {string} */
+            margin_type: "USDT" | "COIN";
+            settle_asset: string;
+            mark_price: components["schemas"]["NullableDecimal"];
+            index_price: components["schemas"]["NullableDecimal"];
+            /** @description The running period's estimate. */
+            funding_rate: components["schemas"]["NullableDecimal"];
+            /** Format: date-time */
+            next_funding_time: string | null;
+            /** @description Binance's, in the base asset or contracts; null without a reference market. */
+            open_interest: components["schemas"]["NullableDecimal"];
+            /** @description The open interest's value in USD. */
+            open_interest_value: components["schemas"]["NullableDecimal"];
+            /** @description The ticker's 24-hour change as a fraction (Ticker.change). */
+            change: components["schemas"]["NullableDecimal"];
+            /** @description The ticker's 24-hour volume in USD (USDT). */
+            quote_volume: components["schemas"]["NullableDecimal"];
+        };
+        /**
+         * @description A forced order of the reference market on a contract (design
+         *     2026-10-06 §3.3), pushed on the public WebSocket channel
+         *     liquidations:{symbol} as Binance streams them (at most one a second
+         *     per contract, not all of them). From batch G3b.
+         */
+        Liquidation: {
+            symbol: string;
+            /**
+             * @description The forced order's side; SELL closed a long.
+             * @enum {string}
+             */
+            side: "BUY" | "SELL";
+            price: components["schemas"]["Decimal"];
+            average_price: components["schemas"]["Decimal"];
+            /** @description In the base asset, or contracts of a coin-margined contract. */
+            quantity: components["schemas"]["Decimal"];
+            filled_quantity: components["schemas"]["Decimal"];
+            value_usd: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            status: "FILLED" | "PARTIALLY_FILLED";
+            /** Format: date-time */
+            traded_at: string;
         };
         TradingPair: {
             /** @example BTC-USDT */
@@ -502,6 +655,11 @@ export interface components {
              * @description When the prices were computed.
              */
             updated_at: string | null;
+            /**
+             * @description PLATFORM (computed here) or BINANCE (the Binance contract's mark and index prices and estimated rate, while market.reference_mark is on for the contract; design 2026-10-06 §3.1, from batch G3a, which makes it required).
+             * @enum {string}
+             */
+            source?: "PLATFORM" | "BINANCE";
         };
         FundingRate: {
             /** Format: date-time */
@@ -514,11 +672,16 @@ export interface components {
             interest_rate: components["schemas"]["Decimal"];
             /**
              * Format: int64
-             * @description Premium index samples in the period (one a second).
+             * @description Premium index samples in the period (one a second); 0 for a rate taken from Binance.
              */
             samples: number;
             /** Format: date-time */
             settled_at: string;
+            /**
+             * @description Where the settled rate came from (design 2026-10-06 §3.1, from batch G3a).
+             * @enum {string}
+             */
+            source?: "PLATFORM" | "BINANCE";
         };
         /** @description [price, quantity] */
         PriceLevel: components["schemas"]["Decimal"][];
@@ -689,7 +852,9 @@ export interface operations {
     };
     listContracts: {
         parameters: {
-            query?: never;
+            query?: {
+                margin_type?: "USDT" | "COIN" | "ALL";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -813,6 +978,29 @@ export interface operations {
                         sparklines: {
                             [key: string]: components["schemas"]["Decimal"][];
                         };
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getFuturesOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One item per listed contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        contracts: components["schemas"]["FuturesOverviewItem"][];
                     };
                 };
             };
@@ -961,6 +1149,40 @@ export interface operations {
                     "application/json": {
                         symbol: string;
                         funding_rates: components["schemas"]["FundingRate"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getFuturesData: {
+        parameters: {
+            query: {
+                metric: "open_interest" | "long_short_account" | "top_long_short_account" | "top_long_short_position" | "taker_ratio" | "basis" | "funding";
+                /** @description The points' spacing; funding has one point per settlement whatever the period. */
+                period?: "5m" | "15m" | "1h" | "4h" | "1d";
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A listed pair or contract (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The points. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        metric: string;
+                        period: string;
+                        points: components["schemas"]["FuturesDataPoint"][];
                     };
                 };
             };

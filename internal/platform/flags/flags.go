@@ -78,6 +78,19 @@ const (
 	KeyMarginAutoBorrow  = "margin.auto_borrow"
 )
 
+// Coin-margined perpetuals and the futures market after Binance (design
+// 2026-10-06 §2.5, batch G0): users trade the coin-margined contracts
+// (eligibility COIN_M_TRADE; by user or region), a contract's mark price,
+// index price and funding rate follow its Binance contract (per symbol),
+// the futures statistics are served. All off by default; derivatives-
+// service reads the first from batch G1, market-data-service the others
+// from G3a and G3b.
+const (
+	KeyCoinM         = "derivatives.coin_m"
+	KeyReferenceMark = "market.reference_mark"
+	KeyFuturesData   = "market.futures_data"
+)
+
 // Known describes the known flags.
 var Known = map[string]string{
 	KeyRegistrationSMS:   "SMS as a registration and login channel (high-risk regions stay email-only)",
@@ -106,6 +119,9 @@ var Known = map[string]string{
 	KeyMarginEnabled:     "Margin trading: transfers to margin accounts, borrowing from HOUSE and orders on margin accounts; off answers MARGIN_DISABLED to them, while repaying and transfers back to SPOT stay open (design 2026-10-06)",
 	KeyMarginLiquidation: "Margin liquidations: accounts at their liquidation level are frozen, closed against HOUSE and their debts repaid; off only warns (design 2026-10-06 §4.5)",
 	KeyMarginAutoBorrow:  "Orders on margin accounts with side_effect AUTO_BORROW borrow what the free balance lacks (design 2026-10-06 §5.1)",
+	KeyCoinM:             "Coin-margined perpetuals (BTC-USD-PERP and the others, settled in their base asset): orders, positions and the FUTURES accounts of BTC, ETH and ASTRA, by user or region (eligibility COIN_M_TRADE; design 2026-10-06 §2)",
+	KeyReferenceMark:     "Mark price, index price and funding rate from the Binance contract the contract follows instead of the platform's own computation, which stays the fallback when the stream stalls, per symbol (design 2026-10-06 §3.1)",
+	KeyFuturesData:       "The futures statistics from Binance (open interest, long and short ratios, taker volume, basis, funding history, liquidations) and the futures overview (design 2026-10-06 §3.3)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

@@ -8,7 +8,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's FUTURES account at the mark prices */
+        /** The caller's FUTURES account of an asset at the mark prices */
         get: operations["getDerivativesAccount"];
         put?: never;
         post?: never;
@@ -121,8 +121,10 @@ export interface paths {
          *     the leverage's cap; details max_notional, leverage and notional),
          *     DERIV_INSUFFICIENT_MARGIN (the available balance less the cross
          *     positions' unrealized loss), ORDER_TOO_MANY_OPEN or the USER_
-         *     eligibility codes. A client_order_id repeated with the same order
-         *     returns that order.
+         *     eligibility codes; on a coin-margined contract also
+         *     DERIV_CONTRACTS_NOT_INTEGER (a fraction of a contract) and, while
+         *     derivatives.coin_m is off for the caller, USER_NOT_ELIGIBLE. A
+         *     client_order_id repeated with the same order returns that order.
          */
         post: operations["createDerivativesOrder"];
         /** Cancel the caller's active contract orders */
@@ -249,7 +251,11 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         FuturesAccount: {
-            /** @example USDT */
+            /**
+             * @description The settlement asset the account and its amounts are in.
+             * @example USDT
+             * @example BTC
+             */
             asset: string;
             /** @description available + frozen. */
             wallet_balance: components["schemas"]["Decimal"];
@@ -304,6 +310,14 @@ export interface components {
             funding: components["schemas"]["Decimal"];
             /** Format: date-time */
             updated_at: string;
+            /** @description The asset margin, PnL and funding are in (from batch G1, which makes it required). */
+            settle_asset?: string;
+            /** @description Signed, as quantity: whole contracts of a coin-margined contract; null for a linear one (from batch G1). */
+            contracts?: components["schemas"]["NullableDecimal"];
+            /** @description A coin-margined position's value in its settlement asset at the mark price, |contracts| x contract_size / mark; null for a linear one or before the first mark price (from batch G1). */
+            value_coin?: components["schemas"]["NullableDecimal"];
+            /** @description The position's value in USD: |contracts| x contract_size for a coin-margined one, notional for a linear one (from batch G1). */
+            value_usd?: components["schemas"]["NullableDecimal"];
         };
         ContractOrder: {
             /** Format: uuid */
@@ -341,6 +355,8 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The asset the order's margin and fee are in (from batch G1, which makes it required). */
+            settle_asset?: string;
         };
         ConditionalOrder: {
             /** Format: uuid */
@@ -386,6 +402,8 @@ export interface components {
             mark_price: components["schemas"]["Decimal"];
             /** @description Received (positive) or paid. */
             amount: components["schemas"]["Decimal"];
+            /** @description The asset amount is in (from batch G1, which makes it required). */
+            settle_asset?: string;
         };
         ContractFill: {
             /** Format: uuid */
@@ -403,7 +421,7 @@ export interface components {
             quantity: components["schemas"]["Decimal"];
             /** @description Of the quantity, what closed a position. */
             closed_quantity: components["schemas"]["Decimal"];
-            /** @description In the settlement asset (USDT). */
+            /** @description In the settlement asset (settle_asset; USDT for a linear contract). */
             fee: components["schemas"]["Decimal"];
             realized_pnl: components["schemas"]["Decimal"];
             liquidation: boolean;
@@ -411,6 +429,8 @@ export interface components {
             settled: boolean;
             /** Format: date-time */
             executed_at: string;
+            /** @description The asset fee and realized_pnl are in (from batch G1, which makes it required). */
+            settle_asset?: string;
         };
         Error: {
             /**
@@ -458,7 +478,10 @@ export type $defs = Record<string, never>;
 export interface operations {
     getDerivativesAccount: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The settlement asset whose FUTURES account to show (USDT by default; BTC, ETH, ASTRA for the coin-margined contracts, from batch G1); one no contract settles in is DERIV_SETTLE_ASSET_MISMATCH. */
+                asset?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -651,6 +674,7 @@ export interface operations {
                      */
                     time_in_force?: "GTC" | "IOC" | "FOK" | "POST_ONLY";
                     price?: components["schemas"]["Decimal"];
+                    /** @description In the base asset, or whole contracts of a coin-margined contract (DERIV_CONTRACTS_NOT_INTEGER). */
                     quantity: components["schemas"]["Decimal"];
                     reduce_only?: boolean;
                     client_order_id?: string;

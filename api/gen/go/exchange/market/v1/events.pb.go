@@ -836,8 +836,14 @@ type MarkPriceUpdated struct {
 	FundingRate     string                 `protobuf:"bytes,5,opt,name=funding_rate,json=fundingRate,proto3" json:"funding_rate,omitempty"`
 	NextFundingTime *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=next_funding_time,json=nextFundingTime,proto3" json:"next_funding_time,omitempty"`
 	ComputedAt      *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=computed_at,json=computedAt,proto3" json:"computed_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Where the prices come from: PLATFORM (computed here from the index
+	// and the contract's book, as above) or BINANCE (the Binance contract's
+	// mark price, index price and estimated rate while market.reference_mark
+	// is on for the contract, design 2026-10-06 §3.1, from batch G3a; basis
+	// is then (mark - index) / index). Empty reads as PLATFORM.
+	Source        string `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MarkPriceUpdated) Reset() {
@@ -917,6 +923,13 @@ func (x *MarkPriceUpdated) GetComputedAt() *timestamppb.Timestamp {
 		return x.ComputedAt
 	}
 	return nil
+}
+
+func (x *MarkPriceUpdated) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
 }
 
 // IndexComponent is one source of an index price.
@@ -1076,8 +1089,13 @@ type FundingRateUpdated struct {
 	FundingTime *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=funding_time,json=fundingTime,proto3" json:"funding_time,omitempty"`
 	Final       bool                   `protobuf:"varint,7,opt,name=final,proto3" json:"final,omitempty"`
 	// The mark and index prices the period settled at; set when final.
-	MarkPrice     string `protobuf:"bytes,8,opt,name=mark_price,json=markPrice,proto3" json:"mark_price,omitempty"`
-	IndexPrice    string `protobuf:"bytes,9,opt,name=index_price,json=indexPrice,proto3" json:"index_price,omitempty"`
+	MarkPrice  string `protobuf:"bytes,8,opt,name=mark_price,json=markPrice,proto3" json:"mark_price,omitempty"`
+	IndexPrice string `protobuf:"bytes,9,opt,name=index_price,json=indexPrice,proto3" json:"index_price,omitempty"`
+	// PLATFORM (the rate computed here, as above) or BINANCE (the Binance
+	// contract's estimate, and its settled rate once final; premium and
+	// samples are then empty and 0), design 2026-10-06 §3.1, from batch G3a.
+	// Empty reads as PLATFORM.
+	Source        string `protobuf:"bytes,10,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1175,6 +1193,132 @@ func (x *FundingRateUpdated) GetIndexPrice() string {
 	return ""
 }
 
+func (x *FundingRateUpdated) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+// LiquidationOccurred is a forced (liquidation) order of the reference
+// market on a contract that follows it, as Binance streams them (at most
+// one a second per contract, design 2026-10-06 §3.3), keyed by the
+// contract (BTC-USDT-PERP), on market.liquidations.
+type LiquidationOccurred struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Symbol string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	// The forced order's side: SIDE_SELL closed a long, SIDE_BUY a short.
+	Side v1.Side `protobuf:"varint,2,opt,name=side,proto3,enum=exchange.order.v1.Side" json:"side,omitempty"`
+	// The order's price and the average price of its fills.
+	Price        string `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
+	AveragePrice string `protobuf:"bytes,4,opt,name=average_price,json=averagePrice,proto3" json:"average_price,omitempty"`
+	// The order's quantity and what of it filled: in the base asset, or
+	// whole contracts of an inverse contract.
+	Quantity       string `protobuf:"bytes,5,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	FilledQuantity string `protobuf:"bytes,6,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
+	// filled_quantity x average_price, or the contracts' USD value
+	// (filled_quantity x contract_size) for an inverse contract.
+	ValueUsd string `protobuf:"bytes,7,opt,name=value_usd,json=valueUsd,proto3" json:"value_usd,omitempty"`
+	// The order's status when streamed: FILLED or PARTIALLY_FILLED.
+	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
+	TradedAt      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=traded_at,json=tradedAt,proto3" json:"traded_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiquidationOccurred) Reset() {
+	*x = LiquidationOccurred{}
+	mi := &file_exchange_market_v1_events_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiquidationOccurred) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiquidationOccurred) ProtoMessage() {}
+
+func (x *LiquidationOccurred) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_market_v1_events_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiquidationOccurred.ProtoReflect.Descriptor instead.
+func (*LiquidationOccurred) Descriptor() ([]byte, []int) {
+	return file_exchange_market_v1_events_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *LiquidationOccurred) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetSide() v1.Side {
+	if x != nil {
+		return x.Side
+	}
+	return v1.Side(0)
+}
+
+func (x *LiquidationOccurred) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetAveragePrice() string {
+	if x != nil {
+		return x.AveragePrice
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetQuantity() string {
+	if x != nil {
+		return x.Quantity
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetFilledQuantity() string {
+	if x != nil {
+		return x.FilledQuantity
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetValueUsd() string {
+	if x != nil {
+		return x.ValueUsd
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *LiquidationOccurred) GetTradedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.TradedAt
+	}
+	return nil
+}
+
 var File_exchange_market_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_market_v1_events_proto_rawDesc = "" +
@@ -1248,7 +1392,7 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"C\n" +
 	"\rTickerUpdated\x122\n" +
-	"\x06ticker\x18\x01 \x01(\v2\x1a.exchange.market.v1.TickerR\x06ticker\"\xa8\x02\n" +
+	"\x06ticker\x18\x01 \x01(\v2\x1a.exchange.market.v1.TickerR\x06ticker\"\xc0\x02\n" +
 	"\x10MarkPriceUpdated\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1d\n" +
 	"\n" +
@@ -1259,7 +1403,8 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\ffunding_rate\x18\x05 \x01(\tR\vfundingRate\x12F\n" +
 	"\x11next_funding_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x0fnextFundingTime\x12;\n" +
 	"\vcomputed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"computedAt\"r\n" +
+	"computedAt\x12\x16\n" +
+	"\x06source\x18\b \x01(\tR\x06source\"r\n" +
 	"\x0eIndexComponent\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x14\n" +
 	"\x05price\x18\x02 \x01(\tR\x05price\x12\x16\n" +
@@ -1272,7 +1417,7 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"components\x18\x03 \x03(\v2\".exchange.market.v1.IndexComponentR\n" +
 	"components\x12;\n" +
 	"\vcomputed_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"computedAt\"\xbd\x02\n" +
+	"computedAt\"\xd5\x02\n" +
 	"\x12FundingRateUpdated\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12!\n" +
 	"\ffunding_rate\x18\x02 \x01(\tR\vfundingRate\x12\x18\n" +
@@ -1284,7 +1429,19 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"mark_price\x18\b \x01(\tR\tmarkPrice\x12\x1f\n" +
 	"\vindex_price\x18\t \x01(\tR\n" +
-	"indexPriceB\xd1\x01\n" +
+	"indexPrice\x12\x16\n" +
+	"\x06source\x18\n" +
+	" \x01(\tR\x06source\"\xc8\x02\n" +
+	"\x13LiquidationOccurred\x12\x16\n" +
+	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12+\n" +
+	"\x04side\x18\x02 \x01(\x0e2\x17.exchange.order.v1.SideR\x04side\x12\x14\n" +
+	"\x05price\x18\x03 \x01(\tR\x05price\x12#\n" +
+	"\raverage_price\x18\x04 \x01(\tR\faveragePrice\x12\x1a\n" +
+	"\bquantity\x18\x05 \x01(\tR\bquantity\x12'\n" +
+	"\x0ffilled_quantity\x18\x06 \x01(\tR\x0efilledQuantity\x12\x1b\n" +
+	"\tvalue_usd\x18\a \x01(\tR\bvalueUsd\x12\x16\n" +
+	"\x06status\x18\b \x01(\tR\x06status\x127\n" +
+	"\ttraded_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\btradedAtB\xd1\x01\n" +
 	"\x16com.exchange.market.v1B\vEventsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/market/v1;marketv1\xa2\x02\x03EMX\xaa\x02\x12Exchange.Market.V1\xca\x02\x12Exchange\\Market\\V1\xe2\x02\x1eExchange\\Market\\V1\\GPBMetadata\xea\x02\x14Exchange::Market::V1b\x06proto3"
 
 var (
@@ -1299,7 +1456,7 @@ func file_exchange_market_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_market_v1_events_proto_rawDescData
 }
 
-var file_exchange_market_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_exchange_market_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_exchange_market_v1_events_proto_goTypes = []any{
 	(*PriceLevel)(nil),            // 0: exchange.market.v1.PriceLevel
 	(*DepthSnapshot)(nil),         // 1: exchange.market.v1.DepthSnapshot
@@ -1315,34 +1472,37 @@ var file_exchange_market_v1_events_proto_goTypes = []any{
 	(*IndexComponent)(nil),        // 11: exchange.market.v1.IndexComponent
 	(*IndexPriceUpdated)(nil),     // 12: exchange.market.v1.IndexPriceUpdated
 	(*FundingRateUpdated)(nil),    // 13: exchange.market.v1.FundingRateUpdated
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
-	(v1.Side)(0),                  // 15: exchange.order.v1.Side
+	(*LiquidationOccurred)(nil),   // 14: exchange.market.v1.LiquidationOccurred
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(v1.Side)(0),                  // 16: exchange.order.v1.Side
 }
 var file_exchange_market_v1_events_proto_depIdxs = []int32{
 	0,  // 0: exchange.market.v1.DepthSnapshot.bids:type_name -> exchange.market.v1.PriceLevel
 	0,  // 1: exchange.market.v1.DepthSnapshot.asks:type_name -> exchange.market.v1.PriceLevel
-	14, // 2: exchange.market.v1.DepthSnapshot.taken_at:type_name -> google.protobuf.Timestamp
+	15, // 2: exchange.market.v1.DepthSnapshot.taken_at:type_name -> google.protobuf.Timestamp
 	0,  // 3: exchange.market.v1.DepthUpdate.bids:type_name -> exchange.market.v1.PriceLevel
 	0,  // 4: exchange.market.v1.DepthUpdate.asks:type_name -> exchange.market.v1.PriceLevel
-	14, // 5: exchange.market.v1.DepthUpdate.taken_at:type_name -> google.protobuf.Timestamp
+	15, // 5: exchange.market.v1.DepthUpdate.taken_at:type_name -> google.protobuf.Timestamp
 	4,  // 6: exchange.market.v1.TradesPrinted.trades:type_name -> exchange.market.v1.PublicTrade
-	15, // 7: exchange.market.v1.PublicTrade.taker_side:type_name -> exchange.order.v1.Side
-	14, // 8: exchange.market.v1.PublicTrade.executed_at:type_name -> google.protobuf.Timestamp
-	14, // 9: exchange.market.v1.Candle.open_time:type_name -> google.protobuf.Timestamp
+	16, // 7: exchange.market.v1.PublicTrade.taker_side:type_name -> exchange.order.v1.Side
+	15, // 8: exchange.market.v1.PublicTrade.executed_at:type_name -> google.protobuf.Timestamp
+	15, // 9: exchange.market.v1.Candle.open_time:type_name -> google.protobuf.Timestamp
 	5,  // 10: exchange.market.v1.CandleUpdated.candle:type_name -> exchange.market.v1.Candle
 	5,  // 11: exchange.market.v1.CandleClosed.candle:type_name -> exchange.market.v1.Candle
-	14, // 12: exchange.market.v1.Ticker.updated_at:type_name -> google.protobuf.Timestamp
+	15, // 12: exchange.market.v1.Ticker.updated_at:type_name -> google.protobuf.Timestamp
 	8,  // 13: exchange.market.v1.TickerUpdated.ticker:type_name -> exchange.market.v1.Ticker
-	14, // 14: exchange.market.v1.MarkPriceUpdated.next_funding_time:type_name -> google.protobuf.Timestamp
-	14, // 15: exchange.market.v1.MarkPriceUpdated.computed_at:type_name -> google.protobuf.Timestamp
+	15, // 14: exchange.market.v1.MarkPriceUpdated.next_funding_time:type_name -> google.protobuf.Timestamp
+	15, // 15: exchange.market.v1.MarkPriceUpdated.computed_at:type_name -> google.protobuf.Timestamp
 	11, // 16: exchange.market.v1.IndexPriceUpdated.components:type_name -> exchange.market.v1.IndexComponent
-	14, // 17: exchange.market.v1.IndexPriceUpdated.computed_at:type_name -> google.protobuf.Timestamp
-	14, // 18: exchange.market.v1.FundingRateUpdated.funding_time:type_name -> google.protobuf.Timestamp
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	15, // 17: exchange.market.v1.IndexPriceUpdated.computed_at:type_name -> google.protobuf.Timestamp
+	15, // 18: exchange.market.v1.FundingRateUpdated.funding_time:type_name -> google.protobuf.Timestamp
+	16, // 19: exchange.market.v1.LiquidationOccurred.side:type_name -> exchange.order.v1.Side
+	15, // 20: exchange.market.v1.LiquidationOccurred.traded_at:type_name -> google.protobuf.Timestamp
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_exchange_market_v1_events_proto_init() }
@@ -1356,7 +1516,7 @@ func file_exchange_market_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_market_v1_events_proto_rawDesc), len(file_exchange_market_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

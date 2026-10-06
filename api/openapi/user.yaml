@@ -83,7 +83,8 @@ paths:
           required: true
           schema:
             type: string
-            enum: [SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER, MARGIN_TRADE]
+            enum: [SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER, MARGIN_TRADE, COIN_M_TRADE]
+          description: COIN_M_TRADE is trading the coin-margined perpetuals (derivatives.coin_m, design 2026-10-06 §2.5).
         - name: asset
           in: query
           schema:

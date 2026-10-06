@@ -24,6 +24,10 @@ import "google/protobuf/timestamp.proto";
 //                          for perpetual contracts MarkPriceUpdated,
 //                          IndexPriceUpdated, FundingRateUpdated, from
 //                          market-data-service.
+//   market.liquidations    LiquidationOccurred, the reference market's
+//                          forced orders on the contracts it follows
+//                          (design 2026-10-06 §3.3, from batch G3b): kept
+//                          a day, in ClickHouse futures_liquidations for 7.
 //
 // Depth and trades are derived state, kept one hour and not ingested into
 // ClickHouse. The contracts' books use derivatives.market.depth and
@@ -159,6 +163,12 @@ message MarkPriceUpdated {
   string funding_rate = 5;
   google.protobuf.Timestamp next_funding_time = 6;
   google.protobuf.Timestamp computed_at = 7;
+  // Where the prices come from: PLATFORM (computed here from the index
+  // and the contract's book, as above) or BINANCE (the Binance contract's
+  // mark price, index price and estimated rate while market.reference_mark
+  // is on for the contract, design 2026-10-06 §3.1, from batch G3a; basis
+  // is then (mark - index) / index). Empty reads as PLATFORM.
+  string source = 8;
 }
 
 // IndexComponent is one source of an index price.
@@ -197,4 +207,32 @@ message FundingRateUpdated {
   // The mark and index prices the period settled at; set when final.
   string mark_price = 8;
   string index_price = 9;
+  // PLATFORM (the rate computed here, as above) or BINANCE (the Binance
+  // contract's estimate, and its settled rate once final; premium and
+  // samples are then empty and 0), design 2026-10-06 §3.1, from batch G3a.
+  // Empty reads as PLATFORM.
+  string source = 10;
+}
+
+// LiquidationOccurred is a forced (liquidation) order of the reference
+// market on a contract that follows it, as Binance streams them (at most
+// one a second per contract, design 2026-10-06 §3.3), keyed by the
+// contract (BTC-USDT-PERP), on market.liquidations.
+message LiquidationOccurred {
+  string symbol = 1;
+  // The forced order's side: SIDE_SELL closed a long, SIDE_BUY a short.
+  exchange.order.v1.Side side = 2;
+  // The order's price and the average price of its fills.
+  string price = 3;
+  string average_price = 4;
+  // The order's quantity and what of it filled: in the base asset, or
+  // whole contracts of an inverse contract.
+  string quantity = 5;
+  string filled_quantity = 6;
+  // filled_quantity x average_price, or the contracts' USD value
+  // (filled_quantity x contract_size) for an inverse contract.
+  string value_usd = 7;
+  // The order's status when streamed: FILLED or PARTIALLY_FILLED.
+  string status = 8;
+  google.protobuf.Timestamp traded_at = 9;
 }

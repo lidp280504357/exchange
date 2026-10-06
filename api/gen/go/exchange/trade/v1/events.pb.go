@@ -69,8 +69,16 @@ type TradeExecuted struct {
 	SellerAccountType string `protobuf:"bytes,21,opt,name=seller_account_type,json=sellerAccountType,proto3" json:"seller_account_type,omitempty"`
 	BuyerSideEffect   string `protobuf:"bytes,22,opt,name=buyer_side_effect,json=buyerSideEffect,proto3" json:"buyer_side_effect,omitempty"`
 	SellerSideEffect  string `protobuf:"bytes,23,opt,name=seller_side_effect,json=sellerSideEffect,proto3" json:"seller_side_effect,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// A contract trade's settlement asset and an inverse contract's face
+	// value in USD (design 2026-10-06 §2.5, from batch G1): on an inverse
+	// contract quantity is whole contracts and quote_quantity their USD
+	// value, quantity x contract_size; the value in the settlement asset is
+	// quote_quantity / price. Empty for spot trades; contract_size empty or
+	// "0" for a linear contract.
+	SettleAsset   string `protobuf:"bytes,24,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	ContractSize  string `protobuf:"bytes,25,opt,name=contract_size,json=contractSize,proto3" json:"contract_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TradeExecuted) Reset() {
@@ -264,11 +272,25 @@ func (x *TradeExecuted) GetSellerSideEffect() string {
 	return ""
 }
 
+func (x *TradeExecuted) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *TradeExecuted) GetContractSize() string {
+	if x != nil {
+		return x.ContractSize
+	}
+	return ""
+}
+
 var File_exchange_trade_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xe8\x06\n" +
+	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xb0\a\n" +
 	"\rTradeExecuted\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x1d\n" +
@@ -298,7 +320,9 @@ const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\x12buyer_account_type\x18\x14 \x01(\tR\x10buyerAccountType\x12.\n" +
 	"\x13seller_account_type\x18\x15 \x01(\tR\x11sellerAccountType\x12*\n" +
 	"\x11buyer_side_effect\x18\x16 \x01(\tR\x0fbuyerSideEffect\x12,\n" +
-	"\x12seller_side_effect\x18\x17 \x01(\tR\x10sellerSideEffectB\xca\x01\n" +
+	"\x12seller_side_effect\x18\x17 \x01(\tR\x10sellerSideEffect\x12!\n" +
+	"\fsettle_asset\x18\x18 \x01(\tR\vsettleAsset\x12#\n" +
+	"\rcontract_size\x18\x19 \x01(\tR\fcontractSizeB\xca\x01\n" +
 	"\x15com.exchange.trade.v1B\vEventsProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/trade/v1;tradev1\xa2\x02\x03ETX\xaa\x02\x11Exchange.Trade.V1\xca\x02\x11Exchange\\Trade\\V1\xe2\x02\x1dExchange\\Trade\\V1\\GPBMetadata\xea\x02\x13Exchange::Trade::V1b\x06proto3"
 
 var (
