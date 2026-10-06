@@ -854,7 +854,7 @@ else await f.step("M7", M7, async () => {
 // BTC-USDT-PERP to the coin-margined kind at the top of the terminal, opens
 // one contract from the order sheet and closes it from its position card.
 const G4 =
-  "a coin-margined contract: BTC moves to its own futures account; the terminal switches to COIN-M; the sheet takes whole contracts with their BTC and USD worth; a 1-contract long shows in contracts with its value, and closes from its card";
+  "a coin-margined contract: BTC moves to its own futures account; the terminal switches to COIN-M; the sheet takes whole contracts with their BTC and USD worth; a 1-contract long shows in contracts with its result in BTC, and closes from its card";
 async function coinClosed() {
   const c = await api(API, "GET", "/v1/market/contracts/BTC-USD-PERP");
   if (c.status !== 200 || c.body.status !== "TRADING") return `BTC-USD-PERP is not trading (${c.status} ${c.body?.status ?? ""})`;
@@ -910,17 +910,15 @@ else await f.step("G4", G4, async () => {
     // The order sheet closes on the order's acceptance; the tabs take the press once it is gone.
     await T.page.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 15000 });
     await T.clickTab("仓位");
-    await T.page.waitForSelector('[data-testid="position-value"]', { visible: true, timeout: 30000 });
-    const card = await T.page.$eval('[data-testid="position-value"]', (el) => el.closest("article")?.innerText ?? "");
-    if (!/价值 0\.\d+ BTC · 100 USD/.test(card) || !/持仓数量 \(张\)/.test(card) || !/未实现盈亏 \(BTC\)/.test(card)) {
-      throw new Error(`the position card: ${card.replace(/\s+/g, " ")}`);
-    }
-    await T.page.evaluate(() =>
-      [...(document.querySelector('[data-testid="position-value"]')?.closest("article")?.querySelectorAll("button") ?? [])].find((b) => b.innerText.trim() === "平仓")?.click(),
-    );
+    // BTCUSD's card (not BTCUSDT's): its size in contracts, its result in BTC.
+    const CARD = `[...document.querySelectorAll("article")].find((a) => /\\bBTCUSD\\b/.test(a.innerText) && a.innerText.includes("持仓数量 (张)"))`;
+    await T.page.waitForFunction(CARD, { timeout: 30000 });
+    const text = await T.page.evaluate(`(${CARD})?.innerText ?? ""`);
+    if (!/未实现盈亏 \(BTC\)/.test(text) || !/保证金 \(BTC\)/.test(text)) throw new Error(`the position card: ${text.replace(/\s+/g, " ")}`);
+    await T.page.evaluate(`[...((${CARD})?.querySelectorAll("button") ?? [])].find((b) => b.innerText.trim() === "平仓")?.click()`);
     await T.page.waitForSelector("[role=dialog]", { visible: true, timeout: 10000 });
     await T.clickButton("平多", "[role=dialog]");
-    await T.page.waitForFunction(() => !document.querySelector('[data-testid="position-value"]'), { timeout: 30000 });
+    await T.page.waitForFunction(`!(${CARD})`, { timeout: 30000 });
   } finally {
     await T.close();
   }
