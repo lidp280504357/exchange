@@ -194,22 +194,33 @@ try {
 
   // 2c. The pages fetched ahead (A40, review BJ ⑩): once signed in, the
   // idle browser fetches every section's page, one after another in the
-  // sidebar's order (the settings last), within 30 s; three sections never
-  // opened (the system group's) then fetch no JS file at all.
+  // sidebar's order (the settings last), each next one within 8 s of the
+  // last (a round trip and an idle moment, about a second apiece from here:
+  // the time in all grows with the sections, 36 with margin trading's, so a
+  // fixed 30 s became the network's coin toss), all within two minutes;
+  // three sections never opened (the system group's) then fetch no JS file
+  // at all.
   // The console fetches nothing ahead when the browser asks to save data
-  // or while the tab is hidden (preload.ts): said at once, not after 30 s.
+  // or while the tab is hidden (preload.ts): said at once, not after the wait.
   const why = await page.evaluate(() =>
     navigator.connection?.saveData ? "the browser asks to save data" : document.visibilityState === "hidden" ? "the tab is hidden" : "",
   );
   if (why) throw new Error(`the console fetches no page ahead here: ${why}`);
   const chunkOf = (name) => [...fetched].some((p) => new RegExp(`^/assets/${name}-[\\w-]+\\.js$`).test(p));
   const ahead = [["/reports", "报表", "Reports"], ["/health", "系统健康", "Health"], ["/platform", "平台设置", "Platform"]];
-  const aheadBy = Date.now() + 30_000;
+  const aheadBy = Date.now() + 120_000;
+  let seen = fetched.size;
+  let movedAt = Date.now();
   while (!chunkOf("Settings") || ahead.some(([, , name]) => !chunkOf(name))) {
-    if (Date.now() > aheadBy) {
+    if (fetched.size !== seen) [seen, movedAt] = [fetched.size, Date.now()];
+    const stalled = Date.now() - movedAt > 8_000;
+    if (stalled || Date.now() > aheadBy) {
       // A tab hidden or a request to save data meanwhile stops the fetching ahead too.
       const late = await page.evaluate(() => [navigator.connection?.saveData && "the browser asks to save data", document.visibilityState === "hidden" && "the tab is hidden"].filter(Boolean).join(", "));
-      throw new Error(`30 s on, the idle console had not fetched every section's page${late ? ` (${late})` : ""}; the scripts since the start: ${fetchLog.join(", ")}`);
+      throw new Error(
+        `${stalled ? "8 s without a page fetched ahead" : "two minutes on"}, the idle console had not fetched every section's page${late ? ` (${late})` : ""}; ` +
+          `the scripts since the start: ${fetchLog.join(", ")}`,
+      );
     }
     await sleep(250);
   }
