@@ -1,11 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
 import { marginApi, unwrap } from "../api/client";
 import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
 import { useEligibility } from "../assets/hooks";
 import { retryServerErrors } from "../wallet/hooks";
-import { isEmpty, type MarginAccountType, type MarginLoan, type MarginTransfer } from "./math";
+import { isEmpty, type MarginAccountType, type MarginLoan, type MarginPair, type MarginTransfer } from "./math";
 
 // Margin data for the margin pages of both sites (margin design 2026-10-06
 // §7): the public terms (assets and pairs), the caller's accounts, loans
@@ -112,7 +111,20 @@ export function useMarginOpen() {
  */
 export function useIsolatedLeverage(): ReadonlyMap<string, number> {
   const pairs = useMarginPairs();
-  return useMemo(() => new Map((pairs.data?.items ?? []).filter((p) => p.isolated).map((p) => [p.symbol, p.leverage] as const)), [pairs.data]);
+  return pairs.data ? leverageOf(pairs.data) : NO_LEVERAGE;
+}
+
+const NO_LEVERAGE: ReadonlyMap<string, number> = new Map();
+const leverages = new WeakMap<object, ReadonlyMap<string, number>>();
+
+/** leverageOf maps the pairs' isolated leverage, once per answer: every row of a list asks (B111). */
+export function leverageOf(data: { items: readonly MarginPair[] }): ReadonlyMap<string, number> {
+  let m = leverages.get(data);
+  if (!m) {
+    m = new Map(data.items.filter((p) => p.isolated).map((p) => [p.symbol, p.leverage] as const));
+    leverages.set(data, m);
+  }
+  return m;
 }
 
 /**
