@@ -109,7 +109,10 @@ function Item({ to, children }: { to: string; children: ReactNode }) {
   );
 }
 
-// Menu opens on hover and on keyboard focus (CSS only, no timers).
+// Menu opens on hover and on keyboard focus (CSS only, no timers): focus
+// that came from the keyboard (:focus-visible), not the focus a click
+// leaves on the item, which kept the menu open after the pointer had left
+// it (B109); an item followed blurs too, so the keyboard's Enter closes it.
 function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: string; children: ReactNode; align?: "left" | "right" }) {
   return (
     <div className="group relative flex h-full items-center">
@@ -125,7 +128,7 @@ function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: s
       <div
         className={cn(
           "invisible absolute top-full z-[var(--z-dropdown)] min-w-44 translate-y-1 rounded-2 border border-line-1 bg-bg-1 py-1 opacity-0 shadow-pop transition-[opacity,transform] duration-[var(--t-fast)]",
-          "group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100",
+          "group-has-[:focus-visible]:visible group-has-[:focus-visible]:translate-y-0 group-has-[:focus-visible]:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100",
           align === "right" ? "right-0" : "left-0",
         )}
       >
@@ -137,7 +140,11 @@ function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: s
 
 function MenuLink({ to, children }: { to: string; children: ReactNode }) {
   return (
-    <Link to={to} className="block px-4 py-2 text-sm text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1">
+    <Link
+      to={to}
+      onClick={(e) => e.currentTarget.blur()}
+      className="block px-4 py-2 text-sm text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1"
+    >
       {children}
     </Link>
   );
