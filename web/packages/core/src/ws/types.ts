@@ -10,8 +10,11 @@ export type MarketPush<T = unknown> = {
   data: T;
 };
 
-/** A private push with the user's sequence. */
-export type PrivatePush<T = unknown> = { channel: string; seq: number; data: T };
+/**
+ * A private push with the user's sequence; state that the next push
+ * replaces (a margin account as it stands) has none and is not replayed.
+ */
+export type PrivatePush<T = unknown> = { channel: string; seq?: number; data: T };
 
 export type WsPush<T = unknown> = MarketPush<T> | PrivatePush<T>;
 

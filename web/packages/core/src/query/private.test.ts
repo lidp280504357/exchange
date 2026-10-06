@@ -43,10 +43,10 @@ describe("private pushes into the cache", () => {
     expect(after.page!.isolated).toEqual([btc]);
     // Only its valuation moved: the holdings are the same.
     const moved = applyMarginAccount(after.page, { ...borrowed, total_asset: "190", margin_level: "1.9", updated_at: "2026-10-06T07:00:02Z" });
-    expect(moved).toMatchObject({ held: false, page: { cross: { margin_level: "1.9" } } });
+    expect(moved).toMatchObject({ held: false, used: true, page: { cross: { margin_level: "1.9" } } });
     // A push older than the cached account (a poll answered after it) is left out.
     const late = applyMarginAccount(moved.page, { ...borrowed, margin_level: "5", updated_at: "2026-10-06T07:00:01.5Z" });
-    expect(late).toEqual({ page: moved.page, held: false });
+    expect(late).toEqual({ page: moved.page, held: false, used: false });
     // An isolated account replaces its pair's; a new pair's joins the list.
     const eth = account({ account: "MARGIN_ISOLATED", symbol: "ETH-USDT", updated_at: "2026-10-06T07:00:03Z" });
     const joined = applyMarginAccount(moved.page, eth);
@@ -56,15 +56,15 @@ describe("private pushes into the cache", () => {
     expect(btcNow.page!.isolated.map((a) => a.status)).toEqual(["WARNED", "NORMAL"]);
     // Nothing cached: nothing to put it in; against its last push only a
     // change of holdings counts, and without one it may have changed anything.
-    expect(applyMarginAccount(undefined, eth)).toEqual({ page: undefined, held: true });
+    expect(applyMarginAccount(undefined, eth)).toEqual({ page: undefined, held: true, used: true });
     const revalued = { ...eth, total_asset: "99", updated_at: "2026-10-06T07:00:05Z" };
-    expect(applyMarginAccount(undefined, revalued, holdingsOf(eth))).toEqual({ page: undefined, held: false });
+    expect(applyMarginAccount(undefined, revalued, holdingsOf(eth))).toEqual({ page: undefined, held: false, used: true });
     const owing = { ...eth, balances: [{ asset: "USDT", free: "100", locked: "0", borrowed: "5", interest: "0", net: "95" }] };
-    expect(applyMarginAccount(undefined, owing, holdingsOf(eth))).toEqual({ page: undefined, held: true });
+    expect(applyMarginAccount(undefined, owing, holdingsOf(eth))).toEqual({ page: undefined, held: true, used: true });
     // The last push decides over the cached account.
     expect(applyMarginAccount(joined.page, revalued, holdingsOf(eth)).held).toBe(false);
     // An isolated account without its pair is left out.
-    expect(applyMarginAccount(joined.page, { ...eth, symbol: null })).toEqual({ page: joined.page, held: false });
+    expect(applyMarginAccount(joined.page, { ...eth, symbol: null })).toEqual({ page: joined.page, held: false, used: false });
   });
   it("prepends a fill once", () => {
     const page = { items: [], next_cursor: null };

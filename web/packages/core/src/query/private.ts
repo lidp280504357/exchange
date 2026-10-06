@@ -89,29 +89,30 @@ export const marginKey = (a: Pick<MarginAccount, "account" | "symbol">) => `${a.
  * accounts (GET /v1/margin/accounts): the cross account, or its pair's
  * isolated account (a new one joins the list). One older than the cached
  * account (a poll answered after the push was made), or an isolated one
- * without its pair, is left out. held tells whether what the account holds
- * or owes changed, not only its valuation: against last, the holdings of
- * its previous push (holdingsOf), else against the cached account; with
- * neither it cannot tell and says so.
+ * without its pair, is left out (used false: its holdings are no news).
+ * held tells whether what the account holds or owes changed, not only its
+ * valuation: against last, the holdings of its previous push used
+ * (holdingsOf), else against the cached account; with neither it cannot
+ * tell and says so.
  */
 export function applyMarginAccount(
   page: MarginAccounts | undefined,
   a: MarginAccount,
   last?: string,
-): { page: MarginAccounts | undefined; held: boolean } {
+): { page: MarginAccounts | undefined; held: boolean; used: boolean } {
   const cross = a.account === "MARGIN_CROSS";
-  if (!cross && !a.symbol) return { page, held: false };
+  if (!cross && !a.symbol) return { page, held: false, used: false };
   const i = cross || !page ? -1 : page.isolated.findIndex((x) => x.symbol === a.symbol);
   const cur = page ? (cross ? page.cross : page.isolated[i]) : undefined;
-  if (cur && Date.parse(cur.updated_at) > Date.parse(a.updated_at)) return { page, held: false };
+  if (cur && Date.parse(cur.updated_at) > Date.parse(a.updated_at)) return { page, held: false, used: false };
   const before = last ?? (cur ? holdingsOf(cur) : undefined);
   const held = before !== holdingsOf(a);
-  if (!page) return { page, held };
-  if (cross) return { page: { ...page, cross: a }, held };
+  if (!page) return { page, held, used: true };
+  if (cross) return { page: { ...page, cross: a }, held, used: true };
   const isolated = [...page.isolated];
   if (i >= 0) isolated[i] = a;
   else isolated.push(a);
-  return { page: { ...page, isolated }, held };
+  return { page: { ...page, isolated }, held, used: true };
 }
 
 /** isContract tells a perpetual contract (BTC-USDT-PERP) from a spot pair. */
@@ -231,8 +232,8 @@ export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
       if (p.type !== "ACCOUNT" || !p.account) return later.add(qk.margin);
       const cached = qc.getQueryData<MarginAccounts>(qk.marginAccounts);
       const key = marginKey(p.account);
-      const { page, held } = applyMarginAccount(cached, p.account, pushed.get(key));
-      pushed.set(key, holdingsOf(p.account));
+      const { page, held, used } = applyMarginAccount(cached, p.account, pushed.get(key));
+      if (used) pushed.set(key, holdingsOf(p.account));
       if (page !== cached) qc.setQueryData(qk.marginAccounts, page);
       if (held) for (const key of [qk.marginLoans, qk.marginBorrowable, qk.ledger]) later.add(key);
     }),
