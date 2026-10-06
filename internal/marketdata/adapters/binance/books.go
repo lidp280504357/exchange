@@ -19,9 +19,9 @@ import (
 )
 
 // Order books and trades (ADR-0010, ADR-0015): REST snapshots and the
-// depth@100ms and aggTrade streams, of spot pairs on the spot endpoints
-// and of perpetual contracts on the futures ones of their market (USDⓈ-M
-// or COIN-M).
+// depth (every 100 or 500 ms, depthStream) and aggTrade streams, of spot
+// pairs on the spot endpoints and of perpetual contracts on the futures
+// ones of their market (USDⓈ-M or COIN-M).
 
 // SnapshotLevels is how deep a book snapshot goes (a spot request weighs
 // 50 at this depth, a futures one 20).
@@ -200,7 +200,7 @@ type aggEvent struct {
 	BestMatch    bool   `json:"M"`
 }
 
-// BookStream follows the depth updates (every 100 ms) and aggregate trades
+// BookStream follows the depth updates (depthStream) and aggregate trades
 // of refs, all of one market, and passes them to on in the platform's
 // symbols and units. Spot and COIN-M send both on one combined
 // connection; USDⓈ-M futures sends the books and the trades on paths of
@@ -220,9 +220,9 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, on port
 	var both, depths, trades []string
 	byRemote := make(map[string]ports.Reference, len(refs))
 	for _, r := range refs {
-		lower := strings.ToLower(r.Remote)
-		both = append(both, lower+"@depth@100ms", lower+"@aggTrade")
-		depths, trades = append(depths, lower+"@depth@100ms"), append(trades, lower+"@aggTrade")
+		depth, trade := depthStream(r), strings.ToLower(r.Remote)+"@aggTrade"
+		both = append(both, depth, trade)
+		depths, trades = append(depths, depth), append(trades, trade)
 		byRemote[r.Remote] = r
 	}
 	handle := func(data []byte) { s.bookMessage(data, byRemote, on) }
@@ -260,6 +260,22 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, on port
 	cancel()
 	wg.Wait()
 	return err
+}
+
+// fastDepth are the base assets whose perpetuals' books follow depth
+// updates every 100 ms; the other perpetuals' come every 500 ms
+// (coin-margined design §3.4: about 105 contracts, whose market.depth the
+// test server's Redpanda, limited to 2 GB, has to take). Spot has no
+// 500 ms stream: every pair's book takes 100 ms.
+var fastDepth = map[string]bool{"BTC": true, "ETH": true}
+
+// depthStream is the name of r's depth stream.
+func depthStream(r ports.Reference) string {
+	base, _, _ := strings.Cut(r.Symbol, "-")
+	if r.Market != ports.MarketSpot && !fastDepth[base] {
+		return strings.ToLower(r.Remote) + "@depth@500ms"
+	}
+	return strings.ToLower(r.Remote) + "@depth@100ms"
 }
 
 // tradeIdle ends a futures trade connection silent for this long: a group

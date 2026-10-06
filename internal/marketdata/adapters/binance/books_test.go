@@ -172,3 +172,25 @@ func TestFuturesBookStreamSplitsBooksAndTrades(t *testing.T) {
 		t.Fatalf("%d depth updates, trades %+v, failures %v", depths, got, failed)
 	}
 }
+
+// The perpetuals' books follow updates every 100 ms for BTC and ETH and
+// every 500 ms for the others (coin-margined design §3.4); spot's all
+// every 100 ms.
+func TestDepthStreams(t *testing.T) {
+	one, ten := decimal.NewFromInt(1), decimal.NewFromInt(10)
+	for _, c := range []struct {
+		ref  ports.Reference
+		want string
+	}{
+		{ports.Reference{Symbol: "SOL-USDT", Remote: "SOLUSDT", Multiplier: one}, "solusdt@depth@100ms"},
+		{ports.Reference{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Multiplier: one, Market: ports.MarketUSDM}, "btcusdt@depth@100ms"},
+		{ports.Reference{Symbol: "ETH-USD-PERP", Remote: "ETHUSD_PERP", Multiplier: one, Market: ports.MarketCoinM, ContractSize: ten}, "ethusd_perp@depth@100ms"},
+		{ports.Reference{Symbol: "SOL-USDT-PERP", Remote: "SOLUSDT", Multiplier: one, Market: ports.MarketUSDM}, "solusdt@depth@500ms"},
+		{ports.Reference{Symbol: "1000PEPE-USDT-PERP", Remote: "1000PEPEUSDT", Multiplier: one, Market: ports.MarketUSDM}, "1000pepeusdt@depth@500ms"},
+		{ports.Reference{Symbol: "SOL-USD-PERP", Remote: "SOLUSD_PERP", Multiplier: one, Market: ports.MarketCoinM, ContractSize: ten}, "solusd_perp@depth@500ms"},
+	} {
+		if got := depthStream(c.ref); got != c.want {
+			t.Errorf("%s: %s, want %s", c.ref.Symbol, got, c.want)
+		}
+	}
+}

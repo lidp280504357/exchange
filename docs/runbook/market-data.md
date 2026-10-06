@@ -6,7 +6,7 @@
 
 ```text
 matching-engine ──market.depth.internal（每 100 ms 变化的订单簿前 200 档，每 10 s 全量）──> market-data-service
-币安盘口与成交（depth@100ms、aggTrade）──────────────────────────────────────────────> market-data-service
+币安盘口与成交（depth@100ms/500ms、aggTrade）────────────────────────────────────────> market-data-service
 market-data-service ──market.depth（公共盘口：快照 + 增量，1 秒心跳）──┬─> api-gateway（depth: 频道）
                     ──market.trades（公共成交）─────────────────────┤  └─> market-maker（HOUSE 的参考簿，见 market-maker.md）
                                                                    └─> api-gateway（trades: 频道）
@@ -148,7 +148,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 开关按交易对生效（还需要 `market.reference_feed` 开着；测试服对全部跟随的交易对打开，见 `scripts/ops/house.sh flags`）。打开时该交易对的公共盘口（REST 深度、`depth:` 频道）与公共成交（REST trades、`trades:` 频道）都是币安的；HOUSE 按同一份盘口提供流动性（[market-maker.md](market-maker.md)），所以用户看到的就是能成交的价格。
 
 - 币安 U 本位合约的推送按类别分路径（2026-10-06 实测）：盘口在 `/public/stream`（旧的 `/stream` 也只剩盘口），成交、标记价、K 线与 ticker 只在 `/market/stream`；币本位 `dstream` 与现货仍全在 `/stream`。所以合约的盘口与成交是两条连接：盘口连接断了整组重来（盘口重新取快照）；成交连接由适配器自己保持，断了退避重连（1 秒起，最长 30 秒，5 分钟没有成交也重连），盘口不受影响，日志 `reference trade stream failed`，同样计入 `market_reference_book_stream_failures_total`。
-- 本地盘口（`internal/marketdata/domain/localbook.go`，币安"如何正确在本地维护一个订单簿"的做法）：每个组合连接最多 25 个交易对（`<symbol>@depth@100ms` 与 `@aggTrade`），先缓存增量，再逐个用 REST 取快照（现货 `/api/v3/depth?limit=1000`，合约 `/fapi/v1/depth`），丢掉快照之前的增量；现货按 `U`/`u`、合约按 `pu` 检查连续性，断了就重新取快照（`market_reference_book_resyncs_total`）。1000 倍计价的币价格乘、数量除以倍数。
+- 本地盘口（`internal/marketdata/domain/localbook.go`，币安"如何正确在本地维护一个订单簿"的做法）：每个组合连接最多 25 个交易对（`<symbol>@depth@100ms` 与 `@aggTrade`；永续合约只有 BTC、ETH 用 `@depth@100ms`，其余用 `@depth@500ms`，币本位设计 §3.4：合约扩到约 105 个时 `market.depth` 的量要在测试服 Redpanda 的 2 GB 以内，见 `adapters/binance/books.go` 的 `fastDepth`；现货没有 500 毫秒的流），先缓存增量，再逐个用 REST 取快照（现货 `/api/v3/depth?limit=1000`，合约 `/fapi/v1/depth`），丢掉快照之前的增量；现货按 `U`/`u`、合约按 `pu` 检查连续性，断了就重新取快照（`market_reference_book_resyncs_total`）。1000 倍计价的币价格乘、数量除以倍数。
 - 可用的条件：已同步，且它的连接 5 秒内收到过消息（按连接算，冷门币盘口不变也不会被当成断流）。不可用时该交易对退回平台自己的盘口与成交（转发引擎的 `market.depth.internal`），恢复后重新发快照。
 - 发布：每 100 毫秒一轮，变化的交易对发 `DepthUpdate`（与上次发出的前 200 档比较的差异，带 `prev_sequence`），每 10 秒与刚开始显示时发 `DepthSnapshot`，没有变化时每秒一条空的 `DepthUpdate` 作心跳（`taken_at` 是连接最后收到消息的时间）。公共 sequence 按交易对递增，起点是服务启动时刻（微秒），重启后不会回退；不显示参考市场的交易对每次转发引擎快照也占一个 sequence。成交按批发 `TradesPrinted`（`market.trades`）；平台自己的成交只转发这一批里新应用的（按 sequence 判断），`trade.events` 重投时不会重复出现在成交列表里。REST 的最近成交在启动时先从币安取一次。
 - 合约的盘口与成交用它的 `reference_symbol`：U 本位在 `fapi`/`fstream`，币本位在 `dapi`/`dstream`（快照 `/dapi/v1/depth`，盘口与成交在同一条 `/stream` 连接；数量是张），标记价的盘口中间价与溢价指数也用它（币本位的冲击名义是张数，冲击价按张数折算的币价值平均：张数 ÷ Σ(张 ÷ 价)）。
