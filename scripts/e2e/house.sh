@@ -8,9 +8,11 @@
 # bid, a limit buy above the ask fills at once at the ask (not its limit);
 # a limit buy below the book rests until canceled; ETH-BTC (quoted in BTC)
 # fills at HOUSE's ask and bid too; on each contract a market buy opens a
-# long against HOUSE and a reduce-only market sell closes it; afterwards
-# the ledger invariants hold (HOUSE's MARKET_MAKER accounts are the
-# exception to invariant 3). Needs market.reference_depth and
+# long against HOUSE and a reduce-only market sell closes it; a market buy
+# of 5 BTC on BTC-USDT-PERP and the reduce-only sell closing it each fill
+# whole in one order; afterwards the ledger invariants hold (HOUSE's
+# MARKET_MAKER accounts are the exception to invariant 3). Needs
+# market.reference_depth and
 # market.house_liquidity on for every symbol, HOUSE seeded and the pairs
 # open (scripts/ops/house.sh), and ssh to the server.
 #
@@ -176,6 +178,31 @@ for PERP in "${PERPS[@]}"; do
   expect 202 - "a reduce-only market sell"
   eventually 40 "flat again" position "$PERP" 0
 done
+
+# One market order of 5 BTC, opening and closing, fills whole (review FE,
+# C44: with levels of at most 20,000 USDT a reduce-only market sell of 5
+# BTC filled 1.567 and the user had to repeat it); about 9,000 USDT of
+# margin at 50x.
+echo "== BTC-USDT-PERP: a market buy of 5 and a reduce-only market sell of 5, each filled whole"
+call POST /v1/account/transfers '{"asset":"USDT","amount":"9500","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+  "${AUTH[@]}" -H "Idempotency-Key: house-big-in-$RUN"
+expect 201 - "9,500 USDT more to FUTURES"
+call PUT /v1/derivatives/settings/BTC-USDT-PERP '{"leverage":50}' "${AUTH[@]}"
+expect 200 - "50x"
+whole() { # whole ORDER: FILLED, all 5
+  call GET "/v1/derivatives/orders/$1" "" "${AUTH[@]}" &&
+    jq -e '.status == "FILLED" and .filled_quantity == "5"' <<<"$BODY" >/dev/null
+}
+call POST /v1/derivatives/orders '{"symbol":"BTC-USDT-PERP","side":"BUY","type":"MARKET","quantity":"5"}' "${AUTH[@]}"
+expect 202 - "a market buy of 5 BTC"
+BIG=$(jq -r .order_id <<<"$BODY")
+eventually 40 "the buy FILLED, all 5" whole "$BIG"
+eventually 40 "a long of 5" position BTC-USDT-PERP 5
+call POST /v1/derivatives/orders '{"symbol":"BTC-USDT-PERP","side":"SELL","type":"MARKET","quantity":"5","reduce_only":true}' "${AUTH[@]}"
+expect 202 - "a reduce-only market sell of 5"
+BIG=$(jq -r .order_id <<<"$BODY")
+eventually 40 "the sell FILLED, all 5, in one order" whole "$BIG"
+eventually 40 "flat again" position BTC-USDT-PERP 0
 
 echo "== the ledger after HOUSE's trades"
 remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger reconcile" | sed 's/^/     /'

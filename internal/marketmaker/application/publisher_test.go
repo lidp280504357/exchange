@@ -521,6 +521,38 @@ func TestAFailedReadOfTheSpecsIsTriedAgainLater(t *testing.T) {
 	}
 }
 
+// HOUSE's fills use up the levels in the engine's copy of its book: the
+// book goes out again on the next round though the reference market's
+// has not changed, once (review FE, C44: a second market order within
+// the heartbeat found the levels gone).
+func TestABookGoesOutAgainAfterHouseTraded(t *testing.T) {
+	p, rec, _, _ := newRig(t)
+	ctx := context.Background()
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 10, Reference: true, Bids: levels("50000", "1"), Asks: levels("50001", "1")})
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 1 {
+		t.Fatalf("the first round: %v", books)
+	}
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 0 {
+		t.Fatalf("unchanged, within the heartbeat: %v", books)
+	}
+	p.OnHouseFill("BTC-USDT")
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 1 || books[0].GetSymbol() != "BTC-USDT" || len(books[0].GetAsks()) != 1 {
+		t.Fatalf("after HOUSE traded: %v", books)
+	}
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 0 {
+		t.Fatalf("again: %v", books)
+	}
+	p.OnHouseFill("SOL-USDT") // not quoted: nothing goes out, nothing is kept
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 0 || len(p.taken) != 0 {
+		t.Fatalf("a symbol HOUSE does not quote: %v, %v", books, p.taken)
+	}
+}
+
 // A coin-margined contract (coin-margined design 2026-10-06 §2.3): HOUSE
 // quotes it in contracts against its BTC account, the equity valued at
 // BTC-USDT's mid; its levels are worth at most 20,000 USD each (200

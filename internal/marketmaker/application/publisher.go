@@ -98,6 +98,10 @@ type Publisher struct {
 	contracts  domain.ContractAccount
 	houseAt    time.Time
 	sent       map[string]sent
+	// taken are the symbols HOUSE traded on since their books last went
+	// out (OnHouseFill): the engine's copy has the levels used up, so
+	// they go out again on the next round, changed or not.
+	taken map[string]bool
 
 	inventory *prometheus.GaugeVec
 	exposure  *prometheus.GaugeVec
@@ -135,7 +139,7 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 ) *Publisher {
 	p := &Publisher{
 		cfg: cfg, specs: specs, house: house, flags: fl, pub: pub, events: events, log: log, now: time.Now,
-		books: map[string]*refBook{}, contracts: noContracts(), sent: map[string]sent{},
+		books: map[string]*refBook{}, contracts: noContracts(), sent: map[string]sent{}, taken: map[string]bool{},
 		inventory: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_house_inventory", Help: "HOUSE's spot holding of an asset (MARKET_MAKER available; below zero for an internal asset it sold).",
 		}, []string{"asset", "backed"}),
@@ -261,6 +265,18 @@ func (p *Publisher) OnStatus(symbol, to string) {
 		return
 	}
 	p.list = slices.DeleteFunc(slices.Clone(p.list), func(s domain.Spec) bool { return s.Symbol == symbol })
+}
+
+// OnHouseFill takes a trade HOUSE made on symbol (trade.events,
+// derivatives.trade.events): the engine used up the levels it filled
+// against, which the next update gives back, so the book goes out on the
+// next round even when the reference market's has not changed (review
+// FE, C44: a quiet book waited for the heartbeat, and a second market
+// order meanwhile found the levels gone).
+func (p *Publisher) OnHouseFill(symbol string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.taken[symbol] = true
 }
 
 // Run publishes until ctx ends (an app.Loop body).
@@ -454,9 +470,10 @@ func (p *Publisher) round() []outgoing {
 		switch {
 		case empty && (!wasSent || last.key == key):
 			continue // nothing offered, and the engine knows it
-		case key == last.key && now.Sub(last.at) < p.cfg.Heartbeat:
+		case key == last.key && now.Sub(last.at) < p.cfg.Heartbeat && !p.taken[spec.Symbol]:
 			continue
 		}
+		delete(p.taken, spec.Symbol)
 		p.sent[spec.Symbol] = sent{key: key, at: now, contract: spec.Contract}
 		active := 1.0
 		if empty {
@@ -470,6 +487,11 @@ func (p *Publisher) round() []outgoing {
 	listed := make(map[string]bool, len(p.list))
 	for _, spec := range p.list {
 		listed[spec.Symbol] = true
+	}
+	for symbol := range p.taken {
+		if !listed[symbol] {
+			delete(p.taken, symbol)
+		}
 	}
 	for symbol, last := range p.sent {
 		if listed[symbol] {

@@ -1,6 +1,8 @@
 // Package consumer feeds HOUSE's liquidity publisher from the tail of
-// market.depth and derivatives.market.depth (the public books) and of
-// instrument.events (pairs and contracts leaving or starting trading).
+// market.depth and derivatives.market.depth (the public books), of
+// instrument.events (pairs and contracts leaving or starting trading) and
+// of trade.events and derivatives.trade.events (HOUSE's fills, after which
+// its book goes out again).
 package consumer
 
 import (
@@ -9,6 +11,8 @@ import (
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
 	"github.com/skill/exchange/internal/marketmaker/application"
 	"github.com/skill/exchange/internal/platform/kafka"
 )
@@ -21,7 +25,15 @@ func Depth(p *application.Publisher) kafka.Handler {
 		var up marketv1.DepthUpdate
 		var pair instrumentv1.TradingPairStatusChanged
 		var contract instrumentv1.ContractStatusChanged
+		var trade tradev1.TradeExecuted
 		switch {
+		case env.GetPayload().MessageIs(&trade):
+			if err := env.GetPayload().UnmarshalTo(&trade); err != nil {
+				return err
+			}
+			if trade.GetHouseSide() != orderv1.Side_SIDE_UNSPECIFIED {
+				p.OnHouseFill(trade.GetSymbol())
+			}
 		case env.GetPayload().MessageIs(&snap):
 			if err := env.GetPayload().UnmarshalTo(&snap); err != nil {
 				return err

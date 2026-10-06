@@ -9,8 +9,8 @@
 ## 它做什么
 
 - market-maker 从 `market.depth`、`derivatives.market.depth` 的末尾读公共盘口（只认标了 `reference` 的消息，也就是 market-data-service 转发的币安盘口；平台自己的盘口表示该交易对不显示参考市场，HOUSE 在那里不提供流动性）。
-- 每 250 毫秒一轮，对每个现货交易对与合约算出 HOUSE 愿意成交的档位与剩余额度，发 `ReferenceBookUpdate` 到 `order.references`（合约 `derivatives.order.references`）；内容没变时 2 秒发一次心跳。
-  - 档位：参考盘口最好的 20 档，价格放到本交易对的价格步长上（买价向下取、卖价向上取，HOUSE 永远不比参考市场给得多），落在同一格的合并，每档最多值 20,000 USDT（以 BTC 计价的交易对按 BTC 的 USDT 价格折成 BTC；还没有该价格时不报价），数量取整到数量步长。
+- 每 250 毫秒一轮，对每个现货交易对与合约算出 HOUSE 愿意成交的档位与剩余额度，发 `ReferenceBookUpdate` 到 `order.references`（合约 `derivatives.order.references`）；内容没变时 2 秒发一次心跳。HOUSE 在某个簿上有成交（market-maker 从末尾读 `trade.events`、`derivatives.trade.events` 里带 `house_side` 的成交）后，该簿下一轮照发、不等心跳：引擎把成交吃掉的档位从自己的副本里减掉，要等下一次更新才补回（审查 FE，C44）。
+  - 档位：参考盘口最好的 20 档，价格放到本交易对的价格步长上（买价向下取、卖价向上取，HOUSE 永远不比参考市场给得多），落在同一格的合并，每档最多值 `HOUSE_LEVEL_CAP`（代码默认 20,000 USDT；以 BTC 计价的交易对按 BTC 的 USDT 价格折成 BTC；还没有该价格时不报价），数量取整到数量步长。一笔订单最多吃到当时发布的这些档：2026-10-07 用户在 BTC-USDT-PERP 市价平 5 BTC 只成交 1.567——20 档各取 min(币安该档数量, 20,000 USDT ≈ 0.23 BTC)，合计只有 1.567 BTC，其余撤单（IOC），之后几次也一样；测试服因此把单档上限放到 500,000,000（等于不限，见下），币安前 20 档 BTC 约 21 个，5 BTC 一笔成交（`scripts/e2e/house.sh` 覆盖）。
   - 现货额度（ADR-0013）：
     - 可充提资产（instrument-service 里有网络的资产，现在是 USDT、BTC、ETH；每 30 秒从 `/v1/market/assets` 读，与账本同一个定义，读到之前一律当作可充提）要有库存才能卖，且保留 1,000 USDT 的价值不动（`HOUSE_SAFETY`）；买入花的 USDT 同样保留 1,000；安全线以上的部分平均分给 HOUSE 正在报价、会花掉它的簿（卖出花基础币、买入花计价币；USDT 由约 87 个簿分），两次读取持仓之间各簿合计不会花超（审查 M1，ADR-0015）；
     - 内部资产（其余 47 个币）没有库存也能卖（HOUSE 在 `MARKET_MAKER` 科目上记负数，ADR-0013）；
@@ -57,7 +57,7 @@
 
 ## 配置
 
-`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，代码默认值按设计稿 §8.6：20000、100000、1000000、100000、1000）与 `HOUSE_CONTRACT_LEVERAGE`（倍数，默认 10）覆盖（`HOUSE_BACKED_ASSETS` 已取消，见上）；启动日志 `house liquidity caps` 打出生效的值。**测试服**因为所有订单都由 HOUSE 接（2026-10-02），在 compose 里把单资产上限设为 2,000,000、现货合计 20,000,000、单合约 5,000,000（单档与保留额不变）：按设计默认值，一个用户 125 倍开 2 BTC 就能占满 BTC-USDT-PERP 一侧，HOUSE 持有的 0.24 BTC 也只够全体用户买 0.23 BTC。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
+`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，代码默认值按设计稿 §8.6：20000、100000、1000000、100000、1000）与 `HOUSE_CONTRACT_LEVERAGE`（倍数，默认 10）覆盖（`HOUSE_BACKED_ASSETS` 已取消，见上）；启动日志 `house liquidity caps` 打出生效的值。**测试服**因为所有订单都由 HOUSE 接（2026-10-02），在 compose 里把单资产上限设为 2,000,000、现货合计 20,000,000、单合约 5,000,000（单档与保留额不变）：按设计默认值，一个用户 125 倍开 2 BTC 就能占满 BTC-USDT-PERP 一侧，HOUSE 持有的 0.24 BTC 也只够全体用户买 0.23 BTC。用户 2026-10-07（04:4x）决定测试服的单档、单资产/交易对、单合约、合计四项全部 500,000,000 USDT（compose 已改；后台可调的运行时额度是 C45）：现货实际受 HOUSE 的库存限制，合约受它的合约保证金（`house.sh seed`）的 10 倍限制。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
 
 ## 测试服设置（一次性）
 
