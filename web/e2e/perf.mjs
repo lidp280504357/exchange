@@ -463,19 +463,22 @@ async function margin(browser, { site, base, device, budgets, sheet }) {
   }
 
   // Whatever happens below, the page closes and the 20 USDT go back to spot
-  // (nothing is borrowed).
-  const page = await open(browser, device);
+  // (nothing is borrowed); a failure to move them back is told, not thrown
+  // over the run's own error.
+  let page;
   try {
+    page = await open(browser, device);
     await page.evaluateOnNewDocument((token) => {
       window.__E2E_CAPTCHA_TOKEN__ = token;
     }, bypass);
     await marginPages(page, { site, base, user, password, budgets, sheet });
   } finally {
-    await page.browserContext().close().catch(() => {});
-    await api(base, "POST", "/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: "20" }, {
+    await page?.browserContext().close().catch(() => {});
+    const back = await api(base, "POST", "/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: "20" }, {
       ...auth,
       "Idempotency-Key": `${key}-out`,
-    });
+    }).catch((e) => ({ status: 0, body: { code: String(e) } }));
+    if (back.status !== 200) console.log(`     ${site}: the 20 USDT stay in ${user.email}'s cross account (${back.status} ${back.body?.code ?? ""})`);
   }
 }
 
@@ -489,15 +492,18 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
 
   // A page loaded afresh: its LCP, and the JavaScript fetched (compressed,
   // as served) by the frame that first showed selector, its first screen.
-  // One poller, registered once, notes when each of these first shows.
-  await page.evaluateOnNewDocument((selectors) => {
+  // One poller, registered once, notes when the selector of its document's
+  // page first shows, and stops.
+  await page.evaluateOnNewDocument((byPath) => {
     window.__perfShown = {};
+    const sel = byPath[location.pathname];
+    if (!sel) return;
     const check = () => {
-      for (const sel of selectors) if (!(sel in window.__perfShown) && document.querySelector(sel)) window.__perfShown[sel] = performance.now();
-      if (selectors.some((sel) => !(sel in window.__perfShown))) requestAnimationFrame(check);
+      if (document.querySelector(sel)) window.__perfShown[sel] = performance.now();
+      else requestAnimationFrame(check);
     };
     requestAnimationFrame(check);
-  }, ['[data-testid="assets-total"]', '[data-testid="margin-account-MARGIN_CROSS"]']);
+  }, { "/assets": '[data-testid="assets-total"]', "/assets/margin": '[data-testid="margin-account-MARGIN_CROSS"]' });
   const fresh = async (path, selector) => {
     await page.goto(`${base}${path}`, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(selector, { visible: true, timeout: 30000 });
