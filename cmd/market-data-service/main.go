@@ -62,6 +62,10 @@ type settings struct {
 	// the self-computed one stands in (MARK_SOURCE_STALE_SECONDS, coin-M
 	// design §3.1: 10).
 	MarkSourceStaleSeconds int `koanf:"mark_source_stale_seconds"`
+	// BinanceFastDepth are the base assets whose perpetuals' books follow
+	// depth updates every 100 ms (BINANCE_FAST_DEPTH, coin-M design §3.4:
+	// BTC and ETH); the other perpetuals' come every 500 ms.
+	BinanceFastDepth []string `koanf:"binance_fast_depth"`
 	// IndexMinSources is the fewest reference sources an index price
 	// needs (INDEX_MIN_SOURCES, §11.7: 2); test environments with Binance
 	// alone set 1.
@@ -110,7 +114,7 @@ func setup(ctx context.Context, a *app.App) error {
 		BinanceREST: "https://data-api.binance.vision", BinanceStream: "wss://data-stream.binance.vision",
 		BinanceFuturesREST: "https://fapi.binance.com", BinanceFuturesStream: "wss://fstream.binance.com",
 		BinanceCoinMREST: "https://dapi.binance.com", BinanceCoinMStream: "wss://dstream.binance.com",
-		IndexMinSources: 2, MarkSourceStaleSeconds: 10,
+		IndexMinSources: 2, MarkSourceStaleSeconds: 10, BinanceFastDepth: []string{"BTC", "ETH"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -148,7 +152,8 @@ func setup(ctx context.Context, a *app.App) error {
 	// market.reference_feed is on.
 	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second}).
 		WithFutures(cfg.BinanceFuturesREST, cfg.BinanceFuturesStream).
-		WithCoinFutures(cfg.BinanceCoinMREST, cfg.BinanceCoinMStream)
+		WithCoinFutures(cfg.BinanceCoinMREST, cfg.BinanceCoinMStream).
+		WithFastDepth(cfg.BinanceFastDepth)
 	refs := application.NewReferenceMap(listed, a.Logger())
 	// A minute without a trade of a symbol no reference market follows is
 	// stored flat when its next trade is applied (coordinator 2026-10-04),

@@ -303,6 +303,34 @@ func TestFundingSettlesAtTheReferenceMarketsRate(t *testing.T) {
 		}
 	})
 
+	// The contract's cap (0.0075) holds over the market's rates, and a
+	// settled mark price 16% from the contract's does not price the
+	// payments (review EM).
+	t.Run("past the cap, a mark far off", func(t *testing.T) {
+		r := newFollowRig(t, "2026-10-06T07:59:00Z")
+		r.follow = true
+		r.stream("60100", "60050", "-0.02", end)
+		for range 30 {
+			r.tick(false)
+		}
+		if p, _ := r.marks.Latest(perp.Symbol); !p.FundingRate.Equal(d("-0.0075")) || p.FundingSource != MarkSourceBinance {
+			t.Fatalf("the estimate past the cap: %+v", p)
+		}
+		for range 30 { // up to 08:00:00: the period ended
+			r.tick(false)
+		}
+		r.stream("60110", "60060", "0.00007", end.Add(8*time.Hour))
+		r.ref.mu.Lock()
+		r.ref.settled[end] = domain.SettledFunding{Symbol: perp.Symbol, FundingTime: end.Add(time.Millisecond), Rate: d("0.01"), Mark: d("70000")}
+		r.ref.mu.Unlock()
+		r.pub.take(t)
+		r.tick(false)
+		f := settled(t, r)
+		if f == nil || f.GetFundingRate() != "0.0075" || f.GetMarkPrice() != "60110" || f.GetSource() != MarkSourceBinance {
+			t.Fatalf("settled %v", f)
+		}
+	})
+
 	t.Run("the market's last estimate", func(t *testing.T) {
 		r := newFollowRig(t, "2026-10-06T07:59:00Z")
 		r.follow = true
@@ -368,6 +396,16 @@ func TestMarksReturnToTheReferenceMarketAfterAWhile(t *testing.T) {
 	}
 	if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourcePlatform || !p.SourceDegraded {
 		t.Fatalf("stale: %+v", p)
+	}
+	// One mark, then the stream goes quiet again: the mark stays young
+	// enough to use for 10 seconds, but the market is not streaming; the
+	// prices stay the platform's (review ET ①).
+	r.tick(false)
+	for i := range 11 {
+		r.tick(true)
+		if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourcePlatform {
+			t.Fatalf("followed on a quiet stream, %d seconds after its mark: %+v", i+1, p)
+		}
 	}
 	// Fresh for 4 seconds, silent again, fresh again: still the platform's.
 	for range 4 {

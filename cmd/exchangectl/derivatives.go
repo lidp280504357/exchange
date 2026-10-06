@@ -197,8 +197,11 @@ func derivativesReconcile(ctx context.Context, cfg settings, db *pg.DB, out io.W
 		}
 		k, ok := kinds[symbol]
 		if !ok {
-			rows.Close()
-			return fmt.Errorf("positions on %s, which is not a listed contract", symbol)
+			// A mismatch, as the service's Reconciler records it (C38): the
+			// rest is still checked.
+			fmt.Fprintf(out, "%-16s long − short %s, long cost − short cost %s: not a listed contract, its asset unknown\n", symbol, qty, cost)
+			broken++
+			continue
 		}
 		fmt.Fprintf(out, "%-16s long − short %s, long cost − short cost %s %s\n", symbol, qty, cost, k.settle)
 		if !qty.IsZero() {

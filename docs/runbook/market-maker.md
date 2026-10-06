@@ -47,10 +47,11 @@
 | `market_house_contract_equity_usdt` | HOUSE 的 USDT 合约权益（USDT 的 FUTURES `margin_balance`，按标记价）；第一次读到之前是 NaN（不触发告警） |
 | `market_house_contract_exposure_usdt` | HOUSE 全部 U 本位合约仓位按标记价的合计价值 |
 | `market_house_coin_contract_equity{asset}` | HOUSE 币本位账户的权益（该币的 FUTURES `margin_balance`），以币计 |
+| `market_house_coin_contract_equity_usdt{asset}` | 同上按该币 USDT 交易对的参考中间价折成美元（没有价格时没有这条序列）；不再有该币结算的合约时这几条序列删除 |
 | `market_house_coin_contract_exposure_usdt{asset}` | HOUSE 在该币结算的合约仓位的合计美元价值（张数 × 面值） |
 | `market_house_contract_max_leverage` | 配置的 `HOUSE_CONTRACT_LEVERAGE` |
 
-告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HouseContractOverLeveraged`（合约仓位合计超过权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟：只能减仓，用 `exchangectl ledger house-margin` 补保证金）、`HouseContractEquityGone`（合约权益不大于 0，critical：之后的亏损由保险基金承担）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
+告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HouseContractOverLeveraged`（合约仓位合计超过权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟：只能减仓，用 `exchangectl ledger house-margin` 补保证金）、`HouseContractEquityGone`（合约权益不大于 0，critical：之后的亏损由保险基金承担）；币本位账户按币各有一对：`HouseCoinContractOverLeveraged{asset}`（该币结算的仓位美元价值超过该账户美元权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟，用 `house-margin --asset` 补）、`HouseCoinContractEquityGone{asset}`（该币账户权益不大于 0，critical：亏损由该币的保险基金补，基金不够时结算被拒）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
 
 日志：`house liquidity not published`、`house liquidity: HOUSE's holdings not read`、`house liquidity idle: set HOUSE_USER_ID`（没配 HOUSE 账户时服务空转）。
 

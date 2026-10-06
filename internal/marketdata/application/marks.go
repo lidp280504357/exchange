@@ -63,15 +63,25 @@ const (
 	// settleWait is how long an ended period of a contract that follows
 	// the reference market waits for the rate the market settled.
 	settleWait = 2 * time.Minute
-	// referenceRecover is how long the reference market's mark must be
-	// fresh again before the prices follow it back from the self-computed
+	// referenceRecover is how long the reference market must stream its
+	// mark again before the prices follow it back from the self-computed
 	// ones (review EL C37: a flapping stream must not switch them back and
-	// forth).
+	// forth); referenceLive is how old its latest mark may be on each tick
+	// of that while (it streams every second; review ET ①: a mark fresh
+	// enough to use, under the 10 seconds, but from a stream gone quiet
+	// again, does not count).
 	referenceRecover = 5 * time.Second
+	referenceLive    = 2 * time.Second
 	// basisDecimals is the precision of the basis while it is Binance's
 	// (that of the self-computed one, domain's ratio precision).
 	basisDecimals = 12
 )
+
+// settleMarkTolerance: the mark price the reference market settled a
+// period at prices the period's payments when it is within this of the
+// contract's current mark (review EM: one bad figure must not price every
+// position's payment); else the current mark does.
+var settleMarkTolerance = decimal.RequireFromString("0.05")
 
 // ReferenceMarks is the reference market's mark prices and settled rates
 // (MarkFeed).
@@ -586,9 +596,13 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 		return domain.ReferenceMark{}, false
 	}
 	// Back after the source degraded: the self-computed prices go on until
-	// the market's have stayed fresh for referenceRecover (none of its own
-	// at hand: follow at once).
+	// the market has streamed its mark for referenceRecover, each tick's at
+	// most referenceLive old (none of its own at hand: follow at once).
 	if st.latest.SourceDegraded && st.latest.Computed.IsPositive() {
+		if now.Sub(received) > referenceLive {
+			st.refBackSince = time.Time{}
+			return domain.ReferenceMark{}, false
+		}
 		if st.refBackSince.IsZero() {
 			st.refBackSince = now
 		}
@@ -600,7 +614,12 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 	m.markSource(ctx, st, false, "")
 	if ref.HasRate {
 		if ref.NextFunding.Equal(st.period) {
-			st.refRates[st.period] = ref.FundingRate
+			r, cut := capped(st, ref.FundingRate)
+			if prev, had := st.refRates[st.period]; cut && (!had || !prev.Equal(r)) {
+				m.log.WarnContext(ctx, "the reference market's funding rate estimate is past the contract's cap: capped",
+					"symbol", symbol, "rate", ref.FundingRate.String(), "cap", st.spec.FundingCap.String())
+			}
+			st.refRates[st.period] = r
 		} else if !st.refApart[st.period] {
 			st.refApart[st.period] = true
 			m.log.WarnContext(ctx, "the reference market ends the funding period at another time: its rate is not followed for it",
@@ -673,9 +692,19 @@ func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([
 			estimate, estimated := st.refRates[p.FundingTime]
 			switch {
 			case found:
-				p.Rate, p.Source, how = s.Rate, MarkSourceBinance, MarkSourceBinance
-				if s.Mark.IsPositive() {
+				rate, cut := capped(st, s.Rate)
+				if cut {
+					m.log.WarnContext(ctx, "the reference market settled the period past the contract's cap: capped",
+						"symbol", p.Symbol, "funding_time", p.FundingTime, "rate", s.Rate.String(), "cap", st.spec.FundingCap.String())
+				}
+				p.Rate, p.Source, how = rate, MarkSourceBinance, MarkSourceBinance
+				switch {
+				case !s.Mark.IsPositive():
+				case !p.MarkPrice.IsPositive() || s.Mark.Div(p.MarkPrice).Sub(decimal.NewFromInt(1)).Abs().LessThanOrEqual(settleMarkTolerance):
 					p.MarkPrice = s.Mark
+				default:
+					m.log.WarnContext(ctx, "the reference market settled the period at a mark price far from the contract's: the contract's prices it",
+						"symbol", p.Symbol, "funding_time", p.FundingTime, "reference_mark", s.Mark.String(), "mark", p.MarkPrice.String())
 				}
 			case now.Sub(p.FundingTime) < settleWait:
 				done = false
@@ -705,6 +734,14 @@ func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([
 		out = append(out, Update{p.Symbol, final})
 	}
 	return out, done, nil
+}
+
+// capped is the reference market's rate within the contract's cap
+// (domain.CapRate, review EM: the spec's limit holds whatever the market
+// says), and whether the cap took something off.
+func capped(st *contractMarks, rate decimal.Decimal) (decimal.Decimal, bool) {
+	r := domain.CapRate(rate, st.spec.FundingCap)
+	return r, !r.Equal(rate)
 }
 
 // checkDegraded reports the contract degraded once it has had no mark

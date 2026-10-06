@@ -238,6 +238,26 @@ groups:
           summary: "HOUSE's contract equity is {{ $value }} USDT: it is never liquidated, so its losses now come out of the insurance fund"
           runbook: docs/runbook/market-maker.md
 
+      # HOUSE's coin-margined accounts (coin-margined design §2.3, review
+      # ES): the same two checks, an account a settlement asset.
+      - alert: HouseCoinContractOverLeveraged
+        expr: |
+          max by (job, asset) (market_house_coin_contract_exposure_usdt)
+            > max by (job, asset) (market_house_coin_contract_equity_usdt) * on (job) group_left max by (job) (market_house_contract_max_leverage)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "HOUSE's positions settled in {{ $labels.asset }} are worth {{ $value }} USD, more than HOUSE_CONTRACT_LEVERAGE times that account's equity: it only reduces them until the account is topped up"
+          runbook: docs/runbook/market-maker.md
+
+      - alert: HouseCoinContractEquityGone
+        expr: max by (job, asset) (market_house_coin_contract_equity) <= 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "HOUSE's {{ $labels.asset }} contract equity is {{ $value }} {{ $labels.asset }}: its losses there now come out of that coin's insurance fund"
+          runbook: docs/runbook/market-maker.md
+
       - alert: MarketSimFailing
         expr: sum by (job) (increase(market_sim_errors_total[10m])) > 100
         labels: {severity: warning}

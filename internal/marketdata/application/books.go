@@ -159,11 +159,15 @@ func (b *Books) nextSeq(symbol string) (prev, next int64) {
 }
 
 // Run follows the reference market while market.reference_feed is on (an
-// app.Loop body): one stream connection per group of symbols, spot and
-// futures apart, restarted when the followed symbols change.
+// app.Loop body): one stream connection per group of symbols, a market's
+// each (regroup). It looks at the followed symbols every remap.
 func (b *Books) Run(ctx context.Context) error {
+	var running []*runningGroup
+	defer func() { stopGroups(running) }()
 	for ctx.Err() == nil {
 		if !b.flags.Enabled(flags.KeyReferenceFeed, flags.Subject{}) {
+			stopGroups(running)
+			running = nil
 			b.drop()
 			sleep(ctx, 10*time.Second)
 			continue
@@ -173,35 +177,90 @@ func (b *Books) Run(ctx context.Context) error {
 			sleep(ctx, 10*time.Second)
 			continue
 		}
-		session, stop := context.WithCancel(ctx)
-		var wg sync.WaitGroup
-		for _, group := range groups(followed) {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				b.connection(session, group)
-			}()
-		}
-		// Restart when the flag goes off or the followed symbols change.
-		for session.Err() == nil {
-			sleep(session, b.remap)
-			if session.Err() != nil {
-				break
-			}
-			if !b.flags.Enabled(flags.KeyReferenceFeed, flags.Subject{}) || !sameFollowed(b.follow(session), followed) {
-				b.log.InfoContext(ctx, "reference books: followed symbols changed")
-				stop()
-			}
-		}
-		stop()
-		wg.Wait()
+		running = b.regroup(ctx, running, followed)
+		sleep(ctx, b.remap)
 	}
 	return nil
 }
 
+// runningGroup is a group's stream connection kept up by Run.
+type runningGroup struct {
+	group bookGroup
+	stop  context.CancelFunc
+	done  chan struct{}
+}
+
+// current reports whether every symbol of the group is still followed, on
+// the same reference.
+func (g *runningGroup) current(followed map[string]ports.Reference) bool {
+	for _, ref := range g.group.refs {
+		if f, ok := followed[ref.Symbol]; !ok || !ports.SameReference(f, ref) {
+			return false
+		}
+	}
+	return true
+}
+
+func stopGroups(gs []*runningGroup) {
+	for _, g := range gs {
+		g.stop()
+	}
+	for _, g := range gs {
+		<-g.done
+	}
+}
+
+// regroup keeps the running groups whose symbols are all still followed on
+// the same reference, stops the others, and starts groups (groups) for the
+// followed symbols left without one: a listing adds connections of its
+// own and a delisting restarts the group it was in, while the other books
+// stay as they are. Restarting every group at each change had every book
+// load its snapshot and trades again at once, past Binance's request
+// weight (review ET ②).
+func (b *Books) regroup(ctx context.Context, running []*runningGroup, followed map[string]ports.Reference) []*runningGroup {
+	var kept, stopped []*runningGroup
+	covered := map[string]bool{}
+	for _, g := range running {
+		if !g.current(followed) {
+			stopped = append(stopped, g)
+			continue
+		}
+		kept = append(kept, g)
+		for _, ref := range g.group.refs {
+			covered[ref.Symbol] = true
+		}
+	}
+	stopGroups(stopped)
+	rest := map[string]ports.Reference{}
+	for symbol, ref := range followed {
+		if !covered[symbol] {
+			rest[symbol] = ref
+		}
+	}
+	added := groups(rest)
+	if len(running) > 0 && (len(stopped) > 0 || len(added) > 0) {
+		b.log.InfoContext(ctx, "reference books: followed symbols changed", "kept", len(kept), "stopped", len(stopped), "started", len(added))
+	}
+	for _, g := range added {
+		ctx, stop := context.WithCancel(ctx)
+		r := &runningGroup{group: g, stop: stop, done: make(chan struct{})}
+		go func() {
+			defer close(r.done)
+			b.connection(ctx, g)
+		}()
+		kept = append(kept, r)
+	}
+	return kept
+}
+
 // follow reads the followed symbols and makes sure each has a book.
 func (b *Books) follow(ctx context.Context) map[string]ports.Reference {
-	m := b.refs.Get(ctx)
+	return b.track(b.refs.Get(ctx))
+}
+
+// track gives every symbol of m a book (a new one when its reference
+// changed) and forgets the others.
+func (b *Books) track(m map[string]ports.Reference) map[string]ports.Reference {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for symbol, ref := range m {
@@ -303,8 +362,9 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		b.loadRecent(ctx, g)
-		b.loader(ctx, byName, resync)
+		// The books first: the recent trades (REST only) once every
+		// snapshot was tried.
+		b.loader(ctx, byName, resync, len(g.refs), func() { b.loadRecent(ctx, g) })
 	}()
 	err := b.src.BookStream(ctx, g.refs, ports.BookHandlers{
 		Depth: func(symbol string, d domain.DepthDiff) {
@@ -353,12 +413,16 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 }
 
 // loader loads the snapshots of the symbols sent on resync, one at a time
-// (the source spaces its requests), until ctx ends.
-func (b *Books) loader(ctx context.Context, refs map[string]ports.Reference, resync chan string) {
+// (the source spaces its requests), until ctx ends; after the first
+// initial ones (each symbol's first) it calls then, once.
+func (b *Books) loader(ctx context.Context, refs map[string]ports.Reference, resync chan string, initial int, then func()) {
 	// Let the stream buffer a few updates first: a snapshot must not be
 	// older than the first update (spot).
 	sleep(ctx, time.Second)
-	for {
+	for loaded := 0; ; loaded++ {
+		if loaded == initial && then != nil {
+			then()
+		}
 		var symbol string
 		select {
 		case <-ctx.Done():
@@ -392,9 +456,17 @@ func (b *Books) loader(ctx context.Context, refs map[string]ports.Reference, res
 	}
 }
 
-// loadRecent fills the recent trades of a group's symbols (for REST).
+// loadRecent fills the recent trades (for REST) of a group's symbols that
+// have none: a reconnect keeps what the stream brought.
 func (b *Books) loadRecent(ctx context.Context, g bookGroup) {
 	for _, ref := range g.refs {
+		b.mu.Lock()
+		st, ok := b.books[ref.Symbol]
+		have := ok && len(st.recent) > 0
+		b.mu.Unlock()
+		if have || ctx.Err() != nil {
+			continue
+		}
 		trades, err := b.src.RecentTrades(ctx, ref, bookRecent)
 		if err != nil {
 			if ctx.Err() == nil {

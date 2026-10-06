@@ -24,8 +24,13 @@ import (
 // ones of their market (USDⓈ-M or COIN-M).
 
 // SnapshotLevels is how deep a book snapshot goes (a spot request weighs
-// 50 at this depth, a futures one 20).
-const SnapshotLevels = 1000
+// 50 at this depth, a futures one 20), SlowSnapshotLevels that of a
+// perpetual on 500 ms updates (weighing 10): the public books carry 200
+// levels a side.
+const (
+	SnapshotLevels     = 1000
+	SlowSnapshotLevels = 500
+)
 
 // tradeNamespace seeds the platform IDs of the reference market's trades.
 var tradeNamespace = uuid.MustParse("5f0b6c8e-2d4a-4c1e-9b7a-3e8d2f6a1c04")
@@ -76,15 +81,20 @@ type depthRow struct {
 	Asks         [][2]string `json:"asks"`
 }
 
-// DepthSnapshot returns ref's book, SnapshotLevels a side at most, and the
-// update ID it stands at, in the platform's units.
+// DepthSnapshot returns ref's book, SnapshotLevels a side at most
+// (SlowSnapshotLevels for a perpetual on 500 ms updates), and the update ID
+// it stands at, in the platform's units.
 func (s *Source) DepthSnapshot(ctx context.Context, ref ports.Reference) (int64, []domain.Level, []domain.Level, error) {
 	rest, prefix, _, err := s.endpoints(ref.Market)
 	if err != nil {
 		return 0, nil, nil, err
 	}
 	var row depthRow
-	q := url.Values{"symbol": {ref.Remote}, "limit": {strconv.Itoa(SnapshotLevels)}}
+	levels := SnapshotLevels
+	if s.slow(ref) {
+		levels = SlowSnapshotLevels
+	}
+	q := url.Values{"symbol": {ref.Remote}, "limit": {strconv.Itoa(levels)}}
 	if err := s.getAt(ctx, "depth", rest, prefix+"/depth", q, &row); err != nil {
 		return 0, nil, nil, err
 	}
@@ -220,7 +230,7 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, on port
 	var both, depths, trades []string
 	byRemote := make(map[string]ports.Reference, len(refs))
 	for _, r := range refs {
-		depth, trade := depthStream(r), strings.ToLower(r.Remote)+"@aggTrade"
+		depth, trade := s.depthStream(r), strings.ToLower(r.Remote)+"@aggTrade"
 		both = append(both, depth, trade)
 		depths, trades = append(depths, depth), append(trades, trade)
 		byRemote[r.Remote] = r
@@ -262,17 +272,19 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, on port
 	return err
 }
 
-// fastDepth are the base assets whose perpetuals' books follow depth
-// updates every 100 ms; the other perpetuals' come every 500 ms
-// (coin-margined design §3.4: about 105 contracts, whose market.depth the
-// test server's Redpanda, limited to 2 GB, has to take). Spot has no
-// 500 ms stream: every pair's book takes 100 ms.
-var fastDepth = map[string]bool{"BTC": true, "ETH": true}
+// slow reports whether r is a perpetual whose book follows depth updates
+// every 500 ms: those of bases outside fastDepth (BTC and ETH by default,
+// WithFastDepth), coin-margined design §3.4: about 105 contracts, whose
+// market.depth the test server's Redpanda, limited to 2 GB, has to take.
+// Spot has no 500 ms stream: every pair's book takes 100 ms.
+func (s *Source) slow(r ports.Reference) bool {
+	base, _, _ := strings.Cut(r.Symbol, "-")
+	return r.Market != ports.MarketSpot && !s.fastDepth[base]
+}
 
 // depthStream is the name of r's depth stream.
-func depthStream(r ports.Reference) string {
-	base, _, _ := strings.Cut(r.Symbol, "-")
-	if r.Market != ports.MarketSpot && !fastDepth[base] {
+func (s *Source) depthStream(r ports.Reference) string {
+	if s.slow(r) {
 		return strings.ToLower(r.Remote) + "@depth@500ms"
 	}
 	return strings.ToLower(r.Remote) + "@depth@100ms"

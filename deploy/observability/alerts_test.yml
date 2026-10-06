@@ -470,6 +470,51 @@ tests:
               summary: "HOUSE's contract equity is -1200 USDT: it is never liquidated, so its losses now come out of the insurance fund"
               runbook: docs/runbook/market-maker.md
 
+  # HOUSE's BTC account: 0.5 BTC (25,000 USD) may carry 250,000 USD of
+  # positions at 10x; from 3m they are worth 260,000. Its ETH account is
+  # fine throughout.
+  - interval: 1m
+    input_series:
+      - series: 'market_house_coin_contract_exposure_usdt{job="market-maker", instance="a", asset="BTC"}'
+        values: '200000x2 260000x10'
+      - series: 'market_house_coin_contract_equity_usdt{job="market-maker", instance="a", asset="BTC"}'
+        values: '25000x12'
+      - series: 'market_house_coin_contract_exposure_usdt{job="market-maker", instance="a", asset="ETH"}'
+        values: '1000x12'
+      - series: 'market_house_coin_contract_equity_usdt{job="market-maker", instance="a", asset="ETH"}'
+        values: '500000x12'
+      - series: 'market_house_contract_max_leverage{job="market-maker", instance="a"}'
+        values: '10x12'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HouseCoinContractOverLeveraged
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: HouseCoinContractOverLeveraged
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-maker, asset: BTC}
+            exp_annotations:
+              summary: "HOUSE's positions settled in BTC are worth 260000 USD, more than HOUSE_CONTRACT_LEVERAGE times that account's equity: it only reduces them until the account is topped up"
+              runbook: docs/runbook/market-maker.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_house_coin_contract_equity{job="market-maker", instance="a", asset="BTC"}'
+        values: '6 -0.01 -0.01 -0.01'
+      - series: 'market_house_coin_contract_equity{job="market-maker", instance="a", asset="ETH"}'
+        values: '200 200 200 200'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HouseCoinContractEquityGone
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HouseCoinContractEquityGone
+        exp_alerts:
+          - exp_labels: {severity: critical, job: market-maker, asset: BTC}
+            exp_annotations:
+              summary: "HOUSE's BTC contract equity is -0.01 BTC: its losses there now come out of that coin's insurance fund"
+              runbook: docs/runbook/market-maker.md
+
   - interval: 1m
     input_series:
       - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="SOL-USDT"}'

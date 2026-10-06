@@ -214,6 +214,65 @@ func TestTheEnginesBookIsRelayedWhereTheReferenceIsNotShown(t *testing.T) {
 	}
 }
 
+// A listing gets a connection of its own; a delisting or a changed
+// reference restarts only the group it was in, the other books going on
+// (review ET ②: every group restarting reloaded every snapshot at once).
+func TestOnlyTheChangedGroupsRestart(t *testing.T) {
+	b, src, _, _ := newBooksRig(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	one := decimal.NewFromInt(1)
+	btc := ports.Reference{Symbol: "BTC-USDT", Remote: "BTCUSDT", Multiplier: one}
+	eth := ports.Reference{Symbol: "ETH-USDT", Remote: "ETHUSDT", Multiplier: one}
+	opened := func(want ...string) {
+		t.Helper()
+		var got []string
+		select {
+		case refs := <-src.opened:
+			for _, r := range refs {
+				got = append(got, r.Symbol)
+			}
+		case <-time.After(5 * time.Second):
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("opened %v, want %v", got, want)
+		}
+	}
+	nothingOpened := func() {
+		t.Helper()
+		select {
+		case refs := <-src.opened:
+			t.Fatalf("opened %v", refs)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	regroup := func(running []*runningGroup, refs ...ports.Reference) []*runningGroup {
+		m := map[string]ports.Reference{}
+		for _, r := range refs {
+			m[r.Symbol] = r
+		}
+		return b.regroup(ctx, running, b.track(m))
+	}
+	running := regroup(nil, btc)
+	opened("BTC-USDT")
+	running = regroup(running, btc, eth) // ETH listed: a group of its own
+	opened("ETH-USDT")
+	nothingOpened()
+	running = regroup(running, eth) // BTC delisted: its group goes
+	nothingOpened()
+	if len(running) != 1 || running[0].group.refs[0].Symbol != "ETH-USDT" {
+		t.Fatalf("running %+v", running)
+	}
+	thousand := eth
+	thousand.Multiplier = decimal.NewFromInt(1000)
+	running = regroup(running, thousand) // ETH's reference changed: its group restarts
+	opened("ETH-USDT")
+	if len(running) != 1 || !running[0].group.refs[0].Multiplier.Equal(thousand.Multiplier) {
+		t.Fatalf("running %+v", running)
+	}
+	stopGroups(running)
+}
+
 func TestBooksAreSplitIntoConnections(t *testing.T) {
 	m := map[string]ports.Reference{}
 	for i := range 30 {

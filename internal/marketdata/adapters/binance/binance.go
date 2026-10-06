@@ -50,12 +50,18 @@ type Source struct {
 	// otherwise block until TCP keepalive gives up.
 	idle time.Duration
 
+	// fastDepth are the base assets whose perpetuals follow depth updates
+	// every 100 ms (depthStream).
+	fastDepth map[string]bool
+
 	// turn lets one caller at a time wait for its turn; last is when the
 	// latest request went out, or when requests may resume after Binance
-	// asked to back off.
-	turn chan struct{}
-	mu   sync.Mutex
-	last time.Time
+	// asked to back off. weights is each REST host's request weight
+	// (weight.go).
+	turn    chan struct{}
+	mu      sync.Mutex
+	last    time.Time
+	weights map[string]*hostWeight
 }
 
 // New returns a source on the REST and stream base URLs, e.g.
@@ -63,9 +69,22 @@ type Source struct {
 func New(rest, stream string, client *http.Client) *Source {
 	return &Source{
 		rest: strings.TrimRight(rest, "/"), stream: strings.TrimRight(stream, "/"), client: client, gap: 200 * time.Millisecond,
-		turn: make(chan struct{}, 1),
+		turn: make(chan struct{}, 1), weights: map[string]*hostWeight{}, fastDepth: map[string]bool{"BTC": true, "ETH": true},
 		idle: 30 * time.Second,
 	}
+}
+
+// WithFastDepth sets the base assets whose perpetuals' books follow depth
+// updates every 100 ms (BTC and ETH by default); the others' come every
+// 500 ms.
+func (s *Source) WithFastDepth(bases []string) *Source {
+	s.fastDepth = map[string]bool{}
+	for _, b := range bases {
+		if b = strings.ToUpper(strings.TrimSpace(b)); b != "" {
+			s.fastDepth[b] = true
+		}
+	}
+	return s
 }
 
 // Name is the source's name.
@@ -113,9 +132,12 @@ func (s *Source) backOff(resp *http.Response) {
 	s.mu.Unlock()
 }
 
-// getAt fetches a REST path of base into out; requests to every base wait
-// their turn together.
+// getAt fetches a REST path of base into out: within the host's request
+// weight (weigh), then in turn with the requests to every base.
 func (s *Source) getAt(ctx context.Context, what, base, path string, q url.Values, out any) error {
+	if err := s.weigh(ctx, base, requestWeight(base == s.rest, path, q)); err != nil {
+		return err
+	}
 	if err := s.wait(ctx); err != nil {
 		return err
 	}
@@ -128,6 +150,7 @@ func (s *Source) getAt(ctx context.Context, what, base, path string, q url.Value
 		return fmt.Errorf("binance %s: %w", what, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	s.observeWeight(base, resp.Header.Get("X-MBX-USED-WEIGHT-1M"))
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusTooManyRequests, http.StatusTeapot:

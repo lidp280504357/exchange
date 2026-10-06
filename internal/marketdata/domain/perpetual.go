@@ -223,6 +223,16 @@ func FundingRate(premium, interest, limit decimal.Decimal) decimal.Decimal {
 	return decimal.Min(decimal.Max(r, limit.Neg()), limit).Round(RateDecimals)
 }
 
+// CapRate keeps a rate taken from elsewhere (the reference market's)
+// within the contract's ±limit, as FundingRate keeps its own; no limit
+// set (zero) leaves it as it is.
+func CapRate(rate, limit decimal.Decimal) decimal.Decimal {
+	if !limit.IsPositive() {
+		return rate
+	}
+	return decimal.Min(decimal.Max(rate, limit.Neg()), limit)
+}
+
 // NextFunding returns the end of the funding period that contains t, for
 // periods of hours aligned to 00:00 UTC: a time on a boundary starts the
 // next period.

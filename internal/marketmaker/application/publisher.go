@@ -107,9 +107,11 @@ type Publisher struct {
 	failures  prometheus.Counter
 	// HOUSE's USDT contract equity, what its linear positions are worth and
 	// how many times the equity they may be worth (ContractLeverage); its
-	// coin-margined accounts' equity (in the coin) and positions' worth.
-	equity, worth, leverage  prometheus.Gauge
-	coinEquity, coinExposure *prometheus.GaugeVec
+	// coin-margined accounts' equity (in the coin and in USD) and
+	// positions' worth, for the assets in coinAssets.
+	equity, worth, leverage                 prometheus.Gauge
+	coinEquity, coinEquityUSD, coinExposure *prometheus.GaugeVec
+	coinAssets                              []string
 }
 
 // refBook is a reference market's book as the public messages give it.
@@ -165,6 +167,10 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 			Name: "market_house_coin_contract_equity",
 			Help: "HOUSE's equity in a coin-margined FUTURES account (margin balance at the mark prices), in the coin.",
 		}, []string{"asset"}),
+		coinEquityUSD: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_house_coin_contract_equity_usdt",
+			Help: "HOUSE's equity in a coin-margined FUTURES account valued in USD at the coin's reference price (no series without one).",
+		}, []string{"asset"}),
 		coinExposure: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_house_coin_contract_exposure_usdt",
 			Help: "What HOUSE's positions settled in a coin are worth together, in USD (contracts x face value).",
@@ -177,7 +183,7 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 	p.equity.Set(math.NaN())
 	p.worth.Set(math.NaN())
 	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures, p.equity, p.worth, p.leverage, p.coinEquity,
-		p.coinExposure)
+		p.coinEquityUSD, p.coinExposure)
 	return p
 }
 
@@ -321,6 +327,7 @@ func (p *Publisher) refresh(ctx context.Context) {
 		for asset := range holdings {
 			backed[asset] = p.backed(asset)
 		}
+		prices := p.prices(readAt)
 		p.mu.Unlock()
 		for asset, amount := range holdings {
 			// An asset counts as backed until the backed assets are read:
@@ -330,13 +337,35 @@ func (p *Publisher) refresh(ctx context.Context) {
 		}
 		p.equity.Set(contracts.Equity[domain.Valuation].InexactFloat64())
 		p.worth.Set(contracts.Exposure[domain.Valuation].InexactFloat64())
-		for _, asset := range assets {
-			if asset != domain.Valuation {
-				p.coinEquity.WithLabelValues(asset).Set(contracts.Equity[asset].InexactFloat64())
-				p.coinExposure.WithLabelValues(asset).Set(contracts.Exposure[asset].InexactFloat64())
-			}
+		p.coinGauges(assets, contracts, prices)
+	}
+}
+
+// coinGauges sets the coin-margined accounts' gauges, and drops those of
+// an asset no contract quoted settles in any more.
+func (p *Publisher) coinGauges(assets []string, contracts domain.ContractAccount, prices map[string]decimal.Decimal) {
+	var coins []string
+	for _, asset := range assets {
+		if asset == domain.Valuation {
+			continue
+		}
+		coins = append(coins, asset)
+		p.coinEquity.WithLabelValues(asset).Set(contracts.Equity[asset].InexactFloat64())
+		p.coinExposure.WithLabelValues(asset).Set(contracts.Exposure[asset].InexactFloat64())
+		if price := prices[asset]; price.IsPositive() {
+			p.coinEquityUSD.WithLabelValues(asset).Set(contracts.Equity[asset].Mul(price).InexactFloat64())
+		} else {
+			p.coinEquityUSD.DeleteLabelValues(asset)
 		}
 	}
+	for _, gone := range p.coinAssets {
+		if !slices.Contains(coins, gone) {
+			p.coinEquity.DeleteLabelValues(gone)
+			p.coinEquityUSD.DeleteLabelValues(gone)
+			p.coinExposure.DeleteLabelValues(gone)
+		}
+	}
+	p.coinAssets = coins
 }
 
 // backed reports whether HOUSE must hold asset to sell it: every asset

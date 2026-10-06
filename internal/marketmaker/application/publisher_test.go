@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -577,5 +578,10 @@ func TestHouseQuotesACoinMarginedContractInContracts(t *testing.T) {
 	}
 	if book == nil || book.GetBuyRoom() != "300" || book.GetSellRoom() != "0" {
 		t.Fatalf("the coin-margined book without room %v", book)
+	}
+	// The account's equity in USD, for the alerts: 0.06 BTC at 50,000.
+	var m dto.Metric
+	if err := p.coinEquityUSD.WithLabelValues("BTC").Write(&m); err != nil || m.GetGauge().GetValue() != 3000 {
+		t.Fatalf("BTC equity in USD %v %v", m.GetGauge().GetValue(), err)
 	}
 }
