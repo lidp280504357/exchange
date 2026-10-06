@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
@@ -74,6 +75,20 @@ func TestToEvent(t *testing.T) {
 	if e.Data["side"] != "LONG" {
 		t.Fatalf("a hedge-mode long: %v", e.Data)
 	}
+	// The unit follows the face value the event carries.
+	e, _ = toEvent(&derivv1.AdlExecuted{UserId: "u", Symbol: "BTC-USD-PERP", PositionSide: "SHORT", Quantity: "4", ContractSize: "100", SettleAsset: "BTC"})
+	if e.Data["contract_size"] != "100" || e.Data["side"] != "SHORT" || e.Data["quantity"] != "4" {
+		t.Fatalf("adl: %v", e.Data)
+	}
+	// One-way mode's BOTH: the direction the event names since C49.
+	e, _ = toEvent(&derivv1.AdlExecuted{UserId: "u", Symbol: "BTC-USD-PERP", PositionSide: "BOTH", Direction: "LONG", Quantity: "4", ContractSize: "100"})
+	if e.Data["side"] != "LONG" {
+		t.Fatalf("adl in one-way mode: %v", e.Data)
+	}
+	e, _ = toEvent(&derivv1.LiquidationWarning{UserId: "u", Symbol: "ETH-USDT-PERP", PositionSide: "BOTH", Direction: "SHORT"})
+	if e.Data["side"] != "SHORT" {
+		t.Fatalf("warning in one-way mode: %v", e.Data)
+	}
 }
 
 func TestMergeKey(t *testing.T) {
@@ -83,10 +98,18 @@ func TestMergeKey(t *testing.T) {
 		e.At = at
 		return e
 	}
-	// One cross takeover: every position's event has the account's key.
+	// One cross takeover: every position's event has the account's key,
+	// a UUID as the inbox wants (review R10, B138).
 	a, b := mergeKey(cross("BTC-USD-PERP", at)), mergeKey(cross("BTC-USD-PERP", at.Add(300*time.Millisecond)))
 	if a == "" || a != b {
 		t.Fatalf("one takeover, two keys: %q %q", a, b)
+	}
+	if _, err := uuid.Parse(a); err != nil {
+		t.Fatalf("the merge key %q is no UUID: %v", a, err)
+	}
+	// An account-wide notice names no single position's side, size or mark.
+	if d := cross("BTC-USD-PERP", at).Data; d["side"] != "" || d["quantity"] != "" || d["mark_price"] != "" || d["symbol"] != "BTC-USD-PERP" {
+		t.Fatalf("cross data: %v", d)
 	}
 	if mergeKey(cross("BTC-USD-PERP", at.Add(time.Minute))) == a {
 		t.Fatal("a takeover a minute later merged into the first")

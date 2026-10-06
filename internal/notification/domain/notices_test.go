@@ -82,7 +82,7 @@ func TestContractNotices(t *testing.T) {
 		t.Fatalf("isolated warning: %s", body)
 	}
 	title, body = render(NoticeContractLiquidating, "zh-CN", map[string]string{"symbol": "BTC-USD-PERP", "side": "LONG", "quantity": "3", "mark_price": "85000.1", "settle_asset": "BTC"})
-	if title != "合约仓位强平" || !strings.Contains(body, "BTCUSD 永续 多仓（3 张）") || !strings.Contains(body, "标记价格 85000.1") || !strings.Contains(body, "以 BTC 结算") {
+	if title != "合约仓位强平" || !strings.Contains(body, "BTCUSD 永续多仓（3 张）") || !strings.Contains(body, "标记价格 85000.1") || !strings.Contains(body, "以 BTC 结算") {
 		t.Fatalf("liquidating: %q %s", title, body)
 	}
 	_, body = render(NoticeContractLiquidating, "en", map[string]string{"symbol": "ETH-USDT-PERP", "side": "SHORT", "quantity": "0.5", "mark_price": "2600"})
@@ -90,7 +90,7 @@ func TestContractNotices(t *testing.T) {
 		t.Fatalf("liquidating en: %s", body)
 	}
 	_, body = render(NoticeContractDeleveraged, "zh-CN", map[string]string{"symbol": "ETH-USD-PERP", "quantity": "7", "price": "2600.5", "realized_pnl": "0.0123", "settle_asset": "ETH"})
-	if !strings.Contains(body, "ETHUSD 永续 仓位") || !strings.Contains(body, "自动减仓 7 张（成交价 2600.5）") || !strings.Contains(body, "已实现盈亏 0.0123 ETH") {
+	if !strings.Contains(body, "ETHUSD 永续仓位") || !strings.Contains(body, "自动减仓 7 张（成交价 2600.5）") || !strings.Contains(body, "已实现盈亏 0.0123 ETH") {
 		t.Fatalf("adl: %s", body)
 	}
 	title, _ = render(NoticeContractLiquidating, "zh-TW", map[string]string{"symbol": "BTC-USD-PERP", "side": "LONG", "quantity": "3"})

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // Notice types, the "type" of NotificationCreated.
@@ -111,7 +113,8 @@ func contractName(symbol, lang string) string {
 func contractUnit(symbol, size, lang string) string {
 	inverse := strings.HasSuffix(symbol, "-USD-PERP")
 	if size != "" {
-		inverse = strings.Trim(size, "0.") != ""
+		d, err := decimal.NewFromString(size)
+		inverse = err == nil && d.IsPositive()
 	}
 	if inverse {
 		if english(lang) {
@@ -354,7 +357,7 @@ func RenderNotice(in NoticeInput) (title, body string) {
 				"its open orders are canceled and the liquidation engine closes it. Its result is settled in %s.",
 				name, side, d["quantity"], unit, when, d["mark_price"], settleOr(d["settle_asset"]))
 		}
-		return zh(lang, "合约仓位强平"), fmt.Sprintf(zh(lang, "您的 %s %s（%s %s）已于 %s 触发强平（标记价格 %s）：系统已撤销该仓位的挂单并接管平仓，盈亏以 %s 结算。"),
+		return zh(lang, "合约仓位强平"), fmt.Sprintf(zh(lang, "您的 %s%s（%s %s）已于 %s 触发强平（标记价格 %s）：系统已撤销该仓位的挂单并接管平仓，盈亏以 %s 结算。"),
 			name, side, d["quantity"], unit, when, d["mark_price"], settleOr(d["settle_asset"]))
 	case NoticeContractDeleveraged:
 		name, unit, asset := contractName(d["symbol"], lang), contractUnit(d["symbol"], d["contract_size"], lang), settleOr(d["settle_asset"])
@@ -364,7 +367,7 @@ func RenderNotice(in NoticeInput) (title, body string) {
 				"Auto-deleveraging closes profitable positions when a liquidation cannot fill and the insurance fund falls short.",
 				d["quantity"], unit, name, position, when, d["price"], d["realized_pnl"], asset)
 		}
-		return zh(lang, "合约仓位自动减仓"), fmt.Sprintf(zh(lang, "您的 %s %s已于 %s 被自动减仓 %s %s（成交价 %s），已实现盈亏 %s %s。强平单无法成交且保险基金不足时，系统按盈利与杠杆排序减仓。"),
+		return zh(lang, "合约仓位自动减仓"), fmt.Sprintf(zh(lang, "您的 %s%s已于 %s 被自动减仓 %s %s（成交价 %s），已实现盈亏 %s %s。强平单无法成交且保险基金不足时，系统按盈利与杠杆排序减仓。"),
 			name, position, when, d["quantity"], unit, d["price"], d["realized_pnl"], asset)
 	case NoticeStatusChanged:
 		to := pick(statusNames, d["to"], lang)

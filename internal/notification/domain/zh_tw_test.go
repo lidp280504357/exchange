@@ -47,6 +47,13 @@ func TestMessagesInTraditionalChinese(t *testing.T) {
 	} {
 		for _, lang := range []string{"zh-TW", "zh-HK"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Data: data})
+			if typ == NoticeContractWarned || typ == NoticeContractLiquidating {
+				// Their cross account's wording too (review R10, B138).
+				crossTitle, crossBody := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Data: map[string]string{"cross": "true", "settle_asset": "BTC"}})
+				if strings.ContainsAny(crossTitle+crossBody, simplifiedOnly) || strings.Contains(crossBody, "%!") {
+					t.Errorf("%s/%s cross: %q %q", typ, lang, crossTitle, crossBody)
+				}
+			}
 			if title == "" || body == "" || strings.ContainsAny(title+body, simplifiedOnly) || strings.Contains(body, "%!") {
 				t.Errorf("%s/%s: %q %q", typ, lang, title, body)
 			}
