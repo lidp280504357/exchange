@@ -4,8 +4,9 @@
 //   APP=https://m.astras.vip node web/e2e/m-smoke.mjs
 //
 // Drives the deployed site as a phone would (390 x 844, touch, an iPhone
-// user agent, so nginx does not send it to the PC site), in Chinese: sign
-// up through the form, the welcome funds on the assets tab, the "me" tab's
+// user agent, so nginx does not send it to the PC site), in Chinese: a
+// visitor's home and terms pages without a failed request, sign up
+// through the form, the welcome funds on the assets tab, the "me" tab's
 // cards signed in and out (sign-out is there), sign back in, the market
 // list and its search, the first screens of the home, markets, coin,
 // assets and terms pages without a failed request, a limit order
@@ -53,6 +54,15 @@ async function signOut() {
 }
 
 try {
+  // 0. A visitor's home and terms pages ask for nothing that fails either
+  // (B117, B118: the user saw the hero's 404 signed out).
+  const visitorFailing = [];
+  for (const path of ["/", "/legal/terms"]) {
+    for (const f of await t.firstScreenFailures(path, null)) visitorFailing.push(`${path}: ${f}`);
+  }
+  if (visitorFailing.length) throw new Error(`requests failed while a visitor's first screens came up: ${visitorFailing.join("; ")}`);
+  ok("a visitor's home and terms pages come up without a failed request");
+
   // 1. Sign-up through the form: account, password, terms, then the code.
   await go("/register");
   await typeInto('input[autocomplete="email"]', email);
@@ -256,7 +266,7 @@ try {
     () => [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "1日" && b.offsetParent !== null) ?? false,
     { timeout: 20000 },
   );
-  if ((await daily.evaluate((b) => b.getAttribute("data-state"))) !== "on") await daily.click();
+  if ((await daily.evaluate((b) => b.getAttribute("aria-pressed"))) !== "true") await daily.click();
   // Daily candles are dated without a time in the legend.
   await page.waitForFunction(() => /^\d{4}-\d{2}-\d{2}(?!\s*\d{1,2}:\d{2})/.test(document.querySelector('[data-testid="candle-legend"]')?.innerText ?? ""), {
     timeout: 20000,

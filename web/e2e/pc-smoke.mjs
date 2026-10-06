@@ -4,7 +4,8 @@
 //   APP=https://astras.vip node web/e2e/pc-smoke.mjs
 //
 // Drives the deployed site in headless Chrome, in Chinese, the way a new
-// user would: sign up through the form (the human check passes with the
+// user would: a visitor's home and terms pages without a failed request,
+// sign up through the form (the human check passes with the
 // environment's CAPTCHA_BYPASS_TOKEN, the code comes from the dev inbox),
 // the welcome funds on the assets page, sign out and back in, the market
 // list and its search, the first screens of the home, markets, coin,
@@ -30,6 +31,15 @@ const t = await start({ app: APP, api: API, name: "pc", device: { viewport: { wi
 const { page, shot, go, waitText, waitPath, clickButton, typeInto } = t;
 
 try {
+  // 0. A visitor's home and terms pages ask for nothing that fails either
+  // (B117, B118: the user saw the hero's 404 signed out).
+  const visitorFailing = [];
+  for (const path of ["/", "/legal/terms"]) {
+    for (const f of await t.firstScreenFailures(path, null)) visitorFailing.push(`${path}: ${f}`);
+  }
+  if (visitorFailing.length) throw new Error(`requests failed while a visitor's first screens came up: ${visitorFailing.join("; ")}`);
+  ok("a visitor's home and terms pages come up without a failed request");
+
   // 1. Sign-up through the form: account, password, terms, then the code.
   await go("/register");
   await typeInto('input[type="email"]', email);
