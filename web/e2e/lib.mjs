@@ -121,6 +121,35 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
   const t = {
     page,
     /**
+     * firstScreenFailures opens path afresh and returns the requests that
+     * failed while its first screen came up (ready: a selector to wait for,
+     * else the network going quiet), each as "status method url" for an
+     * answer of 400 or more or "failed reason url": the browser logs every
+     * one in red in its console, as the user saw for the home page's hero
+     * (B117). A request the page aborted itself is not a failure.
+     */
+    async firstScreenFailures(path, ready) {
+      const failed = [];
+      const onResponse = (r) => {
+        if (r.status() >= 400) failed.push(`${r.status()} ${r.request().method()} ${r.url()}`);
+      };
+      const onFailed = (q) => {
+        const why = q.failure()?.errorText ?? "";
+        if (!why.includes("ERR_ABORTED")) failed.push(`failed ${why} ${q.url()}`);
+      };
+      page.on("response", onResponse);
+      page.on("requestfailed", onFailed);
+      try {
+        await page.goto(app + path, { waitUntil: "networkidle2" });
+        if (ready) await page.waitForSelector(ready, { visible: true, timeout: 20000 });
+        await sleep(1500);
+      } finally {
+        page.off("response", onResponse);
+        page.off("requestfailed", onFailed);
+      }
+      return failed;
+    },
+    /**
      * openMargin opens margin trading for the signed-in user alone through
      * web.sh's helper (scripts/e2e/lib/margin-user.sh, put back when web.sh
      * ends; a switch on for everyone it leaves as it is) and reports whether

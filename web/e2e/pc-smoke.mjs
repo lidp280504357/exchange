@@ -7,9 +7,13 @@
 // user would: sign up through the form (the human check passes with the
 // environment's CAPTCHA_BYPASS_TOKEN, the code comes from the dev inbox),
 // the welcome funds on the assets page, sign out and back in, the market
-// list and its search, a limit order placed from the spot terminal and
+// list and its search, the first screens of the home, markets, coin,
+// assets and terms pages without a failed request, a limit order placed
+// from the spot terminal and
 // cancelled from its open orders, a transfer to futures and its ledger
-// entry, a deposit address, the futures terminal, notifications, devices,
+// entry, a deposit address, the futures terminal, the candle charts'
+// legends clear of the highest candle (there and on the coin page at
+// 1024 wide), notifications, devices,
 // the language switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
@@ -136,6 +140,23 @@ try {
   );
   ok("the market list shows the markets and the search narrows them");
   await shot("2-markets");
+
+  // 3b. The first screens of the home, markets, coin, assets and terms
+  // pages ask for nothing that fails (B117: the hero's 404 was red in the
+  // browser's console; an article the console has not published is read
+  // from its draft without asking for it).
+  const failing = [];
+  for (const [path, ready] of [
+    ["/", null],
+    ["/markets", "main table tbody tr"],
+    ["/coin/BTC", '[data-testid="candle-plot"] canvas'],
+    ["/assets", '[data-testid="assets-total"]'],
+    ["/legal/terms", null],
+  ]) {
+    for (const f of await t.firstScreenFailures(path, ready)) failing.push(`${path}: ${f}`);
+  }
+  if (failing.length) throw new Error(`requests failed while first screens came up: ${failing.join("; ")}`);
+  ok("the home, markets, coin, assets and terms pages come up without a failed request");
 
   // 4. Spot terminal. First the book fills its panel (B71, B74) on both
   // terminals, signed in, at 1280 × 760, 1280 × 800, 1440 × 900 and

@@ -7,10 +7,12 @@
 // user agent, so nginx does not send it to the PC site), in Chinese: sign
 // up through the form, the welcome funds on the assets tab, the "me" tab's
 // cards signed in and out (sign-out is there), sign back in, the market
-// list and its search, a limit order
+// list and its search, the first screens of the home, markets, coin,
+// assets and terms pages without a failed request, a limit order
 // placed from the spot terminal's order sheet and cancelled from its open
 // orders, a transfer to futures and its ledger entry, a deposit address,
-// the futures terminal, notifications, devices, help, the language switch
+// the futures terminal, the candle charts' legends clear of the highest
+// candle (there and on the coin page), notifications, devices, help, the language switch
 // and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
 import { legendClear, ok, sleep, start } from "./lib.mjs";
@@ -113,6 +115,23 @@ try {
   );
   ok(`the market list shows the markets and the search narrows them (${(await rows()).length} rows for ETH)`);
   await shot("2-markets");
+
+  // 3b. The first screens of the home, markets, coin, assets and terms
+  // pages ask for nothing that fails (B117: the hero's 404 was red in the
+  // browser's console; an article the console has not published is read
+  // from its draft without asking for it).
+  const failing = [];
+  for (const [path, ready] of [
+    ["/", null],
+    ["/markets", ROWS],
+    ["/coin/BTC", '[data-testid="candle-plot"] canvas'],
+    ["/assets", '[data-testid="assets-total"]'],
+    ["/legal/terms", null],
+  ]) {
+    for (const f of await t.firstScreenFailures(path, ready)) failing.push(`${path}: ${f}`);
+  }
+  if (failing.length) throw new Error(`requests failed while first screens came up: ${failing.join("; ")}`);
+  ok("the home, markets, coin, assets and terms pages come up without a failed request");
 
   // 4. Spot terminal: the buy sheet places a limit buy 5% under the last
   // price (after its confirmation), which rests and then cancels.
