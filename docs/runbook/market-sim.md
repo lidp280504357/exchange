@@ -102,8 +102,14 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 - 规格在 `deploy/instruments/test.json`（`PREPARE`；风险阶梯按 125 倍表、名义上限缩小 10 倍：5,000 USDT 以内 125 倍……10,000,000 以内 2 倍）。指数价来自平台自己的 ASTRA-USDT（引擎盘口中间价，见 [market-data.md](market-data.md)），标记价与资金费沿用通用规则。HOUSE 不为它报价，它的订单互相成交（[derivatives.md](derivatives.md)）。
 - 开关 `sim.perp`（按合约，默认关）打开、且合约 `TRADING` 时：做市商在永续上同样以目标价为中心挂梯子（每轮一个做市商重报），噪声交易者按 `perp_daily_volume`（默认每天 1,000,000 USDT）的泊松流下市价单，永续 45 秒没有成交时（从机器人开始做永续算起；最近成交每 5 秒读一次，所以实际在 45～50 秒之间；`PAUSE` 与停牌期间不下，审查 AU：永续的指数取现货，由现货的安静吃单维持）由一个吃单者立刻下一笔合约最小量的市价单（最小名义金额按 lot 向上取整，市价单的保护价让它只在标记价的价格带内成交；计数 `market_sim_perp_quiet_takes_total`，订单计入 `PERP_TAKER`，下单成功后再等 45 秒；协调会话 2026-10-04 代用户决定：此前约五分之一的分钟没有成交，1 分钟 K 线断续，现货的同类保证见上表 TAKER）。这笔单计入 `perp_daily_volume`（同一决定）：它的名义金额记为欠额，从之后噪声交易者的市价单里扣（一单不够扣就整单不下，扣完剩下不足最小名义金额的也不下），欠额最多一小时的预算——预算小到只靠这些安静单就超过时，以"有成交"为准；每个机器人的仓位价值超过 `perp_bot_cap`（默认 20,000 USDT）后只做减仓方向（做市商撤掉加仓一侧，噪声交易者下只减仓的单）。机器人之间的多空在池内相互抵消。
 - 保证金：每 10 秒读一次每个机器人的仓位与 FUTURES 可用余额（两次之间的做市成交最多让仓位略超 `perp_bot_cap`），余额低于 `perp_margin`（默认 30,000）的一半时从它的现货 USDT 划转补足（`POST /v1/account/transfers`，幂等键按这 10 秒）。
-- 关掉 `sim.perp`、关掉 `sim.enabled` 或 `HALT` 事件时撤掉做市商在永续上的挂单。`GET /internal/sim` 有 `perp`、`perp_running`，每个机器人有 `perp_position`、`futures_usdt`。
+- 关掉 `sim.perp`、关掉 `sim.enabled` 或 `HALT` 事件时撤掉做市商在永续上的挂单。`GET /internal/sim` 有 `perp`、`perp_running`（第一个永续，即 U 本位的），`perps`（每个永续的 `symbol`、`settle_asset`、`running`）；每个机器人有 `perp_position`、`futures_usdt`（U 本位），`perp_positions`（按永续）与 `futures`（按结算币）。
 - 启用：`scripts/ops/astra.sh perp-open`（合约置 `TRADING`）、`astra.sh perp-on`。
+
+### 币本位 ASTRA-USD-PERP（币本位设计 2026-10-06 §2.3，G2）
+
+- market-sim 管的永续是一个列表（`SIM_PERP_SYMBOLS`，默认 `ASTRA-USDT-PERP,ASTRA-USD-PERP`），每个各自按 `sim.perp` 的按合约规则与合约状态启停，各用同一套设置（所以每个永续各有 `perp_daily_volume` 的成交、各自的 `perp_bot_cap` 与 `perp_margin`）；停牌事件（`HALT`）把它们和 ASTRA-USDT 一起停、结束时一起恢复；心跳停牌（`sim.halt_on_loss`）由 market-data-service 停 ASTRA-USDT 与以它为指数的全部合约（两种都在内）。
+- 币本位的数量是整张（面值 10 美元，`contract_size`）：挂单与市价单的金额（美元）按面值折成张数，最少一张；仓位的价值按张数 × 面值计（`perp_bot_cap` 照此判断只减仓）。保证金在 ASTRA：每 10 秒读每个机器人的 ASTRA 合约账户（`GET /v1/derivatives/account?asset=ASTRA`），低于 `perp_margin` 按当时价格折成的 ASTRA 的一半时从它的现货 ASTRA 划转补足（四位小数，幂等键带资产）。指数价是平台的 ASTRA-USDT，标记价与资金费由 market-data-service 按张算（G2）。
+- 合约开放前（协调会话的 C39 关口之后）机器人不碰它；开放：`astra.sh perp-open ASTRA-USD-PERP`，再 `astra.sh perp-on ASTRA-USDT-PERP ASTRA-USD-PERP`（列表整体替换）。
 
 ## 设置
 
@@ -111,7 +117,7 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 
 `p0`、`w_btc`、`w_eth`、`beta`、`theta`、`sigma`、`mu`、`max_minute_move`、`floor`、`ceiling`、`levels`、`spread`、`level_ticks`、`level_size`、`requote_ticks`、`daily_volume`、`order_size`、`trend_minutes`、`trend_strength`、`orders_per_second`、`cancels_per_second`、`bot_usdt`、`perp_daily_volume`、`perp_bot_cap`、`perp_margin`；含义与默认值见 `internal/marketsim/domain/params.go`，`Validate` 给出范围。其中几条是硬上限，不论谁签名、有没有批准（审查 M4）：`floor` 不低于 0.0001、`ceiling` 不高于 1,000,000，`max_minute_move` 至多 5%/分，`orders_per_second`、`cancels_per_second` 各至多 100，`daily_volume`、`perp_daily_volume` 至多每天 1 亿 USDT，`order_size`、`level_size` 至多 50,000，`bot_usdt`、`perp_bot_cap`、`perp_margin` 至多 1000 万；超出答 400。库里存的设置启动时也按硬上限夹取（超出的按上限跑、日志记下改了哪些，库里那行不改）；夹取后仍不合法（例如 `floor` 不低于 `ceiling` 这类上限管不到的）则拒绝启动：compose 会一直重启它，管理接口在不就绪的实例上答 503，只能直接改库——`UPDATE marketsim.settings SET params = jsonb_set(params, '{字段}', '值'), version = version + 1`，改完重启 market-sim（569a958 审查）。
 
-环境变量（compose 的 market-sim 段）：`TRADING_SERVICE_URL`、`LEDGER_SERVICE_URL`、`MARKET_DATA_SERVICE_URL`、`INSTRUMENT_SERVICE_URL`、`INSTRUMENT_GRPC_ADDR`、`DERIVATIVES_SERVICE_URL`；`SIM_SYMBOL`（默认 ASTRA-USDT）、`SIM_QUOTE`（默认 USDT）、`SIM_PERP_SYMBOL`（默认 ASTRA-USDT-PERP，空为不做永续）、`SIM_SEED`（默认 0，取时钟）。
+环境变量（compose 的 market-sim 段）：`TRADING_SERVICE_URL`、`LEDGER_SERVICE_URL`、`MARKET_DATA_SERVICE_URL`、`INSTRUMENT_SERVICE_URL`、`INSTRUMENT_GRPC_ADDR`、`DERIVATIVES_SERVICE_URL`；`SIM_SYMBOL`（默认 ASTRA-USDT）、`SIM_QUOTE`（默认 USDT）、`SIM_PERP_SYMBOLS`（逗号分隔，默认 `ASTRA-USDT-PERP,ASTRA-USD-PERP`，空为不做永续；G2 起取代只能写一个的 `SIM_PERP_SYMBOL`）、`SIM_SEED`（默认 0，取时钟）。
 
 ## 管理接口（内网，`market-sim:8098`，网关不转发）
 

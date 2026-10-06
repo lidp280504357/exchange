@@ -32,7 +32,7 @@
   - Tailwind 主题：`src/styles/theme.css`。默认调色板已去掉，只能用语义类名，如 `bg-bg-1`、`text-up`。
     - 文字的对比度（WCAG 4.5:1）：浅色页面上的涨跌、品牌与状态文字用 `text-*-strong`（浅色主题加深，深色主题就是原色）；落在 15% 淡底上的涨、跌、信息、危险文字用 `text-*-soft-fg`（向正文色挪 30%，`Badge` 的 soft 样式用它）；涨、跌、危险的实色底上用黑字（`Badge` 的 solid、买卖与危险按钮、未读数）。
     - 触控尺寸：`--tap`（44 px）映射成 `size-tap`、`h-tap`、`min-h-tap`、`min-w-tap`、`w-tap`。根字号是 14 px，`size-11` 之类的 rem 尺寸只有 38.5 px，要 44 px 时用这组。
-    - 层级：`--z-sticky`（30，页面里的粘性表头与吸底栏）< `--z-topbar`（35，两站的顶栏、PC 的断线提示条、手机站的底部 tab 栏）< `--z-sheet` < `--z-dialog` < `--z-dropdown` < `--z-toast`，用法如 `z-[var(--z-topbar)]`。sticky 的顶栏自成层叠上下文，里面用 CSS 打开的菜单只能跟着顶栏的层级走，所以顶栏要压住页面里所有粘性元素（B61：行情表的表头曾盖住「合约」菜单的第一项）；Radix 的弹层渲染到 body，不受影响。
+    - 层级：`--z-sticky`（30，页面里的粘性表头与吸底栏）< `--z-topbar`（35，两站的顶栏、手机站的底部 tab 栏；PC 的断线提示条在它下面一层，`z-[calc(var(--z-topbar)-1)]`，顶栏的菜单盖得住它——重连时打开的「合约」菜单第一项曾被提示条盖住）< `--z-sheet` < `--z-dialog` < `--z-dropdown` < `--z-toast`，用法如 `z-[var(--z-topbar)]`。sticky 的顶栏自成层叠上下文，里面用 CSS 打开的菜单只能跟着顶栏的层级走，所以顶栏要压住页面里所有粘性元素（B61：行情表的表头曾盖住「合约」菜单的第一项）；Radix 的弹层渲染到 body，不受影响。
   - 组件与 Storybook 故事，动效预设在 `src/lib/motion.ts`。
 
 应用之间不互相 import；取数、推送、格式化、校验、i18n 与组件都放共享包。
