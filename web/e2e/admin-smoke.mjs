@@ -642,23 +642,43 @@ try {
     await go("/margin/params?tab=settings");
     await waitText("全仓条款");
     await noError("the cross terms");
+    // A page's table, there and loaded (before its chunk renders, nothing in main is busy yet).
+    const loaded = (label) =>
+      page.waitForFunction((l) => !!document.querySelector(`main table[aria-label="${l}"]`) && !document.querySelector("main [aria-busy=true]"), {
+        timeout: 30000,
+      }, label);
     await go("/margin/accounts");
-    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    await loaded("margin-accounts");
     await noError("the margin accounts");
-    if (await page.$("main table[aria-label=margin-accounts] tbody tr[data-row-id]")) {
+    // An account that holds or owes something, when there is one (the test
+    // server's users move funds in and out): its detail, each tab rendered.
+    const account = !!(await page.$("main table[aria-label=margin-accounts] tbody tr[data-row-id]"));
+    if (account) {
       await openRow("main table[aria-label=margin-accounts] tbody tr");
       await page.waitForSelector("[role=dialog] [data-testid=margin-account] table");
+      // In place before a tab is pressed: the drawer slides in from the right.
+      await page.waitForFunction(() => {
+        const d = document.querySelector("[role=dialog]")?.getBoundingClientRect();
+        return d && Math.abs(d.right - innerWidth) < 2;
+      });
+      for (const tab of ["借款与借还记录", "计息", "杠杆强平", "资产与负债"]) {
+        await clickButton(tab, "[role=dialog]");
+        await page.waitForSelector("[role=dialog] [data-testid=margin-account] table");
+      }
       await t.shot("4h-margin-account");
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
     }
     await go("/margin/liquidations");
-    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    await loaded("margin-liquidations");
     await noError("the margin liquidations");
     await go("/margin/interest");
-    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    await loaded("margin-interest-report");
     await noError("the margin interest");
-    ok("margin trading: the parameters (an editor opened and closed unchanged; a pair's new leverage keeps its thresholds and offers the suggested), the accounts, the liquidations and the interest");
+    ok(
+      "margin trading: the parameters (an editor opened and closed unchanged; a pair's new leverage keeps its thresholds and offers the suggested), " +
+        `the accounts (${account ? "an account's detail, every tab" : "none holds anything: no detail"}), the liquidations and the interest`,
+    );
   } else {
     await go("/margin/params");
     await waitPath("/");
