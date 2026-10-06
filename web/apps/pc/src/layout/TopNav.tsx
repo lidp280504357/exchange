@@ -5,15 +5,15 @@ import {
 import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
-import { Bell, Check, ChevronDown, Globe, UserRound } from "lucide-react";
+import { ArrowLeftRight, Bell, Bitcoin, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
 import { Logo } from "./Logo";
 import { SearchPalette } from "./SearchPalette";
 
-// How many contracts the futures menu names in each group.
-const FUTURES_MENU_SIZE = 5;
+// The coin-margined contract the futures menu opens before any was visited.
+const DEFAULT_COIN_CONTRACT = "BTC-USD-PERP";
 
 /**
  * TopNav: the bar fixed on every page (design §6.1), TOP_NAV_HEIGHT tall — markets, spot,
@@ -27,27 +27,20 @@ export function TopNav() {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
   const recent = useTerminalPrefs((s) => s.recent);
-  const recentSpot = recent.filter((s) => !isContract(s)).slice(0, 5);
-  const recentFutures = recent.filter(isContract);
+  const setPrefs = useTerminalPrefs((s) => s.set);
   const contracts = useContracts();
-  // The futures menu names a few contracts in two groups, USDT-margined and
-  // coin-margined (design 2026-10-06 §2.6): the ones visited lately first,
-  // then those trading in the list's order; each group leads to the
-  // markets' futures tab for the rest (the list follows Binance's, §3.4:
-  // some 100 contracts).
+  // Binance's menus (review FE, B131): 交易 holds spot and margin trading,
+  // 合约 the USDT- and coin-margined contracts and the futures data; each
+  // trading entry opens the market of its kind visited last (BTC-USDT,
+  // BTC-USDT on the cross margin account, BTC-USDT-PERP, BTC-USD-PERP
+  // before any).
   const listed = contracts.data?.contracts ?? [];
   const bySymbol = new Map(listed.map((c) => [c.symbol, c]));
-  const menuOf = (coin: boolean) =>
-    [
-      ...new Set([
-        ...recentFutures.filter((s) => bySymbol.has(s) && isInverse(bySymbol.get(s)) === coin),
-        ...listed.filter((c) => c.status === "TRADING" && isInverse(c) === coin).map((c) => c.symbol),
-      ]),
-    ].slice(0, FUTURES_MENU_SIZE);
-  const futuresGroups = [
-    { key: "usdt", label: t("pc.usdtMargined"), symbols: menuOf(false), all: `${routes.markets}?cat=futures` },
-    { key: "coin", label: t("pc.coinMargined"), symbols: menuOf(true), all: `${routes.markets}?cat=futures&margin=coin` },
-  ].filter((g) => g.symbols.length > 0);
+  const spot = recent.find((s) => !isContract(s)) ?? DEFAULT_SYMBOL;
+  const lastOf = (coin: boolean) => recent.find((s) => bySymbol.has(s) && isInverse(bySymbol.get(s)) === coin);
+  const usdtContract = lastOf(false) ?? DEFAULT_CONTRACT;
+  const coinContract = lastOf(true) ?? (bySymbol.has(DEFAULT_COIN_CONTRACT) ? DEFAULT_COIN_CONTRACT : listed.find((c) => isInverse(c))?.symbol);
+  const account = (tradeAccount: "SPOT" | "MARGIN_CROSS") => () => setPrefs({ tradeAccount });
   const brand = useBranding().name;
   // The top bar's layer is above the pages' sticky table headers: its menus
   // open over them (review B61).
@@ -59,32 +52,27 @@ export function TopNav() {
         </Link>
         <nav className="flex h-full items-center gap-1 text-base">
           <Item to={routes.markets}>{t("nav.markets")}</Item>
-          <Menu label={t("nav.spot")} to={routes.trade(recentSpot[0] ?? DEFAULT_SYMBOL)}>
-            <p className="px-4 pb-1 pt-2 text-xs text-fg-3">{t("nav.recent")}</p>
-            {(recentSpot.length > 0 ? recentSpot : [DEFAULT_SYMBOL]).map((s) => (
-              <MenuLink key={s} to={routes.trade(s)}>
-                {s.replace("-", "/")}
-              </MenuLink>
-            ))}
-            <MenuLink to={routes.markets}>{t("nav.markets")} →</MenuLink>
+          <Menu label={t("nav.trade")} to={routes.trade(spot)} wide>
+            <MenuEntry to={routes.trade(spot)} icon={<ArrowLeftRight size={18} />} title={t("pc.menu.spot")} hint={t("pc.menu.spotHint")} onClick={account("SPOT")} />
+            <MenuEntry
+              to={routes.trade(spot)}
+              icon={<Landmark size={18} />}
+              title={t("pc.menu.margin")}
+              hint={t("pc.menu.marginHint")}
+              onClick={account("MARGIN_CROSS")}
+            />
           </Menu>
-          <Menu label={t("nav.futures")} to={routes.futures(recentFutures[0] ?? DEFAULT_CONTRACT)}>
-            {futuresGroups.map((g) => (
-              <div key={g.key} data-testid={`futures-menu-${g.key}`}>
-                <p className="px-4 pb-1 pt-2 text-xs text-fg-3">{g.label}</p>
-                {g.symbols.map((symbol) => {
-                  const c = bySymbol.get(symbol)!;
-                  return (
-                    <MenuLink key={symbol} to={routes.futures(symbol)}>
-                      {c.base_asset}
-                      {c.quote_asset} {t("pc.perpetual")}
-                    </MenuLink>
-                  );
-                })}
-                <MenuLink to={g.all}>{t("pc.allFutures")} →</MenuLink>
-              </div>
-            ))}
-            {futuresGroups.length === 0 && <MenuLink to={`${routes.markets}?cat=futures`}>{t("pc.allFutures")} →</MenuLink>}
+          <Menu label={t("nav.futures")} to={routes.futures(recent.find(isContract) ?? DEFAULT_CONTRACT)} wide>
+            <MenuEntry
+              to={routes.futures(usdtContract)}
+              icon={<CircleDollarSign size={18} />}
+              title={t("pc.menu.usdtFutures")}
+              hint={t("pc.menu.usdtFuturesHint")}
+            />
+            {coinContract && (
+              <MenuEntry to={routes.futures(coinContract)} icon={<Bitcoin size={18} />} title={t("pc.menu.coinFutures")} hint={t("pc.menu.coinFuturesHint")} />
+            )}
+            <MenuEntry to={routes.futuresData} icon={<ChartColumn size={18} />} title={t("pc.menu.futuresData")} hint={t("pc.menu.futuresDataHint")} />
           </Menu>
           {signedIn && (
             <Menu label={t("nav.assets")} to={routes.assets}>
@@ -145,7 +133,16 @@ function Item({ to, children }: { to: string; children: ReactNode }) {
 // that came from the keyboard (:focus-visible), not the focus a click
 // leaves on the item, which kept the menu open after the pointer had left
 // it (B109); an item followed blurs too, so the keyboard's Enter closes it.
-function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: string; children: ReactNode; align?: "left" | "right" }) {
+function Menu({
+  label, to, children, align = "left", wide,
+}: {
+  label: ReactNode;
+  to: string;
+  children: ReactNode;
+  align?: "left" | "right";
+  /** A panel of entries with a line each (MenuEntry). */
+  wide?: boolean;
+}) {
   return (
     <div className="group relative flex h-full items-center">
       <NavLink
@@ -159,7 +156,8 @@ function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: s
       </NavLink>
       <div
         className={cn(
-          "invisible absolute top-full z-[var(--z-dropdown)] min-w-44 translate-y-1 rounded-2 border border-line-1 bg-bg-1 py-1 opacity-0 shadow-pop transition-[opacity,transform] duration-[var(--t-fast)]",
+          "invisible absolute top-full z-[var(--z-dropdown)] translate-y-1 rounded-2 border border-line-1 bg-bg-1 py-1 opacity-0 shadow-pop transition-[opacity,transform] duration-[var(--t-fast)]",
+          wide ? "w-72 py-2" : "min-w-44",
           "group-has-[:focus-visible]:visible group-has-[:focus-visible]:translate-y-0 group-has-[:focus-visible]:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100",
           align === "right" ? "right-0" : "left-0",
         )}
@@ -167,6 +165,29 @@ function Menu({ label, to, children, align = "left" }: { label: ReactNode; to: s
         {children}
       </div>
     </div>
+  );
+}
+
+// MenuEntry is one entry of a wide menu: an icon, a title and a line
+// saying what it is (Binance's trade and futures menus).
+function MenuEntry({ to, icon, title, hint, onClick }: { to: string; icon: ReactNode; title: string; hint: string; onClick?: () => void }) {
+  return (
+    <Link
+      to={to}
+      onClick={(e) => {
+        onClick?.();
+        e.currentTarget.blur();
+      }}
+      className="group/entry flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-bg-2"
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-2 bg-bg-2 text-fg-2 transition-colors group-hover/entry:bg-brand-soft group-hover/entry:text-brand">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-sm font-medium text-fg-1">{title}</span>
+        <span className="text-xs text-fg-3">{hint}</span>
+      </span>
+    </Link>
   );
 }
 

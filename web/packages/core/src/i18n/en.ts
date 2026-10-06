@@ -8,7 +8,6 @@ export const en = {
     withdraw: "Withdraw", transfer: "Transfer", history: "History", announcements: "Announcements", help: "Help center",
     search: "Search coins", notifications: "Notifications", account: "Account", security: "Security", settings: "Settings",
     sessions: "Devices", logout: "Sign out", login: "Sign in", register: "Sign up", language: "Language", me: "Me", trade: "Trade",
-    recent: "Recent pairs",
     margin: "Margin",
   },
   footer: {

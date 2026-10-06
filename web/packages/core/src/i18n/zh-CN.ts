@@ -7,7 +7,7 @@ export const zhCN = {
     home: "首页", markets: "行情", spot: "现货交易", futures: "合约", assets: "资产", overview: "资产总览", deposit: "充值",
     withdraw: "提现", transfer: "划转", history: "资金流水", announcements: "公告", help: "帮助中心", search: "搜索币种",
     notifications: "通知", account: "账户", security: "安全", settings: "设置", sessions: "设备与登录", logout: "退出登录",
-    login: "登录", register: "注册", language: "语言", me: "我的", trade: "交易", recent: "最近交易对", margin: "杠杆账户",
+    login: "登录", register: "注册", language: "语言", me: "我的", trade: "交易", margin: "杠杆账户",
   },
   footer: {
     products: "产品", support: "支持", about: "关于", toMobile: "切换到手机版", toPC: "切换到电脑版",
