@@ -88,6 +88,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 状态：跌破预警线 `NORMAL → WARNED`，记 `warned_at`、发 `MarginLevelWarned`（`margin.events`；回到线上之前只发一次，网关推成 `margin` 频道的 `WARNING`，站内信与邮件由通知服务做）；回到预警线的 1.01 倍以上才 `WARNED → NORMAL`（在线附近来回波动只预警一次，审查 CY）。某个用户的余额读不到时只跳过这个用户（审查 CY C17 ③）。到强平线连续两轮交给强平（E3，受 `margin.liquidation` 控制）；估值不完整（有从未有价的资产）的账户不动状态、不强平；`FROZEN` 的账户不改状态，但到强平线照样强平；`LIQUIDATING` 由强平流程管。
 - 推送：账户变化时把整个账户（`MarginAccountUpdated`：状态、风险率、阈值、总资产/总负债/净资产、逐仓强平价、各资产余额）发到主题 `margin.accounts`（按 user_id 分区，派生状态，保留 1 小时，直接生产不经 outbox，丢了由下一次补上），网关推成 `margin` 频道的 `ACCOUNT`。何时发：余额被动过、状态变了，或风险率、总资产、总负债相对上次变动超过 0.1%（价格引起），每个账户每秒至多一次；没有负债的账户只在被动过时发。
 - 指标：`margin_monitor_accounts`、`margin_monitor_last_pass_timestamp_seconds`、`margin_warnings_total`、`margin_liquidations_due_total`；告警 `MarginMonitorStalled`（超过 1 分钟没有完成一轮，critical：既不预警也不强平）。
+- 局限："被动过"的通知只在本进程内（`Touched`），监控与强平只在持租约 `margin-monitor` 的实例上跑。多实例时，别的实例处理的写不会立即触发推送：有负债的账户至多 5 秒后重读补上，没有负债的账户要等下一次被动过才推（编码会话提出）。测试服是单实例；要多实例时改成跨实例通知。
 
 ## 强平（E3）
 
@@ -135,7 +136,8 @@ admin-service 经 margin-service 的 HTTP 端口调 `/internal/margin/*`（协�
 
 ## 测试服设置
 
-- `margin.enabled` 已于 2026-10-06 07:06（北京时间；UTC 10-05 23:06:48）对所有人打开：审查 CR ③ 的条件是 C11 部署（7039fc5）且 margin.sh 通过（65 项），条件满足后由本会话持运维锁打开（理由写在开关历史里）。`margin.auto_borrow` 与 `margin.liquidation` 仍关着，只由脚本按用户临时打开。
+- `margin.enabled` 已于 2026-10-06 07:06（北京时间；UTC 10-05 23:06:48）对所有人打开：审查 CR ③ 的条件是 C11 部署（7039fc5）且 margin.sh 通过（65 项），条件满足后由本会话持运维锁打开（理由写在开关历史里）。`margin.auto_borrow` 依协调会话 07:40 的决定 ③ 于 2026-10-06 08:39（北京时间；UTC 00:39:36）在 E3（42a96e7）部署、margin.sh 通过（75 项）后同样对所有人打开；上线前两者都要回到按用户或地区的规则。`margin.liquidation` 仍关着，只由脚本按用户临时打开。
+- 故障演练：`scripts/fault/margin-liquidation.sh`（`task fault` 包含）——新用户全仓 100 USDT 自动借币买入约 210 USDT 的 ASTRA（风险率约 1.34），运营价格事件把 ASTRA 压低 20%，监控预警、连续两轮到强平线后自动强平（`margin.liquidation` 只对该用户打开）：ASTRA 卖给模拟市场、收费、还清、账户回到 NORMAL，结束时价格与开关都还原。要模拟市场的机器人与价格事件开着，并且一小时内单人还有 45% 的调价额度（否则跳过，同 astra.sh）。
 - 端到端：`scripts/e2e/margin.sh`（`task e2e` 包含）。它持运维锁，注册的用户拿到 user_id 后把这两个开关**只对这个用户**打开（加进开关的 `allow-users`，开关原本已对所有人打开时不动），结束时（含失败）还原成原来的状态；单独运行时自己取锁。
 
 ## 常用命令
