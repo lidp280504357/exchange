@@ -728,15 +728,15 @@ func TestAnUnreachableMarginServiceLeavesTheOrderForRecovery(t *testing.T) {
 }
 
 // featureEligibility refuses the features named in no with reason, and
-// records what it was asked.
+// records what it was asked: feature:symbol.
 type featureEligibility struct {
 	no     map[string]bool
 	reason string
 	asked  []string
 }
 
-func (f *featureEligibility) Check(_ context.Context, _, feature, _ string) (bool, string, error) {
-	f.asked = append(f.asked, feature)
+func (f *featureEligibility) Check(_ context.Context, _, feature, symbol string) (bool, string, error) {
+	f.asked = append(f.asked, feature+":"+symbol)
 	if f.no[feature] {
 		return false, f.reason, nil
 	}
@@ -758,7 +758,17 @@ func TestMarginOrdersNeedTheMarginEligibility(t *testing.T) {
 	if _, err := svc.Place(ctx, buy("s1")); err != nil {
 		t.Fatalf("a spot order of the same user: %v", err)
 	}
-	if want := []string{FeatureMarginTrade, FeatureSpotTrade}; !slices.Equal(elig.asked, want) {
+	// The cross account has no symbol (as margin-service asks it); spot
+	// trading asks with the pair.
+	if want := []string{FeatureMarginTrade + ":", FeatureSpotTrade + ":BTC-USDT"}; !slices.Equal(elig.asked, want) {
+		t.Fatalf("asked %v, want %v", elig.asked, want)
+	}
+	// An isolated account asks with its pair.
+	elig.asked = nil
+	if _, err := svc.Place(ctx, marginBuy("i1", domain.AccountMarginIsolated, domain.SideEffectNone)); !apperr.Is(err, "USER_RISK_REVIEW") {
+		t.Fatalf("an isolated order without MARGIN_TRADE: %v", err)
+	}
+	if want := []string{FeatureMarginTrade + ":BTC-USDT"}; !slices.Equal(elig.asked, want) {
 		t.Fatalf("asked %v, want %v", elig.asked, want)
 	}
 	// The switch comes first: off, it answers MARGIN_DISABLED without asking.
