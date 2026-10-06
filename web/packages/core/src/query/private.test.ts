@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarginAccount } from "../margin/math";
-import { applyBalance, applyFill, applyMarginAccount, applyOrder } from "./private";
+import { applyBalance, applyFill, applyMarginAccount, applyOrder, holdingsOf } from "./private";
 
 const account = (over: Partial<MarginAccount>): MarginAccount => ({
   account: "MARGIN_CROSS", symbol: null, leverage: 5, status: "NORMAL", margin_level: null, warn_level: "1.3", liquidation_level: "1.1",
@@ -54,8 +54,17 @@ describe("private pushes into the cache", () => {
     expect(joined.page!.isolated.map((a) => a.symbol)).toEqual(["BTC-USDT", "ETH-USDT"]);
     const btcNow = applyMarginAccount(joined.page, { ...btc, status: "WARNED", updated_at: "2026-10-06T07:00:04Z" });
     expect(btcNow.page!.isolated.map((a) => a.status)).toEqual(["WARNED", "NORMAL"]);
-    // Nothing cached: nothing to put it in, and it may have changed anything.
+    // Nothing cached: nothing to put it in; against its last push only a
+    // change of holdings counts, and without one it may have changed anything.
     expect(applyMarginAccount(undefined, eth)).toEqual({ page: undefined, held: true });
+    const revalued = { ...eth, total_asset: "99", updated_at: "2026-10-06T07:00:05Z" };
+    expect(applyMarginAccount(undefined, revalued, holdingsOf(eth))).toEqual({ page: undefined, held: false });
+    const owing = { ...eth, balances: [{ asset: "USDT", free: "100", locked: "0", borrowed: "5", interest: "0", net: "95" }] };
+    expect(applyMarginAccount(undefined, owing, holdingsOf(eth))).toEqual({ page: undefined, held: true });
+    // The last push decides over the cached account.
+    expect(applyMarginAccount(joined.page, revalued, holdingsOf(eth)).held).toBe(false);
+    // An isolated account without its pair is left out.
+    expect(applyMarginAccount(joined.page, { ...eth, symbol: null })).toEqual({ page: joined.page, held: false });
   });
   it("prepends a fill once", () => {
     const page = { items: [], next_cursor: null };

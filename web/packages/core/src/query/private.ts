@@ -78,24 +78,35 @@ export function applyFill(page: FillsPage | undefined, p: FillData, symbol: stri
 
 type MarginAccounts = { cross: MarginAccount; isolated: MarginAccount[] };
 
-/** holdings is what an account holds and owes, without its valuation. */
-const holdings = (a: MarginAccount) => a.balances.map((b) => [b.asset, b.free, b.locked, b.borrowed, b.interest].join(" ")).join("|");
+/** holdingsOf is what an account holds and owes, without its valuation: the same for two pushes that only revalued it. */
+export const holdingsOf = (a: MarginAccount) => a.balances.map((b) => [b.asset, b.free, b.locked, b.borrowed, b.interest].join(" ")).join("|");
+
+/** marginKey names a margin account: the cross account, or an isolated account by its pair. */
+export const marginKey = (a: Pick<MarginAccount, "account" | "symbol">) => `${a.account}:${a.symbol ?? ""}`;
 
 /**
  * applyMarginAccount puts an account of an ACCOUNT push into the cached
  * accounts (GET /v1/margin/accounts): the cross account, or its pair's
  * isolated account (a new one joins the list). One older than the cached
- * account (a poll answered after the push was made) is left out. held
- * tells whether what the account holds or owes changed, not only its
- * valuation; without cached accounts it cannot tell and says so.
+ * account (a poll answered after the push was made), or an isolated one
+ * without its pair, is left out. held tells whether what the account holds
+ * or owes changed, not only its valuation: against last, the holdings of
+ * its previous push (holdingsOf), else against the cached account; with
+ * neither it cannot tell and says so.
  */
-export function applyMarginAccount(page: MarginAccounts | undefined, a: MarginAccount): { page: MarginAccounts | undefined; held: boolean } {
-  if (!page) return { page, held: true };
+export function applyMarginAccount(
+  page: MarginAccounts | undefined,
+  a: MarginAccount,
+  last?: string,
+): { page: MarginAccounts | undefined; held: boolean } {
   const cross = a.account === "MARGIN_CROSS";
-  const i = cross ? -1 : page.isolated.findIndex((x) => x.symbol === a.symbol);
-  const cur = cross ? page.cross : page.isolated[i];
+  if (!cross && !a.symbol) return { page, held: false };
+  const i = cross || !page ? -1 : page.isolated.findIndex((x) => x.symbol === a.symbol);
+  const cur = page ? (cross ? page.cross : page.isolated[i]) : undefined;
   if (cur && Date.parse(cur.updated_at) > Date.parse(a.updated_at)) return { page, held: false };
-  const held = !cur || holdings(cur) !== holdings(a);
+  const before = last ?? (cur ? holdingsOf(cur) : undefined);
+  const held = before !== holdingsOf(a);
+  if (!page) return { page, held };
   if (cross) return { page: { ...page, cross: a }, held };
   const isolated = [...page.isolated];
   if (i >= 0) isolated[i] = a;
@@ -175,6 +186,10 @@ class Invalidator {
  */
 export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
   const later = new Invalidator(qc);
+  // Each margin account's holdings at its last push (holdingsOf), to tell a
+  // push that changed them from one that revalued them while no page holds
+  // the accounts (the ledger page reloads only on the first kind).
+  const pushed = new Map<string, string>();
   const offs = [
     ws.subscribe("balances", (m) => {
       const p = (m as PrivatePush<BalanceData>).data;
@@ -215,7 +230,9 @@ export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
       const p = (m as PrivatePush<MarginPush>).data;
       if (p.type !== "ACCOUNT" || !p.account) return later.add(qk.margin);
       const cached = qc.getQueryData<MarginAccounts>(qk.marginAccounts);
-      const { page, held } = applyMarginAccount(cached, p.account);
+      const key = marginKey(p.account);
+      const { page, held } = applyMarginAccount(cached, p.account, pushed.get(key));
+      pushed.set(key, holdingsOf(p.account));
       if (page !== cached) qc.setQueryData(qk.marginAccounts, page);
       if (held) for (const key of [qk.marginLoans, qk.marginBorrowable, qk.ledger]) later.add(key);
     }),
