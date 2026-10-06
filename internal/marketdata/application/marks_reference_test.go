@@ -354,3 +354,36 @@ func gauge(t *testing.T, g *prometheus.GaugeVec, symbol string) float64 {
 	}
 	return m.GetGauge().GetValue()
 }
+
+// Back from a stale stream, the prices follow the reference market again
+// only once its mark has stayed fresh for 5 seconds (review EL C37): one
+// that flaps does not switch them back and forth.
+func TestMarksReturnToTheReferenceMarketAfterAWhile(t *testing.T) {
+	r := newFollowRig(t, "2026-10-06T01:00:00Z")
+	r.follow = true
+	r.stream("60120", "60060", "0.00023", at("2026-10-06T08:00:00Z"))
+	r.tick(false)
+	for range 11 {
+		r.tick(true)
+	}
+	if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourcePlatform || !p.SourceDegraded {
+		t.Fatalf("stale: %+v", p)
+	}
+	// Fresh for 4 seconds, silent again, fresh again: still the platform's.
+	for range 4 {
+		r.tick(false)
+	}
+	for range 11 {
+		r.tick(true)
+	}
+	for range 5 { // fresh at 0 to 4 seconds
+		r.tick(false)
+		if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourcePlatform {
+			t.Fatalf("followed again within 5 seconds: %+v", p)
+		}
+	}
+	r.tick(false)
+	if p, _ := r.marks.Latest(perp.Symbol); p.Source != MarkSourceBinance || p.SourceDegraded || !p.Mark.Equal(d("60120")) {
+		t.Fatalf("5 seconds fresh: %+v", p)
+	}
+}

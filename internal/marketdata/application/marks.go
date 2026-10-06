@@ -63,6 +63,11 @@ const (
 	// settleWait is how long an ended period of a contract that follows
 	// the reference market waits for the rate the market settled.
 	settleWait = 2 * time.Minute
+	// referenceRecover is how long the reference market's mark must be
+	// fresh again before the prices follow it back from the self-computed
+	// ones (review EL C37: a flapping stream must not switch them back and
+	// forth).
+	referenceRecover = 5 * time.Second
 	// basisDecimals is the precision of the basis while it is Binance's
 	// (that of the self-computed one, domain's ratio precision).
 	basisDecimals = 12
@@ -212,6 +217,9 @@ type contractMarks struct {
 	// ends at another time (its rate is not followed then).
 	refRates map[time.Time]decimal.Decimal
 	refApart map[time.Time]bool
+	// refBackSince is when the reference market's mark came back fresh
+	// while the source was degraded (referenceRecover).
+	refBackSince time.Time
 
 	pushedRate   decimal.Decimal
 	pushedSource string
@@ -563,6 +571,7 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 		return domain.ReferenceMark{}, false
 	}
 	if !fresh {
+		st.refBackSince = time.Time{}
 		last := received
 		if last.Before(m.started) {
 			last = m.started
@@ -576,6 +585,18 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 		}
 		return domain.ReferenceMark{}, false
 	}
+	// Back after the source degraded: the self-computed prices go on until
+	// the market's have stayed fresh for referenceRecover (none of its own
+	// at hand: follow at once).
+	if st.latest.SourceDegraded && st.latest.Computed.IsPositive() {
+		if st.refBackSince.IsZero() {
+			st.refBackSince = now
+		}
+		if now.Sub(st.refBackSince) < referenceRecover {
+			return domain.ReferenceMark{}, false
+		}
+	}
+	st.refBackSince = time.Time{}
 	m.markSource(ctx, st, false, "")
 	if ref.HasRate {
 		if ref.NextFunding.Equal(st.period) {

@@ -62,9 +62,19 @@ func (t *Tickers) reference(mapping map[string]ports.Reference, symbol string) (
 		return domain.Ticker{}, false
 	}
 	tk.Symbol = symbol
-	if ref.Market != ports.MarketSpot && t.book != nil {
-		if bids, asks, ok := t.book(symbol, 1); ok && len(bids) > 0 && len(asks) > 0 {
-			tk.Bid, tk.Ask = bids[0].Price, asks[0].Price
+	if ref.Market != ports.MarketSpot {
+		bids, asks, ok := []domain.Level(nil), []domain.Level(nil), false
+		if t.book != nil {
+			bids, asks, ok = t.book(symbol, 1)
+		}
+		if !ok { // the reference book unusable: the engine's (review EL C37)
+			bids, asks = t.svc.Book(symbol)
+		}
+		if len(bids) > 0 {
+			tk.Bid = bids[0].Price
+		}
+		if len(asks) > 0 {
+			tk.Ask = asks[0].Price
 		}
 	}
 	return tk, true
@@ -89,19 +99,43 @@ func (t *Tickers) Ticker(ctx context.Context, symbol string) (domain.Ticker, err
 	return own, nil
 }
 
-// All returns the ticker of every listed pair and contract.
+// All returns the ticker of every listed pair and contract but the
+// contracts still in PREPARE (review EL C37: the coin-margined ones before
+// they open).
 func (t *Tickers) All(ctx context.Context) ([]domain.Ticker, error) {
 	list, err := t.svc.Tickers(ctx)
 	if err != nil {
 		return nil, err
 	}
+	hidden := t.preparing(ctx)
 	mapping := t.mapping(ctx)
-	for i := range list {
-		if ref, ok := t.reference(mapping, list[i].Symbol); ok {
-			list[i] = ref
+	out := list[:0]
+	for _, tk := range list {
+		if hidden[tk.Symbol] {
+			continue
+		}
+		if ref, ok := t.reference(mapping, tk.Symbol); ok {
+			tk = ref
+		}
+		out = append(out, tk)
+	}
+	return out, nil
+}
+
+// preparing lists the contracts in PREPARE; none while the contracts
+// cannot be read.
+func (t *Tickers) preparing(ctx context.Context) map[string]bool {
+	contracts, err := t.instruments.Contracts(ctx)
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, c := range contracts {
+		if c.Status == "PREPARE" {
+			out[c.Symbol] = true
 		}
 	}
-	return list, nil
+	return out
 }
 
 // Ranks returns the base asset's rank of each listed pair and contract.
@@ -161,16 +195,17 @@ func (t *Tickers) Summary(ctx context.Context, n int) (Summary, error) {
 // reference ticker for that ticker, pushed whenever a newer one arrived.
 func (t *Tickers) Push(ctx context.Context, updates []Update) []Update {
 	mapping := t.mapping(ctx)
+	hidden := t.preparing(ctx)
 	served := map[string]domain.Ticker{}
 	for symbol := range mapping {
-		if tk, ok := t.reference(mapping, symbol); ok {
+		if tk, ok := t.reference(mapping, symbol); ok && !hidden[symbol] {
 			served[symbol] = tk
 		}
 	}
 	out := make([]Update, 0, len(updates)+len(served))
 	for _, u := range updates {
-		if _, ok := served[u.Symbol]; ok {
-			if _, isTicker := u.Message.(*marketv1.TickerUpdated); isTicker {
+		if _, isTicker := u.Message.(*marketv1.TickerUpdated); isTicker {
+			if _, ok := served[u.Symbol]; ok || hidden[u.Symbol] {
 				continue
 			}
 		}

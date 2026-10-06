@@ -44,6 +44,11 @@ func newTickerRig(t *testing.T, fl Flags) tickerRig {
 		ports.Pair{Symbol: "ETH-USDT", Base: "ETH", Quote: "USDT", Status: "TRADING", Rank: 2, Reference: ref("ETH-USDT", "ETHUSDT")},
 		ports.Pair{Symbol: "SOL-USDT", Base: "SOL", Quote: "USDT", Status: "PREPARE", Rank: 5, Reference: ref("SOL-USDT", "SOLUSDT")},
 	)
+	// A coin-margined contract not open yet.
+	list.contracts = append(list.contracts, ports.Contract{
+		Symbol: "BTC-USD-PERP", IndexSymbol: "BTC-USDT", Status: "PREPARE", MarginType: "COIN", ContractSize: d("100"),
+		ReferenceSymbol: "BTCUSD_PERP",
+	})
 	svc := New(newMemStore(), list, slog.New(slog.DiscardHandler))
 	if err := svc.Load(context.Background()); err != nil {
 		t.Fatal(err)
@@ -90,6 +95,15 @@ func TestTickersShowTheReferenceMarket(t *testing.T) {
 	if got, _ := rig.ticks.Ticker(ctx, "BTC-USDT"); !got.Bid.IsZero() {
 		t.Fatalf("a pair's ticker keeps its own bid: %+v", got)
 	}
+	// The reference book unusable: the engine's best bid and ask.
+	rig.ticks.UseBooks(func(string, int) (bids, asks []domain.Level, ok bool) { return nil, nil, false })
+	rig.svc.OnDepth(&marketv1.DepthSnapshot{
+		Symbol: "BTC-USDT-PERP", Sequence: 1, Bids: []*marketv1.PriceLevel{{Price: "84000", Quantity: "1"}},
+		Asks: []*marketv1.PriceLevel{{Price: "84020", Quantity: "1"}},
+	})
+	if got, _ := rig.ticks.Ticker(ctx, "BTC-USDT-PERP"); !got.Bid.Equal(d("84000")) || !got.Ask.Equal(d("84020")) {
+		t.Fatalf("the engine's bid and ask: %+v", got)
+	}
 	// Denied by the flag, or no reference market: the platform's.
 	if got, _ := rig.ticks.Ticker(ctx, "ETH-USDT"); !got.Last.IsZero() || !got.At.IsZero() {
 		t.Fatalf("ETH-USDT %+v", got)
@@ -97,8 +111,9 @@ func TestTickersShowTheReferenceMarket(t *testing.T) {
 	if got, _ := rig.ticks.Ticker(ctx, "ETH-BTC"); !got.At.IsZero() {
 		t.Fatalf("ETH-BTC %+v", got)
 	}
+	// The contract in PREPARE is not listed (review EL C37).
 	all, err := rig.ticks.All(ctx)
-	if err != nil || len(all) != 5 {
+	if err != nil || len(all) != 5 || slices.ContainsFunc(all, func(tk domain.Ticker) bool { return tk.Symbol == "BTC-USD-PERP" }) {
 		t.Fatalf("all %d %v", len(all), err)
 	}
 }
