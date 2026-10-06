@@ -303,9 +303,19 @@ func (s *Service) stepTrade(ctx context.Context, l ports.Liquidation) (ports.Liq
 	if locked(holdings) {
 		return s.wait(ctx, l, "waiting for the ledger to settle the orders")
 	}
-	l.Traded = executed(orders, "")
-	plan, why, err := s.planSells(ctx, l, holdings, orders)
-	if side == sideBuy {
+	if traded := executed(orders, ""); !traded.Equal(l.Traded) {
+		// Kept as it grows, whatever the step waits for next (wait stores
+		// a new note only; review DJ).
+		l.Traded = traded
+		if err := s.save(ctx, l); err != nil {
+			return l, false, err
+		}
+	}
+	var plan []ports.LiquidationOrder
+	var why string
+	if side == sideSell {
+		plan, why, err = s.planSells(ctx, l, holdings, orders)
+	} else {
 		plan, why, err = s.planBuys(ctx, l, holdings, orders)
 	}
 	switch {
@@ -345,9 +355,8 @@ func sideOf(step string) string {
 // send places a liquidation order or reads it again, and stores where it
 // stands when that changed: SENT once taken, DONE once it executes no
 // more (what it executed with it), REFUSED when refused, as it came or
-// later (nothing executed). Only a refusal of kind Invalid, Conflict or
-// Unprocessable is one: any other failure (the trading service down, its
-// 403 or 404) says nothing of the order, which is read again later.
+// later (nothing executed; orderRefused tells a refusal). Any other
+// failure says nothing of the order, which is read again later.
 func (s *Service) send(ctx context.Context, l ports.Liquidation, o ports.LiquidationOrder) (ports.LiquidationOrder, error) {
 	was := o
 	st, err := s.Trading.PlaceLiquidation(ctx, l.UserID, l.Account, o)
@@ -541,6 +550,10 @@ type need struct {
 // with the quote asset, the largest first; one without a pair that may
 // ever trade is left to the insurance fund.
 func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []domain.Holding) ([]need, error) {
+	decimals, err := s.Instruments.Decimals(ctx, l.QuoteAsset)
+	if err != nil {
+		return nil, err
+	}
 	var out []need
 	for _, h := range holdings {
 		short := h.Debt().Sub(h.Free)
@@ -558,10 +571,6 @@ func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []dom
 		if err != nil {
 			return nil, err
 		}
-		decimals, err := s.Instruments.Decimals(ctx, l.QuoteAsset)
-		if err != nil {
-			return nil, err
-		}
 		inQuote := func(q decimal.Decimal) decimal.Decimal { return q.Mul(price).Mul(buyBuffer).RoundCeil(decimals) }
 		smallest := least(info)
 		out = append(out, need{
@@ -570,6 +579,14 @@ func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []dom
 	}
 	slices.SortFunc(out, func(a, b need) int { return b.amount.Cmp(a.amount) })
 	return out, nil
+}
+
+// take is what a buy of the need spends out of left: at most the need and
+// what is left; ok is false when that buys less than an order's least, a
+// remnant left to the insurance fund.
+func (n need) take(left decimal.Decimal) (decimal.Decimal, bool) {
+	amount := decimal.Min(n.amount, left)
+	return amount, !amount.LessThan(n.least)
 }
 
 // sellBuffer is what the sales bring beyond what is needed (review DD
@@ -667,8 +684,8 @@ func (s *Service) planBuys(ctx context.Context, l ports.Liquidation, holdings []
 	var plan []ports.LiquidationOrder
 	why := ""
 	for _, n := range needs {
-		amount := decimal.Min(n.amount, budget)
-		if amount.LessThan(n.least) {
+		amount, ok := n.take(budget)
+		if !ok {
 			continue // the insurance fund covers it
 		}
 		t := all[n.info.Symbol]
@@ -692,11 +709,9 @@ func (s *Service) planBuys(ctx context.Context, l ports.Liquidation, holdings []
 func buyable(needs []need, budget decimal.Decimal) decimal.Decimal {
 	spent := decimal.Zero
 	for _, n := range needs {
-		amount := decimal.Min(n.amount, budget.Sub(spent))
-		if amount.LessThan(n.least) {
-			continue
+		if amount, ok := n.take(budget.Sub(spent)); ok {
+			spent = spent.Add(amount)
 		}
-		spent = spent.Add(amount)
 	}
 	return spent
 }

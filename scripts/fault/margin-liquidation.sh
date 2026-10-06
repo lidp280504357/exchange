@@ -144,7 +144,7 @@ unwind() {
   local qty bid
   call GET /v1/margin/accounts "" "${AUTH[@]}"
   qty=$(jq -r '[.cross.balances[] | select(.asset == "ASTRA")][0].free // "0"' <<<"$BODY")
-  if [[ $qty != 0 ]] && book; then
+  if jq -en --argjson q "$qty" '$q >= 1' >/dev/null && book; then
     bid=$(jq -r '.bids[0][0] | tonumber * 0.99 * 10000 | floor / 10000' <<<"$BODY")
     call POST /v1/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$bid\",\"quantity\":\"$(jq -rn --argjson q "$qty" '$q | floor')\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_REPAY\"}" "${AUTH[@]}" -H "Idempotency-Key: fault-margin-$RUN-unwind"
     for _ in $(seq 30); do # the sale repays as it settles

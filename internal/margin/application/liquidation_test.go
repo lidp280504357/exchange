@@ -141,26 +141,27 @@ func (t *trading) execute(user string, a domain.Account, o ports.LiquidationOrde
 type pairs struct {
 	instruments
 	mu     sync.Mutex
-	halted map[string]bool
+	status map[string]string
 }
 
 func (p *pairs) Pair(ctx context.Context, symbol string) (ports.PairInfo, error) {
 	info, err := p.instruments.Pair(ctx, symbol)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.halted[symbol] {
-		info.Status = "HALT"
+	if st := p.status[symbol]; st != "" {
+		info.Status = st
 	}
 	return info, err
 }
 
-func (p *pairs) halt(symbol string, on bool) {
+// set gives a pair a status ("" back to TRADING).
+func (p *pairs) set(symbol, status string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.halted == nil {
-		p.halted = map[string]bool{}
+	if p.status == nil {
+		p.status = map[string]string{}
 	}
-	p.halted[symbol] = on
+	p.status[symbol] = status
 }
 
 // liquidationRig is a rig whose liquidations trade on the fake trading
@@ -444,7 +445,7 @@ func TestLiquidationWaitsForThePair(t *testing.T) {
 	r := newLiquidationRig(t)
 	u := r.open(t, d("0.1"), "USDT", d("2000"), map[string]string{"BTC": "0.1667"})
 	r.prices.setBTC("13000", true)
-	r.pairs.halt("BTC-USDT", true)
+	r.pairs.set("BTC-USDT", "HALT")
 	before := r.fund()
 	l := r.liquidate(t, u)
 	r.pass(t, 5, time.Minute)
@@ -453,7 +454,7 @@ func TestLiquidationWaitsForThePair(t *testing.T) {
 		!r.fund().Equal(before) {
 		t.Fatalf("halted %+v", got)
 	}
-	r.pairs.halt("BTC-USDT", false)
+	r.pairs.set("BTC-USDT", "")
 	r.pass(t, 2, 3*time.Second)
 	if got := r.get(t, l.ID); got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.IsZero() || !got.Traded.Equal(d("2082.6")) {
 		t.Fatalf("after the halt %+v", got)
@@ -527,9 +528,10 @@ func TestLiquidationRepaysAgain(t *testing.T) {
 }
 
 // TestLiquidationResumesAfterARestart checks that a liquidation goes on
-// from what it stored after margin-service restarts (review DJ C23 ③):
-// mid-sale, the order read again rather than placed a second time; at the
-// fee, the stored fee booked once under its key.
+// from what it stored after margin-service restarts (reviews DJ C23 ③, DP
+// C27 ③): the order stored but not sent, sent once; mid-sale, the order
+// read again rather than placed a second time; at the fee, the stored fee
+// booked once under its key.
 func TestLiquidationResumesAfterARestart(t *testing.T) {
 	r := newLiquidationRig(t)
 	cross := domain.Cross()
@@ -546,17 +548,27 @@ func TestLiquidationResumesAfterARestart(t *testing.T) {
 	}
 	r.ledger.mu.Unlock()
 	before := r.fund()
-	l := r.liquidate(t, u)
-	r.pass(t, 1, 3*time.Second)
-	if got := r.get(t, l.ID); got.Step != application.StepSell || got.Note != "waiting for the orders to execute" {
-		t.Fatalf("mid-sale %+v", got)
-	}
 	restart := func() {
 		svc := &application.Service{
 			Store: r.store, Ledger: r.ledger, Prices: r.prices, Instruments: r.pairs, Eligibility: eligible{}, Features: r.features,
 			Trading: r.trading, Log: r.svc.Log, Now: r.now,
 		}
 		r.svc, r.monitor = svc, &application.Monitor{Svc: svc, Liquidate: svc.AutoLiquidate}
+	}
+	// The order stored, the trading service out of reach, then a restart.
+	r.trading.fail = apperr.Unavailable(fmt.Errorf("connection refused"))
+	l := r.liquidate(t, u)
+	r.pass(t, 1, 3*time.Second)
+	if orders := r.orders(t, l.ID); len(orders) != 1 || orders[0].Status != ports.OrderPlanned || len(r.trading.sent) != 0 {
+		t.Fatalf("stored, not sent: %+v, %d placed", orders, len(r.trading.sent))
+	}
+	restart()
+	r.trading.mu.Lock()
+	r.trading.fail = nil
+	r.trading.mu.Unlock()
+	r.pass(t, 1, 3*time.Second)
+	if got := r.get(t, l.ID); got.Step != application.StepSell || got.Note != "waiting for the orders to execute" || len(r.trading.sent) != 1 {
+		t.Fatalf("mid-sale %+v, %d placed", got, len(r.trading.sent))
 	}
 	restart()
 	r.pass(t, 3, 3*time.Second)
@@ -663,10 +675,30 @@ func TestLiquidationIsolated(t *testing.T) {
 	}
 }
 
+// TestLiquidationPairDelisting checks a pair that will not trade again
+// (CANCEL_ONLY, review DP C27 ③): no order, the BTC stays in the account
+// and the insurance fund pays the debt.
+func TestLiquidationPairDelisting(t *testing.T) {
+	r := newLiquidationRig(t)
+	u := r.open(t, d("0.1"), "USDT", d("2000"), map[string]string{"BTC": "0.1667"})
+	r.prices.setBTC("13000", true)
+	r.pairs.set("BTC-USDT", "CANCEL_ONLY")
+	l := r.liquidate(t, u)
+	r.pass(t, 3, 3*time.Second)
+	got := r.get(t, l.ID)
+	if got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.Equal(d("2000.02")) || !got.Fee.IsZero() ||
+		len(r.orders(t, l.ID)) != 0 || len(r.trading.sent) != 0 {
+		t.Fatalf("the liquidation %+v, %d placed", got, len(r.trading.sent))
+	}
+	if b := r.ledger.owed(u, domain.Cross(), "BTC"); !b.free.Equal(d("0.1667")) {
+		t.Fatalf("the BTC stays %+v", b)
+	}
+}
+
 // TestLiquidationAttemptsUsedUp checks the end of selling (review DJ C23
 // ③): a pair with its 1000 orders placed counts as one that never trades,
-// so what the account could not sell stays in it and the insurance fund
-// pays the debt.
+// so no attempt 1001 is stored or placed, what the account could not sell
+// stays in it and the insurance fund pays the debt.
 func TestLiquidationAttemptsUsedUp(t *testing.T) {
 	r := newLiquidationRig(t)
 	ctx := context.Background()
@@ -688,6 +720,9 @@ func TestLiquidationAttemptsUsedUp(t *testing.T) {
 	if got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.Equal(d("2000.02")) || !got.Traded.IsZero() || !got.Fee.IsZero() ||
 		len(r.trading.sent) != 0 {
 		t.Fatalf("the liquidation %+v, %d placed", got, len(r.trading.sent))
+	}
+	if orders := r.orders(t, l.ID); len(orders) != 1 || orders[0].Attempt != 1000 {
+		t.Fatalf("an attempt past 1000 %+v", orders)
 	}
 	if b := r.ledger.owed(u, domain.Cross(), "BTC"); !b.free.Equal(d("0.1667")) {
 		t.Fatalf("the BTC stays %+v", b)
