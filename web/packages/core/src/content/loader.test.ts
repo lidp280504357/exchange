@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadHero } from "./hero";
 import { plainText, type Block, type Inline } from "./markdown";
 import {
+  bundledFile,
   bundledSource,
   forgetPublished,
   HELP_CATEGORIES,
@@ -10,6 +11,7 @@ import {
   listSlugs,
   loadArticle,
   loadArticles,
+  loadBundledArticle,
   neighbours,
   pickLocale,
   sortArticles,
@@ -41,6 +43,20 @@ describe("file index and language fallback", () => {
     expect(pickLocale(idx.get("a"), "en")).toEqual({ locale: "en", value: 2 });
     expect(pickLocale(idx.get("b"), "en")).toEqual({ locale: "zh-CN", value: 3 });
     expect(pickLocale(idx.get("c"), "en")).toBeNull();
+  });
+
+  it("has every Simplified Chinese file in Traditional Chinese too, generated", async () => {
+    const idx = indexFiles({ "../../content/help/a.zh-CN.md": 1, "../../content/help/a.zh-TW.md": 2, "../../content/help/b.zh-CN.md": 3 });
+    expect(pickLocale(idx.get("a"), "zh-TW")).toEqual({ locale: "zh-TW", value: 2 });
+    expect(pickLocale(idx.get("b"), "zh-TW")).toEqual({ locale: "zh-CN", value: 3 });
+    for (const section of ["announcements", "help", "legal", "home"] as const) {
+      for (const slug of listSlugs(section)) {
+        const tw = await bundledFile(section, slug, "zh-TW");
+        expect(tw, `${section}/${slug}`).not.toBeNull();
+        expect(tw, `${section}/${slug}`).not.toMatch(/[们这说时间应设为发简体]/);
+      }
+    }
+    expect((await loadBundledArticle("help", "faq", "zh-TW"))?.title).toMatch(/常見問題/);
   });
 });
 

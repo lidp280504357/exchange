@@ -1,5 +1,7 @@
 // Strings of the account pages: security, devices and sign-ins, settings
 // and notifications (namespace pcAccount).
+import zhTW from "./account.zh-TW";
+
 export default {
   "zh-CN": {
     pcAccount: {
@@ -152,8 +154,7 @@ export default {
         display: "语言与时区",
         language: "语言",
         languageDesc: "界面显示的语言",
-        langNames: { "zh-CN": "简体中文", en: "English" },
-        langDesc: { "zh-CN": "中文（简体）", en: "英语" },
+        langDesc: { "zh-CN": "中文（简体）", "zh-TW": "中文（繁体）", en: "英语" },
         timeZone: "时区",
         timeZoneDesc: "图表、订单和记录的时间都按这个时区显示",
         followBrowser: "跟随浏览器（{{zone}}）",
@@ -344,8 +345,7 @@ export default {
         display: "Language and time zone",
         language: "Language",
         languageDesc: "The language of the interface",
-        langNames: { "zh-CN": "简体中文", en: "English" },
-        langDesc: { "zh-CN": "Chinese (Simplified)", en: "English" },
+        langDesc: { "zh-CN": "Chinese (Simplified)", "zh-TW": "Chinese (Traditional)", en: "English" },
         timeZone: "Time zone",
         timeZoneDesc: "Charts, orders and records show times in this zone",
         followBrowser: "Browser's zone ({{zone}})",
@@ -385,4 +385,6 @@ export default {
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

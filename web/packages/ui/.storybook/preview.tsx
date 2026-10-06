@@ -19,7 +19,7 @@ const preview: Preview = {
     },
     locale: {
       description: "Language",
-      toolbar: { icon: "globe", items: ["zh-CN", "en"], dynamicTitle: true },
+      toolbar: { icon: "globe", items: ["zh-CN", "zh-TW", "en"], dynamicTitle: true },
     },
   },
   initialGlobals: { theme: "dark", updown: "green-up", locale: "zh-CN" },

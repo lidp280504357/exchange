@@ -1,4 +1,4 @@
-import { ApiError, errorText, routes, selectRestoring, selectSignedIn, useSession, useSettings } from "@exchange/core";
+import { ApiError, errorText, LOCALES, routes, selectRestoring, selectSignedIn, useSession, useSettings } from "@exchange/core";
 import { channelOf, type IdentityKind } from "@exchange/core/auth/identity";
 import { signIn } from "@exchange/core/auth/login";
 import { passwordChecks } from "@exchange/core/auth/password";
@@ -274,13 +274,13 @@ export default function Register() {
 function RegionPicker({ value, onChange, locale }: { value: string; onChange: (v: string) => void; locale: string }) {
   const { t } = useTranslation();
   const items = useMemo<ComboboxItem[]>(() => {
-    const other = locale === "en" ? "zh-CN" : "en";
     const collator = new Intl.Collator(locale);
     return REGIONS.map((code) => ({
       value: code,
       label: regionName(code, locale),
       description: code,
-      keywords: [code, regionName(code, other)],
+      // Found by its name in any of the languages.
+      keywords: [code, ...LOCALES.map((l) => regionName(code, l))],
     })).sort((a, b) => collator.compare(a.label, b.label));
   }, [locale]);
   return (

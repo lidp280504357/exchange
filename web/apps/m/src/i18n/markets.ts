@@ -1,4 +1,6 @@
 // Strings of the mobile home page, the markets list and the coin pages (namespace mMarkets).
+import zhTW from "./markets.zh-TW";
+
 export default {
   "zh-CN": {
     mMarkets: {
@@ -232,4 +234,6 @@ export default {
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

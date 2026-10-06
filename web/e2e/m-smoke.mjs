@@ -285,13 +285,25 @@ try {
   ok("notifications, devices (current one marked) and the help centre render");
 
   // 9. Settings: English switches the site's language at once (the page
-  // and its header).
+  // and its header); so does Traditional Chinese (design 2026-10-06
+  // 繁体中文), shown on the key pages in the Traditional fonts
+  // (screenshots to check the widths), and back.
   await go("/account/settings");
   await clickButton("English");
   await waitText("Time zone", 10000);
+  await clickButton("繁體中文");
+  await waitText("時區", 10000);
+  for (const [path, text] of [["/", "總資產估值"], ["/markets", "現貨"], ["/trade/BTC-USDT", "買入"], ["/assets", "總資產估值"], ["/help", "幫助中心"]]) {
+    await go(path);
+    await waitText(text);
+    await shot(`zh-TW${path === "/" ? "-home" : path.replaceAll("/", "-")}`);
+  }
+  const fonts = await page.evaluate(() => getComputedStyle(document.documentElement).fontFamily);
+  if (!fonts.includes("PingFang TC")) throw new Error(`Traditional Chinese without its fonts: ${fonts}`);
+  await go("/account/settings");
   await clickButton("简体中文");
   await waitText("时区", 10000);
-  ok("the language setting switches the site to English and back");
+  ok("the language setting switches the site to English, to Traditional Chinese (five key pages, its fonts) and back");
 
   // 10. Sign out.
   await signOut();

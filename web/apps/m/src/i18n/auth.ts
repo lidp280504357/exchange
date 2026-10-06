@@ -1,5 +1,7 @@
 // Strings of sign-in, sign-up, reset, the code step and step-up (namespace mAuth).
 // features/auth (OtpStep, StepUp) uses the first block of keys.
+import zhTW from "./auth.zh-TW";
+
 export default {
   "zh-CN": {
     mAuth: {
@@ -235,4 +237,6 @@ export default {
       resetDone: "Password reset. Sign in with the new one.",
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

@@ -2,6 +2,8 @@
 // dialogs (namespace pcMargin; margin design 2026-10-06 §7). Shared words
 // (nav.*, common.*, codes.*, errors.*) come from @exchange/core, the gauge's
 // from @exchange/ui.
+import zhTW from "./margin.zh-TW";
+
 export default {
   "zh-CN": {
     pcMargin: {
@@ -119,4 +121,6 @@ export default {
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

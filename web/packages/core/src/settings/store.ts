@@ -5,7 +5,11 @@ import { persist } from "zustand/middleware";
 // language, time zone, the colour of rises, order confirmations and small
 // balances. Applying them to the page (html attributes) is applySettings.
 
-export type Locale = "zh-CN" | "en";
+export type Locale = "zh-CN" | "zh-TW" | "en";
+/** The sites' languages, in menu order. */
+export const LOCALES: readonly Locale[] = ["zh-CN", "zh-TW", "en"];
+/** Each language's name in itself, the same whatever the page's language. */
+export const LOCALE_NAMES: Record<Locale, string> = { "zh-CN": "简体中文", "zh-TW": "繁體中文", en: "English" };
 /** green-up: green rises, red falls (default); red-up swaps them. */
 export type UpDown = "green-up" | "red-up";
 
@@ -24,9 +28,23 @@ type SettingsState = Settings & {
   set: (patch: Partial<Settings>) => void;
 };
 
+/**
+ * localeOf maps a browser language tag to a site language: Traditional
+ * Chinese for zh-Hant and Taiwan, Hong Kong and Macao (design 2026-10-06
+ * 繁体中文 §2.1), Simplified for the other Chinese, English for the rest.
+ */
+export function localeOf(tag: string): Locale {
+  const t = tag.toLowerCase();
+  if (!t.startsWith("zh")) return "en";
+  if (t.includes("-hant")) return "zh-TW";
+  if (t.includes("-hans")) return "zh-CN";
+  return /^zh-(tw|hk|mo)\b/.test(t) ? "zh-TW" : "zh-CN";
+}
+
+/** browserLocale is the first visit's language: the browser's first preference. */
 function browserLocale(): Locale {
-  const lang = globalThis.navigator?.language?.toLowerCase() ?? "zh-cn";
-  return lang.startsWith("zh") ? "zh-CN" : "en";
+  const nav = globalThis.navigator;
+  return localeOf(nav?.languages?.[0] ?? nav?.language ?? "zh-CN");
 }
 
 export const useSettings = create<SettingsState>()(

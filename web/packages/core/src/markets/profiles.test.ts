@@ -31,4 +31,23 @@ describe("asset profiles from the API", () => {
     expect(coinProfile("ETH")?.logo).toBeUndefined();
     expect(coinName("ETH", "en")).toBe("Ethereum");
   });
+
+  it("name coins in Traditional Chinese, generated from the Simplified", () => {
+    expect(coinName("BTC", "zh-CN")).toBe("比特币");
+    expect(coinName("BTC", "zh-TW")).toBe("比特幣");
+    expect(coinName("1000PEPE", "zh-TW")).toBe(coinName("PEPE", "zh-TW"));
+    expect(coinProfile("ETH")?.intro["zh-TW"]).toMatch(/以太坊/);
+  });
+
+  it("show operators' Simplified introduction where they wrote no Traditional one", () => {
+    rememberAssets([{ asset_code: "BTC", display_name: "Bitcoin", description: { "zh-CN": "数字黄金" }, links: {}, logo_url: null }]);
+    expect(coinProfile("BTC")?.intro["zh-TW"]).toBe("数字黄金");
+    expect(coinName("BTC", "zh-TW")).toBe("Bitcoin");
+    rememberAssets([{ asset_code: "BTC", display_name: null, description: { "zh-CN": "数字黄金", "zh-TW": "數位黃金" }, links: {}, logo_url: null }]);
+    expect(coinProfile("BTC")?.intro["zh-TW"]).toBe("數位黃金");
+    expect(coinProfile("BTC")?.intro["zh-CN"]).toBe("数字黄金");
+    // Only English from operators: the bundled Chinese stays.
+    rememberAssets([{ asset_code: "ETH", display_name: null, description: { en: "World computer" }, links: {}, logo_url: null }]);
+    expect(coinProfile("ETH")?.intro["zh-TW"]).toMatch(/以太坊/);
+  });
 });

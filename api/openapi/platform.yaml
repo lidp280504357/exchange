@@ -108,11 +108,15 @@ components:
       type: string
       enum: [logo_light, logo_dark, favicon, apple_touch_icon]
     Texts:
-      description: A text by language; zh-CN is the fallback of a language without one.
+      description: >-
+        A text by language; zh-CN is the fallback of a language without one. zh-TW (Traditional Chinese, design
+        2026-10-06 繁体中文 §2.1) is absent or empty until operators write it.
       type: object
       required: [zh-CN, en]
       properties:
         zh-CN:
+          type: string
+        zh-TW:
           type: string
         en:
           type: string
@@ -215,7 +219,7 @@ components:
                 description: An https URL.
         default_locale:
           type: string
-          enum: [zh-CN, en]
+          enum: [zh-CN, zh-TW, en]
         test_mode:
           type: object
           description: >-

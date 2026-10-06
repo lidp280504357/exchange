@@ -8,6 +8,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "types": "pnpm --filter @exchange/core api:types",
+    "i18n": "pnpm --filter @exchange/core i18n",
+    "i18n:check": "pnpm --filter @exchange/core i18n:check",
     "lint": "node scripts/check-tokens.mjs",
     "storybook": "pnpm --filter @exchange/ui storybook"
   }

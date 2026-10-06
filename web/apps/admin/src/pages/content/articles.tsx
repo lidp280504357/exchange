@@ -81,10 +81,10 @@ type Source = NonNullable<Awaited<ReturnType<typeof bundledSource>>>;
 
 /** seedOf is the draft of a bundled file, in Chinese and (when there is one) English, for modes (its front matter's by default). */
 export function seedOf(slug: string, zh: Source, en: Source | null, modes: Modes = zh.modes): Draft {
-  const text = (s: Source): Text => ({ locale: s.locale, title: s.title, summary: s.summary, body: s.body.trim() });
+  const text = (s: Source, locale: Locale): Text => ({ locale, title: s.title, summary: s.summary, body: s.body.trim() });
   return {
     slug, modes, category: zh.category, pinned: zh.pinned, order: String(zh.order),
-    texts: { "zh-CN": text(zh), en: en ? text(en) : { locale: "en", title: "", summary: "", body: "" } },
+    texts: { "zh-CN": text(zh, "zh-CN"), en: en ? text(en, "en") : { locale: "en", title: "", summary: "", body: "" } },
   };
 }
 

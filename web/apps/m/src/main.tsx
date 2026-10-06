@@ -9,7 +9,11 @@ import { App } from "./App";
 import { mMessages } from "./i18n";
 import "./index.css";
 
-initI18n({ "zh-CN": { ...uiMessages["zh-CN"], ...mMessages["zh-CN"] }, en: { ...uiMessages.en, ...mMessages.en } });
+initI18n({
+  "zh-CN": { ...uiMessages["zh-CN"], ...mMessages["zh-CN"] },
+  "zh-TW": { ...uiMessages["zh-TW"], ...mMessages["zh-TW"] },
+  en: { ...uiMessages.en, ...mMessages.en },
+});
 applySettings(useSettings.getState());
 useSettings.subscribe((s) => applySettings(s));
 const queryClient = createQueryClient();

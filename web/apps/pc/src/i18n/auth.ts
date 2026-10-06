@@ -1,4 +1,6 @@
 // Strings of sign-in, sign-up, reset, the code step and step-up (namespace pcAuth).
+import zhTW from "./auth.zh-TW";
+
 export default {
   "zh-CN": {
     pcAuth: {
@@ -230,4 +232,6 @@ export default {
       resetDone: "Password reset. Sign in with the new one.",
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

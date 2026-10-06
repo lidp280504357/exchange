@@ -77,7 +77,7 @@ function ArticleBody({ article: a, list, listPath }: { article: ArticleData; lis
       {a.fallback && (
         <div role="note" className="mt-4 flex items-start gap-2 rounded-2 border border-info/30 bg-info/10 px-3 py-2.5 text-xs leading-relaxed text-info">
           <Languages size={14} className="mt-0.5 shrink-0" />
-          {t("mContent.article.fallback")}
+          {t(locale === "zh-TW" ? "mContent.article.fallbackTraditional" : "mContent.article.fallback")}
         </div>
       )}
       <SimNotice className="mt-4" />

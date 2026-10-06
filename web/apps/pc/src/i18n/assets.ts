@@ -1,6 +1,8 @@
 // Strings of the assets pages: overview, deposit, withdraw, transfer and
 // history (namespace pcAssets). Shared words (nav.*, common.*, codes.*,
 // errors.*) come from @exchange/core.
+import zhTW from "./assets.zh-TW";
+
 export default {
   "zh-CN": {
     pcAssets: {
@@ -597,4 +599,6 @@ export default {
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

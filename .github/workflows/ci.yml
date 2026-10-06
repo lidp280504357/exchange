@@ -130,6 +130,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: API types match the contracts
         run: pnpm types && git diff --exit-code -- packages/core/src/api/gen admin/src/api/gen
+      - name: Traditional Chinese matches the Simplified (pnpm i18n)
+        run: pnpm i18n:check
       - name: no raw colours outside the tokens
         run: pnpm lint
       - run: pnpm typecheck

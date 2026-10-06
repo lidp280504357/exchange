@@ -293,10 +293,12 @@ components:
     Locale:
       name: locale
       in: query
-      description: en for English; Chinese otherwise. An article without English comes in Chinese (fallback true).
+      description: >-
+        en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the
+        language comes in Simplified Chinese (fallback true).
       schema:
         type: string
-        enum: [zh-CN, en]
+        enum: [zh-CN, zh-TW, en]
     Slug:
       name: slug
       in: path
@@ -353,10 +355,10 @@ components:
           format: date-time
         locale:
           type: string
-          enum: [zh-CN, en]
+          enum: [zh-CN, zh-TW, en]
         fallback:
           type: boolean
-          description: No text in the language asked; the Chinese one instead.
+          description: No text in the language asked; the Simplified Chinese one instead.
         version:
           type: integer
           description: Grows with every change; the sites may cache by it.

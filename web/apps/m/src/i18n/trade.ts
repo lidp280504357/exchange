@@ -1,4 +1,6 @@
 // Strings of the mobile spot and futures terminals (namespace mTrade).
+import zhTW from "./trade.zh-TW";
+
 export default {
   "zh-CN": {
     mTrade: {
@@ -172,4 +174,6 @@ export default {
       funding: "Funding",
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

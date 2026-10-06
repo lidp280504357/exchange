@@ -20,6 +20,10 @@ describe("platform profile helpers (design 2026-10-04 §4.1)", () => {
     expect(textOf({ "zh-CN": "中文", en: "English" }, "en")).toBe("English");
     expect(textOf({ "zh-CN": "中文", en: "" }, "en")).toBe("中文");
     expect(textOf(undefined, "zh-CN")).toBe("");
+    // Traditional Chinese falls back to the Simplified, left empty or absent.
+    expect(textOf({ "zh-CN": "简体", "zh-TW": "繁體", en: "" }, "zh-TW")).toBe("繁體");
+    expect(textOf({ "zh-CN": "简体", "zh-TW": "", en: "" }, "zh-TW")).toBe("简体");
+    expect(textOf({ "zh-CN": "简体", en: "" }, "zh-TW")).toBe("简体");
   });
 
   it("puts dark text on a light brand and white on a dark one", () => {

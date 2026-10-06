@@ -8,18 +8,20 @@ import { excerpt, parseMarkdown, renderByMode, type ContentMode, type MarkdownDo
 // repository (web/packages/core/content/<section>/<slug>.<locale>.md,
 // design §6.2), bundled at build time, one chunk per file: an article
 // page loads only its own file, a list loads the files of one language.
-// A missing English file falls back to the Chinese one. The sites show the
-// content of the exchange's mode (design 2026-10-04 §4.4): a file's front
-// matter `modes` (TEST, FORMAL or BOTH, the default) and its :::test /
-// :::formal blocks (renderByMode); the console's articles come filtered
-// by the API and have their blocks filtered here.
+// A missing English or Traditional Chinese file falls back to the
+// Simplified Chinese one (the Traditional files are generated from those,
+// scripts/gen-zh-tw.mjs). The sites show the content of the exchange's
+// mode (design 2026-10-04 §4.4): a file's front matter `modes` (TEST,
+// FORMAL or BOTH, the default) and its :::test / :::formal blocks
+// (renderByMode); the console's articles come filtered by the API and
+// have their blocks filtered here.
 
 export type ContentSection = "announcements" | "help" | "legal" | "home";
 
 /** The legal and information pages (design 2026-10-04 §4.4), bundled as drafts the console may replace. */
 export const LEGAL_SLUGS = ["terms", "privacy", "risk", "fees", "about", "contact"] as const;
 export type LegalSlug = (typeof LEGAL_SLUGS)[number];
-export type ContentLocale = "zh-CN" | "en";
+export type ContentLocale = "zh-CN" | "zh-TW" | "en";
 
 export const CONTENT_FALLBACK: ContentLocale = "zh-CN";
 
@@ -35,7 +37,7 @@ const files: Record<ContentSection, Record<string, Loader>> = {
   home: import.meta.glob<string>("../../content/home/*.md", { query: "?raw", import: "default" }),
 };
 
-const FILE = /\/([a-z0-9][a-z0-9-]*)\.(zh-CN|en)\.md$/;
+const FILE = /\/([a-z0-9][a-z0-9-]*)\.(zh-CN|zh-TW|en)\.md$/;
 
 /** indexFiles maps slug → language → loader from the file paths alone. */
 export function indexFiles<T>(paths: Record<string, T>): Map<string, Map<ContentLocale, T>> {

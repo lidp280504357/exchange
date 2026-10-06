@@ -1,7 +1,10 @@
+import zhTW from "./i18n.zh-TW";
+
 // Strings of the design system's components, merged into each app's
 // i18next resources: initI18n(uiMessages) (Storybook does the same).
 // Keys live under "ui"; shared words (common.*, market.*, state.*, codes.*)
-// come from @exchange/core.
+// come from @exchange/core. The Traditional Chinese ones are generated from
+// "zh-CN" (core's scripts/gen-zh-tw.mjs).
 export const uiMessages = {
   "zh-CN": {
     ui: {
@@ -263,4 +266,5 @@ export const uiMessages = {
       form: { optional: "Optional" },
     },
   },
+  "zh-TW": zhTW,
 };

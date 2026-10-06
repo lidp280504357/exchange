@@ -1,4 +1,4 @@
-import { routes, setLocale, useSettings, type Locale, type UpDown } from "@exchange/core";
+import { LOCALE_NAMES, LOCALES, routes, setLocale, useSettings, type Locale, type UpDown } from "@exchange/core";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
 import { RadioGroup, Segmented, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
 import { ChevronRight, Clock } from "lucide-react";
@@ -36,7 +36,7 @@ export default function Settings() {
               value={locale}
               onValueChange={(v) => setLocale(v as Locale)}
               aria-label={t("mAccount.settings.language")}
-              items={(["zh-CN", "en"] as const).map((l) => ({ value: l, label: t(`mAccount.settings.langNames.${l}`) }))}
+              items={LOCALES.map((l) => ({ value: l, label: <span lang={l}>{LOCALE_NAMES[l]}</span> }))}
             />
           </div>
           <TimeZoneRow />

@@ -1,5 +1,7 @@
 // Strings of the "me" tab and the account pages: security, devices and
 // sign-ins, settings and notifications (namespace mAccount).
+import zhTW from "./account.zh-TW";
+
 export default {
   "zh-CN": {
     mAccount: {
@@ -211,7 +213,6 @@ export default {
         display: "语言与时区",
         language: "语言",
         languageDesc: "界面显示的语言",
-        langNames: { "zh-CN": "简体中文", en: "English" },
         timeZone: "时区",
         timeZoneDesc: "图表、订单和记录的时间都按这个时区显示",
         followBrowser: "跟随浏览器（{{zone}}）",
@@ -459,7 +460,6 @@ export default {
         display: "Language and time zone",
         language: "Language",
         languageDesc: "The language of the interface",
-        langNames: { "zh-CN": "简体中文", en: "English" },
         timeZone: "Time zone",
         timeZoneDesc: "Charts, orders and records show times in this zone",
         followBrowser: "Browser's zone ({{zone}})",
@@ -497,4 +497,6 @@ export default {
       list: { failed: "Could not load more", end: "That is all" },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

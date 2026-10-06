@@ -1,4 +1,5 @@
 import * as dec from "../format/decimal";
+import type { Locale } from "../settings/store";
 import type { MarketRow, TickerOf } from "./list";
 
 // Headline figures of the home page (design §6.2, rolled in with CountUp):
@@ -8,15 +9,21 @@ import type { MarketRow, TickerOf } from "./list";
 export type CompactParts = {
   /** The value in `suffix` units, at most `decimals` places (exact decimal). */
   value: string;
-  /** "亿", "万" in Chinese; "B", "M", "K" in English; "" when small. */
+  /** "亿", "万" in Chinese (億、萬 in Traditional); "B", "M", "K" in English; "" when small. */
   suffix: string;
 };
 
-const UNITS: Record<"zh" | "en", [string, string][]> = {
-  zh: [
+const UNITS: Record<Locale, [string, string][]> = {
+  "zh-CN": [
     ["1000000000000", "万亿"],
     ["100000000", "亿"],
     ["10000", "万"],
+  ],
+  // Taiwan's: 兆 for a million millions.
+  "zh-TW": [
+    ["1000000000000", "兆"],
+    ["100000000", "億"],
+    ["10000", "萬"],
   ],
   en: [
     ["1000000000000", "T"],
@@ -33,7 +40,7 @@ const UNITS: Record<"zh" | "en", [string, string][]> = {
  */
 export function compactParts(v: string, locale: string, decimals = 2): CompactParts {
   if (!dec.isDecimal(v)) return { value: "0", suffix: "" };
-  const units = UNITS[locale.startsWith("zh") ? "zh" : "en"];
+  const units = UNITS[locale as Locale] ?? UNITS[locale.startsWith("zh") ? "zh-CN" : "en"];
   const abs = dec.abs(v);
   for (const [size, suffix] of units) {
     if (dec.gte(abs, size)) return { value: dec.div(v, size, decimals, "half"), suffix };

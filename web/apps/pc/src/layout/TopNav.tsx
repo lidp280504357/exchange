@@ -1,10 +1,11 @@
 import {
-  DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, routes, selectSignedIn, setLocale, signOut, useContracts, useSession, useSettings, useTerminalPrefs,
+  DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, signOut, useContracts, useSession, useSettings,
+  useTerminalPrefs, type Locale,
 } from "@exchange/core";
 import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
-import { Bell, ChevronDown, Globe, UserRound } from "lucide-react";
+import { Bell, Check, ChevronDown, Globe, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
@@ -89,7 +90,7 @@ export function TopNav() {
               </Button>
             </>
           )}
-          <LanguageToggle />
+          <LanguageMenu />
         </div>
       </div>
     </header>
@@ -170,18 +171,50 @@ function NotificationBell() {
   );
 }
 
-function LanguageToggle() {
+// The language button's short names, each in itself.
+const SHORT_NAMES: Record<Locale, string> = { "zh-CN": "简体", "zh-TW": "繁體", en: "EN" };
+
+// The languages open as Menu does (hover and keyboard focus, CSS only),
+// each named in itself; choosing one switches at once.
+function LanguageMenu() {
+  const { t } = useTranslation();
   const locale = useSettings((s) => s.locale);
-  const next = locale === "zh-CN" ? "en" : "zh-CN";
   return (
-    <button
-      type="button"
-      onClick={() => setLocale(next)}
-      aria-label="Language"
-      className="flex h-9 items-center gap-1 rounded-2 px-2 text-sm text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1"
-    >
-      <Globe size={16} />
-      {locale === "zh-CN" ? "中文" : "EN"}
-    </button>
+    <div className="group relative flex h-full items-center">
+      <button
+        type="button"
+        aria-label={t("nav.language")}
+        className="flex h-9 items-center gap-1 rounded-2 px-2 text-sm text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1"
+      >
+        <Globe size={16} />
+        <span lang={locale}>{SHORT_NAMES[locale]}</span>
+      </button>
+      <div
+        className={cn(
+          "invisible absolute right-0 top-full z-[var(--z-dropdown)] min-w-36 translate-y-1 rounded-2 border border-line-1 bg-bg-1 py-1 opacity-0 shadow-pop transition-[opacity,transform] duration-[var(--t-fast)]",
+          "group-has-[:focus-visible]:visible group-has-[:focus-visible]:translate-y-0 group-has-[:focus-visible]:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100",
+        )}
+      >
+        {LOCALES.map((l) => (
+          <button
+            key={l}
+            type="button"
+            lang={l}
+            aria-pressed={l === locale}
+            onClick={(e) => {
+              setLocale(l);
+              e.currentTarget.blur();
+            }}
+            className={cn(
+              "flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm transition-colors hover:bg-bg-2 hover:text-fg-1",
+              l === locale ? "text-fg-1" : "text-fg-2",
+            )}
+          >
+            {LOCALE_NAMES[l]}
+            {l === locale && <Check size={14} className="text-brand" />}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

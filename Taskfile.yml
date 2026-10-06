@@ -128,17 +128,23 @@ tasks:
     dir: web
     cmds: [pnpm types]
 
+  web:i18n:
+    desc: 由简体中文重新生成繁体中文（OpenCC 简→台湾正体 + 术语表 packages/core/src/i18n/zh-TW.overrides.ts：文案、内容文件、币种资料；繁体设计 2026-10-06 §2.2）
+    dir: web
+    cmds: [pnpm i18n]
+
   web:storybook:
     desc: 本机启动设计系统目录（Storybook，http://localhost:6006）
     dir: web
     cmds: [pnpm install --prefer-offline --silent, pnpm storybook]
 
   web:check:
-    desc: 前端类型与契约一致、无硬编码颜色、类型检查、单元测试
+    desc: 前端类型与契约一致、繁体中文与简体一致、无硬编码颜色、类型检查、单元测试
     dir: web
     cmds:
       - pnpm install --frozen-lockfile --prefer-offline --silent
       - pnpm types >/dev/null && git diff --exit-code -- packages/core/src/api/gen
+      - pnpm --silent i18n:check
       - pnpm lint
       - pnpm typecheck
       - pnpm test

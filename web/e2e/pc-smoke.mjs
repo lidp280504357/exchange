@@ -381,13 +381,27 @@ try {
   await waitText("注册与登录");
   ok("notifications, devices (current one marked) and the help centre render");
 
-  // 9. Settings: English switches the site's language at once.
+  // 9. Settings: English switches the site's language at once; so does
+  // Traditional Chinese (design 2026-10-06 繁体中文), shown on the key pages
+  // in the Traditional fonts (screenshots to check the widths), and back.
   await go("/account/settings");
   await page.waitForSelector('button[role="radio"][value="en"]', { visible: true });
   await page.click('button[role="radio"][value="en"]');
   await page.waitForFunction(() => document.querySelector("header")?.innerText.includes("Markets"), { timeout: 10000 });
+  await page.click('button[role="radio"][value="zh-TW"]');
+  await page.waitForFunction(() => document.documentElement.lang === "zh-TW" && document.querySelector("header")?.innerText.includes("資產"), { timeout: 10000 });
+  for (const [path, text] of [["/", "漲幅榜"], ["/markets", "即時行情"], ["/trade/BTC-USDT", "限價"], ["/assets", "資產總覽"], ["/help", "幫助中心"]]) {
+    await go(path);
+    await waitText(text);
+    await shot(`zh-TW${path === "/" ? "-home" : path.replaceAll("/", "-")}`);
+  }
+  const fonts = await page.evaluate(() => getComputedStyle(document.documentElement).fontFamily);
+  if (!fonts.includes("PingFang TC")) throw new Error(`Traditional Chinese without its fonts: ${fonts}`);
+  await go("/account/settings");
+  await page.waitForSelector('button[role="radio"][value="zh-CN"]', { visible: true });
   await page.click('button[role="radio"][value="zh-CN"]');
-  ok("the language setting switches the site to English and back");
+  await page.waitForFunction(() => document.documentElement.lang === "zh-CN" && document.querySelector("header")?.innerText.includes("资产"), { timeout: 10000 });
+  ok("the language setting switches the site to English, to Traditional Chinese (five key pages, its fonts) and back");
 
   // 10. Sign out.
   await go("/");

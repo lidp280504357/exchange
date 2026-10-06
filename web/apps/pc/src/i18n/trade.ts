@@ -1,4 +1,6 @@
 // Strings of the spot and futures terminals (namespace pcTrade).
+import zhTW from "./trade.zh-TW";
+
 export default {
   "zh-CN": {
     pcTrade: {
@@ -246,4 +248,6 @@ export default {
       degraded: "The contract's price source is interrupted: positions can only be reduced until an operator lifts it.",
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

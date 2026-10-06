@@ -218,8 +218,8 @@ export interface components {
             /** Format: date-time */
             published_at: string;
             /** @enum {string} */
-            locale: "zh-CN" | "en";
-            /** @description No text in the language asked; the Chinese one instead. */
+            locale: "zh-CN" | "zh-TW" | "en";
+            /** @description No text in the language asked; the Simplified Chinese one instead. */
             fallback: boolean;
             /** @description Grows with every change; the sites may cache by it. */
             version: number;
@@ -292,8 +292,8 @@ export interface components {
         };
     };
     parameters: {
-        /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
-        Locale: "zh-CN" | "en";
+        /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
+        Locale: "zh-CN" | "zh-TW" | "en";
         Slug: string;
         /** @description Articles on a page (20 when absent, at most 100). */
         ListLimit: number;
@@ -370,7 +370,7 @@ export interface operations {
     listAnnouncements: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
                 /** @description Articles on a page (20 when absent, at most 100). */
                 limit?: components["parameters"]["ListLimit"];
@@ -398,7 +398,7 @@ export interface operations {
     getAnnouncement: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
             };
             header?: never;
@@ -425,7 +425,7 @@ export interface operations {
     listHelpArticles: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
                 /** @description Articles on a page (20 when absent, at most 100). */
                 limit?: components["parameters"]["ListLimit"];
@@ -453,7 +453,7 @@ export interface operations {
     getHelpArticle: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
             };
             header?: never;
@@ -480,7 +480,7 @@ export interface operations {
     listLegalPages: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
                 /** @description Articles on a page (20 when absent, at most 100). */
                 limit?: components["parameters"]["ListLimit"];
@@ -508,7 +508,7 @@ export interface operations {
     getLegalPage: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
             };
             header?: never;
@@ -535,7 +535,7 @@ export interface operations {
     listHomeBlocks: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
                 /** @description Articles on a page (20 when absent, at most 100). */
                 limit?: components["parameters"]["ListLimit"];
@@ -563,7 +563,7 @@ export interface operations {
     getHomeBlock: {
         parameters: {
             query?: {
-                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                /** @description en for English, zh-TW for Traditional Chinese, Simplified Chinese otherwise. An article without a text in the language comes in Simplified Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
             };
             header?: never;

@@ -1,4 +1,6 @@
 // Strings of the mobile announcements and help centre (namespace mContent).
+import zhTW from "./content.zh-TW";
+
 export default {
   "zh-CN": {
     mContent: {
@@ -41,6 +43,7 @@ export default {
         notFound: "文章不存在",
         notFoundHint: "这篇文章不存在或已被移除。",
         fallback: "本文暂无英文版，以下为中文原文。",
+        fallbackTraditional: "本文暂无繁体中文版，以下为简体中文原文。",
         external: "（新窗口打开）",
       },
     },
@@ -86,8 +89,11 @@ export default {
         notFound: "Article not found",
         notFoundHint: "This article does not exist or has been removed.",
         fallback: "This article is not available in English yet; the Chinese version is shown.",
+        fallbackTraditional: "This article is not available in Traditional Chinese yet; the Simplified Chinese version is shown.",
         external: "(opens in a new window)",
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

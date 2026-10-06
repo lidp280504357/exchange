@@ -1,4 +1,6 @@
 // Strings of the home page, the markets list and the coin pages (namespace pcMarkets).
+import zhTW from "./markets.zh-TW";
+
 export default {
   "zh-CN": {
     pcMarkets: {
@@ -284,4 +286,6 @@ export default {
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

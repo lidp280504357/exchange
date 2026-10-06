@@ -77,7 +77,7 @@ They do the same things, laid out for wide screens and for phones held upright: 
 
 ### How do I change the language, time zone or colors?
 
-Open [Settings](/account/settings): choose Chinese or English, the time zone for times on screen, the colors of rises and falls (green up or red up), and whether orders ask for confirmation. The top bar also switches the language.
+Open [Settings](/account/settings): choose Simplified Chinese, Traditional Chinese or English, the time zone for times on screen, the colors of rises and falls (green up or red up), and whether orders ask for confirmation. The top bar also switches the language.
 
 ### Is there an API?
 

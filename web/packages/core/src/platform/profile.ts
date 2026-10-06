@@ -59,10 +59,10 @@ export function contentMode(p: Pick<PlatformProfile, "test_mode">): ContentMode 
   return p.test_mode.enabled ? "test" : "formal";
 }
 
-/** textOf picks a text in the locale, else the Chinese one. */
+/** textOf picks a text in the locale, else (left empty too) the Simplified Chinese one. */
 export function textOf(texts: Partial<Texts> | undefined, locale: string): string {
   if (!texts) return "";
-  return (locale === "en" ? texts.en : texts["zh-CN"]) || texts["zh-CN"] || "";
+  return (texts as Partial<Record<string, string>>)[locale] || texts["zh-CN"] || "";
 }
 
 /**

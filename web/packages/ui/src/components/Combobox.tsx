@@ -1,4 +1,4 @@
-import { coinName, type Locale } from "@exchange/core";
+import { coinName, LOCALES, type Locale } from "@exchange/core";
 import { Check, ChevronDown, Search } from "lucide-react";
 import { Popover as RPopover } from "radix-ui";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -46,13 +46,11 @@ export function filterItems(items: ComboboxItem[], query: string): ComboboxItem[
 /** coinItems builds coin search items: letter icon, symbol and name. */
 export function coinItems(symbols: string[], locale: Locale): ComboboxItem[] {
   return symbols.map((s) => {
-    const zh = coinName(s, "zh-CN");
-    const en = coinName(s, "en");
     return {
       value: s,
       label: s,
-      description: locale === "zh-CN" ? zh : en,
-      keywords: [zh, en],
+      description: coinName(s, locale),
+      keywords: LOCALES.map((l) => coinName(s, l)),
       icon: <CoinIcon symbol={s} size={20} />,
     };
   });

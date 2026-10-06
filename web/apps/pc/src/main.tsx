@@ -11,7 +11,11 @@ import "./index.css";
 
 // Start-up: strings, the saved settings on <html>, one WebSocket and market
 // store for the app's life, the session from the refresh cookie.
-initI18n({ "zh-CN": { ...uiMessages["zh-CN"], ...pcMessages["zh-CN"] }, en: { ...uiMessages.en, ...pcMessages.en } });
+initI18n({
+  "zh-CN": { ...uiMessages["zh-CN"], ...pcMessages["zh-CN"] },
+  "zh-TW": { ...uiMessages["zh-TW"], ...pcMessages["zh-TW"] },
+  en: { ...uiMessages.en, ...pcMessages.en },
+});
 applySettings(useSettings.getState());
 useSettings.subscribe((s) => applySettings(s));
 const queryClient = createQueryClient();

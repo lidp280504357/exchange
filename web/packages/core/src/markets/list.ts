@@ -64,7 +64,7 @@ function searchText(parts: (string | undefined)[]): string {
 
 function profileNames(base: string): string[] {
   const p = coinProfile(base);
-  return p ? [p.name["zh-CN"], p.name.en] : [];
+  return p ? [p.name["zh-CN"], p.name["zh-TW"], p.name.en] : [];
 }
 
 /**

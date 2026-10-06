@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Locale } from "../settings/store";
+import { LOCALES, type Locale } from "../settings/store";
 
 // Asset profiles from the API (ASTRA design §5.3): the display names,
 // introductions, links and logos operators set. The pairs and assets
@@ -60,7 +60,7 @@ export function rememberAssets(assets: readonly AssetProfileFields[]): void {
   const updates: Record<string, ApiProfile> = {};
   for (const a of assets) {
     const intro: Partial<Record<Locale, string>> = {};
-    for (const locale of ["zh-CN", "en"] as const) {
+    for (const locale of LOCALES) {
       const text = a.description?.[locale];
       if (text) intro[locale] = text;
     }

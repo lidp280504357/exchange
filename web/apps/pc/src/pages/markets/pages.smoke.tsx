@@ -1,4 +1,4 @@
-import { createQueryClient, initI18n, LiveProvider, MarketStore, qk, type Locale, type TickerData, type WsClient } from "@exchange/core";
+import { createQueryClient, initI18n, LiveProvider, LOCALES, MarketStore, qk, type Locale, type TickerData, type WsClient } from "@exchange/core";
 import { contentKeys, loadArticle, loadArticles } from "@exchange/core/content/index";
 import { DEFAULT_PROFILE } from "@exchange/core/platform/index";
 import { uiMessages } from "@exchange/ui";
@@ -63,7 +63,11 @@ let market: MarketStore;
 
 async function seed() {
   const pcMessages = withAreas(marketsMessages, contentMessages);
-  initI18n({ "zh-CN": { ...uiMessages["zh-CN"], ...pcMessages["zh-CN"] }, en: { ...uiMessages.en, ...pcMessages.en } });
+  initI18n({
+    "zh-CN": { ...uiMessages["zh-CN"], ...pcMessages["zh-CN"] },
+    "zh-TW": { ...uiMessages["zh-TW"], ...pcMessages["zh-TW"] },
+    en: { ...uiMessages.en, ...pcMessages.en },
+  });
   qc = createQueryClient();
   // In test mode, as the test server: the test content (the pinned notice).
   qc.setQueryData(qk.platform, { ...DEFAULT_PROFILE, test_mode: { enabled: true, banner: true, text: { "zh-CN": "测试模式", en: "Test mode" } } });
@@ -71,7 +75,7 @@ async function seed() {
   qc.setQueryData(qk.contracts, { contracts: [contract("BTC-USDT-PERP", "BTC-USDT"), contract("ETH-USDT-PERP", "ETH-USDT")] });
   qc.setQueryData(qk.tickers, { tickers });
   qc.setQueryData(qk.assets, { assets: [{ asset_code: "USDT", name: "Tether USD", decimals: 6, rank: 3, categories: ["stablecoin"], deposit_enabled: false, withdraw_enabled: false, trading_enabled: true, networks: [] }] });
-  for (const locale of ["zh-CN", "en"] as const) {
+  for (const locale of LOCALES) {
     for (const section of ["announcements", "help"] as const) {
       const list = await loadArticles(section, locale, "test");
       qc.setQueryData(contentKeys.list(section, locale, "test"), list);
@@ -101,6 +105,8 @@ function render(path: string, pattern: string, page: ReactNode): string {
 
 /** describePages renders every page in one language (the stores' initial one). */
 export function describePages(locale: Locale) {
+  // The text expected in each language: Simplified, Traditional, English.
+  const say = (zh: string, tw: string, en: string) => (locale === "en" ? en : locale === "zh-TW" ? tw : zh);
   describe(`pages in ${locale}`, () => {
     beforeAll(seed);
 
@@ -108,9 +114,9 @@ export function describePages(locale: Locale) {
       const html = render("/", "/", <Home />);
       expect(html).toContain("BTC/USDT");
       expect(html).toContain("85,226.01");
-      expect(html).toContain(locale === "en" ? "Why Astras" : "为什么选择 Astras");
+      expect(html).toContain(say("为什么选择 Astras", "為什麼選擇 Astras", "Why Astras"));
       // The latest announcements come from the Markdown.
-      expect(html).toContain(locale === "en" ? "USDT perpetual futures are live" : "USDT 永续合约上线");
+      expect(html).toContain(say("USDT 永续合约上线", "USDT 永續合約上線", "USDT perpetual futures are live"));
     });
 
     it("markets, with filters from the address", () => {
@@ -120,22 +126,22 @@ export function describePages(locale: Locale) {
       const futures = render("/markets?cat=futures&sort=change&dir=asc", "/markets", <Markets />);
       expect(futures).toContain("ETHUSDT");
       const none = render("/markets?q=nothing-matches", "/markets", <Markets />);
-      expect(none).toContain(locale === "en" ? "No coins match" : "没有匹配的币种");
+      expect(none).toContain(say("没有匹配的币种", "沒有匹配的幣種", "No coins match"));
     });
 
     it("a coin, a quote asset and an unknown coin", () => {
       const btc = render("/coin/BTC", "/coin/:symbol", <Coin />);
-      expect(btc).toContain(locale === "en" ? "Bitcoin" : "比特币");
+      expect(btc).toContain(say("比特币", "比特幣", "Bitcoin"));
       expect(btc).toContain("50x");
       const usdt = render("/coin/USDT", "/coin/:symbol", <Coin />);
-      expect(usdt).toContain(locale === "en" ? "quote asset" : "计价资产");
+      expect(usdt).toContain(say("计价资产", "計價資產", "quote asset"));
       const unknown = render("/coin/NOPE", "/coin/:symbol", <Coin />);
-      expect(unknown).toContain(locale === "en" ? "Coin not found" : "未找到该币种");
+      expect(unknown).toContain(say("未找到该币种", "未找到該幣種", "Coin not found"));
     });
 
     it("announcements and one of them", () => {
       const list = render("/announcements", "/announcements", <Announcements />);
-      expect(list).toContain(locale === "en" ? "Pinned" : "置顶");
+      expect(list).toContain(say("置顶", "置頂", "Pinned"));
       const one = render("/announcements/usdt-perpetual-launch", "/announcements/:slug", <Article section="announcements" />);
       expect(one).toContain("BTC-USDT-PERP");
       expect(one).toContain("<table>");
@@ -144,12 +150,12 @@ export function describePages(locale: Locale) {
 
     it("the help centre, an article and a missing one", () => {
       const help = render("/help?q=%E5%85%85%E5%80%BC", "/help", <Help />);
-      expect(help).toContain(locale === "en" ? "Help center" : "帮助中心");
+      expect(help).toContain(say("帮助中心", "幫助中心", "Help center"));
       const article = render("/help/withdraw", "/help/:slug", <Article section="help" />);
-      expect(article).toContain(locale === "en" ? "How to withdraw" : "如何提现");
-      expect(article).toContain(locale === "en" ? "On this page" : "本文目录");
+      expect(article).toContain(say("如何提现", "如何提現", "How to withdraw"));
+      expect(article).toContain(say("本文目录", "本文目錄", "On this page"));
       const missing = render("/help/nope", "/help/:slug", <Article section="help" />);
-      expect(missing).toContain(locale === "en" ? "Article not found" : "文章不存在");
+      expect(missing).toContain(say("文章不存在", "文章不存在", "Article not found"));
     });
   });
 }

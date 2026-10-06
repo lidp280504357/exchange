@@ -12,7 +12,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "api:types": "node scripts/gen-api.mjs"
+    "api:types": "node scripts/gen-api.mjs",
+    "i18n": "node scripts/gen-zh-tw.mjs",
+    "i18n:check": "node scripts/gen-zh-tw.mjs --check"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
@@ -29,6 +31,7 @@
     "@types/react": "^19.3.0",
     "happy-dom": "^20.14.5",
     "openapi-typescript": "^7.13.0",
+    "opencc-js": "^1.4.2",
     "react": "^19.3.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.1",

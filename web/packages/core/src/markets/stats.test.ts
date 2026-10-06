@@ -14,6 +14,13 @@ describe("compactParts", () => {
     expect(compactParts("0", "en")).toEqual({ value: "0", suffix: "" });
     expect(compactParts("oops", "en")).toEqual({ value: "0", suffix: "" });
   });
+
+  it("uses Taiwan's units in Traditional Chinese", () => {
+    expect(compactParts("2088349849.68", "zh-TW")).toEqual({ value: "20.88", suffix: "億" });
+    expect(compactParts("12345", "zh-TW")).toEqual({ value: "1.23", suffix: "萬" });
+    expect(compactParts("3200000000000", "zh-TW")).toEqual({ value: "3.2", suffix: "兆" });
+    expect(compactParts("3200000000000", "zh-CN")).toEqual({ value: "3.2", suffix: "万亿" });
+  });
 });
 
 describe("headline", () => {

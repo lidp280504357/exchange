@@ -2,6 +2,8 @@
 // and history (namespace mAssets). Shared words (nav.*, common.*, codes.*,
 // errors.*) come from @exchange/core. Keys with a count have plural forms
 // (_one, _other) in both languages.
+import zhTW from "./assets.zh-TW";
+
 export default {
   "zh-CN": {
     mAssets: {
@@ -543,4 +545,6 @@ export default {
       },
     },
   },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
 };

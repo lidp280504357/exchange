@@ -48,7 +48,8 @@ export function readChartTheme(): ChartTheme {
 
 /**
  * useChartTheme returns the chart colours and a new object whenever the
- * page switches theme or rise colour (a MutationObserver on <html>).
+ * page switches theme, rise colour or language (a MutationObserver on
+ * <html>; Traditional Chinese has its own font stack).
  */
 export function useChartTheme(): ChartTheme {
   const [theme, setTheme] = useState(readChartTheme);
@@ -56,7 +57,7 @@ export function useChartTheme(): ChartTheme {
     const root = globalThis.document?.documentElement;
     if (!root || typeof MutationObserver === "undefined") return;
     const observer = new MutationObserver(() => setTheme(readChartTheme()));
-    observer.observe(root, { attributes: true, attributeFilter: ["data-theme", "data-updown", "class", "style"] });
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme", "data-updown", "class", "style", "lang"] });
     return () => observer.disconnect();
   }, []);
   return theme;

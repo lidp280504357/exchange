@@ -1,4 +1,4 @@
-import { setLocale, useSettings, type Locale, type UpDown } from "@exchange/core";
+import { LOCALE_NAMES, LOCALES, setLocale, useSettings, type Locale, type UpDown } from "@exchange/core";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
 import { Combobox, RadioGroup, Switch, TimeText, listItem, useNow, cn, type ComboboxItem } from "@exchange/ui";
 import { ChartCandlestick, Clock, Languages, SlidersHorizontal } from "lucide-react";
@@ -33,9 +33,9 @@ export default function Settings() {
             onValueChange={(v) => setLocale(v as Locale)}
             aria-label={t("pcAccount.settings.language")}
             className="[&>label]:min-w-40"
-            options={(["zh-CN", "en"] as const).map((l) => ({
+            options={LOCALES.map((l) => ({
               value: l,
-              label: t(`pcAccount.settings.langNames.${l}`),
+              label: <span lang={l}>{LOCALE_NAMES[l]}</span>,
               description: t(`pcAccount.settings.langDesc.${l}`),
             }))}
           />

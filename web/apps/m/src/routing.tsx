@@ -1,4 +1,4 @@
-import { registerMessages, routes, selectRestoring, selectSignedIn, useSession } from "@exchange/core";
+import { registerMessages, routes, selectRestoring, selectSignedIn, useSession, type LocaleMessages } from "@exchange/core";
 import { lazy, type ComponentType, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 import { PageSkeleton } from "./layout/PageSkeleton";
@@ -9,7 +9,7 @@ import { PageSkeleton } from "./layout/PageSkeleton";
 // their strings: lazyPage loads a page's chunk and its areas' messages
 // together and registers the messages before the page renders.
 
-type Messages = { default: { "zh-CN": Record<string, unknown>; en: Record<string, unknown> } };
+type Messages = { default: LocaleMessages };
 
 /** lazyPage is React.lazy for a page whose strings live in apps/m/src/i18n/<area>.ts. */
 export function lazyPage<P extends object>(page: () => Promise<{ default: ComponentType<P> }>, ...messages: (() => Promise<Messages>)[]) {

@@ -1,4 +1,4 @@
-import { routes, setLocale, switchSite, useSettings } from "@exchange/core";
+import { LOCALE_NAMES, LOCALES, routes, setLocale, switchSite, useSettings } from "@exchange/core";
 import { LEGAL_SLUGS, type LegalSlug } from "@exchange/core/content/index";
 import { useBrandText, useBranding } from "@exchange/core/platform/index";
 import { ChartCredit } from "@exchange/ui";
@@ -72,9 +72,11 @@ export function Footer() {
           <button type="button" className="text-left" onClick={() => switchSite("m")}>
             {t("footer.toMobile")}
           </button>
-          <button type="button" className="text-left" onClick={() => setLocale(locale === "zh-CN" ? "en" : "zh-CN")}>
-            {locale === "zh-CN" ? "English" : "中文"}
-          </button>
+          {LOCALES.filter((l) => l !== locale).map((l) => (
+            <button key={l} type="button" lang={l} className="text-left" onClick={() => setLocale(l)}>
+              {LOCALE_NAMES[l]}
+            </button>
+          ))}
         </Column>
       </div>
       <div className="flex flex-col items-center gap-1 border-t border-line-1 py-4 text-center text-xs text-fg-3">

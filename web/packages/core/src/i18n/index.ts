@@ -3,26 +3,38 @@ import { initReactI18next } from "react-i18next";
 import { ApiError } from "../api/errors";
 import { formatAmount } from "../format/number";
 import { DEFAULT_BRAND } from "../platform/profile";
-import { useSettings, type Locale } from "../settings/store";
+import { LOCALES, useSettings, type Locale } from "../settings/store";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
+import { zhTW } from "./zh-TW";
 
-export { en, zhCN };
+export { en, zhCN, zhTW };
 export type Messages = typeof zhCN;
+/** Strings by language: an app's, a page's. */
+export type LocaleMessages = Partial<Record<Locale, Record<string, unknown>>>;
 
 // One i18next instance per app, started with the shared strings; each app
-// merges its own page strings (initI18n's extra) under the same keys.
+// merges its own page strings (initI18n's extra) under the same keys. The
+// Traditional Chinese strings are generated from the Simplified ones
+// (scripts/gen-zh-tw.mjs); a key missing in a language shows in zh-CN.
 
 let started = false;
 
+const shared: Record<Locale, Record<string, unknown>> = { "zh-CN": zhCN, "zh-TW": zhTW, en };
+
+// The languages of the app: an app that brings no Traditional Chinese
+// strings of its own (the console, design 2026-10-06 繁体中文 §1) shows
+// Simplified Chinese instead.
+let offered: readonly Locale[] = LOCALES;
+
 /** initI18n starts i18next in the saved language; call once at start-up. */
-export function initI18n(extra: { "zh-CN"?: Record<string, unknown>; en?: Record<string, unknown> } = {}): typeof i18n {
+export function initI18n(extra: LocaleMessages = {}): typeof i18n {
   if (started) return i18n;
   started = true;
-  const resources: Resource = {
-    "zh-CN": { translation: deepMerge(zhCN, extra["zh-CN"] ?? {}) },
-    en: { translation: deepMerge(en, extra.en ?? {}) },
-  };
+  offered = LOCALES.filter((l) => l !== "zh-TW" || extra[l]);
+  if (!offered.includes(useSettings.getState().locale)) useSettings.getState().set({ locale: "zh-CN" });
+  const resources: Resource = {};
+  for (const lng of offered) resources[lng] = { translation: deepMerge(shared[lng], extra[lng] ?? {}) };
   void i18n.use(initReactI18next).init({
     resources,
     lng: useSettings.getState().locale,
@@ -60,19 +72,20 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * registerMessages adds a page's own strings when its chunk loads (both
- * languages, merged deeply into the shared ones), so the first screen does
+ * registerMessages adds a page's own strings when its chunk loads (every
+ * language, merged deeply into the shared ones), so the first screen does
  * not carry every page's text.
  */
-export function registerMessages(messages: { "zh-CN"?: Record<string, unknown>; en?: Record<string, unknown> }): void {
-  for (const lng of ["zh-CN", "en"] as const) {
+export function registerMessages(messages: LocaleMessages): void {
+  for (const lng of offered) {
     const m = messages[lng];
     if (m) i18n.addResourceBundle(lng, "translation", m, true, true);
   }
 }
 
-/** setLocale switches the language and remembers it. */
-export function setLocale(locale: Locale): void {
+/** setLocale switches the language and remembers it (one the app does not offer is Simplified Chinese). */
+export function setLocale(wanted: Locale): void {
+  const locale = offered.includes(wanted) ? wanted : "zh-CN";
   useSettings.getState().set({ locale });
   void i18n.changeLanguage(locale);
   if (globalThis.document) document.documentElement.lang = locale;

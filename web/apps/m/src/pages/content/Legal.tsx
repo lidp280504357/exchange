@@ -1,4 +1,4 @@
-import { errorText, routes } from "@exchange/core";
+import { errorText, routes, useSettings } from "@exchange/core";
 import { LEGAL_SLUGS, useArticle, type LegalSlug } from "@exchange/core/content/index";
 import { EmptyState, ErrorState, Skeleton, SkeletonLines, cn } from "@exchange/ui";
 import { Languages } from "lucide-react";
@@ -24,6 +24,7 @@ const LABELS: Record<LegalSlug, string> = {
  */
 export default function Legal() {
   const { t } = useTranslation();
+  const locale = useSettings((s) => s.locale);
   const { slug = "" } = useParams();
   const known = (LEGAL_SLUGS as readonly string[]).includes(slug);
   const article = useArticle("legal", slug);
@@ -51,7 +52,7 @@ export default function Legal() {
         {a.fallback && (
           <div role="note" className="mt-4 flex items-start gap-2 rounded-2 border border-info/30 bg-info/10 px-3 py-2.5 text-xs text-info">
             <Languages size={14} className="mt-0.5 shrink-0" />
-            {t("mContent.article.fallback")}
+            {t(locale === "zh-TW" ? "mContent.article.fallbackTraditional" : "mContent.article.fallback")}
           </div>
         )}
         {a.doc.toc.length > 1 && <Toc items={a.doc.toc} className="mt-4" />}

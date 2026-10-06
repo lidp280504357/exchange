@@ -67,9 +67,10 @@ export interface components {
     schemas: {
         /** @enum {string} */
         PlatformImageKind: "logo_light" | "logo_dark" | "favicon" | "apple_touch_icon";
-        /** @description A text by language; zh-CN is the fallback of a language without one. */
+        /** @description A text by language; zh-CN is the fallback of a language without one. zh-TW (Traditional Chinese, design 2026-10-06 繁体中文 §2.1) is absent or empty until operators write it. */
         Texts: {
             "zh-CN": string;
+            "zh-TW"?: string;
             en: string;
         };
         WelcomeCredit: {
@@ -125,7 +126,7 @@ export interface components {
                 url: string;
             }[];
             /** @enum {string} */
-            default_locale: "zh-CN" | "en";
+            default_locale: "zh-CN" | "zh-TW" | "en";
             /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off, design §4.4), "测试模式" badges and, when banner is true, text in a banner at the top. */
             test_mode: {
                 enabled: boolean;
