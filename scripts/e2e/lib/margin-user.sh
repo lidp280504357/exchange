@@ -53,7 +53,7 @@ show() {
     printf '%s\n' "$out"
     return 0
   fi
-  if [[ $rc -ne 0 ]] && grep -q "is not set" "$err"; then
+  if [[ $rc -ne 0 ]] && grep -qF "flag $key is not set" "$err"; then
     rm -f "$err"
     echo '{"enabled":false,"rules":{}}'
     return 0
@@ -73,7 +73,8 @@ on)
   fi
   users=$(jq -r '(.rules.users.allow // []) | join(",")' <<<"$current")
   [[ -s $state ]] || printf '%s %s\n' "$(jq -r .enabled <<<"$current")" "$users" >"$state"
-  ctl flags set "$key" --on --allow-users "${users:+$users,}$user" --reason "e2e web.sh: margin trading for its smoke user $user" >/dev/null
+  ctl flags set "$key" --on --allow-users "${users:+$users,}$user" --reason "e2e web.sh: margin trading for its smoke user $user" >/dev/null ||
+    { echo "FAIL could not open $key for $user" >&2; exit 1; }
   echo "note: $key on for $user until web.sh ends"
   ;;
 back)

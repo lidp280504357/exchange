@@ -9,8 +9,11 @@ RUN="$(date +%s)"
 WORK="$(mktemp -d)"
 AT_EXIT=()
 # AT_END runs after the at_exit commands (lib/remote.sh closes its ssh
-# connection there, which those commands may still need).
+# connection there, which those commands may still need). An at_exit
+# command sets EXIT_FAILED to fail the run even when the script itself got
+# through (web.sh: a switch it could not put back).
 AT_END=""
+EXIT_FAILED=""
 run_at_exit() {
   local i
   for ((i = ${#AT_EXIT[@]} - 1; i >= 0; i--)); do
@@ -18,6 +21,7 @@ run_at_exit() {
   done
   [[ -z $AT_END ]] || eval "$AT_END" || true
   rm -rf "$WORK"
+  [[ -z $EXIT_FAILED ]] || exit 1
 }
 trap run_at_exit EXIT
 STATUS="" BODY="" TICKET=""

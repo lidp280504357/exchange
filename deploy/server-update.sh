@@ -124,7 +124,7 @@ build_app_image() {
   sudo docker build -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" \
     --build-arg GO_IMAGE=mirror.gcr.io/library/golang:1.27-alpine --build-arg RUNTIME_IMAGE=mirror.gcr.io/library/alpine:3.22 \
     -t exchange-app:next . 2>&1 | tee "$log" || rc=$?
-  if [ "$rc" != 0 ] && grep -qiE 'mirror\.gcr\.io[^ ]*: (failed to resolve source metadata|.*(429|too ?many ?requests|denied|unauthorized|timeout|no such host))' "$log"; then
+  if [ "$rc" != 0 ] && grep -qiE 'mirror\.gcr\.io[^ ]*: (failed to resolve source metadata|.*(429|too ?many ?requests|denied|unauthorized|timeout|no such host|connection reset|EOF|unexpected status))' "$log"; then
     echo "== 从 mirror.gcr.io 拉基础镜像失败，改用 AWS ECR Public 构建"
     rc=0
     sudo docker build -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" -t exchange-app:next . || rc=$?

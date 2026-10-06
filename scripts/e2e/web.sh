@@ -23,7 +23,7 @@ source "$(dirname "$0")/lib/remote.sh"
 MARGIN_USER_HELPER="$(cd "$(dirname "$0")" && pwd)/lib/margin-user.sh"
 export MARGIN_USER_HELPER MARGIN_USER_STATE="$WORK/margin-user" REMOTE
 # shellcheck disable=SC2016 # expanded when the script ends
-at_exit 'bash "$MARGIN_USER_HELPER" back'
+at_exit 'bash "$MARGIN_USER_HELPER" back || EXIT_FAILED=1'
 M_BASE="${M_BASE:-https://m.astras.vip}"
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 DESKTOP="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
