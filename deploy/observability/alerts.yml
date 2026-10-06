@@ -133,6 +133,13 @@ groups:
           summary: "a margin liquidation has run for {{ $value }} seconds (exchangectl margin liquidations shows the step it waits at and why)"
           runbook: docs/runbook/margin.md
 
+      - alert: MarginLiquidationDue
+        expr: sum by (job) (increase(margin_liquidations_due_total[10m])) > sum by (job) (increase(margin_liquidations_total{trigger="AUTO"}[10m]))
+        labels: {severity: warning}
+        annotations:
+          summary: "margin accounts reached their liquidation level in the last 10 minutes and were not liquidated (margin.liquidation off for their users): they stay WARNED; liquidate them by hand (an approved request in the console, or exchangectl margin liquidate) or watch them"
+          runbook: docs/runbook/margin.md
+
       - alert: InsuranceFundShort
         expr: max by (job) (margin_liquidations_shortfall) > 0
         labels: {severity: critical}

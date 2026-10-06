@@ -103,11 +103,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Name: "margin_warnings_total", Help: "Margin accounts that fell under their warning level.",
 	})
 	m.LiquidationsDue = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "margin_liquidations_due_total", Help: "Passes that found a margin account at its liquidation level twice in a row.",
+		Name: "margin_liquidations_due_total", Help: "Times a margin account was found at its liquidation level two passes in a row.",
 	})
 	m.Liquidations = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "margin_liquidations_total", Help: "Margin liquidations started, by trigger (AUTO, MANUAL).",
 	}, []string{"trigger"})
+	for _, trigger := range []string{ports.TriggerAuto, ports.TriggerManual} {
+		m.Liquidations.WithLabelValues(trigger) // 0 from the start: MarginLiquidationDue compares with it
+	}
 	m.LiquidationOldest = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "margin_liquidation_oldest_seconds", Help: "How long the oldest margin liquidation under way has run (0 without one).",
 	})

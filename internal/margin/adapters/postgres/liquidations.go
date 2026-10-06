@@ -17,7 +17,7 @@ import (
 type liquidations repos
 
 const liquidationColumns = `liquidation_id, user_id, account_type, symbol, trigger, approval_id, requested_by, status, step,
-	prior_status, margin_level, total_asset, total_liability, fee_rate, quote_asset, quote_mark, traded, fee, fee_usdt,
+	prior_status, margin_level, total_asset, total_liability, fee_rate, quote_asset, traded, fee, fee_usdt,
 	insurance_covered, repaid, remaining, note, started_at, step_at, completed_at`
 
 func scanLiquidation(row pgx.Row) (ports.Liquidation, error) {
@@ -27,7 +27,7 @@ func scanLiquidation(row pgx.Row) (ports.Liquidation, error) {
 	var repaid, remaining []byte
 	var completed *time.Time
 	if err := row.Scan(&l.ID, &l.UserID, &accountType, &symbol, &l.Trigger, &approval, &l.RequestedBy, &l.Status, &l.Step,
-		&l.PriorStatus, &l.MarginLevel, &l.TotalAsset, &l.TotalLiability, &l.FeeRate, &l.QuoteAsset, &l.QuoteMark, &l.Traded, &l.Fee,
+		&l.PriorStatus, &l.MarginLevel, &l.TotalAsset, &l.TotalLiability, &l.FeeRate, &l.QuoteAsset, &l.Traded, &l.Fee,
 		&l.FeeUSDT, &l.InsuranceCovered, &repaid, &remaining, &l.Note, &l.StartedAt, &l.StepAt, &completed); err != nil {
 		return ports.Liquidation{}, err
 	}
@@ -52,9 +52,9 @@ func amounts(list []ports.AssetAmount) []byte {
 
 func (r liquidations) Insert(ctx context.Context, l ports.Liquidation) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO liquidations (`+liquidationColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-		$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
+		$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
 		l.ID, l.UserID, l.Account.Type, l.Account.Symbol, l.Trigger, nullUUID(l.ApprovalID), l.RequestedBy, l.Status, l.Step,
-		l.PriorStatus, l.MarginLevel, l.TotalAsset, l.TotalLiability, l.FeeRate, l.QuoteAsset, l.QuoteMark, l.Traded, l.Fee, l.FeeUSDT,
+		l.PriorStatus, l.MarginLevel, l.TotalAsset, l.TotalLiability, l.FeeRate, l.QuoteAsset, l.Traded, l.Fee, l.FeeUSDT,
 		l.InsuranceCovered, amounts(l.Repaid), amounts(l.Remaining), l.Note, l.StartedAt, l.StepAt, nullTime(l.CompletedAt))
 	if err != nil {
 		return fmt.Errorf("insert liquidation: %w", err)
@@ -86,9 +86,9 @@ func (r liquidations) GetForUpdate(ctx context.Context, id string) (ports.Liquid
 }
 
 func (r liquidations) Update(ctx context.Context, l ports.Liquidation) error {
-	tag, err := r.q.Exec(ctx, `UPDATE liquidations SET status = $2, step = $3, quote_mark = $4, traded = $5, fee = $6, fee_usdt = $7,
-		insurance_covered = $8, repaid = $9, remaining = $10, note = $11, step_at = $12, completed_at = $13 WHERE liquidation_id = $1`,
-		l.ID, l.Status, l.Step, l.QuoteMark, l.Traded, l.Fee, l.FeeUSDT, l.InsuranceCovered, amounts(l.Repaid), amounts(l.Remaining),
+	tag, err := r.q.Exec(ctx, `UPDATE liquidations SET status = $2, step = $3, traded = $4, fee = $5, fee_usdt = $6,
+		insurance_covered = $7, repaid = $8, remaining = $9, note = $10, step_at = $11, completed_at = $12 WHERE liquidation_id = $1`,
+		l.ID, l.Status, l.Step, l.Traded, l.Fee, l.FeeUSDT, l.InsuranceCovered, amounts(l.Repaid), amounts(l.Remaining),
 		l.Note, l.StepAt, nullTime(l.CompletedAt))
 	if err != nil {
 		return fmt.Errorf("update liquidation: %w", err)
@@ -138,13 +138,14 @@ func (r liquidations) OfUser(ctx context.Context, userID string, a *domain.Accou
 		ORDER BY liquidation_id DESC LIMIT $5`, userID, accountType, symbol, cursor, limit)
 }
 
-const liquidationOrderColumns = `liquidation_id, symbol, side, quantity, quote_amount, order_id, status, error, created_at`
+const liquidationOrderColumns = `liquidation_id, symbol, side, attempt, quantity, quote_amount, order_id, status, order_status,
+	filled_quantity, filled_quote, error, created_at, updated_at`
 
 func scanLiquidationOrder(row pgx.Row) (ports.LiquidationOrder, error) {
 	var o ports.LiquidationOrder
 	var order *string
-	if err := row.Scan(&o.LiquidationID, &o.Symbol, &o.Side, &o.Quantity, &o.QuoteAmount, &order, &o.Status, &o.Error,
-		&o.CreatedAt); err != nil {
+	if err := row.Scan(&o.LiquidationID, &o.Symbol, &o.Side, &o.Attempt, &o.Quantity, &o.QuoteAmount, &order, &o.Status,
+		&o.OrderStatus, &o.FilledQuantity, &o.FilledQuote, &o.Error, &o.CreatedAt, &o.UpdatedAt); err != nil {
 		return ports.LiquidationOrder{}, err
 	}
 	o.OrderID = stringOf(order)
@@ -153,24 +154,30 @@ func scanLiquidationOrder(row pgx.Row) (ports.LiquidationOrder, error) {
 
 func (r liquidations) Orders(ctx context.Context, id string) ([]ports.LiquidationOrder, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+liquidationOrderColumns+` FROM liquidation_orders WHERE liquidation_id = $1
-		ORDER BY created_at, symbol, side`, id)
+		ORDER BY created_at, symbol, side, attempt`, id)
 	return collect(rows, err, "liquidation orders", scanLiquidationOrder)
 }
 
 func (r liquidations) AddOrder(ctx context.Context, o ports.LiquidationOrder) error {
 	if _, err := r.q.Exec(ctx, `INSERT INTO liquidation_orders (`+liquidationOrderColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`, o.LiquidationID, o.Symbol, o.Side, o.Quantity,
-		o.QuoteAmount, nullUUID(o.OrderID), o.Status, o.Error, o.CreatedAt); err != nil {
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT DO NOTHING`, o.LiquidationID, o.Symbol,
+		o.Side, o.Attempt, o.Quantity, o.QuoteAmount, nullUUID(o.OrderID), o.Status, o.OrderStatus, o.FilledQuantity, o.FilledQuote,
+		o.Error, o.CreatedAt, o.CreatedAt); err != nil {
 		return fmt.Errorf("insert liquidation order: %w", err)
 	}
 	return nil
 }
 
 func (r liquidations) SetOrder(ctx context.Context, o ports.LiquidationOrder) error {
-	if _, err := r.q.Exec(ctx, `UPDATE liquidation_orders SET order_id = $4, status = $5, error = $6
-		WHERE liquidation_id = $1 AND symbol = $2 AND side = $3`, o.LiquidationID, o.Symbol, o.Side, nullUUID(o.OrderID), o.Status,
-		o.Error); err != nil {
+	tag, err := r.q.Exec(ctx, `UPDATE liquidation_orders SET order_id = $5, status = $6, order_status = $7, filled_quantity = $8,
+		filled_quote = $9, error = $10, updated_at = $11 WHERE liquidation_id = $1 AND symbol = $2 AND side = $3 AND attempt = $4`,
+		o.LiquidationID, o.Symbol, o.Side, o.Attempt, nullUUID(o.OrderID), o.Status, o.OrderStatus, o.FilledQuantity, o.FilledQuote,
+		o.Error, o.UpdatedAt)
+	if err != nil {
 		return fmt.Errorf("update liquidation order: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("update liquidation order %s %s %s %d: no row", o.LiquidationID, o.Symbol, o.Side, o.Attempt)
 	}
 	return nil
 }

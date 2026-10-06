@@ -467,11 +467,9 @@ type Liquidation struct {
 	TotalAsset     decimal.Decimal
 	TotalLiability decimal.Decimal
 	FeeRate        decimal.Decimal
-	// QuoteAsset is what the orders trade against; QuoteMark its free
-	// balance when the current trading step began; Traded what the orders
-	// traded of it.
+	// QuoteAsset is what the orders trade against; Traded what they
+	// executed of it, as the trading service reports their fills.
 	QuoteAsset string
-	QuoteMark  decimal.Decimal
 	Traded     decimal.Decimal
 	// Fee is in the quote asset, FeeUSDT and InsuranceCovered in USDT.
 	Fee              decimal.Decimal
@@ -500,25 +498,59 @@ type AssetAmount struct {
 	Amount decimal.Decimal `json:"amount"`
 }
 
-// LiquidationOrder is a liquidation's market order against HOUSE.
+// LiquidationOrder is a liquidation's market order against HOUSE, the
+// Attempt-th of its pair and side (from 1): the next part of a trade, or
+// another try after one that was refused or executed short (review DD
+// C19 ①).
 type LiquidationOrder struct {
 	LiquidationID string
 	Symbol        string
 	Side          string
-	Quantity      decimal.Decimal
-	QuoteAmount   decimal.Decimal
-	OrderID       string
-	Status        string
-	Error         string
-	CreatedAt     time.Time
+	Attempt       int
+	// A sell's quantity of the base, a buy's amount of the quote.
+	Quantity    decimal.Decimal
+	QuoteAmount decimal.Decimal
+	OrderID     string
+	Status      string
+	// OrderStatus is the trading service's status of the order; Filled
+	// what it executed, final once it is DONE.
+	OrderStatus    string
+	FilledQuantity decimal.Decimal
+	FilledQuote    decimal.Decimal
+	Error          string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
-// States of a liquidation order.
+// States of a liquidation order: PLANNED until the trading service took
+// it (SENT), DONE once it executes no more, REFUSED when the trading
+// service refused it, as it came or later (nothing executed).
 const (
 	OrderPlanned = "PLANNED"
 	OrderSent    = "SENT"
+	OrderDone    = "DONE"
 	OrderRefused = "REFUSED"
 )
+
+// Open reports that the order may still execute.
+func (o LiquidationOrder) Open() bool { return o.Status == OrderPlanned || o.Status == OrderSent }
+
+// OrderState is a liquidation order as the trading service has it.
+type OrderState struct {
+	OrderID        string
+	Status         string
+	FilledQuantity decimal.Decimal
+	FilledQuote    decimal.Decimal
+}
+
+// Final reports that the order executes no more.
+func (s OrderState) Final() bool {
+	switch s.Status {
+	case "FILLED", "CANCELED", "EXPIRED", "REJECTED":
+		return true
+	}
+	return false
+}
 
 // LiquidationRepo stores the liquidations.
 type LiquidationRepo interface {
@@ -536,8 +568,8 @@ type LiquidationRepo interface {
 	// OfUser returns a page of the user's liquidations, newest first,
 	// optionally of one account; before is the previous page's last ID.
 	OfUser(ctx context.Context, userID string, a *domain.Account, before string, limit int) ([]Liquidation, error)
-	// Orders returns a liquidation's orders; AddOrder stores one unless
-	// it is there; SetOrder stores how sending it went.
+	// Orders returns a liquidation's orders, oldest first; AddOrder
+	// stores one unless it is there; SetOrder stores where it stands.
 	Orders(ctx context.Context, id string) ([]LiquidationOrder, error)
 	AddOrder(ctx context.Context, o LiquidationOrder) error
 	SetOrder(ctx context.Context, o LiquidationOrder) error
@@ -549,10 +581,12 @@ type Trading interface {
 	// canceled (the engine's order events tell when).
 	CancelAccount(ctx context.Context, userID string, a domain.Account) error
 	// PlaceLiquidation places a liquidation's market order against HOUSE
-	// and returns its ID; the same order again returns the same ID. A
-	// refusal (the pair halted, a quantity under a lot) is an apperr of
-	// kind Invalid, Conflict or Unprocessable.
-	PlaceLiquidation(ctx context.Context, userID string, a domain.Account, o LiquidationOrder) (string, error)
+	// (its attempt) and returns where it stands; the same order again
+	// reads it again. A refusal, as it came or later (the pair halted, a
+	// quantity under a lot, the engine's rejection), is an apperr of kind
+	// Invalid, Conflict or Unprocessable; any other error says nothing of
+	// the order.
+	PlaceLiquidation(ctx context.Context, userID string, a domain.Account, o LiquidationOrder) (OrderState, error)
 }
 
 // RunRepo records the reconciliation runs.
@@ -631,10 +665,12 @@ type PairInfo struct {
 	Base   string
 	Quote  string
 	Status string
-	// TickDecimals is the price's precision; Lot the quantity's step and
-	// MaxQuantity the most one order may take (0: no bound).
+	// TickDecimals is the price's precision; Lot the quantity's step;
+	// MinQuantity and MaxQuantity the least and the most one order may
+	// take (0: no bound).
 	TickDecimals int32
 	Lot          decimal.Decimal
+	MinQuantity  decimal.Decimal
 	MaxQuantity  decimal.Decimal
 }
 

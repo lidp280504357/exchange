@@ -59,13 +59,15 @@ func TestLiquidationShortfall(t *testing.T) {
 	if b := r.ledger.owed(u, cross, "BTC"); !b.borrowed.IsPositive() {
 		t.Fatalf("the debt left owed %+v", b)
 	}
-	// The fund gets BTC; a minute on, the cover goes through.
+	// The fund gets BTC; a minute on, the cover goes through. The fee came
+	// before the buy (review DD C19 ④): 2% of the 2745.09804 USDT the buy
+	// could spend with it taken.
 	r.ledger.mu.Lock()
 	r.ledger.insurance["BTC"] = d("1")
 	r.ledger.mu.Unlock()
 	pass(2, time.Minute)
 	got, _, err = r.store.Read().Liquidations().Get(ctx, l.ID)
-	if err != nil || got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.IsPositive() || !got.Fee.IsZero() {
+	if err != nil || got.Status != ports.LiquidationCompleted || !got.InsuranceCovered.IsPositive() || !got.Fee.Equal(d("54.90196")) {
 		t.Fatalf("covered %+v %v", got, err)
 	}
 	if b := r.ledger.owed(u, cross, "BTC"); !b.borrowed.IsZero() || !b.interest.IsZero() {

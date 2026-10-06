@@ -19,8 +19,9 @@
 # following it); invariant 5 counts the margin trades. Batch E3: with
 # 50 USDT in, 0.6 SOL bought with AUTO_BORROW, an administrators'
 # liquidation (exchangectl margin liquidate, as an approved request) sells
-# the SOL to HOUSE, repays the loan, charges the 2% fee and frees the
-# account.
+# to HOUSE as much SOL as the loan and the 2% fee need (review DD C19),
+# repays the loan, charges the fee and frees the account with the rest of
+# its SOL.
 # Margin trading stays off for everyone else: the script switches
 # margin.enabled and margin.auto_borrow on for its own user only and puts
 # them back as they were when it ends, also after a failure (the
@@ -248,10 +249,13 @@ check '(.items | length) == 1 and .items[0].account == "MARGIN_CROSS" and .items
 call GET /v1/margin/loans "" "${AUTH[@]}"
 check '.items == []' "nothing owed after it"
 call GET /v1/margin/accounts "" "${AUTH[@]}"
-check '.cross.status == "NORMAL" and .cross.total_liability == "0" and ([.cross.balances[] | select(.asset == "SOL")][0].free // "0" | tonumber) < 0.01' "the account free again, its SOL sold but what is under a lot"
+check '.cross.status == "NORMAL" and .cross.total_liability == "0" and ([.cross.balances[] | select(.asset == "SOL")][0].free // "0" | tonumber) > 0.1' "the account free again with the SOL the debt did not need"
 LEFT=$(jq -r '[.cross.balances[] | select(.asset == "USDT")][0].free' <<<"$BODY")
+SOL_LEFT=$(jq -r '[.cross.balances[] | select(.asset == "SOL")][0].free' <<<"$BODY")
 call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"$LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out5"
 expect 200 - "the $LEFT USDT left after the liquidation back to SPOT"
+call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"SOL\",\"amount\":\"$SOL_LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out6"
+expect 200 - "the $SOL_LEFT SOL left after the liquidation back to SPOT"
 remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger reconcile" | grep -E "TRADE_SETTLE_MATCHES_TRADES|MARGIN_" | sed 's/^/     /'
 echo "ok   the margin trades settle in invariant 5's sums"
 remote "sudo docker compose $COMPOSE_FILES exec -T margin-service /app/exchangectl margin reconcile" | tail -1 | sed 's/^/     /'

@@ -45,6 +45,8 @@ type ledger struct {
 	// received, per asset; insurance is the insurance fund.
 	lent, income, insurance map[string]decimal.Decimal
 	posts                   int
+	// refuse, when set, may refuse a posting before it books.
+	refuse func(p ports.Posting) error
 }
 
 func newLedger() *ledger {
@@ -87,6 +89,11 @@ func (l *ledger) Post(_ context.Context, p ports.Posting) ([]string, error) {
 			return nil, apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict, "key reused")
 		}
 		return make([]string, len(p.Moves)), nil
+	}
+	if l.refuse != nil {
+		if err := l.refuse(p); err != nil {
+			return nil, err
+		}
 	}
 	// Work on copies; commit only when every move passed.
 	spot := map[string]decimal.Decimal{}

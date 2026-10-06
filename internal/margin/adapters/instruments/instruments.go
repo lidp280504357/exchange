@@ -76,6 +76,9 @@ func (c *Client) Pair(ctx context.Context, symbol string) (ports.PairInfo, error
 	if lot, err := decimal.NewFromString(p.GetLotSize()); err == nil {
 		pair.Lot = lot
 	}
+	if fewest, err := decimal.NewFromString(p.GetMinQuantity()); err == nil {
+		pair.MinQuantity = fewest
+	}
 	if most, err := decimal.NewFromString(p.GetMaxQuantity()); err == nil {
 		pair.MaxQuantity = most
 	}

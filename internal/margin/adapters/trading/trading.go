@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/skill/exchange/internal/margin/domain"
 	"github.com/skill/exchange/internal/margin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
@@ -95,11 +97,13 @@ func (c *Client) CancelAccount(ctx context.Context, userID string, a domain.Acco
 }
 
 // PlaceLiquidation places a liquidation's market order (a sell by
-// quantity, a buy by quote amount) and returns the order's ID.
-func (c *Client) PlaceLiquidation(ctx context.Context, userID string, a domain.Account, o ports.LiquidationOrder) (string, error) {
-	body := map[string]string{
+// quantity, a buy by quote amount; its attempt) and returns where it
+// stands; the same order again answers the order as it is now (a
+// rejected one its rejection).
+func (c *Client) PlaceLiquidation(ctx context.Context, userID string, a domain.Account, o ports.LiquidationOrder) (ports.OrderState, error) {
+	body := map[string]any{
 		"liquidation_id": o.LiquidationID, "user_id": userID, "account": string(a.Type), "symbol": o.Symbol, "side": o.Side,
-		"side_effect": string(domain.SideEffectNone),
+		"side_effect": string(domain.SideEffectNone), "attempt": max(o.Attempt, 1),
 	}
 	if o.Side == "SELL" {
 		body["quantity"] = o.Quantity.String()
@@ -107,13 +111,22 @@ func (c *Client) PlaceLiquidation(ctx context.Context, userID string, a domain.A
 		body["quote_amount"] = o.QuoteAmount.String()
 	}
 	var out struct {
-		OrderID string `json:"order_id"`
+		OrderID        string `json:"order_id"`
+		Status         string `json:"status"`
+		FilledQuantity string `json:"filled_quantity"`
+		FilledQuote    string `json:"filled_quote"`
 	}
 	if err := c.post(ctx, "/internal/orders/liquidations", body, &out); err != nil {
-		return "", err
+		return ports.OrderState{}, err
 	}
-	if out.OrderID == "" {
-		return "", apperr.Unavailable(fmt.Errorf("liquidation order of %s: no order_id in the answer", o.LiquidationID))
+	st := ports.OrderState{OrderID: out.OrderID, Status: out.Status}
+	var err error
+	if st.FilledQuantity, err = decimal.NewFromString(out.FilledQuantity); err == nil {
+		st.FilledQuote, err = decimal.NewFromString(out.FilledQuote)
 	}
-	return out.OrderID, nil
+	if out.OrderID == "" || out.Status == "" || err != nil {
+		return ports.OrderState{}, apperr.Unavailable(fmt.Errorf("liquidation order of %s: an answer without its order, status or fills",
+			o.LiquidationID))
+	}
+	return st, nil
 }

@@ -95,15 +95,16 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 触发：监控到强平线连续两轮，且 `margin.liquidation` 对该用户打开（`AUTO`）；或管理员的强平申请经第二人批准后，由 admin-service 调内部接口（`MANUAL`，带 `approval_id`；同一个 `approval_id` 再调返回同一笔强平）。没有负债答 `MARGIN_NOTHING_OWED`（409），已在强平中答 `MARGIN_FROZEN`。
 - 开始时在用户锁内记一行 `liquidations`（`STARTED`），账户改为 `LIQUIDATING`（不能下单、借币、划转），发 `MarginLiquidationStarted`。之后由监控每秒推进，每一步做完就进下一步，重启后从记下的步骤接着做：
   1. `CANCEL`：调交易服务的 `POST /internal/orders/cancel`，直到账户没有冻结；
-  2. `SELL`：账户里每种资产超出它自身负债的部分，按 lot 向下取整，对 HOUSE 发市价卖单换成报价资产（全仓是 USDT，逐仓是该交易对的报价资产），`POST /internal/orders/liquidations`。订单先记进 `liquidation_orders` 再发，发送失败就重发；交易服务按"强平 + 交易对 + 方向"幂等，拒绝的单记为 `REFUSED`，该资产留在账户里。等至少 2 秒、账户没有冻结之后，按报价资产可用余额的变化记成交额；
-  3. `BUY`：还欠的非报价资产不够还时，用报价资产按价格 ×1.02 发市价买单。报价资产先留够它自己的负债，缺口大的先买；
-  4. `FEE`：强平费 = 成交额 × 强平费率（交易对或全仓条款里的 `liquidation_fee`，默认 2%），记在报价资产上，最多收到账户剩下的报价资产为止（`LIQUIDATION_FEE` → `INSURANCE_FUND`，键 `liquidation-fee:<强平ID>`）。金额先存进这一行再记账，重试记同样的数。先收费、再还债、再由基金补（审查 CY 的决定 (b)）；
-  5. `REPAY`：每种资产用账户里的余额还自己的负债，先息后本，记成强平还款（`LIQUIDATION_REPAY`，分录 `MARGIN_LIQUIDATE`，键 `liquidation:<强平ID>:repay:<资产>`）；
-  6. `COVER`：还剩的负债由保险基金 `INSURANCE_FUND` 按该负债币种补足（`INSURANCE_COVER`，同样先息后本）。基金不允许为负，按可借资产分别注资（测试服 2026-10-06 已按各资产借贷池上限的 10% 注资，USDT 沿用合约的保险基金；上线时双人划转）。某资产不够时账本拒绝：强平状态记为 `SHORTFALL`，负债保留，告警 `InsuranceFundShort`；每分钟换一个键重试（`...:cover:<资产>:<n>`），运维给基金注资（`exchangectl ledger insurance-fund --asset <资产>`）后下一次就能完成（审查 CY 的决定 (a)）。对用户仍显示为进行中；
+  2. `SELL`（审查 DD C19 ①②⑤）：只卖够用的——要卖出的报价资产 x 满足"报价资产可用 + x ≥ 报价资产自身负债 + 要买回的 + 强平费率 ×（已卖 + x + 要买回的）"，再多 2%（`sellBuffer`）；"要买回的"见第 4 步。按估值从大到小，从各资产超出它自身负债的部分里卖（按 lot 向上取整到够数，不超过该部分按 lot 向下取整的量，也不超过交易对的单笔上限），对 HOUSE 发市价卖单换成报价资产（全仓是 USDT，逐仓是该交易对的报价资产），`POST /internal/orders/liquidations`，side_effect NONE。
+     订单一轮一轮下：每单先记进 `liquidation_orders`（主键含 `attempt`，迁移 margin 00007）再发；交易服务按"强平 + 交易对 + 方向 + attempt"幂等，同一单再发就读回它现在的状态（`status`、`filled_quantity`、`filled_quote`）。成交了多少只认交易服务报的终态（`FILLED`/`CANCELED`/`EXPIRED`/`REJECTED`，记为 `DONE`；被拒记为 `REFUSED`、成交为 0），不从余额变化推断；交易服务的 403、404 与连不上都不算拒绝，只是等着再读。一轮的单全部终结、账户也没有冻结（账本结算完）之后，按当时的持仓重算还差多少，差就下一轮——同一交易对的下一单是 `attempt + 1`：上一单成交了就立刻下，连续没成交的按 0、2、4、8……秒、最多 1 分钟退避；交易对暂停（`HALT`/`PREPARE`）时不下单，等它恢复。只有不再缺、或剩下的都卖不了（不足一个 lot 或最小数量、交易对不存在或已 `CANCEL_ONLY`/`DELISTED`、同一交易对已下满 1000 单）才进下一步——还能卖的抵押不会交给保险基金；
+  3. `FEE`（审查 DD C19 ④，先于买入）：强平费 = 强平费率 ×（卖出所得 + 将要买入的金额），买入金额取"要买回的"与 (报价资产可用 − 自身负债 − 费率 × 卖出所得) ÷ (1 + 费率) 中较小者；费率取交易对或全仓条款里的 `liquidation_fee`（默认 2%），记在报价资产上，最多收到账户剩下的报价资产为止（`LIQUIDATION_FEE` → `INSURANCE_FUND`，键 `liquidation-fee:<强平ID>`）。金额先存进这一行再记账，重试记同样的数（审查 CY 的决定 (b)：先收费、再还债、再由基金补）；
+  4. `BUY`：还欠的非报价资产（"要买回的"：缺口按 lot 向上取整、至少一单的最小量，按价格 ×1.02 折成报价资产）用收费后剩下的报价资产（先留够报价资产自身的负债）发市价买单，缺口大的先买；订单、终态、`attempt`、退避与暂停同 `SELL`；剩下的报价资产不够买一个最小量时不再买，缺口由基金补；
+  5. `REPAY`：每种资产用账户里的余额还自己的负债，先息后本，记成强平还款（`LIQUIDATION_REPAY`，分录 `MARGIN_LIQUIDATE`，键 `liquidation:<强平ID>:repay:<资产>`，第 n 次再加 `:<n>`）。账本拒绝时按当时的余额与负债重算、换下一个键再还（审查 DD C19 ③）：第一次立刻，之后按同样的退避；
+  6. `COVER`：保险基金 `INSURANCE_FUND` 只补账户还不了的部分（负债 − 可用；某资产账户里还有余额就先回到 `REPAY` 用它还），按该负债币种（`INSURANCE_COVER`，同样先息后本）。基金不允许为负，按可借资产分别注资（测试服 2026-10-06 已按各资产借贷池上限的 10% 注资，USDT 沿用合约的保险基金；上线时双人划转）。某资产不够时账本拒绝：强平状态记为 `SHORTFALL`，负债保留，告警 `InsuranceFundShort`；每分钟换一个键重试（`...:cover:<资产>:<n>`），运维给基金注资（`exchangectl ledger insurance-fund --asset <资产>`）后下一次就能完成（审查 CY 的决定 (a)）。对用户仍显示为进行中；
   7. `SETTLE`：记下各资产还了多少（账户自己还的加上基金补的）、账户剩下什么、基金补了多少（按当时价格折成 USDT），状态 `COMPLETED`。账户回到原来的状态：管理员冻结过的仍是 `FROZEN`，否则 `NORMAL`。最后发 `MarginLiquidationCompleted`。
 - 查询：用户 `GET /v1/margin/liquidations`；后台账户详情的 `liquidations`；`exchangectl margin liquidations [--user ID]` 列出强平，含进行到哪一步、在等什么（`note`）。手工强平（测试与演练用，等同一次已批准的申请）：`exchangectl margin liquidate --user ID --account MARGIN_CROSS|MARGIN_ISOLATED:<交易对>`，在 margin-service 容器里执行。
-- 卖单的数量不超过交易对的单笔上限（每个强平、每个交易对、每个方向只有一单，超过的部分留在账户里，最后由基金补）。
-- 指标与告警：`margin_liquidations_total{trigger}`、`margin_liquidation_oldest_seconds`、`margin_liquidations_shortfall`；告警 `MarginLiquidationStuck`（一笔强平超过 10 分钟没完成，critical）、`InsuranceFundShort`（有强平在等基金，critical）——用 `exchangectl margin liquidations` 看卡在哪一步、在等什么。
+- 卖单的数量不超过交易对的单笔上限，超过的部分在下一轮以下一个 `attempt` 再卖。`SELL`、`BUY` 卡住（交易对长期暂停、HOUSE 不接单）时强平一直等着，`note` 写在等什么，由 `MarginLiquidationStuck` 叫人；监控日志里"a liquidation waits"每分钟至多一条。
+- 指标与告警：`margin_liquidations_total{trigger}`（AUTO、MANUAL 从 0 开始）、`margin_liquidation_oldest_seconds`（不含 `SHORTFALL` 的，那些归 `InsuranceFundShort`）、`margin_liquidations_shortfall`、`margin_liquidations_due_total`；告警 `MarginLiquidationStuck`（一笔强平超过 10 分钟没完成，critical）、`InsuranceFundShort`（有强平在等基金，critical）、`MarginLiquidationDue`（10 分钟内到强平线的账户多于监控自动强平的，即 `margin.liquidation` 对这些用户关着，warning：账户停在 `WARNED`，要么人工强平——后台申请经第二人批准或 `exchangectl margin liquidate`——要么盯着）——用 `exchangectl margin liquidations` 看卡在哪一步、在等什么。
 
 ## 对账
 

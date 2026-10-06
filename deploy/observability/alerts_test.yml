@@ -286,6 +286,30 @@ tests:
               summary: "a margin liquidation has run for 900 seconds (exchangectl margin liquidations shows the step it waits at and why)"
               runbook: docs/runbook/margin.md
 
+  - interval: 1m
+    input_series:
+      # An account at its liquidation level with margin.liquidation off...
+      - series: 'margin_liquidations_due_total{job="margin-service"}'
+        values: '0 0 1 1 1'
+      - series: 'margin_liquidations_total{job="margin-service", trigger="AUTO"}'
+        values: '0 0 0 0 0'
+      # ...and one the monitor liquidated.
+      - series: 'margin_liquidations_due_total{job="margin-service-on"}'
+        values: '0 0 1 1 1'
+      - series: 'margin_liquidations_total{job="margin-service-on", trigger="AUTO"}'
+        values: '0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MarginLiquidationDue
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MarginLiquidationDue
+        exp_alerts:
+          - exp_labels: {severity: warning, job: margin-service}
+            exp_annotations:
+              summary: "margin accounts reached their liquidation level in the last 10 minutes and were not liquidated (margin.liquidation off for their users): they stay WARNED; liquidate them by hand (an approved request in the console, or exchangectl margin liquidate) or watch them"
+              runbook: docs/runbook/margin.md
+
   - interval: 10m
     input_series:
       # An hour finished at 60 s after the epoch; none after it.

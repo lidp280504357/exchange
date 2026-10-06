@@ -42,6 +42,9 @@ type Monitor struct {
 	tracked time.Time
 	hits    map[accountOf]int
 	sent    map[accountOf]sentAccount
+	// waitLogged is when a waiting liquidation was last logged: once a
+	// minute, not every pass (review DD).
+	waitLogged time.Time
 }
 
 type heldAt struct {
@@ -173,7 +176,8 @@ func (m *Monitor) Pass(ctx context.Context) (int, error) {
 			delete(m.held, user)
 		}
 	}
-	if _, err := s.AdvanceLiquidations(ctx); err != nil {
+	if _, err := s.AdvanceLiquidations(ctx); err != nil && now.Sub(m.waitLogged) >= time.Minute {
+		m.waitLogged = now
 		s.Log.WarnContext(ctx, "a liquidation waits", "error", err)
 	}
 	if len(pushes) > 0 && m.Pushes != nil {
