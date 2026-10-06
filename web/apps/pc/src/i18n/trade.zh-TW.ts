@@ -21,7 +21,7 @@ export default {
       transfer: "劃轉",
       borrow: "借幣",
       repay: "還幣",
-      liquidation: "強平價 {{price}}",
+      liquidationPrice: "強平價（估算）",
       accountLabel: "帳戶",
       borrowable: "可借",
     },

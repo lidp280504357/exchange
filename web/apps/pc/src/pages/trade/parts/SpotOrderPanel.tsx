@@ -8,14 +8,14 @@ import { useMaxBorrowable } from "@exchange/core/margin/hooks";
 import {
   afterMarginOrder, freezeAsset, tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount,
 } from "@exchange/core/margin/trade";
-import { Checkbox, Dialog, KeyValue, OrderForm, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
+import { Checkbox, cn, Dialog, KeyValue, OrderForm, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
 import { MarginDialog } from "../../assets/parts/lazyMargin";
 import { ORDER_FORM_ID } from "./EmptyList";
-import { MarginBar } from "./MarginBar";
+import { MarginBar, MarginInfo } from "./MarginBar";
 
 type Balance = { account_type: string; asset: string; available: string };
 
@@ -148,8 +148,9 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
     void send(order);
   };
 
+  // 12 px insets in every account, as the futures panel's (B120).
   return (
-    <div id={ORDER_FORM_ID} className={className}>
+    <div id={ORDER_FORM_ID} className={cn("flex flex-col gap-3 p-3", className)}>
       {signedIn && marginOpen && (support.cross || support.isolated) && (
         <MarginBar
           account={account}
@@ -157,9 +158,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
           effect={effect}
           onEffect={(e) => setPrefs({ sideEffect: e })}
           trade={margin}
-          priceDecimals={pair.price_decimals}
           onAct={setAct}
-          borrowable={{ asset: spends, amount: borrowable.data?.amount, decimals: side === "SELL" ? baseDecimals : quoteDecimals }}
         />
       )}
       <OrderForm
@@ -177,12 +176,20 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
         onDeposit={account === "SPOT" ? () => navigate(routes.deposit) : () => setAct("transfer")}
         depositLabel={account === "SPOT" ? undefined : t("pcTrade.margin.transfer")}
         availableLabel={account !== "SPOT" && effect === "AUTO_BORROW" ? t("pcTrade.margin.withBorrow") : undefined}
+        info={
+          <MarginInfo
+            account={account}
+            trade={margin}
+            priceDecimals={pair.price_decimals}
+            borrowable={{ asset: spends, amount: borrowable.data?.amount, decimals: side === "SELL" ? baseDecimals : quoteDecimals }}
+          />
+        }
         fill={fill}
         resetKey={resetKey}
         baseDecimals={baseDecimals}
         quoteDecimals={quoteDecimals}
       />
-      {!tradable(pair.status) && <p className="px-4 pb-3 text-xs text-warn">{t("pcTrade.notTrading")}</p>}
+      {!tradable(pair.status) && <p className="text-xs text-warn">{t("pcTrade.notTrading")}</p>}
       {act && (
         <Suspense fallback={null}>
           <MarginDialog

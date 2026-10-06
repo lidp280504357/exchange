@@ -165,46 +165,27 @@ export function SpotOrderSheet({
                   ...(support.isolated ? [{ value: "MARGIN_ISOLATED", label: t("mTrade.margin.isolated") }] : []),
                 ]}
               />
+              {/* One row, as Binance's (B120): the leverage, the side effect and the
+                  dialogs; what it may borrow and the margin level go under the
+                  form, beside the available balance. */}
               {account !== "SPOT" && margin.terms && (
-                <>
-                  <div className="flex items-center gap-2">
-                    <Badge tone="brand" size="sm">
-                      {margin.owner?.leverage ?? margin.terms.leverage}x
-                    </Badge>
-                    {margin.pending ? (
-                      <Skeleton className="h-5 flex-1" />
-                    ) : (
-                      <MarginLevel
-                        level={margin.owner?.margin_level ?? null}
-                        warn={margin.owner?.warn_level ?? margin.terms.warn_level}
-                        liquidation={margin.owner?.liquidation_level ?? margin.terms.liquidation_level}
-                        size="sm"
-                        compact
-                        className="flex-1"
-                      />
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-fg-3">{t("mTrade.margin.borrowable")}</span>
-                    <span className="tabular-nums text-fg-1" data-testid="margin-borrowable">
-                      {borrowable.data ? formatAmount(borrowable.data.amount, side === "SELL" ? baseDecimals : quoteDecimals) : "—"} {spends}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="-ml-3 flex items-center">
-                      <TextButton onClick={() => setAct("transfer")}>{t("mTrade.margin.transfer")}</TextButton>
-                      <TextButton onClick={() => setAct("borrow")}>{t("mTrade.margin.borrow")}</TextButton>
-                      <TextButton onClick={() => setAct("repay")}>{t("mTrade.margin.repay")}</TextButton>
-                    </span>
-                    <Select
-                      size="lg"
-                      value={effect}
-                      onValueChange={(v) => setPrefs({ sideEffect: v as SideEffect })}
-                      aria-label={t("mTrade.margin.effect")}
-                      options={(["NONE", "AUTO_BORROW", "AUTO_REPAY"] as const).map((e) => ({ value: e, label: t(`mTrade.margin.effects.${e}`) }))}
-                    />
-                  </div>
-                </>
+                <div className="flex flex-wrap items-center gap-x-2">
+                  <Badge tone="brand" size="sm">
+                    {margin.owner?.leverage ?? margin.terms.leverage}x
+                  </Badge>
+                  <Select
+                    size="lg"
+                    value={effect}
+                    onValueChange={(v) => setPrefs({ sideEffect: v as SideEffect })}
+                    aria-label={t("mTrade.margin.effect")}
+                    options={(["NONE", "AUTO_BORROW", "AUTO_REPAY"] as const).map((e) => ({ value: e, label: t(`mTrade.margin.effects.${e}`) }))}
+                  />
+                  <span className="-mr-3 ml-auto flex items-center">
+                    <TextButton onClick={() => setAct("transfer")}>{t("mTrade.margin.transfer")}</TextButton>
+                    <TextButton onClick={() => setAct("borrow")}>{t("mTrade.margin.borrow")}</TextButton>
+                    <TextButton onClick={() => setAct("repay")}>{t("mTrade.margin.repay")}</TextButton>
+                  </span>
+                </div>
               )}
             </div>
           )}
@@ -228,6 +209,29 @@ export function SpotOrderSheet({
             onDeposit={account === "SPOT" ? () => navigate(routes.deposit) : () => setAct("transfer")}
             depositLabel={account === "SPOT" ? undefined : t("mTrade.margin.transfer")}
             availableLabel={account !== "SPOT" && effect === "AUTO_BORROW" ? t("mTrade.margin.withBorrow") : undefined}
+            info={
+              account !== "SPOT" && margin.terms ? (
+                <div className="flex flex-col gap-1.5" data-testid="margin-info">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-fg-3">{t("mTrade.margin.borrowable")}</span>
+                    <span className="tabular-nums text-fg-1" data-testid="margin-borrowable">
+                      {borrowable.data ? formatAmount(borrowable.data.amount, side === "SELL" ? baseDecimals : quoteDecimals) : "—"} {spends}
+                    </span>
+                  </div>
+                  {margin.pending ? (
+                    <Skeleton className="h-8" />
+                  ) : (
+                    <MarginLevel
+                      level={margin.owner?.margin_level ?? null}
+                      warn={margin.owner?.warn_level ?? margin.terms.warn_level}
+                      liquidation={margin.owner?.liquidation_level ?? margin.terms.liquidation_level}
+                      size="sm"
+                      compact
+                    />
+                  )}
+                </div>
+              ) : undefined
+            }
             fill={fill}
             resetKey={resetKey}
             baseDecimals={baseDecimals}

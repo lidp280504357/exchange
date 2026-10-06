@@ -316,14 +316,42 @@ try {
     await marginTransfer("OUT", "10", "已划出 10 USDT");
     ok("10 USDT moves into the cross margin account from its dialog, shows in its coins (pushed on the margin channel) and in the assets overview's total, and moves back");
     // The spot terminal trades from the cross account once chosen above
-    // the order form, with its margin level; back to spot afterwards.
+    // the order form, its borrowable amount and margin level under the
+    // form; back to spot afterwards. The bar and the form keep the panel's
+    // 12 px insets on both sides in each account (B120: the spot form was
+    // flush with the panel's edges).
     await go("/trade/BTC-USDT");
     await page.waitForSelector('[data-testid="margin-bar"]', { visible: true, timeout: 20000 });
+    const insets = () =>
+      page.evaluate(() => {
+        const panel = document.getElementById("order-form");
+        const box = panel.getBoundingClientRect();
+        const left = box.left + panel.clientLeft;
+        const right = left + panel.clientWidth;
+        const of = (el) => {
+          const r = el.getBoundingClientRect();
+          return [Math.round(r.left - left), Math.round(right - r.right)];
+        };
+        return {
+          bar: of(document.querySelector('[data-testid="margin-bar"] > :first-child')),
+          side: of(document.querySelector("#order-form form > :first-child")),
+          submit: of(document.querySelector('#order-form button[type="submit"]')),
+        };
+      });
+    const spotInsets = await insets();
     await clickButton("全仓", '[data-testid="margin-bar"]');
-    await page.waitForSelector('[data-testid="margin-bar"] [data-testid="margin-level"]', { visible: true, timeout: 10000 });
+    await page.waitForSelector('#order-form [data-testid="margin-info"] [data-testid="margin-level"]', { visible: true, timeout: 10000 });
+    await page.waitForSelector('#order-form [data-testid="margin-info"] [data-testid="margin-borrowable"]', { visible: true, timeout: 10000 });
+    const crossInsets = await insets();
+    await shot("5b-margin-cross");
     await clickButton("现货", '[data-testid="margin-bar"]');
-    await page.waitForSelector('[data-testid="margin-bar"] [data-testid="margin-level"]', { hidden: true, timeout: 10000 });
-    ok("the spot terminal switches its order form to the cross margin account and back");
+    await page.waitForSelector('[data-testid="margin-info"]', { hidden: true, timeout: 10000 });
+    for (const [state, m] of [["spot", spotInsets], ["cross", crossInsets]]) {
+      for (const [part, [l, r]] of Object.entries(m)) {
+        if (l !== 12 || r !== 12) throw new Error(`the ${part} of the ${state} order form is ${l} px from the left and ${r} px from the right, not 12: ${JSON.stringify({ spotInsets, crossInsets })}`);
+      }
+    }
+    ok("the spot terminal switches its order form to the cross margin account and back, 12 px from both edges in each, the margin level and borrowable amount under the form");
   }
   await shot("5b-margin");
 

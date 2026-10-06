@@ -55,6 +55,11 @@ export type OrderFormProps = {
   /** The balance line's label (default "可用"; with AUTO_BORROW "可用（含可借）"). */
   availableLabel?: ReactNode;
   /**
+   * The account's own lines under the balance (a margin account's
+   * borrowable amount and margin level, as Binance shows them, B120).
+   */
+  info?: ReactNode;
+  /**
    * A price (and optionally a quantity) picked in the order book: pass a new
    * object on every pick and the form takes it.
    */
@@ -80,7 +85,7 @@ export type OrderFormProps = {
  */
 export function OrderForm({
   side, onSideChange, type, onTypeChange, pair, available, lastPrice, onSubmit, submitting, signedIn, onSignIn, onDeposit, depositLabel,
-  availableLabel, fill, resetKey, baseDecimals = 8, quoteDecimals = 8, hideSideSwitch, submitLabel, className,
+  availableLabel, info, fill, resetKey, baseDecimals = 8, quoteDecimals = 8, hideSideSwitch, submitLabel, className,
 }: OrderFormProps) {
   const { t } = useTranslation();
   const [price, setPrice] = useState("");
@@ -307,6 +312,7 @@ export function OrderForm({
             )}
           </span>
         </div>
+        {info}
         {!byTotal && (
           <div className="flex items-center justify-between gap-2">
             <span className="text-fg-3">{buy ? t("ui.order.maxBuy") : t("ui.order.maxSell")}</span>
