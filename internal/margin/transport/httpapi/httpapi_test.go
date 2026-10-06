@@ -1,0 +1,438 @@
+package httpapi_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+
+	"github.com/skill/exchange/internal/margin/adapters/postgres"
+	"github.com/skill/exchange/internal/margin/application"
+	"github.com/skill/exchange/internal/margin/domain"
+	"github.com/skill/exchange/internal/margin/ports"
+	"github.com/skill/exchange/internal/margin/transport/httpapi"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+)
+
+func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
+
+// ledger books what it is given on in-memory balances: enough of the
+// ledger for the handlers' answers (the application tests check the
+// postings' rules).
+type ledger struct {
+	mu       sync.Mutex
+	spot     map[string]map[string]decimal.Decimal
+	holdings map[string]map[domain.Account]map[string]*domain.Holding
+	keys     map[string][]string
+}
+
+func (l *ledger) fund(user, asset string, amount decimal.Decimal) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.spot[user] == nil {
+		l.spot[user] = map[string]decimal.Decimal{}
+	}
+	l.spot[user][asset] = l.spot[user][asset].Add(amount)
+}
+
+func (l *ledger) Post(_ context.Context, p ports.Posting) ([]string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if j, ok := l.keys[p.IdemKey]; ok {
+		return j, nil
+	}
+	if l.holdings[p.UserID] == nil {
+		l.holdings[p.UserID] = map[domain.Account]map[string]*domain.Holding{}
+	}
+	if l.holdings[p.UserID][p.Account] == nil {
+		l.holdings[p.UserID][p.Account] = map[string]*domain.Holding{}
+	}
+	acct := l.holdings[p.UserID][p.Account]
+	journals := make([]string, 0, len(p.Moves))
+	for _, m := range p.Moves {
+		h := acct[m.Asset]
+		if h == nil {
+			h = &domain.Holding{Asset: m.Asset}
+			acct[m.Asset] = h
+		}
+		switch m.Type {
+		case domain.MoveTransferIn:
+			if l.spot[p.UserID][m.Asset].LessThan(m.Amount) {
+				return nil, apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient spot")
+			}
+			l.spot[p.UserID][m.Asset] = l.spot[p.UserID][m.Asset].Sub(m.Amount)
+			h.Free = h.Free.Add(m.Amount)
+		case domain.MoveTransferOut:
+			h.Free = h.Free.Sub(m.Amount)
+			l.spot[p.UserID][m.Asset] = l.spot[p.UserID][m.Asset].Add(m.Amount)
+		case domain.MoveBorrow:
+			h.Free, h.Borrowed = h.Free.Add(m.Amount), h.Borrowed.Add(m.Amount)
+		case domain.MoveInterest:
+			h.Interest = h.Interest.Add(m.Amount)
+		case domain.MoveRepay, domain.MoveLiquidationRepay:
+			h.Free, h.Interest, h.Borrowed = h.Free.Sub(m.Amount), h.Interest.Sub(m.Interest), h.Borrowed.Sub(m.Amount.Sub(m.Interest))
+		default:
+			return nil, apperr.Invalid("not booked here: " + string(m.Type))
+		}
+		journals = append(journals, uuid.Must(uuid.NewV7()).String())
+	}
+	l.keys[p.IdemKey] = journals
+	return journals, nil
+}
+
+func (l *ledger) Accrue(context.Context, string, string, string, []ports.Accrual) (string, error) {
+	return "", apperr.Invalid("no interest runs here")
+}
+
+func (l *ledger) Holdings(_ context.Context, userID string) (map[domain.Account][]domain.Holding, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := map[domain.Account][]domain.Holding{}
+	for a, assets := range l.holdings[userID] {
+		for _, h := range assets {
+			out[a] = append(out[a], *h)
+		}
+	}
+	return out, nil
+}
+
+func (l *ledger) Debts(context.Context) ([]ports.Debt, error) { return nil, nil }
+
+type prices struct{}
+
+func (prices) Prices() domain.Prices {
+	return domain.Prices{"BTC": {Value: d("30000"), Fresh: true}, "ETH": {Value: d("2000"), Fresh: true}}
+}
+
+// instruments knows every asset (8 decimals, USDT 6) and every pair.
+type instruments struct{}
+
+func (instruments) Decimals(_ context.Context, asset string) (int32, error) {
+	if asset == "USDT" {
+		return 6, nil
+	}
+	return 8, nil
+}
+
+func (instruments) Pair(_ context.Context, symbol string) (ports.PairInfo, error) {
+	base, quote, ok := strings.Cut(symbol, "-")
+	if !ok {
+		return ports.PairInfo{}, apperr.NotFound("no such pair")
+	}
+	return ports.PairInfo{Symbol: symbol, Base: base, Quote: quote, Status: "TRADING", TickDecimals: 2, Lot: d("0.0001")}, nil
+}
+
+type eligible struct{}
+
+func (eligible) Check(context.Context, string, string, string) (bool, string, error) {
+	return true, "", nil
+}
+
+type allOn struct{}
+
+func (allOn) Enabled(string, flags.Subject) bool { return true }
+
+type trading struct{}
+
+func (trading) CancelAccount(context.Context, string, domain.Account) error { return nil }
+
+func (trading) PlaceLiquidation(context.Context, string, domain.Account, ports.LiquidationOrder) (ports.OrderState, error) {
+	return ports.OrderState{}, apperr.Unavailable(fmt.Errorf("no trading service here"))
+}
+
+// api is margin-service's HTTP endpoints over the margin schema on the
+// test database, its terms the repository's seed.
+type api struct {
+	t      *testing.T
+	srv    *httptest.Server
+	store  *postgres.Store
+	ledger *ledger
+}
+
+func newAPI(t *testing.T) *api {
+	t.Helper()
+	ctx := context.Background()
+	db := testenv.Postgres(t)
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := migrate.UpPlatform(ctx, db, log); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, db, os.DirFS("../../../../migrations/margin"), log); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.NewStore(db, event.NewFactory("margin-service", "test"))
+	f, err := os.Open("../../../../deploy/instruments/margin.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	file, err := application.ReadTermsFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := file.Terms()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.ApplyTerms(ctx, store, seed, application.ApplyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	l := &ledger{
+		spot: map[string]map[string]decimal.Decimal{}, holdings: map[string]map[domain.Account]map[string]*domain.Holding{},
+		keys: map[string][]string{},
+	}
+	svc := &application.Service{
+		Store: store, Ledger: l, Prices: prices{}, Instruments: instruments{}, Eligibility: eligible{}, Features: allOn{},
+		Trading: trading{}, Log: log, Now: time.Now,
+	}
+	r := chi.NewRouter()
+	h := &httpapi.Handler{Svc: svc}
+	h.Routes(r)
+	h.InternalRoutes(r)
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+	return &api{t: t, srv: srv, store: store, ledger: l}
+}
+
+// do sends a request and returns the status and the decoded body; headers
+// go in pairs.
+func (a *api) do(method, path, body string, headers ...string) (int, map[string]any) {
+	a.t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), method, a.srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		a.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		a.t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		a.t.Fatal(err)
+	}
+	out := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			a.t.Fatalf("%s %s: %s", method, path, raw)
+		}
+	}
+	return resp.StatusCode, out
+}
+
+// expect checks an answer's status and, for an error, its code.
+func expect(t *testing.T, what string, status int, body map[string]any, want int, code string) {
+	t.Helper()
+	if status != want || (code != "" && body["code"] != code) {
+		t.Fatalf("%s: %d %v, want %d %s", what, status, body, want, code)
+	}
+}
+
+func item(body map[string]any, key, value string) map[string]any {
+	items, _ := body["items"].([]any)
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok && m[key] == value {
+			return m
+		}
+	}
+	return nil
+}
+
+// TestUserEndpoints checks the user endpoints (api/openapi/margin.yaml):
+// the terms public, the rest only with the caller's identity; requests
+// read strictly; a transfer, a borrow and a repayment of ALL answered
+// with the contract's fields, a write repeated with its key answered as
+// the first time; a liquidation waiting for the insurance fund shown to
+// its user as under way.
+func TestUserEndpoints(t *testing.T) {
+	a := newAPI(t)
+	user := uuid.Must(uuid.NewV7()).String()
+	a.ledger.fund(user, "USDT", d("1000"))
+	as := []string{"X-User-Id", user}
+	with := func(key string) []string { return append(append([]string{}, as...), "Idempotency-Key", key) }
+
+	st, body := a.do("GET", "/v1/margin/assets", "")
+	expect(t, "the assets", st, body, 200, "")
+	usdt := item(body, "asset", "USDT")
+	if usdt == nil || usdt["haircut"] != "1" || usdt["interest_model"] != "FIXED" || usdt["borrowable"] != true {
+		t.Fatalf("USDT %v", usdt)
+	}
+	if f, ok := usdt["floating"].(map[string]any); !ok || f["kink"] != "0.8" {
+		t.Fatalf("USDT's floating curve %v", usdt["floating"])
+	}
+	st, body = a.do("GET", "/v1/margin/pairs", "")
+	expect(t, "the pairs", st, body, 200, "")
+	if p := item(body, "symbol", "BTC-USDT"); p == nil || p["isolated"] != true {
+		t.Fatalf("BTC-USDT %v", p)
+	}
+
+	st, body = a.do("GET", "/v1/margin/accounts", "")
+	expect(t, "without the caller", st, body, 401, apperr.CodeUnauthorized)
+	for _, c := range []struct{ what, body string }{
+		{"a direction", `{"direction":"SIDEWAYS","account":"MARGIN_CROSS","asset":"USDT","amount":"10"}`},
+		{"an isolated account without its pair", `{"direction":"IN","account":"MARGIN_ISOLATED","asset":"USDT","amount":"10"}`},
+		{"an amount", `{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"1x"}`},
+		{"an unknown field", `{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"10","memo":"x"}`},
+	} {
+		st, body = a.do("POST", "/v1/margin/transfer", c.body, with("bad")...)
+		expect(t, "a transfer with a bad "+c.what, st, body, 400, apperr.CodeInvalidArgument)
+	}
+	in := `{"direction":"IN","account":"MARGIN_CROSS","asset":"usdt","amount":"500"}`
+	st, body = a.do("POST", "/v1/margin/transfer", in, as...)
+	expect(t, "a transfer without a key", st, body, 400, "")
+	st, body = a.do("POST", "/v1/margin/transfer", in, with("in-1")...)
+	expect(t, "500 USDT in", st, body, 200, "")
+	if body["direction"] != "IN" || body["account"] != "MARGIN_CROSS" || body["symbol"] != nil || body["asset"] != "USDT" ||
+		body["amount"] != "500" || body["transfer_id"] == "" {
+		t.Fatalf("the transfer %v", body)
+	}
+	first := body["transfer_id"]
+	st, body = a.do("POST", "/v1/margin/transfer", in, with("in-1")...)
+	expect(t, "the same transfer again", st, body, 200, "")
+	if body["transfer_id"] != first {
+		t.Fatalf("a repeat answered %v, first %v", body["transfer_id"], first)
+	}
+
+	st, body = a.do("POST", "/v1/margin/borrow", `{"account":"MARGIN_CROSS","asset":"USDT","amount":"100"}`, with("b-1")...)
+	expect(t, "a borrow", st, body, 200, "")
+	// The first hour's interest at 0.001% an hour is charged as it is lent.
+	if body["principal"] != "100" || body["interest"] != "0.001" || body["interest_model"] != "FIXED" || body["symbol"] != nil {
+		t.Fatalf("the loan %v", body)
+	}
+	st, body = a.do("GET", "/v1/margin/max-borrowable?account=MARGIN_CROSS&asset=USDT", "", as...)
+	expect(t, "what may still be borrowed", st, body, 200, "")
+	if body["asset"] != "USDT" || body["amount"] == "" || body["limited_by"] == "" {
+		t.Fatalf("max-borrowable %v", body)
+	}
+	st, body = a.do("GET", "/v1/margin/loans?symbol=BTC-USDT", "", as...)
+	expect(t, "loans of a pair without the account", st, body, 400, apperr.CodeInvalidArgument)
+	st, body = a.do("GET", "/v1/margin/loans", "", as...)
+	expect(t, "the loans", st, body, 200, "")
+	if l := item(body, "asset", "USDT"); l == nil || l["principal"] != "100" {
+		t.Fatalf("the loans %v", body)
+	}
+	st, body = a.do("POST", "/v1/margin/repay", `{"account":"MARGIN_CROSS","asset":"USDT","amount":"ALL"}`, with("r-1")...)
+	expect(t, "repaying ALL", st, body, 200, "")
+	loan, _ := body["loan"].(map[string]any)
+	if body["interest_repaid"] != "0.001" || body["principal_repaid"] != "100" || loan["principal"] != "0" || loan["interest"] != "0" {
+		t.Fatalf("the repayment %v", body)
+	}
+	st, body = a.do("GET", "/v1/margin/accounts", "", as...)
+	expect(t, "the accounts", st, body, 200, "")
+	cross, _ := body["cross"].(map[string]any)
+	if cross["status"] != "NORMAL" || cross["total_liability"] != "0" || cross["margin_level"] != nil {
+		t.Fatalf("the cross account %v", cross)
+	}
+
+	// A liquidation waiting for the insurance fund is under way for its
+	// user; the console sees SHORTFALL.
+	now := time.Now()
+	l := ports.Liquidation{
+		ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Account: domain.Cross(), Trigger: ports.TriggerAuto,
+		Status: ports.LiquidationShortfall, Step: application.StepCover, PriorStatus: domain.StatusNormal, TotalAsset: d("90"),
+		TotalLiability: d("100"), FeeRate: d("0.02"), QuoteAsset: "USDT", Traded: decimal.Zero, Fee: decimal.Zero,
+		FeeUSDT: decimal.Zero, InsuranceCovered: decimal.Zero, StartedAt: now, StepAt: now,
+	}
+	if err := a.store.Tx(context.Background(), func(r ports.Repos) error { return r.Liquidations().Insert(context.Background(), l) }); err != nil {
+		t.Fatal(err)
+	}
+	st, body = a.do("GET", "/v1/margin/liquidations", "", as...)
+	expect(t, "the liquidations", st, body, 200, "")
+	if got := item(body, "liquidation_id", l.ID); got == nil || got["status"] != "STARTED" || got["completed_at"] != nil {
+		t.Fatalf("the liquidation for its user %v", body)
+	}
+	st, body = a.do("GET", "/internal/margin/accounts/"+user+"/MARGIN_CROSS", "")
+	expect(t, "the account in the console", st, body, 200, "")
+	liqs, _ := body["liquidations"].([]any)
+	if len(liqs) != 1 || liqs[0].(map[string]any)["status"] != "SHORTFALL" {
+		t.Fatalf("the liquidation in the console %v", body["liquidations"])
+	}
+}
+
+// TestInternalEndpoints checks the console's endpoints (admin-service on
+// the compose network): not served to a request that came through the
+// gateway; writes name their administrator; a change over a version that
+// moved refused; a freeze with its reason and back.
+func TestInternalEndpoints(t *testing.T) {
+	a := newAPI(t)
+	admin := []string{"X-Admin-Id", "ops@example.com"}
+
+	st, body := a.do("GET", "/internal/margin/settings", "", "X-User-Id", uuid.Must(uuid.NewV7()).String())
+	expect(t, "through the gateway", st, body, 404, apperr.CodeNotFound)
+	st, body = a.do("GET", "/internal/margin/settings", "")
+	expect(t, "the settings", st, body, 200, "")
+	cross, _ := body["cross"].(map[string]any)
+	if body["updated_by"] != "" || cross["leverage"] != float64(3) || cross["liquidation_fee"] != "0.02" {
+		t.Fatalf("the settings %v", body)
+	}
+
+	st, body = a.do("GET", "/internal/margin/assets", "")
+	expect(t, "the assets", st, body, 200, "")
+	btc := item(body, "asset", "BTC")
+	if btc == nil || btc["updated_by"] != "" {
+		t.Fatalf("BTC %v", btc)
+	}
+	version := int64(btc["version"].(float64))
+	put := func(v int64) string {
+		return fmt.Sprintf(`{"borrowable":true,"collateral":true,"haircut":"0.9","pool_cap":"20","user_cap":"2","interest_model":"FIXED",
+			"fixed_rate":"0.000005","float_base":"0.000005","float_kink":"0.8","float_kink_rate":"0.00003","float_max_rate":"0.0001",
+			"expected_version":%d}`, v)
+	}
+	st, body = a.do("PUT", "/internal/margin/assets/BTC", put(version), "")
+	expect(t, "a change without its administrator", st, body, 400, apperr.CodeInvalidArgument)
+	st, body = a.do("PUT", "/internal/margin/assets/BTC", put(version+1), admin...)
+	expect(t, "a change over a version that moved", st, body, 409, "MARGIN_PARAMS_CHANGED")
+	st, body = a.do("PUT", "/internal/margin/assets/BTC", put(version), admin...)
+	expect(t, "BTC's haircut to 0.9", st, body, 200, "")
+	if body["haircut"] != "0.9" || body["updated_by"] != "ops@example.com" || int64(body["version"].(float64)) != version+1 {
+		t.Fatalf("BTC after %v", body)
+	}
+
+	user := uuid.Must(uuid.NewV7()).String()
+	a.ledger.fund(user, "USDT", d("100"))
+	st, body = a.do("POST", "/v1/margin/transfer", `{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"100"}`,
+		"X-User-Id", user, "Idempotency-Key", "in")
+	expect(t, "100 USDT in", st, body, 200, "")
+	path := "/internal/margin/accounts/" + user + "/MARGIN_CROSS"
+	st, body = a.do("POST", path+"/freeze", `{"reason":" "}`, admin...)
+	expect(t, "a freeze without a reason", st, body, 400, apperr.CodeInvalidArgument)
+	st, body = a.do("POST", "/internal/margin/accounts/not-a-user/MARGIN_CROSS/freeze", `{"reason":"checks"}`, admin...)
+	expect(t, "a freeze of no user", st, body, 400, apperr.CodeInvalidArgument)
+	st, body = a.do("POST", path+"/freeze", `{"reason":"checks"}`, admin...)
+	expect(t, "a freeze", st, body, 200, "")
+	if body["status"] != "FROZEN" || body["frozen_by"] != "ops@example.com" || body["frozen_reason"] != "checks" {
+		t.Fatalf("frozen %v", body)
+	}
+	st, body = a.do("POST", "/v1/margin/borrow", `{"account":"MARGIN_CROSS","asset":"USDT","amount":"10"}`,
+		"X-User-Id", user, "Idempotency-Key", "b")
+	expect(t, "a borrow while frozen", st, body, 409, "MARGIN_FROZEN")
+	st, body = a.do("POST", path+"/unfreeze", "", admin...)
+	expect(t, "an unfreeze", st, body, 200, "")
+	if body["status"] != "NORMAL" || body["frozen_by"] != nil {
+		t.Fatalf("unfrozen %v", body)
+	}
+	st, body = a.do("POST", path+"/liquidate", `{"approval_id":"approved"}`, admin...)
+	expect(t, "a liquidation without an approval's ID", st, body, 400, apperr.CodeInvalidArgument)
+	st, body = a.do("POST", path+"/liquidate", fmt.Sprintf(`{"approval_id":%q}`, uuid.Must(uuid.NewV7()).String()), admin...)
+	expect(t, "a liquidation of an account owing nothing", st, body, 409, "MARGIN_NOTHING_OWED")
+}
