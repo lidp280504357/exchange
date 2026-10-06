@@ -179,13 +179,14 @@ try {
       20000,
       "ACCOUNT push of the cross account holding the 10 USDT",
     );
-    // The assets overview counts the margin accounts (B102): their tile shows the 10 USDT.
+    // The assets overview counts the margin accounts (B102): their tile shows
+    // the 10 USDT (the amount may run into its unit: "10.00USDT").
     await go("/assets");
-    await page.waitForFunction((sel) => /\b10\.00\b/.test(document.querySelector(sel)?.innerText ?? ""), { timeout: 20000 }, '[data-testid="margin-entry"]');
+    await page.waitForFunction((sel) => /(^|[^\d.,])10\.00(?!\d)/.test(document.querySelector(sel)?.innerText ?? ""), { timeout: 20000 }, '[data-testid="margin-entry"]');
     await go("/assets/margin");
     await page.waitForSelector('[data-testid="margin-account-MARGIN_CROSS"]', { visible: true, timeout: 20000 });
     await marginTransfer("OUT", "10", "已划出 10 USDT");
-    ok("10 USDT moves into the cross margin account from its sheet, shows in its coins (pushed on the margin channel), and moves back");
+    ok("10 USDT moves into the cross margin account from its sheet, shows in its coins (pushed on the margin channel) and in the assets overview's total, and moves back");
     // The order sheet trades from the cross account once chosen above the
     // form, with its margin level and what it may borrow; back to spot.
     await go("/trade/BTC-USDT");
