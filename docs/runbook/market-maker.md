@@ -57,7 +57,16 @@
 
 ## 配置
 
-`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，代码默认值按设计稿 §8.6：20000、100000、1000000、100000、1000）与 `HOUSE_CONTRACT_LEVERAGE`（倍数，默认 10）覆盖（`HOUSE_BACKED_ASSETS` 已取消，见上）；启动日志 `house liquidity caps` 打出生效的值。**测试服**因为所有订单都由 HOUSE 接（2026-10-02），在 compose 里把单资产上限设为 2,000,000、现货合计 20,000,000、单合约 5,000,000（单档与保留额不变）：按设计默认值，一个用户 125 倍开 2 BTC 就能占满 BTC-USDT-PERP 一侧，HOUSE 持有的 0.24 BTC 也只够全体用户买 0.23 BTC。用户 2026-10-07（04:4x）决定测试服的单档、单资产/交易对、单合约、合计四项全部 500,000,000 USDT（compose 已改；后台可调的运行时额度是 C45）：现货实际受 HOUSE 的库存限制，合约受它的合约保证金（`house.sh seed`）的 10 倍限制。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
+`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，代码默认值按设计稿 §8.6：20000、100000、1000000、100000、1000）与 `HOUSE_CONTRACT_LEVERAGE`（倍数，默认 10）覆盖（`HOUSE_BACKED_ASSETS` 已取消，见上）——C45 起它们只是第一次启动时存入库里的第 1 版，之后以库里的运行时额度为准（见「运行时额度」）；启动日志 `house liquidity caps` 打出生效的值。**测试服**因为所有订单都由 HOUSE 接（2026-10-02），在 compose 里把单资产上限设为 2,000,000、现货合计 20,000,000、单合约 5,000,000（单档与保留额不变）：按设计默认值，一个用户 125 倍开 2 BTC 就能占满 BTC-USDT-PERP 一侧，HOUSE 持有的 0.24 BTC 也只够全体用户买 0.23 BTC。用户 2026-10-07（04:4x）决定测试服的单档、单资产/交易对、单合约、合计四项全部 500,000,000 USDT（compose 已改；后台可调的运行时额度是 C45）：现货实际受 HOUSE 的库存限制，合约受它的合约保证金（`house.sh seed`）的 10 倍限制。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
+
+## 运行时额度（用户决定 2026-10-07，C45）
+
+- 生效的额度存在库里（schema `marketmaker`：`house_caps` 一行，`house_caps_changes` 记每次改动的新值、旧值、操作人、批准人、审批号与原因；迁移 marketmaker 00001）。服务第一次启动时把环境变量 `HOUSE_*` 的值存为第 1 版，之后以库里的为准，环境变量不再起作用；每 10 秒重读一次（多实例或直接改库也会跟上），本实例改的立即生效，下一轮（250 毫秒）报价就用新额度。启动日志与每次变化打 `house liquidity caps`（带 `version`）。
+- 内部接口（端口 8091，`HTTP_ADDR`；网关不转发 `/internal`，只给 admin-service，后台「HOUSE」页的「额度」卡由后台会话做（A69：双人审批 `HOUSE_CAPS`，后台审计））：
+  - `GET /internal/house/caps` → `level`、`symbol`、`total`、`contract`、`safety`（USDT，十进制字符串）、`contract_leverage`（倍数）、`version`、`updated_by`、`updated_at`；
+  - `PUT /internal/house/caps` `{"level"?, "symbol"?, "total"?, "contract"?, "safety"?, "contract_leverage"?, "version", "actor", "approver"?, "approval_id"?, "reason"}`：只改给出的项，`version` 必须是读到的那一版（中间有人改过答 409 `HOUSE_CAPS_VERSION`，重读再改），数值不能为负（400），`actor`、`reason` 必填；答新的一版；
+  - `GET /internal/house/caps/changes?limit=`（默认 20，最多 100）→ `items`：新的在前，每项 `version`、`caps`、`previous`（第 1 版为 null）、`actor`、`approver`、`approval_id`、`reason`、`at`。
+- 手工（服务器上）：`sudo docker compose exec -T market-maker wget -qO- http://127.0.0.1:8091/internal/house/caps`。
 
 ## 测试服设置（一次性）
 

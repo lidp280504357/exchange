@@ -42,6 +42,8 @@ var (
 	marketsim embed.FS
 	//go:embed margin/*.sql
 	margin embed.FS
+	//go:embed marketmaker/*.sql
+	marketmaker embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -94,6 +96,9 @@ func MarketSim() fs.FS { return sub(marketsim, "marketsim") }
 
 // Margin holds margin-service's schema (margin trading).
 func Margin() fs.FS { return sub(margin, "margin") }
+
+// MarketMaker holds market-maker's schema (HOUSE's runtime caps).
+func MarketMaker() fs.FS { return sub(marketmaker, "marketmaker") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

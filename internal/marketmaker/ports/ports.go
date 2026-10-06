@@ -4,10 +4,25 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/skill/exchange/internal/marketmaker/domain"
 	"github.com/skill/exchange/internal/platform/flags"
 )
+
+// CapsStore keeps HOUSE's caps and their changes (review C45).
+type CapsStore interface {
+	// Caps returns the stored caps; false when none are stored yet.
+	Caps(ctx context.Context) (domain.StoredCaps, bool, error)
+	// Seed stores caps as the first version unless some are stored, and
+	// returns what is stored.
+	Seed(ctx context.Context, caps domain.Caps, actor string, at time.Time) (domain.StoredCaps, error)
+	// Change replaces the stored caps when they are still the change's
+	// version (domain.ErrCapsVersion otherwise) and keeps the change.
+	Change(ctx context.Context, c domain.CapsChange, at time.Time) (domain.StoredCaps, error)
+	// Changes returns the latest changes, newest first.
+	Changes(ctx context.Context, limit int) ([]domain.CapsRecord, error)
+}
 
 // Specs lists the pairs that follow a reference market (those not TRADING
 // Halted) and the TRADING contracts that do.

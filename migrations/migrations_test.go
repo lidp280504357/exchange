@@ -109,6 +109,7 @@ func TestDownMigrations(t *testing.T) {
 		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(), "market": migrations.Market(),
 		"wallet": migrations.Wallet(), "signer": migrations.Signer(), "admin": migrations.Admin(),
 		"derivatives": migrations.Derivatives(), "marketsim": migrations.MarketSim(), "margin": migrations.Margin(),
+		"marketmaker": migrations.MarketMaker(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)

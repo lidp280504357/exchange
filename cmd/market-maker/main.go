@@ -18,19 +18,26 @@ import (
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
 	"github.com/skill/exchange/internal/marketmaker/adapters/api"
 	"github.com/skill/exchange/internal/marketmaker/adapters/ledger"
+	"github.com/skill/exchange/internal/marketmaker/adapters/postgres"
 	"github.com/skill/exchange/internal/marketmaker/application"
 	"github.com/skill/exchange/internal/marketmaker/domain"
 	"github.com/skill/exchange/internal/marketmaker/transport/consumer"
+	"github.com/skill/exchange/internal/marketmaker/transport/httpapi"
 	"github.com/skill/exchange/internal/platform/app"
 	"github.com/skill/exchange/internal/platform/bootstrap"
 	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/migrations"
 )
 
 type settings struct {
-	// Postgres reaches the config schema, for the flags.
-	Postgres pg.Config    `koanf:",squash"`
+	// Postgres reaches the config schema, for the flags, and the
+	// marketmaker schema, for HOUSE's runtime caps.
+	Postgres pg.Config `koanf:",squash"`
+	// HTTPAddr is the internal API (HTTP_ADDR): HOUSE's runtime caps for
+	// the console.
+	HTTPAddr string       `koanf:"http_addr"`
 	Kafka    kafka.Config `koanf:",squash"`
 	// HouseUser is HOUSE's user ID on the trades and its contract account
 	// (HOUSE_USER_ID); without one the service idles.
@@ -41,7 +48,8 @@ type settings struct {
 	// kept back (HOUSE_SAFETY); the backed assets, those with a network,
 	// must be held to be sold (ADR-0013; read from instrument-service). All
 	// contract positions together may be worth HOUSE_CONTRACT_LEVERAGE
-	// times HOUSE's contract equity.
+	// times HOUSE's contract equity. These are the first caps stored: from
+	// then on the stored ones count, changed from the console (C45).
 	LevelCap         string `koanf:"house_level_cap"`
 	SymbolCap        string `koanf:"house_symbol_cap"`
 	TotalCap         string `koanf:"house_total_cap"`
@@ -75,7 +83,7 @@ func main() {
 func setup(ctx context.Context, a *app.App) error {
 	def := application.DefaultConfig()
 	cfg := settings{
-		Postgres: pg.DefaultConfig(), LevelCap: def.Caps.Level.String(), SymbolCap: def.Caps.Symbol.String(),
+		Postgres: pg.DefaultConfig(), HTTPAddr: ":8091", LevelCap: def.Caps.Level.String(), SymbolCap: def.Caps.Symbol.String(),
 		TotalCap: def.Caps.Total.String(), ContractCap: def.Caps.Contract.String(), Safety: def.Caps.Safety.String(),
 		ContractLeverage: def.Caps.ContractLeverage.String(), LedgerAddr: "localhost:9185", InstrumentURL: "http://localhost:8084",
 		DerivativesURL: "http://localhost:8095",
@@ -99,6 +107,10 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	db, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "marketmaker", migrations.MarketMaker())
+	if err != nil {
+		return err
+	}
 	conf := def
 	conf.HouseUser = cfg.HouseUser
 	conf.Caps = domain.Caps{
@@ -106,9 +118,6 @@ func setup(ctx context.Context, a *app.App) error {
 		Total: decimal.RequireFromString(cfg.TotalCap), Contract: decimal.RequireFromString(cfg.ContractCap),
 		Safety: decimal.RequireFromString(cfg.Safety), ContractLeverage: decimal.RequireFromString(cfg.ContractLeverage),
 	}
-	a.Logger().Info("house liquidity caps", "level", conf.Caps.Level.String(), "symbol", conf.Caps.Symbol.String(),
-		"total", conf.Caps.Total.String(), "contract", conf.Caps.Contract.String(), "safety", conf.Caps.Safety.String(),
-		"contract_leverage", conf.Caps.ContractLeverage.String())
 	client := &api.Client{
 		Instrument: cfg.InstrumentURL, Derivatives: cfg.DerivativesURL, HouseUser: cfg.HouseUser, HTTP: &http.Client{Timeout: 5 * time.Second},
 	}
@@ -117,6 +126,19 @@ func setup(ctx context.Context, a *app.App) error {
 		*api.Client
 	}{ledger.Inventory{Client: ledgerv1.NewLedgerServiceClient(ledgerConn)}, client}
 	pub := application.New(conf, client, house, flagClient, prod, event.NewFactory(a.Name(), a.Config().InstanceID), a.Logger(), a.Metrics())
+	// The caps in force are the stored ones; the environment's are the
+	// first stored (C45). Changed through the internal API, read again
+	// every few seconds.
+	caps := application.NewCaps(postgres.NewStore(db), pub, a.Logger())
+	if err := caps.Start(ctx, conf.Caps); err != nil {
+		return err
+	}
+	a.Add("house caps", app.Loop(caps.Run))
+	r := a.NewRouter()
+	(&httpapi.Handler{Caps: caps}).Routes(r)
+	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {
+		return err
+	}
 	// Only the latest books matter: read the public depth from its end.
 	// The public books, pairs and contracts leaving trading (an empty book
 	// at once, not at the next read of the specs), and the trades, whose

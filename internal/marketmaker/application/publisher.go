@@ -267,6 +267,15 @@ func (p *Publisher) OnStatus(symbol, to string) {
 	p.list = slices.DeleteFunc(slices.Clone(p.list), func(s domain.Spec) bool { return s.Symbol == symbol })
 }
 
+// SetCaps replaces HOUSE's caps from the next round on (runtime caps,
+// Caps).
+func (p *Publisher) SetCaps(caps domain.Caps) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cfg.Caps = caps
+	p.leverage.Set(caps.ContractLeverage.InexactFloat64())
+}
+
 // OnHouseFill takes a trade HOUSE made on symbol (trade.events,
 // derivatives.trade.events): the engine used up the levels it filled
 // against, which the next update gives back, so the book goes out on the
