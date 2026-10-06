@@ -35,6 +35,10 @@
 #                                 default; the list replaces the one
 #                                 before); they top up their margin from
 #                                 their spot USDT, ASTRA for ASTRA-USD-PERP.
+#                                 A coin-margined one also needs the bots
+#                                 allowed by derivatives.coin_m: added to
+#                                 its users list, or the flag turned on for
+#                                 them alone while it is off.
 #   scripts/ops/astra.sh events-on|events-off
 #                                 allow the operators' price events (flag
 #                                 sim.events).
@@ -70,6 +74,29 @@ sim() {
   else
     ctl market-sim sim call POST /internal/sim/bots "$1" </dev/null
   fi
+}
+
+# coin_m_bots lets the bots trade the coin-margined perpetual (flag
+# derivatives.coin_m, eligibility COIN_M_TRADE; review EU ①): on for
+# everyone, nothing to do; on for a list of users, the bots join it; off,
+# it goes on for the bots alone. Its other rules (regions, statuses) stay
+# and are named: the bots must pass them too.
+coin_m_bots() {
+  local flag bots allow others
+  bots=$(sim | jq -r '[.bots[].user_id] | join(",")')
+  flag=$(ctl user-service flags show derivatives.coin_m </dev/null 2>/dev/null || echo '{"enabled":false,"rules":{}}')
+  if [[ $(jq -r '.enabled' <<<"$flag") != true ]]; then
+    ctl user-service flags set derivatives.coin_m --on --allow-users "$bots" \
+      --reason "the bots trade the coin-margined perpetual, nobody else (astra.sh perp-on)" </dev/null
+  elif [[ $(jq -r '.rules.users.allow // [] | length' <<<"$flag") -gt 0 ]]; then
+    allow=$(jq -r --arg bots "$bots" '(.rules.users.allow + ($bots | split(","))) | unique | join(",")' <<<"$flag")
+    ctl user-service flags set derivatives.coin_m --allow-users "$allow" \
+      --reason "the bots join the users of the coin-margined perpetual (astra.sh perp-on)" </dev/null
+  else
+    echo "derivatives.coin_m is on for every user: the bots may trade the coin-margined perpetual"
+  fi
+  others=$(jq -r '.rules | del(.users) | to_entries | map(select(.value != null)) | map(.key) | join(", ")' <<<"$flag")
+  [[ -z $others ]] || echo "note: derivatives.coin_m also has rules on $others; the bots must pass them"
 }
 
 # role N is the role of bot number N (1-based): 6 makers, 12 takers, 4
@@ -163,6 +190,7 @@ perp-open)
 perp-on)
   shift
   perps=$(IFS=,; echo "${*:-$PERP}")
+  [[ $perps != *-USD-PERP* ]] || coin_m_bots
   ctl market-sim flags set sim.perp --on --allow-symbols "$perps" --reason "the bots make the platform coin's perpetuals $perps (astra.sh perp-on)" </dev/null
   ;;
 perp-off)

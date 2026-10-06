@@ -281,7 +281,7 @@ try {
   // the page says so.
   await go("/assets/margin");
   await page.waitForSelector('[data-testid="margin-account-MARGIN_CROSS"]', { visible: true, timeout: 20000 });
-  await page.waitForSelector('[data-testid="margin-level"]', { visible: true });
+  await page.waitForSelector('[data-testid="margin-account-MARGIN_CROSS"] [data-testid="margin-level"]', { visible: true });
   const closed = await page.evaluate(() => document.body.innerText.includes("杠杆交易 · "));
   if (closed && marginOn) throw new Error("margin trading was opened for this user, but the margin page says it is not open");
   if (closed) {

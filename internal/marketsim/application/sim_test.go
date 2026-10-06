@@ -1256,6 +1256,21 @@ func TestTheBotsMakeTheCoinMarginedPerpetual(t *testing.T) {
 	}
 }
 
+// The coin-margined margin is perp_margin's worth in the coin, at most a
+// quarter of what the bot holds: at a very low price it would take more
+// coin than the bot has (review EU ③).
+func TestTheCoinMarginStaysWithinTheBotsCoin(t *testing.T) {
+	if got, capped := coinMarginTarget(30_000, 1.04, d("40000000"), d("0")); capped || !got.Equal(d("28846.1538")) {
+		t.Fatalf("near 1 USDT: %s %v", got, capped)
+	}
+	if got, capped := coinMarginTarget(30_000, 0.001, d("40000000"), d("0")); !capped || !got.Equal(d("10000000")) {
+		t.Fatalf("at 0.001 USDT: %s %v", got, capped)
+	}
+	if got, capped := coinMarginTarget(30_000, 0.001, d("0"), d("100")); !capped || !got.Equal(d("25")) {
+		t.Fatalf("balances unknown: %s %v", got, capped)
+	}
+}
+
 // bandRig is a rig whose pair has a band of 10% around the last trade,
 // which market orders move.
 func bandRig(t *testing.T, store *memStore) *rig {

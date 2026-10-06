@@ -81,7 +81,7 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 			s.stop(ctx)
 			why := "simulated market event " + e.ID + ": " + e.Reason
 			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "HALT", "system:market-sim", why); err != nil {
-				s.m.errors.WithLabelValues("halt").Inc()
+				s.failed("halt", s.cfg.Symbol)
 				s.log.WarnContext(ctx, "simulated market: the pair not halted", "event", e.ID, "error", err)
 			}
 			s.pairAt = time.Time{}
@@ -94,7 +94,7 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 					s.stopPerp(ctx, k)
 				}
 				if err := s.pairs.SetContractStatus(ctx, k.symbol, "HALT", "system:market-sim", why); err != nil {
-					s.m.errors.WithLabelValues("halt").Inc()
+					s.failed("halt", k.symbol)
 					s.log.WarnContext(ctx, "simulated market: the perpetual not halted", "event", e.ID, "symbol", k.symbol, "error", err)
 				}
 				k.pairAt = time.Time{}
@@ -126,7 +126,7 @@ func (s *Sim) keepHalted(ctx context.Context, now time.Time) {
 	why := "simulated market event " + e.ID + ": " + e.Reason
 	if pair, err := s.trading.Pair(ctx, s.cfg.Symbol); err == nil && pair.Status == "TRADING" {
 		if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "HALT", "system:market-sim", why); err != nil {
-			s.m.errors.WithLabelValues("halt").Inc()
+			s.failed("halt", s.cfg.Symbol)
 			s.log.WarnContext(ctx, "simulated market: the halt event's pair still trades, not halted", "event", e.ID, "error", err)
 		} else {
 			s.log.WarnContext(ctx, "simulated market: the halt event's pair was trading; halted again", "event", e.ID)
@@ -141,7 +141,7 @@ func (s *Sim) keepHalted(ctx context.Context, now time.Time) {
 			continue
 		}
 		if err := s.pairs.SetContractStatus(ctx, k.symbol, "HALT", "system:market-sim", why); err != nil {
-			s.m.errors.WithLabelValues("halt").Inc()
+			s.failed("halt", k.symbol)
 			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual still trades, not halted", "event", e.ID, "symbol", k.symbol,
 				"error", err)
 		} else {
@@ -185,7 +185,7 @@ func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event, why string) {
 		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: e.CreatedBy, Reason: why, Details: string(details),
 	})
 	if err != nil {
-		s.m.errors.WithLabelValues("settings").Inc()
+		s.failed("settings", "")
 		s.log.WarnContext(ctx, "simulated market: the new anchor not saved", "event", e.ID, "error", err)
 		return
 	}
@@ -194,7 +194,7 @@ func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event, why string) {
 
 func (s *Sim) persist(ctx context.Context, e *domain.Event, audit *ports.Audit) {
 	if err := s.store.SaveEvent(ctx, *e, audit); err != nil {
-		s.m.errors.WithLabelValues("event").Inc()
+		s.failed("event", "")
 		s.log.WarnContext(ctx, "simulated market: an event not saved", "event", e.ID, "error", err)
 	}
 }
@@ -251,12 +251,12 @@ func (s *Sim) sample(ctx context.Context, now time.Time, p float64) {
 		s.samples = slices.Clone(s.samples[len(s.samples)-samplesKept:])
 	}
 	if err := s.store.SaveSample(ctx, x); err != nil {
-		s.m.errors.WithLabelValues("sample").Inc()
+		s.failed("sample", s.cfg.Symbol)
 	}
 	if now.Sub(s.prunedAt) >= time.Hour {
 		s.prunedAt = now
 		if err := s.store.PruneSamples(ctx, now.Add(-samplesKept*sampleEvery)); err != nil {
-			s.m.errors.WithLabelValues("sample").Inc()
+			s.failed("sample", s.cfg.Symbol)
 		}
 	}
 }

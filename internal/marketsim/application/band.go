@@ -59,7 +59,7 @@ func (s *Sim) refreshAnchor(ctx context.Context, now time.Time) {
 		// The reads of before stay: without them the quotes would center
 		// on the bare target and the band would refuse their far levels
 		// while market data is out (the watchdog waits meanwhile, readAt).
-		s.m.errors.WithLabelValues("last_trade").Inc()
+		s.failed("last_trade", s.cfg.Symbol)
 		return
 	}
 	s.readAt = now
@@ -71,7 +71,7 @@ func (s *Sim) refreshAnchor(ctx context.Context, now time.Time) {
 	anchor := price
 	if !price.IsPositive() || now.Sub(at) > recentTrade {
 		if ref, fresh, err := s.prices.Reference(ctx, s.cfg.Symbol); err != nil {
-			s.m.errors.WithLabelValues("reference").Inc()
+			s.failed("reference", s.cfg.Symbol)
 		} else if fresh && ref.IsPositive() {
 			anchor = ref
 		}
@@ -152,7 +152,7 @@ func (s *Sim) beatOnce(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, reportEvery)
 	defer cancel()
 	if err := s.prices.Report(ctx, s.cfg.Symbol, b.price); err != nil && ctx.Err() == nil {
-		s.m.errors.WithLabelValues("report").Inc()
+		s.failed("report", s.cfg.Symbol)
 	}
 }
 

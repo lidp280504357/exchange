@@ -337,7 +337,7 @@ func (s *Sim) Round(ctx context.Context) {
 	if now.Sub(s.botsAt) >= botsEvery { // also while off: the operators see them
 		s.botsAt = now
 		if err := s.loadBots(ctx); err != nil {
-			s.m.errors.WithLabelValues("bots").Inc()
+			s.failed("bots", "")
 		}
 	}
 	s.refreshPair(ctx, now)
@@ -412,7 +412,7 @@ func (s *Sim) refreshPair(ctx context.Context, now time.Time) {
 	}
 	pair, err := s.trading.Pair(ctx, s.cfg.Symbol)
 	if err != nil {
-		s.m.errors.WithLabelValues("pair").Inc()
+		s.failed("pair", s.cfg.Symbol)
 		s.log.WarnContext(ctx, "simulated market: the pair not read", "symbol", s.cfg.Symbol, "error", err)
 		if s.pairAt.IsZero() {
 			return // never read: not trading
@@ -432,7 +432,7 @@ func (s *Sim) refreshRefs(ctx context.Context, now time.Time) {
 	read := func(symbol string) float64 {
 		p, fresh, err := s.prices.Reference(ctx, symbol)
 		if err != nil {
-			s.m.errors.WithLabelValues("reference").Inc()
+			s.failed("reference", s.cfg.Symbol)
 			return 0
 		}
 		if !fresh {
@@ -499,7 +499,7 @@ func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, center float64
 	b.nextQuote = now.Add(time.Second + time.Duration(rng.Int64N(int64(2*time.Second))))
 	open, err := s.trading.Open(ctx, b.UserID, s.cfg.Symbol)
 	if err != nil {
-		s.fail(ctx, b, "open", err)
+		s.fail(ctx, b, "open", s.cfg.Symbol, err)
 		return
 	}
 	bids, asks := domain.LadderPrices(center, b.phase, s.params, s.pair)
@@ -512,10 +512,10 @@ func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, center float64
 			break
 		}
 		if err := s.trading.Cancel(ctx, b.UserID, o.ID); err != nil {
-			s.fail(ctx, b, "cancel", err)
+			s.fail(ctx, b, "cancel", s.cfg.Symbol, err)
 			continue
 		}
-		s.m.cancels.WithLabelValues(string(b.Role)).Inc()
+		s.m.cancels.WithLabelValues(string(b.Role), s.cfg.Symbol).Inc()
 	}
 	placed, outOfBand, stop := 0, 0, false
 	unfunded := map[domain.Side]bool{}
@@ -711,9 +711,9 @@ func (s *Sim) placed(ctx context.Context, now time.Time, b *bot, err error, back
 		result = "out_of_band"
 	default:
 		result = "failed"
-		s.fail(ctx, b, "order", err)
+		s.fail(ctx, b, "order", s.cfg.Symbol, err)
 	}
-	s.m.orders.WithLabelValues(string(b.Role), result).Inc()
+	s.m.orders.WithLabelValues(string(b.Role), result, s.cfg.Symbol).Inc()
 	if err == nil {
 		return
 	}
@@ -730,18 +730,23 @@ func (s *Sim) placed(ctx context.Context, now time.Time, b *bot, err error, back
 	}
 }
 
-func (s *Sim) fail(ctx context.Context, b *bot, op string, err error) {
-	s.m.errors.WithLabelValues(op).Inc()
+// fail counts and keeps a bot's failed request of op about symbol (the
+// pair or a contract; "" for none).
+func (s *Sim) fail(ctx context.Context, b *bot, op, symbol string, err error) {
+	s.failed(op, symbol)
 	b.err, b.errAt = op+": "+err.Error(), s.now()
-	s.log.WarnContext(ctx, "simulated market: a bot's request failed", "bot", b.Label, "op", op, "error", err)
+	s.log.WarnContext(ctx, "simulated market: a bot's request failed", "bot", b.Label, "op", op, "symbol", symbol, "error", err)
 }
+
+// failed counts a failed request of op about symbol ("" for none).
+func (s *Sim) failed(op, symbol string) { s.m.errors.WithLabelValues(op, symbol).Inc() }
 
 // stop cancels the makers' orders: the bots leave the book when the
 // simulation is switched off or the pair stops trading.
 func (s *Sim) stop(ctx context.Context) {
 	for _, b := range s.botsOf(domain.RoleMaker) {
 		if err := s.trading.CancelAll(ctx, b.UserID, s.cfg.Symbol); err != nil {
-			s.fail(ctx, b, "cancel_all", err)
+			s.fail(ctx, b, "cancel_all", s.cfg.Symbol, err)
 		}
 		b.quotedP, b.nextQuote = 0, time.Time{}
 	}
@@ -763,7 +768,7 @@ func (s *Sim) chores(ctx context.Context, now time.Time) {
 func (s *Sim) save(ctx context.Context) {
 	s.savedAt = s.now()
 	if err := s.store.SaveState(ctx, s.model.Snapshot()); err != nil {
-		s.m.errors.WithLabelValues("save").Inc()
+		s.failed("save", "")
 		s.log.WarnContext(ctx, "simulated market: the state not saved", "error", err)
 	}
 }
@@ -777,7 +782,7 @@ func (s *Sim) checkInventory(ctx context.Context, now time.Time) {
 	for _, b := range s.bots {
 		bal, err := s.trading.Balances(ctx, b.UserID)
 		if err != nil {
-			s.fail(ctx, b, "balances", err)
+			s.fail(ctx, b, "balances", "", err)
 			continue
 		}
 		b.usdt, b.coin, b.known = bal[s.cfg.Quote], bal[base], true
@@ -977,8 +982,8 @@ type metrics struct {
 	inventory                        *prometheus.GaugeVec
 	orders                           *prometheus.CounterVec
 	cancels, guards, throttled       *prometheus.CounterVec
-	errors                           *prometheus.CounterVec
-	deadlocks, quiet, perpQuiet      prometheus.Counter
+	errors, perpQuiet                *prometheus.CounterVec
+	deadlocks, quiet                 prometheus.Counter
 	targetAtRisk                     prometheus.Gauge
 	targets                          *prometheus.CounterVec
 }
@@ -996,11 +1001,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "market_sim_walking", Help: "1 while the target is beyond the price band and the quotes walk toward it.",
 		}),
 		orders: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "market_sim_orders_total", Help: "The bots' orders by role and result (placed, unfunded, out_of_band, failed).",
-		}, []string{"role", "result"}),
+			Name: "market_sim_orders_total", Help: "The bots' orders by role, result (placed, unfunded, out_of_band, failed) and pair or contract.",
+		}, []string{"role", "result", "symbol"}),
 		cancels: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "market_sim_cancels_total", Help: "The bots' cancels by role.",
-		}, []string{"role"}),
+			Name: "market_sim_cancels_total", Help: "The bots' cancels by role and pair or contract.",
+		}, []string{"role", "symbol"}),
 		guards: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_sim_guards_total", Help: "Steps the guards bounded the target in (minute, floor, ceiling).",
 		}, []string{"guard"}),
@@ -1008,8 +1013,8 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "market_sim_throttled_total", Help: "Orders and cancels the throttle held back.",
 		}, []string{"kind"}),
 		errors: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "market_sim_errors_total", Help: "Failed requests to the platform's services, by operation.",
-		}, []string{"op"}),
+			Name: "market_sim_errors_total", Help: "Failed requests to the platform's services, by operation and the pair or contract they were about (empty: none).",
+		}, []string{"op", "symbol"}),
 		deadlocks: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "market_sim_band_deadlocks_total",
 			Help: "Times the watchdog found the market locked (three minutes without a trade, or every level refused for the price band) and rebased the model at the band's anchor.",
@@ -1018,10 +1023,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "market_sim_quiet_takes_total",
 			Help: "Takers' orders sent because nothing had traded for a minute (the perpetual's index needs a trade within five).",
 		}),
-		perpQuiet: prometheus.NewCounter(prometheus.CounterOpts{
+		perpQuiet: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_sim_perp_quiet_takes_total",
-			Help: "Takers' minimum orders on the perpetual sent because it had not traded for 45 seconds (its 1-minute candles stay whole).",
-		}),
+			Help: "Takers' minimum orders on a perpetual sent because it had not traded for 45 seconds (its 1-minute candles stay whole), by contract.",
+		}, []string{"symbol"}),
 	}
 	m.targetAtRisk = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "market_sim_target_at_risk",
