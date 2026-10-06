@@ -612,16 +612,18 @@ try {
   } else if (marginOn) {
     await noError("the margin assets");
     await t.shot("4h-margin-params");
-    await page.click("[data-testid=margin-edit-USDT]");
+    // The lists re-render as their queries settle: the button is found again if a render replaced it.
+    await t.clickLive("[data-testid=margin-edit-USDT]");
     await page.waitForSelector("[role=dialog] [data-testid=margin-asset-save]");
     if (!(await page.$eval("[data-testid=margin-asset-save]", (b) => b.disabled))) throw new Error("the USDT editor offers to save nothing");
-    await clickButton("取消", "[role=dialog]");
+    // Closed with Esc: a drawer slides in from the right, and its footer's buttons are past the edge until it is in.
+    await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
     await go("/margin/params?tab=pairs");
     await rows(1);
     await noError("the margin pairs");
     const pair = await page.$eval('main tbody tr[data-row-id] [data-testid^="margin-pair-"]', (b) => b.dataset.testid);
-    await page.click(`[data-testid="${pair}"]`);
+    await t.clickLive(`[data-testid="${pair}"]`);
     await page.waitForSelector("[role=dialog] [data-testid=margin-pair-save]");
     const levels = () => page.$$eval("[role=dialog] input[inputmode=decimal]", (inputs) => inputs.slice(0, 2).map((i) => i.value).join(" / "));
     const before = await levels();
@@ -635,7 +637,7 @@ try {
     await page.waitForSelector("[role=dialog] [data-testid=margin-suggested]");
     if ((await levels()) !== before) throw new Error(`a new leverage overwrote the thresholds: ${before} -> ${await levels()}`);
     await t.shot("4h-margin-pair");
-    await clickButton("取消", "[role=dialog]");
+    await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
     await go("/margin/params?tab=settings");
     await waitText("全仓条款");
