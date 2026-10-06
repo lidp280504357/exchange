@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { IDLE_WITHIN, onIdle, preloadable } from "./idle";
+import { IDLE_WITHIN, onIdle } from "./idle";
 
 type Ric = (cb: () => void, opts?: { timeout: number }) => number;
 
@@ -86,31 +86,5 @@ describe("onIdle", () => {
     expect(run).toHaveBeenCalledTimes(1);
     cancel();
     expect(cic).toHaveBeenCalledWith(7);
-  });
-});
-
-describe("preloadable", () => {
-  it("renders through React.lazy until its preload resolved, then the component itself; imports once", async () => {
-    const Form = (p: { n: number }) => String(p.n);
-    const load = vi.fn(() => Promise.resolve({ Form }));
-    const C = preloadable(load, (m) => m.Form);
-    expect(C({ n: 1 }).type).not.toBe(Form);
-    await C.preload();
-    const shown = C({ n: 2 });
-    expect(shown.type).toBe(Form);
-    expect(shown.props).toEqual({ n: 2 });
-    await C.preload();
-    expect(load).toHaveBeenCalledTimes(1);
-  });
-
-  it("imports again after a failed preload", async () => {
-    const Form = () => null;
-    const load = vi.fn<() => Promise<{ Form: typeof Form }>>().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ Form });
-    const C = preloadable(load, (m) => m.Form);
-    await expect(C.preload()).rejects.toThrow("offline");
-    expect(C({}).type).not.toBe(Form);
-    await C.preload();
-    expect(C({}).type).toBe(Form);
-    expect(load).toHaveBeenCalledTimes(2);
   });
 });

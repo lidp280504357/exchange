@@ -1,5 +1,5 @@
 import { dec, enumLabel, errorText, formatAmount, formatPercent, formatPrice } from "@exchange/core";
-import { preloadable, useIdleImport } from "@exchange/core/idle";
+import { useIdleImport } from "@exchange/core/idle";
 import { useMarginAccounts, useMarginAssets, useMarginOpen } from "@exchange/core/margin/hooks";
 import type { MarginActionKind, MarginFormInit } from "@exchange/core/margin/form";
 import { hasDebt, isEmpty, type MarginAccount, type MarginAsset, type MarginBalance } from "@exchange/core/margin/math";
@@ -23,13 +23,9 @@ import { motion } from "motion/react";
 import { Suspense, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AssetsLayout, Card } from "./parts/AssetsLayout";
+import { MarginDialog } from "./parts/lazyMargin";
 import { shownDecimals, useAssetMeta, type AssetMeta } from "./parts/meta";
 import { Notice, reasonText } from "./parts/Notice";
-
-// The transfer, borrow and repay dialog is not on the page's first screen
-// (its form: fields, selects, number inputs, B108): it loads once the page
-// is idle and opens at once after (B114).
-const MarginDialog = preloadable(() => import("./parts/MarginDialog"), (m) => m.MarginDialog);
 
 type Act = (kind: MarginActionKind, init?: MarginFormInit) => void;
 

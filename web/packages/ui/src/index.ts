@@ -14,6 +14,7 @@ export * from "./lib/clipboard";
 export { useNow, subscribeClock, clockNow } from "./lib/clock";
 export * from "./lib/useFlash";
 export * from "./lib/settings";
+export * from "./lib/preloadable";
 
 // Base and feedback components.
 export * from "./components/IconButton";

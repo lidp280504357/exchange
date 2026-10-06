@@ -1,4 +1,4 @@
-import { createElement, lazy, useEffect, type ComponentType, type ReactElement } from "react";
+import { useEffect } from "react";
 
 // Chunks a page will likely need soon but not on its first screen (a
 // dialog's form) load once the page has loaded and the browser is idle:
@@ -46,38 +46,4 @@ export function onIdle(run: () => void): () => void {
  */
 export function useIdleImport(load: () => Promise<unknown>, enabled = true): void {
   useEffect(() => (enabled ? onIdle(() => void load().catch(() => {})) : undefined), [load, enabled]);
-}
-
-/** A component in a chunk of its own, with the import that preloads it. */
-export type Preloadable<P> = ((props: P) => ReactElement) & {
-  /** preload imports the chunk (once; again after a failure). */
-  preload: () => Promise<unknown>;
-};
-
-/**
- * preloadable is React.lazy over the component pick takes from the module
- * load imports, rendered at once once its preload has resolved
- * (useIdleImport(C.preload)). A lazy component suspends on its first
- * render even with its chunk in, and React holds a Suspense boundary's
- * content back until 300 ms after its fallback showed (its reveal
- * throttle), so a lazy dialog took a third of a second to open the first
- * time however early its chunk had come (B114).
- */
-export function preloadable<M, P extends object>(load: () => Promise<M>, pick: (m: M) => ComponentType<P>): Preloadable<P> {
-  let loaded: ComponentType<P> | undefined;
-  let pending: Promise<M> | undefined;
-  const preload = () =>
-    (pending ??= load().then(
-      (m) => {
-        loaded = pick(m);
-        return m;
-      },
-      (e: unknown) => {
-        pending = undefined;
-        throw e;
-      },
-    ));
-  const Lazy = lazy(() => preload().then((m) => ({ default: pick(m) })));
-  const Component = (props: P) => (loaded ? createElement(loaded, props) : createElement(Lazy, props));
-  return Object.assign(Component, { preload });
 }
