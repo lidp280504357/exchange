@@ -35,7 +35,11 @@ type Source struct {
 	// contracts' books and trades (WithFutures).
 	futuresREST   string
 	futuresStream string
-	client        *http.Client
+	// coinREST and coinStream are the COIN-M futures endpoints
+	// (WithCoinFutures).
+	coinREST   string
+	coinStream string
+	client     *http.Client
 	// gap spaces REST requests: Binance allows 6000 request weight a
 	// minute per IP; a klines call weighs 2.
 	gap time.Duration

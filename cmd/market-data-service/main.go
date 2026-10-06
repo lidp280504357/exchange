@@ -28,6 +28,7 @@ import (
 	"github.com/skill/exchange/internal/platform/app"
 	"github.com/skill/exchange/internal/platform/bootstrap"
 	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
 	"github.com/skill/exchange/migrations"
@@ -51,6 +52,16 @@ type settings struct {
 	// BINANCE_FUTURES_REST_URL and BINANCE_FUTURES_STREAM_URL.
 	BinanceFuturesREST   string `koanf:"binance_futures_rest_url"`
 	BinanceFuturesStream string `koanf:"binance_futures_stream_url"`
+	// The coin-margined contracts' market data comes from Binance COIN-M
+	// futures at BINANCE_COIN_FUTURES_REST_URL and
+	// BINANCE_COIN_FUTURES_STREAM_URL.
+	BinanceCoinFuturesREST   string `koanf:"binance_coin_futures_rest_url"`
+	BinanceCoinFuturesStream string `koanf:"binance_coin_futures_stream_url"`
+	// MarkSourceStaleSeconds is how old the reference market's mark price
+	// of a contract that follows it (market.reference_mark) may be before
+	// the self-computed one stands in (MARK_SOURCE_STALE_SECONDS, coin-M
+	// design §3.1: 10).
+	MarkSourceStaleSeconds int `koanf:"mark_source_stale_seconds"`
 	// IndexMinSources is the fewest reference sources an index price
 	// needs (INDEX_MIN_SOURCES, §11.7: 2); test environments with Binance
 	// alone set 1.
@@ -65,6 +76,9 @@ func (s *settings) Validate() error {
 	var errs []error
 	if s.IndexMinSources < 1 {
 		errs = append(errs, errors.New("INDEX_MIN_SOURCES must be at least 1"))
+	}
+	if s.MarkSourceStaleSeconds < 1 {
+		errs = append(errs, errors.New("MARK_SOURCE_STALE_SECONDS must be at least 1"))
 	}
 	if _, err := weights(s.IndexSourceWeights); err != nil {
 		errs = append(errs, err)
@@ -95,7 +109,8 @@ func setup(ctx context.Context, a *app.App) error {
 		HTTPAddr: ":8090", Postgres: pg.DefaultConfig(), InstrumentAddr: "localhost:9184",
 		BinanceREST: "https://data-api.binance.vision", BinanceStream: "wss://data-stream.binance.vision",
 		BinanceFuturesREST: "https://fapi.binance.com", BinanceFuturesStream: "wss://fstream.binance.com",
-		IndexMinSources: 2,
+		BinanceCoinFuturesREST: "https://dapi.binance.com", BinanceCoinFuturesStream: "wss://dstream.binance.com",
+		IndexMinSources: 2, MarkSourceStaleSeconds: 10,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -132,7 +147,8 @@ func setup(ctx context.Context, a *app.App) error {
 	// trades of the symbols with a reference market, while
 	// market.reference_feed is on.
 	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second}).
-		WithFutures(cfg.BinanceFuturesREST, cfg.BinanceFuturesStream)
+		WithFutures(cfg.BinanceFuturesREST, cfg.BinanceFuturesStream).
+		WithCoinFutures(cfg.BinanceCoinFuturesREST, cfg.BinanceCoinFuturesStream)
 	refs := application.NewReferenceMap(listed, a.Logger())
 	// A minute without a trade of a symbol no reference market follows is
 	// stored flat when its next trade is applied (coordinator 2026-10-04),
@@ -178,6 +194,15 @@ func setup(ctx context.Context, a *app.App) error {
 	marks := application.NewMarks(svc, listed, indexes, store, pusher, prod, events,
 		application.MarksConfig{MinSources: cfg.IndexMinSources, Weights: sourceWeights}, a.Logger(), a.Metrics())
 	marks.UseReferenceBooks(books.Levels) // HOUSE trades at the reference book's prices (ADR-0015)
+	// The reference market's mark prices and funding rates, followed where
+	// market.reference_mark is on (coin-M design §3.1); the self-computed
+	// ones stand in while they are stale.
+	refMarks := application.NewMarkFeed(src, refs, flagClient, a.Logger(), a.Metrics())
+	a.Add("reference marks", app.Loop(refMarks.Run))
+	a.Add("reference funding", app.Loop(refMarks.RunFunding))
+	marks.FollowReference(refMarks, func(symbol string) bool {
+		return refMarks.Follows(symbol) && flagClient.Enabled(application.FlagReferenceMark, flags.Subject{Symbol: symbol})
+	}, time.Duration(cfg.MarkSourceStaleSeconds)*time.Second)
 	a.Add("contract prices", app.Loop(marks.Run))
 	// The contracts' data panel (design 2026-10-06 §3.3).
 	futures, err := futuresData(a, db, listed, flagClient)

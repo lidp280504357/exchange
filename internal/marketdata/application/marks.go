@@ -43,6 +43,37 @@ const (
 // are usable than required.
 const ReasonIndexSources = "INDEX_SOURCES"
 
+// Where a contract's prices came from (coin-M design §3.1): the reference
+// market's mark price, or the self-computed one.
+const (
+	SourceReference = "REFERENCE"
+	SourceComputed  = "COMPUTED"
+	// SourceReferenceEstimate is a period settled at the last rate the
+	// reference market estimated for it, its settled rate not found.
+	SourceReferenceEstimate = "REFERENCE_ESTIMATE"
+)
+
+const (
+	// DefaultReferenceStale is how old the reference market's mark price
+	// may be before the self-computed one stands in
+	// (MARK_SOURCE_STALE_SECONDS).
+	DefaultReferenceStale = 10 * time.Second
+	// settleWait is how long an ended period of a contract that follows
+	// the reference market waits for the rate the market settled.
+	settleWait = 2 * time.Minute
+)
+
+// ReferenceMarks is the reference market's mark prices and settled rates
+// (MarkFeed).
+type ReferenceMarks interface {
+	// Latest returns the contract's latest reference mark and when it
+	// arrived.
+	Latest(symbol string) (domain.ReferenceMark, time.Time, bool)
+	// Settled returns the rate the market settled the contract's period
+	// ending at at, false while it is not known.
+	Settled(symbol string, at time.Time) (domain.SettledFunding, bool)
+}
+
 // IndexSources gives the fresh spot prices of an index symbol, one per
 // source; Marks applies the weights.
 type IndexSources interface {
@@ -69,6 +100,15 @@ type MarkPrice struct {
 	// Degraded is set once SystemDegraded went out, until the mark price
 	// is back.
 	Degraded bool
+	// Source is where Mark and Index came from (SourceReference or
+	// SourceComputed); Computed and ComputedIndex are the self-computed
+	// prices of the same tick, zero when they could not be computed.
+	Source        string
+	Computed      decimal.Decimal
+	ComputedIndex decimal.Decimal
+	// SourceDegraded is set while market.reference_mark is on for the
+	// contract but the reference market's mark price is stale.
+	SourceDegraded bool
 }
 
 // Marks computes the contracts' index and mark prices every MarkInterval,
@@ -92,6 +132,11 @@ type Marks struct {
 	// refBook is the reference market's book of a contract while it is
 	// usable (UseReferenceBooks); the engine's book otherwise.
 	refBook func(symbol string, limit int) (bids, asks []domain.Level, ok bool)
+	// refMarks are the reference market's mark prices, followed where
+	// follows says so (FollowReference); stale bounds their age.
+	refMarks ReferenceMarks
+	follows  func(symbol string) bool
+	stale    time.Duration
 
 	// Loop state, touched by the loop only.
 	contracts map[string]*contractMarks
@@ -103,10 +148,13 @@ type Marks struct {
 	mu     sync.Mutex
 	latest map[string]MarkPrice
 
-	age      *prometheus.GaugeVec
-	used     *prometheus.GaugeVec
-	degraded *prometheus.GaugeVec
-	settled  prometheus.Counter
+	age            *prometheus.GaugeVec
+	used           *prometheus.GaugeVec
+	degraded       *prometheus.GaugeVec
+	settled        *prometheus.CounterVec
+	source         *prometheus.GaugeVec
+	sourceDegraded *prometheus.GaugeVec
+	gap            *prometheus.GaugeVec
 }
 
 // UseReferenceBooks has the premium read the reference market's book of a
@@ -114,6 +162,18 @@ type Marks struct {
 // its prices), the engine's book otherwise. Call it before Run.
 func (m *Marks) UseReferenceBooks(levels func(symbol string, limit int) (bids, asks []domain.Level, ok bool)) {
 	m.refBook = levels
+}
+
+// FollowReference has the contracts follow the reference market's mark
+// price, index price and funding rate where follows says so
+// (market.reference_mark), while the market's mark is at most stale old
+// (coin-M design §3.1); the self-computed prices stand in otherwise. Call
+// it before Run.
+func (m *Marks) FollowReference(marks ReferenceMarks, follows func(symbol string) bool, stale time.Duration) {
+	m.refMarks, m.follows, m.stale = marks, follows, stale
+	if m.stale <= 0 {
+		m.stale = DefaultReferenceStale
+	}
 }
 
 // book is the book a contract's premium reads.
@@ -140,6 +200,11 @@ type contractMarks struct {
 	settle bool
 	// degradedAt is set while the contract is reported degraded.
 	degradedAt time.Time
+	// refRates are the last rates the reference market estimated for the
+	// periods ending at their keys; refApart marks the periods the market
+	// ends at another time (its rate is not followed then).
+	refRates map[time.Time]decimal.Decimal
+	refApart map[time.Time]bool
 
 	pushedRate   decimal.Decimal
 	pushedPeriod time.Time
@@ -174,11 +239,22 @@ func NewMarks(svc *Service, instruments ports.Instruments, sources IndexSources,
 		degraded: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_contract_degraded", Help: "1 while the contract is reported degraded (no mark price for 10 seconds).",
 		}, []string{"symbol"}),
-		settled: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "market_funding_settled_total", Help: "Funding periods settled.",
-		}),
+		settled: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "market_funding_settled_total", Help: "Funding periods settled, by the source of the rate.",
+		}, []string{"source"}),
+		source: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_mark_source", Help: "1 while the contract's prices follow the reference market's mark price, 0 while self-computed.",
+		}, []string{"symbol"}),
+		sourceDegraded: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_mark_source_degraded",
+			Help: "1 while market.reference_mark is on for the contract but the reference market's mark price is stale (self-computed instead).",
+		}, []string{"symbol"}),
+		gap: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_mark_reference_gap",
+			Help: "The self-computed mark price relative to the reference market's: computed / reference - 1, while both are at hand.",
+		}, []string{"symbol"}),
 	}
-	reg.MustRegister(m.age, m.used, m.degraded, m.settled)
+	reg.MustRegister(m.age, m.used, m.degraded, m.settled, m.source, m.sourceDegraded, m.gap)
 	return m
 }
 
@@ -286,7 +362,7 @@ func (m *Marks) Tick(ctx context.Context) {
 func (m *Marks) state(spec ports.Contract) *contractMarks {
 	st, ok := m.contracts[spec.Symbol]
 	if !ok {
-		st = &contractMarks{settle: m.due[spec.Symbol]}
+		st = &contractMarks{settle: m.due[spec.Symbol], refRates: map[time.Time]decimal.Decimal{}, refApart: map[time.Time]bool{}}
 		m.contracts[spec.Symbol] = st
 	}
 	st.spec = spec
@@ -347,8 +423,11 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 		}
 	}
 	m.used.WithLabelValues(spec.Symbol).Set(float64(included))
-	fresh := err == nil
-	if fresh {
+	// The self-computed prices and premium samples go on whatever the
+	// prices follow: they stand in for the reference market's.
+	computed := err == nil
+	st.latest.Computed, st.latest.ComputedIndex = decimal.Zero, decimal.Zero
+	if computed {
 		bids, asks := m.book(spec.Symbol)
 		var bid, ask decimal.Decimal
 		if len(bids) > 0 {
@@ -363,23 +442,41 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 		st.sum = st.sum.Add(domain.Premium(index, impactBid, impactAsk, bidOK, askOK))
 		st.samples++
 		st.unsaved = true
-		st.latest.Mark, st.latest.Index, st.latest.Basis = domain.Mark(index, st.basis.EMA), index, st.basis.EMA
-		st.latest.Components, st.latest.At = comps, now
+		st.latest.Computed, st.latest.ComputedIndex = domain.Mark(index, st.basis.EMA), index
 		if !indexes[spec.IndexSymbol] {
 			indexes[spec.IndexSymbol] = true
 			out = append(out, Update{spec.IndexSymbol, indexProto(spec.IndexSymbol, index, comps, now)})
 		}
+	}
+	ref, follow := m.reference(ctx, st, now)
+	fresh := follow || computed
+	switch {
+	case follow:
+		st.latest.Mark, st.latest.Index, st.latest.Source = ref.Mark, ref.Index, SourceReference
+	case computed:
+		st.latest.Mark, st.latest.Index, st.latest.Source = st.latest.Computed, index, SourceComputed
+	}
+	if fresh {
+		st.latest.Basis, st.latest.Components, st.latest.At = st.basis.EMA, comps, now
 		m.recovered(ctx, st)
 	} else {
 		m.checkDegraded(ctx, st, now, fmt.Sprintf("%d of the %d index sources required are usable", included, need))
 	}
+	if follow {
+		m.source.WithLabelValues(spec.Symbol).Set(1)
+	} else {
+		m.source.WithLabelValues(spec.Symbol).Set(0)
+	}
 
 	st.latest.Premium = domain.AveragePremium(st.sum, st.samples)
 	st.latest.FundingRate = domain.FundingRate(st.latest.Premium, spec.InterestRate, spec.FundingCap)
+	if r, ok := st.refRates[st.period]; ok && follow {
+		st.latest.FundingRate = r
+	}
 	st.latest.Samples, st.latest.NextFunding = st.samples, st.period
 	if fresh {
 		out = append(out, Update{spec.Symbol, &marketv1.MarkPriceUpdated{
-			Symbol: spec.Symbol, MarkPrice: st.latest.Mark.String(), IndexPrice: index.String(), Basis: st.basis.EMA.String(),
+			Symbol: spec.Symbol, MarkPrice: st.latest.Mark.String(), IndexPrice: st.latest.Index.String(), Basis: st.basis.EMA.String(),
 			FundingRate: st.latest.FundingRate.String(), NextFundingTime: timestamppb.New(st.period), ComputedAt: timestamppb.New(now),
 		}})
 	}
@@ -397,15 +494,102 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 	}
 	// Ended periods settle at the first fresh mark price.
 	if st.settle && fresh {
-		finals, err := m.settle(ctx, st, now)
+		finals, done, err := m.settle(ctx, st, now)
 		out = append(out, finals...)
-		if err != nil {
+		switch {
+		case err != nil:
 			m.log.WarnContext(ctx, "funding not settled", "symbol", spec.Symbol, "error", err)
-		} else {
+		case done:
 			st.settle = false
 		}
 	}
+	for end := range st.refRates {
+		if now.Sub(end) > fundingForget {
+			delete(st.refRates, end)
+		}
+	}
+	for end := range st.refApart {
+		if now.Sub(end) > fundingForget {
+			delete(st.refApart, end)
+		}
+	}
 	return out
+}
+
+// reference returns the reference market's mark of the contract when its
+// prices follow it: market.reference_mark is on for it and the market's
+// latest mark is at most stale old. With the flag on and the mark stale
+// (the start's first stale seconds aside) the source is degraded: the
+// self-computed prices stand in, without reduce-only, and
+// MarkPriceSourceDegraded alerts. It keeps the market's estimate of the
+// running period's rate, for the settlement, and watches the gap between
+// the two mark prices whether the flag is on or not.
+func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time) (domain.ReferenceMark, bool) {
+	symbol := st.spec.Symbol
+	if m.refMarks == nil {
+		return domain.ReferenceMark{}, false
+	}
+	ref, received, ok := m.refMarks.Latest(symbol)
+	fresh := ok && now.Sub(received) <= m.stale && ref.Mark.IsPositive() && ref.Index.IsPositive()
+	if fresh && st.latest.Computed.IsPositive() {
+		gap, _ := st.latest.Computed.Div(ref.Mark).Sub(decimal.NewFromInt(1)).Float64()
+		m.gap.WithLabelValues(symbol).Set(gap)
+	}
+	if !m.follows(symbol) {
+		m.markSource(ctx, st, false, "")
+		return domain.ReferenceMark{}, false
+	}
+	if !fresh {
+		last := received
+		if last.Before(m.started) {
+			last = m.started
+		}
+		if now.Sub(last) > m.stale {
+			detail := "no mark price from the reference market"
+			if ok {
+				detail = fmt.Sprintf("the reference market's mark price is %s old", now.Sub(received).Round(time.Second))
+			}
+			m.markSource(ctx, st, true, detail)
+		}
+		return domain.ReferenceMark{}, false
+	}
+	m.markSource(ctx, st, false, "")
+	if ref.HasRate {
+		if ref.NextFunding.Equal(st.period) {
+			st.refRates[st.period] = ref.FundingRate
+		} else if !st.refApart[st.period] {
+			st.refApart[st.period] = true
+			m.log.WarnContext(ctx, "the reference market ends the funding period at another time: its rate is not followed for it",
+				"symbol", symbol, "period_end", st.period, "reference_next_funding", ref.NextFunding)
+		}
+	}
+	return ref, true
+}
+
+// markSource records whether the reference market's mark price is
+// missing for a contract that should follow it.
+func (m *Marks) markSource(ctx context.Context, st *contractMarks, degraded bool, detail string) {
+	switch {
+	case degraded && !st.latest.SourceDegraded:
+		m.log.ErrorContext(ctx, "reference mark price stale: the self-computed prices stand in", "symbol", st.spec.Symbol, "detail", detail)
+	case !degraded && st.latest.SourceDegraded:
+		m.log.InfoContext(ctx, "reference mark price back: the contract follows it again", "symbol", st.spec.Symbol)
+	default:
+		return
+	}
+	st.latest.SourceDegraded = degraded
+	if degraded {
+		m.sourceDegraded.WithLabelValues(st.spec.Symbol).Set(1)
+	} else {
+		m.sourceDegraded.WithLabelValues(st.spec.Symbol).Set(0)
+	}
+}
+
+// followsFunding reports whether a contract's period ending at end settles
+// at the reference market's rate: the contract follows the market and
+// the market did not end the period at another time.
+func (m *Marks) followsFunding(st *contractMarks, end time.Time) bool {
+	return m.refMarks != nil && m.follows(st.spec.Symbol) && !st.refApart[end]
 }
 
 func (m *Marks) savePeriod(ctx context.Context, st *contractMarks, now time.Time) error {
@@ -419,13 +603,18 @@ func (m *Marks) savePeriod(ctx context.Context, st *contractMarks, now time.Time
 }
 
 // settle fixes the rates of the contract's periods that ended, at the
-// current mark price (§11.7: the settlement time's).
-func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([]Update, error) {
+// current mark price (§11.7: the settlement time's) and the self-computed
+// rate; a contract that follows the reference market takes the rate and
+// mark price the market settled the period at, waiting for them up to
+// settleWait, then the last rate the market estimated for the period,
+// then the self-computed one. done is false while a period waits.
+func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([]Update, bool, error) {
 	periods, err := m.store.Read().Funding().Unsettled(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out []Update
+	done := true
 	for _, p := range periods {
 		if p.Symbol != st.spec.Symbol || p.FundingTime.After(now) {
 			continue
@@ -434,23 +623,40 @@ func (m *Marks) settle(ctx context.Context, st *contractMarks, now time.Time) ([
 		p.InterestRate = st.spec.InterestRate
 		p.Rate = domain.FundingRate(p.Premium, p.InterestRate, st.spec.FundingCap)
 		p.MarkPrice, p.IndexPrice = st.latest.Mark, st.latest.Index
+		source := SourceComputed
+		if m.followsFunding(st, p.FundingTime) {
+			s, found := m.refMarks.Settled(p.Symbol, p.FundingTime)
+			estimate, estimated := st.refRates[p.FundingTime]
+			switch {
+			case found:
+				p.Rate, source = s.Rate, SourceReference
+				if s.Mark.IsPositive() {
+					p.MarkPrice = s.Mark
+				}
+			case now.Sub(p.FundingTime) < settleWait:
+				done = false
+				continue
+			case estimated:
+				p.Rate, source = estimate, SourceReferenceEstimate
+			}
+		}
 		ok, err := m.store.Read().Funding().Settle(ctx, p)
 		if err != nil {
-			return out, err
+			return out, false, err
 		}
 		if !ok {
 			continue
 		}
-		m.settled.Inc()
+		m.settled.WithLabelValues(source).Inc()
 		m.log.InfoContext(ctx, "funding period settled", "symbol", p.Symbol, "funding_time", p.FundingTime,
-			"rate", p.Rate.String(), "samples", p.Samples, "mark_price", p.MarkPrice.String())
+			"rate", p.Rate.String(), "source", source, "samples", p.Samples, "mark_price", p.MarkPrice.String())
 		out = append(out, Update{p.Symbol, &marketv1.FundingRateUpdated{
 			Symbol: p.Symbol, FundingRate: p.Rate.String(), Premium: p.Premium.String(), InterestRate: p.InterestRate.String(),
 			Samples: p.Samples, FundingTime: timestamppb.New(p.FundingTime), Final: true,
 			MarkPrice: p.MarkPrice.String(), IndexPrice: p.IndexPrice.String(),
 		}})
 	}
-	return out, nil
+	return out, done, nil
 }
 
 // checkDegraded reports the contract degraded once it has had no mark

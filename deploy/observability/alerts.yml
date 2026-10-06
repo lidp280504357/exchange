@@ -311,6 +311,13 @@ groups:
           summary: "{{ $labels.symbol }} has no usable index source; it degrades if none comes back"
           runbook: docs/runbook/market-data.md
 
+      - alert: MarkPriceSourceDegraded
+        expr: max by (job, symbol) (market_mark_source_degraded) == 1
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.symbol }} follows the reference market's mark price (market.reference_mark) but it has been stale for 10 seconds: the self-computed prices stand in, trading goes on"
+          runbook: docs/runbook/market-data.md
+
       - alert: WalletScanLagging
         expr: max by (network) (wallet_scan_lag_blocks) > 50
         for: 10m

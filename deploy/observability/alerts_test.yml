@@ -223,6 +223,25 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'market_mark_source_degraded{job="market-data-service", symbol="BTC-USDT-PERP"}'
+        values: '0 1 0'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: MarkPriceSourceDegraded
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: MarkPriceSourceDegraded
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-data-service, symbol: BTC-USDT-PERP}
+            exp_annotations:
+              summary: "BTC-USDT-PERP follows the reference market's mark price (market.reference_mark) but it has been stale for 10 seconds: the self-computed prices stand in, trading goes on"
+              runbook: docs/runbook/market-data.md
+      - eval_time: 2m
+        alertname: MarkPriceSourceDegraded
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
       - series: 'margin_reconcile_mismatches{job="margin-service", check="LOANS_MATCH_LEDGER"}'
         values: '0 2 2'
     alert_rule_test:

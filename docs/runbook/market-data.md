@@ -98,7 +98,20 @@ SELECT symbol, funding_time, samples, premium_sum / nullif(samples, 0) AS avg_pr
 SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.funding_periods WHERE settled_at IS NOT NULL ORDER BY funding_time DESC LIMIT 10;
 ```
 
-指标：`market_mark_age_seconds{symbol}`（-1 表示从未算出）、`market_index_sources{symbol}`（最近一次指数价用到的源数）、`market_contract_degraded{symbol}`、`market_funding_settled_total`；告警 `ContractDegraded`、`ContractIndexSourceMissing`。
+指标：`market_mark_age_seconds{symbol}`（-1 表示从未算出）、`market_index_sources{symbol}`（最近一次指数价用到的源数）、`market_contract_degraded{symbol}`、`market_funding_settled_total{source}`（结算费率的来源，见下节）；告警 `ContractDegraded`、`ContractIndexSourceMissing`。
+
+### 标记价跟随币安（`market.reference_mark`，币本位设计 §3.1）
+
+实现见 `application/markfeed.go`（订阅与取结算费率）、`application/marks.go`（选用与回退）、`adapters/binance/marks.go`。
+
+- **订阅**：`market.reference_feed` 开着时，指数交易对有参考市场的合约（测试服 BTC、ETH 的永续；平台币永续没有）订阅币安合约的 `<symbol>@markPrice@1s`：U 本位走 `fstream`，参考符号以 `_PERP` 结尾的（币本位，如 `BTCUSD_PERP`）走 `dstream`，每条连接最多 200 个合约，跟随的合约变了就重连，断线退避重连（1 秒起，最长 30 秒）。取标记价 `p`、指数价 `i`、本周期预估资金费率 `r` 与下次结算时间 `T`。不论开关是否打开都订阅，用来观察两种标记价的差距。
+- **跟随**：开关 `market.reference_mark` 按合约打开后，该合约每秒发布的标记价、指数价与预估资金费率是币安的（`MarkPriceUpdated` 照旧每秒一条），强平、ADL 与资金费都以它为准。自算（上面的指数、basis EMA、溢价样本）每秒照跑，作为后备，周期样本照常保存；`IndexPriceUpdated`（键为现货指数代码）仍是自算的现货指数。
+- **回退**：币安的标记价超过 `MARK_SOURCE_STALE_SECONDS`（默认 10）秒没有更新，自算的价格顶上，**不进入只减仓**；指标 `market_mark_source_degraded{symbol}` 为 1，告警 `MarkPriceSourceDegraded`，日志 `reference mark price stale`；恢复后自动切回（日志 `reference mark price back`）。服务启动后的前 10 秒（流还在连接）不算陈旧。两者都没有时，才按上面的规则在 10 秒后降级为只减仓。
+- **资金费**：周期结束时间与币安的 `T` 相同时，预估费率跟随币安；周期结束后向币安 REST `fundingRate` 取该期已结算的费率与结算标记价（U 本位一次请求取全部合约，满一页 1000 条时改为逐个；币本位逐个；每 10 秒一次），最多等 2 分钟，期间该周期不结算；仍没有就用流里该期最后的预估费率（来源 `REFERENCE_ESTIMATE`），再没有就用自算费率（`COMPUTED`）。币安结束周期的时间与我们不同（例如币安把该合约改成 4 小时）的周期不跟随费率，日志 `the reference market ends the funding period at another time`，此时应改合约的 `funding_interval_hours`。结算日志 `funding period settled` 带 `source`（`REFERENCE`、`REFERENCE_ESTIMATE`、`COMPUTED`）。
+- **打开时机**：打开开关的那一刻，标记价从自算跳到币安的（通常相差万分之几，`market_mark_reference_gap{symbol}` 实时显示自算相对币安的偏差），临界仓位可能因此被强平。按合约逐个在差距小、行情平稳时打开。
+- **审计**：`/internal/market/{symbol}/mark` 另有 `source`（`REFERENCE` 或 `COMPUTED`）、`source_degraded` 与 `computed`（同一轮自算的标记价与指数价）。
+- 指标：`market_mark_source{symbol}`（1 跟随币安，0 自算）、`market_mark_source_degraded{symbol}`、`market_mark_reference_age_seconds{symbol}`（-1 表示还没有）、`market_mark_reference_gap{symbol}`、`market_mark_stream_failures_total`、`market_mark_funding_fetches_total{result}`（`found`、`pending`、`failed`）。配置：`BINANCE_COIN_FUTURES_REST_URL`、`BINANCE_COIN_FUTURES_STREAM_URL`（默认 `https://dapi.binance.com`、`wss://dstream.binance.com`）、`MARK_SOURCE_STALE_SECONDS`。
+- 开关键 `market.reference_mark` 由 G0 契约加入已知开关（`exchangectl flags set` 只认已知键）；在此之前代码已部署但不会跟随。
 
 ## 参考行情：跟随哪些交易对（ADR-0010）
 
@@ -161,6 +174,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 |---|---|---|
 | 币安行情中断（`MarketFeedHalted`） | `/internal/market/feed` 为 `DOWN`，跟随的交易对被置 HALT；ticker 的 `updated_at` 停住 | 查 `reference feed failed` 日志与出网；恢复后 30 秒自动放开；要提前放开就关掉 `market.halt_on_feed_loss` |
 | 币安盘口断流（`ReferenceBookStale`） | 5 秒后该交易对的公共盘口退回平台自己的，HOUSE 发空簿、不再成交（`market_house_active` 为 0） | 自动重连并重新取快照；`scripts/fault/reference-outage.sh` 演练 |
+| 币安标记价陈旧（`MarkPriceSourceDegraded`） | `/internal/market/{symbol}/mark` 的 `source` 为 `COMPUTED`、`source_degraded` 为 true；`market_mark_reference_age_seconds` 超过 10；交易照常 | 查 `reference mark stream failed` 日志与到 `fstream`/`dstream` 的出网；自算价格已顶上，不用处理只减仓；恢复后自动切回。长时间不恢复又想停掉告警时关掉该合约的 `market.reference_mark` |
 | 合约降级（`ContractDegraded`） | `mark-price` 的 `degraded` 为 true，`updated_at` 停住；`market_index_sources` 为 0 | 查参考行情（`market_reference_age_seconds`、开关 `market.reference_feed`、`reference feed failed` 日志，见 [market-maker.md](market-maker.md)）；恢复后确认标记价正常，再按合约服务手册人工解除只减仓 |
 | 市场服务重启 | 深度最多 10 秒为空；K 线、ticker 从库恢复 | 自动 |
 | PostgreSQL 不可用 | 成交批次写库失败，消费者退避重试，积压上升 | 恢复后自动重载并继续；成交量不会重复累加 |

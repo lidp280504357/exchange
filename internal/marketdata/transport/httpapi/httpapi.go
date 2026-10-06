@@ -536,7 +536,9 @@ type componentJSON struct {
 	Included bool   `json:"included"`
 }
 
-// markInternal adds what the index was made of, for audits (§5.11).
+// markInternal adds what the index was made of, for audits (§5.11), and
+// where the prices came from: the reference market's mark price or the
+// self-computed one, which is shown either way (coin-M design §3.1).
 func (h *Handler) markInternal(w http.ResponseWriter, r *http.Request) {
 	p, ok := h.Marks.Latest(symbol(r))
 	if !ok {
@@ -550,7 +552,8 @@ func (h *Handler) markInternal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"mark": toMarkJSON(p), "basis": p.Basis.String(), "premium": p.Premium.String(), "samples": p.Samples,
-		"components": comps,
+		"components": comps, "source": p.Source, "source_degraded": p.SourceDegraded,
+		"computed": map[string]*string{"mark_price": price(p.Computed), "index_price": price(p.ComputedIndex)},
 	})
 }
 

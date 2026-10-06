@@ -130,6 +130,18 @@ type BookSource interface {
 	BookStream(ctx context.Context, refs []Reference, futures bool, on BookHandlers) error
 }
 
+// MarkSource is the reference market's mark prices and settled funding
+// rates of perpetual contracts (coin-M design §3.1), of its COIN-M market
+// (coin true) or its USDⓈ-M one.
+type MarkSource interface {
+	// MarkStream passes every mark price update of refs to on, about one
+	// a second each, until ctx ends or the connection fails.
+	MarkStream(ctx context.Context, refs []Reference, coin bool, on func(domain.ReferenceMark)) error
+	// SettledFunding returns the rates refs settled with funding times in
+	// [from, to], oldest first.
+	SettledFunding(ctx context.Context, refs []Reference, coin bool, from, to time.Time) ([]domain.SettledFunding, error)
+}
+
 // Halt is a pair market-data-service halted when the reference feed was
 // lost.
 type Halt struct {

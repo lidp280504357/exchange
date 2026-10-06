@@ -207,3 +207,28 @@ func NextFunding(t time.Time, hours int32) time.Time {
 	d := time.Duration(max(hours, 1)) * time.Hour
 	return t.UTC().Truncate(d).Add(d)
 }
+
+// ReferenceMark is a perpetual contract's prices on its reference market
+// (coin-M design §3.1): the mark and index prices and the estimated rate
+// of the funding period ending NextFunding, as the market published them
+// at At.
+type ReferenceMark struct {
+	Symbol string
+	Mark   decimal.Decimal
+	Index  decimal.Decimal
+	// FundingRate is the running period's estimate; HasRate is false when
+	// the market sent none.
+	FundingRate decimal.Decimal
+	HasRate     bool
+	NextFunding time.Time
+	At          time.Time
+}
+
+// SettledFunding is a funding rate the reference market settled, with its
+// mark price at the settlement.
+type SettledFunding struct {
+	Symbol      string
+	FundingTime time.Time
+	Rate        decimal.Decimal
+	Mark        decimal.Decimal
+}
