@@ -147,6 +147,22 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - 体积：繁体文案和英文一样，与各自的页面块打在一起，不另外请求。入口 JS 增加约 3.5 KB（本机 gzip -9：PC 158.9 → 162.4 KB，手机站 146.4 → 150.0 KB）；全部 JS 约增加 16 KB，主要在币种资料块（约 3.7 KB）与各分区的块（0.3–2.8 KB）。
 - 冒烟：两站在设置页切到繁体，检查首页、行情、交易、资产、帮助五页的繁体文字与繁体字体，截图到 `SHOTS`（检查按钮、页签与表头在繁体下的宽度），再切回简体。
 
+## 合约数据（币本位与币安合约数据设计 2026-10-06 §3.3，批次 F）
+
+合约的持仓量、三种多空比（大户账户数、大户持仓量、全市场账户数）、主动买卖量、基差、资金费率历史与爆仓流，数据是 market-data-service 存下的参考市场统计（接口 `GET /v1/market/{symbol}/futures-data`、`/v1/market/{symbol}/liquidations`、`/v1/market/futures/overview`，频道 `liquidations:{symbol}`，见 [market-data.md](market-data.md)「合约数据」）。页面上不写数据来源（ADR-0010）。
+
+| 位置 | PC 站 | 手机站 |
+|---|---|---|
+| 合约终端 | 中间一栏「图表 \| 数据」页签（`pages/trade/parts/FuturesCenter.tsx`，币安合约页的「交易数据」也在图表区）：图表在「数据」下面照常挂着（`invisible`，不卸载、不改尺寸），数据面板盖在上面、按需加载，指针移到页签栏时开始预载 | SwipeTabs 最后一项「数据」（`pages/trade/parts/FuturesDataTab.tsx`）：第一次切到才加载与取数，切走后停止轮询 |
+| 总览 `/futures/data` | 外壳页：U 本位/币本位切换、搜索、可排序的表（标记价、指数价（≥ 1280 px）、24h 涨跌与成交额、持仓量（美元价值与数量）、资金费率与倒计时，16 行起在自己的框里虚拟滚动），上方是该组合计（持仓总价值、24h 成交额、资金费率正/负个数），表下是所选合约的数据面板（行的「数据」或点行；地址 `?symbol=`） | 页面外壳：同样的分组、搜索与合计，排序在下拉框里，合约一行一个，点行在 sheet 里看该合约的数据面板，sheet 底部「去交易」 |
+| 行情列表「合约」类别 | 多两列持仓量（美元价值）与资金费率（可排序，`sort=oi\|funding`），≥ 1280 px 时让出 24h 高低的位置，窄屏时让出近 7 天与「交易」按钮（点行即进终端）；工具栏 U 本位/币本位切换（`margin=coin`）与「全部合约数据」链接 | 名称下一行改为「费率 … · 持仓 …」，不画 24h 走势；排序面板多三项（持仓量、资金费率高低）；同样的切换与链接 |
+
+- 共享逻辑在 core `@exchange/core/futures/index`（不进 core 的 index）：`useFuturesData`（显示时每分钟重取；换周期时先显示上一周期的点并变淡，不跳动）、`useFuturesOverview`（每 30 秒）、`useLiquidations`（REST 一天内最近 100 条 + 频道推送，按时间、方向、价格与数量去重，重连后重取一次）、`useAllContracts`（`margin_type=ALL`）、`METRIC_FORMS`/`METRIC_VALUES`（每项统计的图形与数值单位）、`formatValue`、列表的分组与排序（`openContracts`、`sortFuturesRows`、`overviewRows`、`overviewTotals`）。
+- 哪些合约出现在列表与总览：PREPARE 的不出现（与 `useContracts()` 一致）；币本位的等终端的合约列表（`useContracts()`）里有 COIN 合约时才出现（编码会话的开放开关），免得点进去是未知交易对。平台币的两个永续没有 `reference_symbol`：面板不发请求，直接显示"暂无数据"（控制台不出现 404 红字，同 B117）；接口答 404 `MARKET_NO_FUTURES_DATA` 时同样处理。
+- 图表是 ui `@exchange/ui/futures/index` 的 `SeriesChart`（SVG，不用图表库，不进 K 线图的块）：每张图一条 y 轴（右侧），持仓量是线加 10% 底色、基差是线、资金费率是按正负着色的柱、三种多空比是多（下）空（上）堆到 100% 的柱、主动买卖量是买在零轴上、卖在零轴下的镜像柱；柱宽不超过 24 px、柱间 2 px、数据端 4 px 圆角。指针、触摸（横向拖动读点，不触发手机终端的左右滑动换页）与方向键都能看每个点的全部数值；每张卡片可切到表格（`SeriesTable`，同样的点，最新在上）。统计的说明在信息图标的弹层里（点击或轻点，手机上也能看）。涨跌色沿用站点的 `--up`/`--down`（色觉辅助靠位置：零轴上下、堆叠上下与图例）。
+- 文案在两站的 `src/i18n/futures.ts`（命名空间 `pcFutures`/`mFutures`），随合约终端、行情页与总览页加载；`vite.config.ts` 的 routePreload 里 `^/futures/data` 排在 `^/futures/` 前面（先匹配者生效）。数据面板是单独的块（ui `preloadable`），不在任何页面的首屏里。
+- 冒烟（两站第 7b 步）：合约终端「数据」页签七张图都画出、爆仓有行或写明"最近一天没有爆仓"，PC 切到 1 小时后按 `period=1h` 重取；ASTRA 永续显示"暂无数据"且没有请求；行情「合约」类别有持仓量与资金费率；`/futures/data` 列出合约并画出所选合约的面板（手机在 sheet 里）。
+
 ## 无障碍与状态
 
 - 减少动效：系统开了"减少动态效果"时，两个用户站的 `MotionConfig` 带 `skipAnimations={prefersReducedMotion()}`（`packages/ui/src/lib/motion.ts`），motion 的淡入、错开入场一并跳过（只设 `reducedMotion="user"` 时不透明度动画仍在）；全局 CSS 把动画与过渡的时长和延迟都清零（`packages/ui/src/styles/index.css`），`Drawer`、`Sheet` 也各自用 `useReducedMotion`。
