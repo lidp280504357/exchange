@@ -21,6 +21,7 @@
 | 7 | HOUSE 库存与上限 | HOUSE 的 USDT/BTC/ETH 是"背书资产"，正式环境必须是托管方真实持有的资金：先向商户钱包充入库存，再 `scripts/ops/house.sh seed` 到相应水平、`exchangectl wallet reconcile` 无短缺；compose 里的单资产/单合约上限按真实库存设（测试服的 2,000,000 / 5,000,000 是放大过的） |
 | 8 | 构建时的品牌 | `web/apps/{pc,m}/index.html` 的 `<title>` 与 `description`（供爬虫与分享卡片）在构建时写死，运行时注入只改脚本执行后的页面——上线前把这两个文件里的名称与描述改成正式值再部署（已知限制，见 §4） |
 | 9 | 告警与值班 | `deploy/observability/alerts.yml` 的接收端指向正式的通知渠道（`observability.md`）；确认 `CustodyShortfall`、`WalletWithdrawalsSuspended`、`MarketSimBandDeadlock` 等有人接 |
+| 10 | 杠杆参数与保险基金（杠杆设计 2026-10-06，见 §2.1） | 复制 `deploy/instruments/margin.json` 为正式版：借贷池上限按 HOUSE 真实持有的可充提资产定（USDT/BTC/ETH 是背书资产，借出去的币用户可以卖成别的币再划回现货）、利率与保证金折扣按运营口径，`exchangectl margin apply`；保险基金 `INSURANCE_FUND` 按**每种可借资产**分别注资（`exchangectl ledger insurance-fund --asset <资产>`，正式环境走后台双人划转）——基金不允许为负，某资产不够时强平停在 `SHORTFALL`、负债留着并告警；告警 `InsuranceFundShort`、`MarginLiquidationStuck`、`MarginLiquidationDue`、`MarginMonitorStalled`、`MarginInterestStalled`、`MarginReconciliationMismatch`、`TradingOrdersPendingFreeze` 要有人接（`margin.md`） |
 
 ## 2. 后台侧（按「上线检查清单」的顺序）
 
@@ -38,6 +39,16 @@
 10. **上线检查清单**：全部绿（含「HOUSE 报价与资金」）；红的按链接去改。清单只看后台能改的项，部署侧以 §1 为准。
 11. **开放提现**：步 6 完成且清单全绿后 `wallet.withdraw` 开。
 12. **开盘**：恢复各市场、确认 HOUSE 在报价、看 24 小时。
+
+### 2.1 杠杆交易（杠杆设计 2026-10-06，上线检查清单的 margin 项）
+
+测试服上 `margin.enabled` 与 `margin.auto_borrow` 是对所有人打开的（为了端到端与演练），正式环境**不能照搬**：
+
+1. **强平开关先开**：`margin.liquidation` 必须开着——关着时风险率跌到强平线的账户只会被记为待强平（告警 `MarginLiquidationDue`），负债越滚越大。确认 §1 步 10 的保险基金已按每种可借资产注资。
+2. **杠杆开关按人或按地区开**：`margin.enabled`（划入、借币、杠杆下单）与 `margin.auto_borrow`（自动借款）从"对所有人"改为按用户（`--allow-users`）或按地区（`--allow-regions`）的规则开放，或在上线时先关着、按运营节奏逐步放开（`exchangectl flags set`，见 `feature-flags.md`）。还币与划回现货不受开关影响：关掉后用户仍能用账户里的币还清负债、把资产划回现货（杠杆账户上下单则要开关开着）。
+3. **参数**：后台「杠杆参数」核对各资产的可借与保证金资格、借贷池与单用户上限、利率模型与利率、折扣，各交易对的逐仓倍数与预警/强平线，全仓倍数与阈值（提高风险的改动走双人审批，只收紧的单人即时生效）。
+4. **上线检查清单的 margin 项**：杠杆关着（`margin.enabled` 对任何人都不开）为 OK；开着时要求 `margin.liquidation` 也开，且 `margin.enabled`、`margin.auto_borrow` 都不是对所有人全局打开（按用户或地区的规则才算），否则为 FAIL——测试服现在 FAIL 是对的。
+5. **站点**：行情列表里逐仓交易对的倍数标记对所有访客显示（按公开的 `/v1/margin/pairs`，与币安一致，B108）；交易页的账户切换、资产页的杠杆账户只对 `MARGIN_TRADE` 资格开放的人显示（关掉后还有杠杆资产或负债的人仍看得到入口，用来还币与划出）。帮助中心有《杠杆交易入门》（`help/margin-trading`，两种语言）。
 
 ## 3. 演练
 
