@@ -378,6 +378,9 @@ services:
       # Signs its calls to market-sim's management API (key "admin").
       - path: sim/admin.env
         required: false
+      # Signs its changes of HOUSE's caps on market-maker (key "admin").
+      - path: house/admin.env
+        required: false
     environment:
       <<: *base-env
       GOMEMLIMIT: 240MiB
@@ -424,9 +427,22 @@ services:
   # 20,000 cap had a 5 BTC market order fill 1.567, review FE C44), a pair's
   # or contract's position and all spot positions; HOUSE's contract margin
   # (scripts/ops/house.sh seed) still bounds the contracts at 10x.
+  # These are the first caps stored; the console changes them on the
+  # internal API (8091), its changes signed (review FL, C47) with one key
+  # per caller, made by the deploy script on its first run: house/caps.env
+  # (HOUSE_CAPS_API_SECRET, exchangectl in this container) and
+  # house/admin.env (HOUSE_CAPS_ADMIN_API_SECRET, admin-service too: the
+  # only caller that names an approver).
   market-maker:
     <<: *app
     command: ["/app/market-maker"]
+    env_file:
+      - path: apps.env
+        required: false
+      - path: house/caps.env
+        required: false
+      - path: house/admin.env
+        required: false
     environment:
       <<: *base-env
       HOUSE_LEVEL_CAP: "500000000"

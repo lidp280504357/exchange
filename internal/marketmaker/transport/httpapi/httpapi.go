@@ -2,6 +2,17 @@
 // (review C45), for the console (admin-service; the gateway does not pass
 // /internal). Amounts are decimal strings in USDT; the leverage a number
 // of times.
+//
+// A change (PUT) must be signed (internal/platform/svcsign, review FL,
+// C47) with one of two keys: KeyOps (HOUSE_CAPS_API_SECRET, exchangectl
+// in market-maker's container) or KeyAdmin (HOUSE_CAPS_ADMIN_API_SECRET,
+// the admin console's service). The signer vouches for the actor it names,
+// and only KeyAdmin may name an approver: the console signs both
+// operators in. The reads are not signed.
+//
+//	GET /internal/house/caps          the caps in force and their version
+//	PUT /internal/house/caps          a change {"level": "...", ..., "version", "actor", "approver", "approval_id", "reason"}
+//	GET /internal/house/caps/changes  the latest changes, newest first (?limit=)
 package httpapi
 
 import (
@@ -16,15 +27,32 @@ import (
 	"github.com/skill/exchange/internal/marketmaker/domain"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/svcsign"
 )
 
-// Handler serves the caps.
-type Handler struct{ Caps *application.Caps }
+// The keys the changes are signed with: exchangectl's in market-maker's
+// container, and the admin console's service's, the only one that may
+// name an approver.
+const (
+	KeyOps   = "ops"
+	KeyAdmin = "admin"
+)
+
+// ErrApprovalNeedsAdmin refuses an approver named by any caller but the
+// admin console's service.
+var ErrApprovalNeedsAdmin = apperr.New(apperr.KindForbidden, "HOUSE_CAPS_APPROVAL_NEEDS_ADMIN",
+	"only the admin console's service names an approver: it signed both operators in")
+
+// Handler serves the caps; Signed checks the changes' signatures.
+type Handler struct {
+	Caps   *application.Caps
+	Signed *svcsign.Verifier
+}
 
 // Routes registers the handlers on r.
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/internal/house/caps", h.get)
-	r.Put("/internal/house/caps", h.put)
+	r.With(h.Signed.Changes).Put("/internal/house/caps", h.put)
 	r.Get("/internal/house/caps/changes", h.changes)
 }
 
@@ -82,6 +110,11 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	signedBy := svcsign.KeyID(r.Context())
+	if (b.Approver != "" || b.ApprovalID != "") && signedBy != KeyAdmin {
+		httpx.WriteError(w, r, ErrApprovalNeedsAdmin)
+		return
+	}
 	caps := h.Caps.Get().Caps
 	for name, f := range map[string]struct {
 		in  *string
@@ -102,6 +135,7 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := h.Caps.Change(r.Context(), domain.CapsChange{
 		Caps: caps, Version: b.Version, Actor: b.Actor, Approver: b.Approver, ApprovalID: b.ApprovalID, Reason: b.Reason,
+		SignedBy: signedBy,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -118,6 +152,7 @@ type changeJSON struct {
 	Approver   string    `json:"approver"`
 	ApprovalID string    `json:"approval_id"`
 	Reason     string    `json:"reason"`
+	SignedBy   string    `json:"signed_by"`
 	At         string    `json:"at"`
 }
 
@@ -132,7 +167,7 @@ func (h *Handler) changes(w http.ResponseWriter, r *http.Request) {
 	for _, c := range list {
 		j := changeJSON{
 			Version: c.Version, Caps: toJSON(c.Caps), Actor: c.Actor, Approver: c.Approver, ApprovalID: c.ApprovalID, Reason: c.Reason,
-			At: c.At.UTC().Format(time.RFC3339Nano),
+			SignedBy: c.SignedBy, At: c.At.UTC().Format(time.RFC3339Nano),
 		}
 		if c.Previous != nil {
 			p := toJSON(*c.Previous)

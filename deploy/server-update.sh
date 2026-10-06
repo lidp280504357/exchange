@@ -214,12 +214,16 @@ sync_infra() {
   # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据），每个调用方一把：
   # sim/sim.env 的 SIM_API_SECRET 只给 market-sim（容器里的 exchangectl sim 用），sim/admin.env 的
   # SIM_ADMIN_API_SECRET 给 market-sim 与 admin-service（只有它能填批准人）。第一次部署时生成，之后不变；值不打印
-  sudo mkdir -p "$INFRA/sim" && sudo chmod 700 "$INFRA/sim"
+  # HOUSE 运行时额度接口（market-maker，审查 FL C47）同样两把：house/caps.env 的 HOUSE_CAPS_API_SECRET 只给
+  # market-maker（容器里的 exchangectl house 用），house/admin.env 的 HOUSE_CAPS_ADMIN_API_SECRET 给 market-maker
+  # 与 admin-service（只有它能填批准人）
+  sudo mkdir -p "$INFRA/sim" "$INFRA/house" && sudo chmod 700 "$INFRA/sim" "$INFRA/house"
   local pair
-  for pair in sim.env:SIM_API_SECRET admin.env:SIM_ADMIN_API_SECRET; do
-    if ! sudo test -s "$INFRA/sim/${pair%%:*}"; then
-      sudo sh -c "umask 077 && printf '%s=%s\n' '${pair#*:}' \"\$(openssl rand -hex 32)\" >'$INFRA/sim/${pair%%:*}'"
-      echo "== 已生成 sim/${pair%%:*}（${pair#*:}）"
+  for pair in sim/sim.env:SIM_API_SECRET sim/admin.env:SIM_ADMIN_API_SECRET house/caps.env:HOUSE_CAPS_API_SECRET \
+    house/admin.env:HOUSE_CAPS_ADMIN_API_SECRET; do
+    if ! sudo test -s "$INFRA/${pair%%:*}"; then
+      sudo sh -c "umask 077 && printf '%s=%s\n' '${pair#*:}' \"\$(openssl rand -hex 32)\" >'$INFRA/${pair%%:*}'"
+      echo "== 已生成 ${pair%%:*}（${pair#*:}）"
     fi
   done
 }

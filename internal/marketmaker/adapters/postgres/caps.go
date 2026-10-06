@@ -119,8 +119,8 @@ func (s *Store) Change(ctx context.Context, c domain.CapsChange, at time.Time) (
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO house_caps_changes (version, caps, previous, actor, approver, approval_id, reason, at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, next, body, prev, c.Actor, c.Approver, c.ApprovalID, c.Reason, at)
+		_, err = tx.Exec(ctx, `INSERT INTO house_caps_changes (version, caps, previous, actor, approver, approval_id, reason, signed_by, at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, next, body, prev, c.Actor, c.Approver, c.ApprovalID, c.Reason, c.SignedBy, at)
 		return err
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *Store) Change(ctx context.Context, c domain.CapsChange, at time.Time) (
 
 // Changes returns the latest changes, newest first.
 func (s *Store) Changes(ctx context.Context, limit int) ([]domain.CapsRecord, error) {
-	rows, err := s.db.Query(ctx, `SELECT version, caps, previous, actor, approver, approval_id, reason, at
+	rows, err := s.db.Query(ctx, `SELECT version, caps, previous, actor, approver, approval_id, reason, signed_by, at
 		FROM house_caps_changes ORDER BY version DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list house caps changes: %w", err)
@@ -144,7 +144,7 @@ func (s *Store) Changes(ctx context.Context, limit int) ([]domain.CapsRecord, er
 		var r domain.CapsRecord
 		var caps []byte
 		var prev []byte
-		if err := row.Scan(&r.Version, &caps, &prev, &r.Actor, &r.Approver, &r.ApprovalID, &r.Reason, &r.At); err != nil {
+		if err := row.Scan(&r.Version, &caps, &prev, &r.Actor, &r.Approver, &r.ApprovalID, &r.Reason, &r.SignedBy, &r.At); err != nil {
 			return r, err
 		}
 		var c capsJSON

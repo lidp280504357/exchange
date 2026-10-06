@@ -22,7 +22,9 @@ type StoredCaps struct {
 }
 
 // CapsChange asks to replace the caps of Version (optimistic: another
-// change in between is refused) with Caps.
+// change in between is refused) with Caps. SignedBy is the service key
+// the request was signed with (review FL, C47): the signer vouches for
+// the actor, and only the admin console's may name an approver.
 type CapsChange struct {
 	Caps       Caps
 	Version    int64
@@ -30,10 +32,11 @@ type CapsChange struct {
 	Approver   string
 	ApprovalID string
 	Reason     string
+	SignedBy   string
 }
 
 // CapsRecord is a change as kept: what was set and what it replaced (none
-// for the first, from the environment).
+// for the first, from the environment), and the key that signed it.
 type CapsRecord struct {
 	Version    int64
 	Caps       Caps
@@ -42,6 +45,7 @@ type CapsRecord struct {
 	Approver   string
 	ApprovalID string
 	Reason     string
+	SignedBy   string
 	At         time.Time
 }
 

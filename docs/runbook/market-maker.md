@@ -61,12 +61,14 @@
 
 ## 运行时额度（用户决定 2026-10-07，C45）
 
-- 生效的额度存在库里（schema `marketmaker`：`house_caps` 一行，`house_caps_changes` 记每次改动的新值、旧值、操作人、批准人、审批号与原因；迁移 marketmaker 00001）。服务第一次启动时把环境变量 `HOUSE_*` 的值存为第 1 版，之后以库里的为准，环境变量不再起作用；每 10 秒重读一次（多实例或直接改库也会跟上），本实例改的立即生效，下一轮（250 毫秒）报价就用新额度。启动日志与每次变化打 `house liquidity caps`（带 `version`）。
+- 生效的额度存在库里（schema `marketmaker`：`house_caps` 一行，`house_caps_changes` 记每次改动的新值、旧值、操作人、批准人、审批号、原因与签名的键 `signed_by`；迁移 marketmaker 00001、00002）。服务第一次启动时把环境变量 `HOUSE_*` 的值存为第 1 版，之后以库里的为准，环境变量不再起作用；每 10 秒重读一次（多实例或直接改库也会跟上），本实例改的立即生效，下一轮（250 毫秒）报价就用新额度。启动日志与每次变化打 `house liquidity caps`（带 `version`）。
 - 内部接口（端口 8091，`HTTP_ADDR`；网关不转发 `/internal`，只给 admin-service，后台「HOUSE」页的「额度」卡由后台会话做（A69：双人审批 `HOUSE_CAPS`，后台审计））：
   - `GET /internal/house/caps` → `level`、`symbol`、`total`、`contract`、`safety`（USDT，十进制字符串）、`contract_leverage`（倍数）、`version`、`updated_by`、`updated_at`；
-  - `PUT /internal/house/caps` `{"level"?, "symbol"?, "total"?, "contract"?, "safety"?, "contract_leverage"?, "version", "actor", "approver"?, "approval_id"?, "reason"}`：只改给出的项，`version` 必须是读到的那一版（中间有人改过答 409 `HOUSE_CAPS_VERSION`，重读再改），数值不能为负（400），`actor`、`reason` 必填；答新的一版；
-  - `GET /internal/house/caps/changes?limit=`（默认 20，最多 100）→ `items`：新的在前，每项 `version`、`caps`、`previous`（第 1 版为 null）、`actor`、`approver`、`approval_id`、`reason`、`at`。
-- 手工（服务器上）：`sudo docker compose exec -T market-maker wget -qO- http://127.0.0.1:8091/internal/house/caps`。
+  - `PUT /internal/house/caps` `{"level"?, "symbol"?, "total"?, "contract"?, "safety"?, "contract_leverage"?, "version", "actor", "approver"?, "approval_id"?, "reason"}`：只改给出的项，`version` 必须是读到的那一版（中间有人改过答 409 `HOUSE_CAPS_VERSION`，重读再改），数值不能为负、`contract_leverage` 要大于 0（400），`actor`、`reason` 必填；答新的一版；
+  - `GET /internal/house/caps/changes?limit=`（默认 20，最多 100）→ `items`：新的在前，每项 `version`、`caps`、`previous`（第 1 版为 null）、`actor`、`approver`、`approval_id`、`reason`、`signed_by`、`at`。
+- **改动要签名**（审查 FL，C47，照 market-sim）：`PUT` 必须带 `X-Service-Signature`（`internal/platform/svcsign`，HMAC 覆盖时间、随机数、方法、路径与正文，5 分钟内有效、同一签名只收一次），否则 401 `SERVICE_UNSIGNED`；读不要签名。两把键，每个调用方一把：`ops`（`HOUSE_CAPS_API_SECRET`，market-maker 容器里的 `exchangectl house`）与 `admin`（`HOUSE_CAPS_ADMIN_API_SECRET`，admin-service）。签名方担保正文里的 `actor`；**只有 `admin` 键能带 `approver`/`approval_id`**，其它键带了 403 `HOUSE_CAPS_APPROVAL_NEEDS_ADMIN`。缺哪把键（或不足 32 个字符），用那把签的改动一律被拒，启动日志告警，额度照库里的生效、报价不受影响。
+- 密钥：测试服在 `/opt/exchange/infra/house/caps.env`（`HOUSE_CAPS_API_SECRET`，只挂给 market-maker）与 `house/admin.env`（`HOUSE_CAPS_ADMIN_API_SECRET`，挂给 market-maker 与 admin-service），部署脚本第一次运行时生成、不打印；本机在 `.env`。
+- 手工（服务器上，在 market-maker 容器里）：读 `exchangectl house caps`、`exchangectl house changes`；改 `exchangectl house call PUT /internal/house/caps '{"safety":"2000","version":<读到的版本>,"actor":"ops:<名字>","reason":"..."}'`（`ops` 键，不能带批准人）。例：`sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-maker /app/exchangectl house caps`。
 
 ## 测试服设置（一次性）
 

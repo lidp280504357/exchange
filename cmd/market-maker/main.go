@@ -28,6 +28,7 @@ import (
 	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/svcsign"
 	"github.com/skill/exchange/migrations"
 )
 
@@ -61,6 +62,15 @@ type settings struct {
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
 	InstrumentURL  string `koanf:"instrument_service_url"`
 	DerivativesURL string `koanf:"derivatives_service_url"`
+	// The caps' changes are signed (review FL, C47), one key per caller,
+	// at least 32 characters each: CapsAPISecret (HOUSE_CAPS_API_SECRET,
+	// key ID "ops") is exchangectl's in this container, CapsAdminAPISecret
+	// (HOUSE_CAPS_ADMIN_API_SECRET, key ID "admin") the admin console's
+	// service's, the only caller that may name an approver. A key missing
+	// is not accepted: without either, the caps cannot be changed (HOUSE
+	// keeps quoting on the stored ones).
+	CapsAPISecret      string `koanf:"house_caps_api_secret"`
+	CapsAdminAPISecret string `koanf:"house_caps_admin_api_secret"`
 }
 
 func (s *settings) Validate() error {
@@ -134,8 +144,19 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	a.Add("house caps", app.Loop(caps.Run))
+	signed := &svcsign.Verifier{Keys: map[string][]byte{}}
+	for _, k := range []struct{ id, env, secret string }{
+		{httpapi.KeyOps, "HOUSE_CAPS_API_SECRET", cfg.CapsAPISecret},
+		{httpapi.KeyAdmin, "HOUSE_CAPS_ADMIN_API_SECRET", cfg.CapsAdminAPISecret},
+	} {
+		if err := svcsign.CheckSecret(k.secret); err != nil {
+			a.Logger().Warn("house caps: changes signed with this key are refused", "key", k.id, "variable", k.env, "error", err.Error())
+			continue
+		}
+		signed.Keys[k.id] = []byte(k.secret)
+	}
 	r := a.NewRouter()
-	(&httpapi.Handler{Caps: caps}).Routes(r)
+	(&httpapi.Handler{Caps: caps, Signed: signed}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {
 		return err
 	}

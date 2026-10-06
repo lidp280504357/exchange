@@ -46,8 +46,9 @@ func TestHouseCaps(t *testing.T) {
 	if _, err := store.Change(ctx, domain.CapsChange{Caps: big, Version: 2, Actor: "a", Reason: "r"}, at); apperr.From(err).Code != "HOUSE_CAPS_VERSION" {
 		t.Fatalf("a stale version: %v", err)
 	}
-	s, err = store.Change(ctx, domain.CapsChange{Caps: big, Version: 1, Actor: "admin:a", Approver: "admin:b", ApprovalID: "ap1", Reason: "the user's decision"},
-		at.Add(time.Minute))
+	s, err = store.Change(ctx, domain.CapsChange{
+		Caps: big, Version: 1, Actor: "admin:a", Approver: "admin:b", ApprovalID: "ap1", Reason: "the user's decision", SignedBy: "admin",
+	}, at.Add(time.Minute))
 	if err != nil || s.Version != 2 || !s.Caps.Level.Equal(d("500000000")) || s.UpdatedBy != "admin:a" {
 		t.Fatalf("changed %+v %v", s, err)
 	}
@@ -56,7 +57,8 @@ func TestHouseCaps(t *testing.T) {
 	}
 	list, err := store.Changes(ctx, 10)
 	if err != nil || len(list) != 2 || list[0].Version != 2 || list[0].Previous == nil || !list[0].Previous.Level.Equal(d("20000")) ||
-		list[0].Approver != "admin:b" || list[0].ApprovalID != "ap1" || list[1].Previous != nil || list[1].Actor != "environment" {
+		list[0].Approver != "admin:b" || list[0].ApprovalID != "ap1" || list[0].SignedBy != "admin" || list[1].Previous != nil ||
+		list[1].Actor != "environment" || list[1].SignedBy != "" {
 		t.Fatalf("changes %+v %v", list, err)
 	}
 }

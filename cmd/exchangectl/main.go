@@ -29,6 +29,7 @@
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //	exchangectl sim status | call POST /internal/sim/events '{"type":"JUMP",...}'
+//	exchangectl house caps | changes | call PUT /internal/house/caps '{"level":"...","version":1,...}'
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -59,6 +60,10 @@ type settings struct {
 	// sign its changes (sim only).
 	MarketSimURL string `koanf:"market_sim_url"`
 	SimAPISecret string `koanf:"sim_api_secret"`
+	// MarketMakerURL and HouseCapsAPISecret reach market-maker's internal
+	// API, HOUSE's caps, and sign their changes (house only).
+	MarketMakerURL     string `koanf:"market_maker_url"`
+	HouseCapsAPISecret string `koanf:"house_caps_api_secret"`
 }
 
 const usage = `usage: exchangectl <command> ...
@@ -171,6 +176,11 @@ commands:
   sim call METHOD PATH [JSON] a request to market-sim's management API, its changes signed with
                               SIM_API_SECRET (run in the market-sim container); prints "HTTP <status>"
                               to standard error and the answer, fails on 300 or more
+  house caps                  HOUSE's caps in force and their version (run in the market-maker container)
+  house changes               the latest changes of HOUSE's caps
+  house call METHOD PATH [JSON]
+                              a request to market-maker's internal API, its changes signed with
+                              HOUSE_CAPS_API_SECRET (run in the market-maker container); as sim call
 `
 
 func main() {
@@ -197,7 +207,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if args[0] == "udun" { // the gateway only: no database
 		return udunCmd(ctx, args[1:], out)
 	}
-	cfg := settings{Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098"}
+	cfg := settings{Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098", MarketMakerURL: "http://127.0.0.1:8091"}
 	if err := config.Load(&cfg); err != nil {
 		return err
 	}
@@ -232,6 +242,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return marginCmd(ctx, cfg, args[1:], os.Stdin, out)
 	case "sim":
 		return simCmd(ctx, cfg, args[1:], out)
+	case "house":
+		return houseCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])
