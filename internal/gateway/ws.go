@@ -79,9 +79,11 @@ type wsUser struct {
 }
 
 // wsPush is a private event as sent to the client.
+// wsPush is a private push; one of state that the next replaces (a margin
+// account as it stands, PublishLive) has no seq.
 type wsPush struct {
 	Channel string `json:"channel"`
-	Seq     int64  `json:"seq"`
+	Seq     int64  `json:"seq,omitempty"`
 	Data    any    `json:"data"`
 }
 
@@ -125,6 +127,29 @@ func (h *Hub) Publish(userID, channel string, data any) {
 		targets = append(targets, c)
 	}
 	h.mu.Unlock()
+	h.deliver(targets, channel, p)
+}
+
+// PublishLive pushes state that the next push of it replaces (a margin
+// account as it stands) to the user's connections subscribed to channel:
+// without a seq and not kept for replay, where old snapshots would only
+// push out the events a reconnecting client asks for.
+func (h *Hub) PublishLive(userID, channel string, data any) {
+	h.mu.Lock()
+	u := h.users[userID]
+	if u == nil {
+		h.mu.Unlock()
+		return
+	}
+	targets := make([]*wsConn, 0, len(u.conns))
+	for c := range u.conns {
+		targets = append(targets, c)
+	}
+	h.mu.Unlock()
+	h.deliver(targets, channel, wsPush{Channel: channel, Data: data})
+}
+
+func (h *Hub) deliver(targets []*wsConn, channel string, p wsPush) {
 	for _, c := range targets {
 		if c.subscribed(channel) && c.enqueue(p) {
 			h.pushed.WithLabelValues(channel).Inc()

@@ -190,7 +190,7 @@ type marginLiquidation struct {
 	Repaid           []assetAmount `json:"repaid"`
 	Fee              string        `json:"fee"`
 	InsuranceCovered string        `json:"insurance_covered"`
-	StartedAt        string        `json:"started_at,omitempty"`
+	StartedAt        string        `json:"started_at"`
 	CompletedAt      *string       `json:"completed_at"`
 }
 
@@ -202,7 +202,10 @@ type assetAmount struct {
 // marginOf pushes the margin accounts and events on "margin"; ok reports
 // whether p was one of those it pushes. Borrows, repayments and interest
 // are not pushed themselves: they change the account, which margin.accounts
-// carries.
+// carries. An account is pushed live (no seq, not replayed: the next one
+// replaces it). An isolated account without its pair, or a liquidation
+// without the margin level and start the contract requires, is not pushed
+// but logged.
 func marginOf(h *Hub, p interface {
 	MessageIs(proto.Message) bool
 	UnmarshalTo(proto.Message) error
@@ -219,7 +222,11 @@ func marginOf(h *Hub, p interface {
 		if err := p.UnmarshalTo(&updated); err != nil {
 			return true, err
 		}
-		h.Publish(updated.GetUserId(), "margin", marginPush{Type: "ACCOUNT", Account: marginAccountOf(&updated)})
+		if updated.GetAccountType() == "MARGIN_ISOLATED" && updated.GetSymbol() == "" {
+			h.log.Warn("margin account push dropped: an isolated account without its pair", "user_id", updated.GetUserId())
+			break
+		}
+		h.PublishLive(updated.GetUserId(), "margin", marginPush{Type: "ACCOUNT", Account: marginAccountOf(&updated)})
 	case p.MessageIs(&warned):
 		if err := p.UnmarshalTo(&warned); err != nil {
 			return true, err
@@ -232,6 +239,10 @@ func marginOf(h *Hub, p interface {
 		if err := p.UnmarshalTo(&started); err != nil {
 			return true, err
 		}
+		if started.GetMarginLevel() == "" || started.GetStartedAt() == nil {
+			h.log.Warn("margin liquidation push dropped: no margin level or start", "liquidation_id", started.GetLiquidationId())
+			break
+		}
 		h.Publish(started.GetUserId(), "margin", marginPush{Type: "LIQUIDATION", Liquidation: &marginLiquidation{
 			LiquidationID: started.GetLiquidationId(), Account: started.GetAccountType(), Symbol: optional(started.GetSymbol()),
 			Status: "STARTED", MarginLevel: started.GetMarginLevel(), Repaid: []assetAmount{}, Fee: "0", InsuranceCovered: "0",
@@ -240,6 +251,10 @@ func marginOf(h *Hub, p interface {
 	case p.MessageIs(&completed):
 		if err := p.UnmarshalTo(&completed); err != nil {
 			return true, err
+		}
+		if completed.GetMarginLevel() == "" || completed.GetStartedAt() == nil {
+			h.log.Warn("margin liquidation push dropped: no margin level or start", "liquidation_id", completed.GetLiquidationId())
+			break
 		}
 		back := make([]assetAmount, 0, len(completed.GetRepaid()))
 		for _, a := range completed.GetRepaid() {

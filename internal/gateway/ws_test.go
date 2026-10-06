@@ -193,12 +193,16 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 
 	// Margin accounts: a borrow (not pushed itself: the account it changed
 	// comes on margin.accounts), the account, a warning, a liquidation's end.
+	// An isolated account without its pair and a liquidation without the
+	// level and start the contract requires are not pushed.
 	c.send(`{"op":"subscribe","args":["margin"]}`)
 	if m := c.next(); m["ok"] != true {
 		t.Fatalf("subscribe margin: %v", m)
 	}
 	for _, msg := range []proto.Message{
 		&marginv1.MarginBorrowed{UserId: "u-1", AccountType: "MARGIN_CROSS", Asset: "USDT", Amount: "100"},
+		&marginv1.MarginAccountUpdated{UserId: "u-1", AccountType: "MARGIN_ISOLATED", Leverage: 10, Status: "NORMAL", UpdatedAt: timestamppb.Now()},
+		&marginv1.MarginLiquidationCompleted{LiquidationId: "l0", UserId: "u-1", AccountType: "MARGIN_CROSS", CompletedAt: timestamppb.Now()},
 		&marginv1.MarginAccountUpdated{
 			UserId: "u-1", AccountType: "MARGIN_CROSS", Leverage: 5, Status: "NORMAL", MarginLevel: "2.5", WarnLevel: "1.3",
 			LiquidationLevel: "1.1", TotalAsset: "250", TotalLiability: "100.01", NetAsset: "149.99",
@@ -220,7 +224,9 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if m := c.next(); m["channel"] != "margin" || m["data"].(map[string]any)["type"] != "ACCOUNT" {
+	// The account as it stands has no seq: the next one replaces it, and a
+	// reconnecting client is not sent the old ones.
+	if m := c.next(); m["channel"] != "margin" || m["data"].(map[string]any)["type"] != "ACCOUNT" || m["seq"] != nil {
 		t.Fatalf("account push: %v", m)
 	} else if a, _ := m["data"].(map[string]any)["account"].(map[string]any); a == nil || a["account"] != "MARGIN_CROSS" ||
 		a["symbol"] != nil || a["leverage"] != float64(5) || a["margin_level"] != "2.5" || a["liquidation_price"] != nil ||
@@ -251,6 +257,16 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	}
 	if m := c2.next(); m["channel"] != "notifications" || m["seq"] != float64(2) {
 		t.Fatalf("replayed push: %v", m)
+	}
+	// Of the margin pushes it is sent the events, not the account as it stood.
+	c2.send(`{"op":"subscribe","args":["margin"],"last_seq":2}`)
+	if m := c2.next(); m["ok"] != true {
+		t.Fatalf("resubscribe margin: %v", m)
+	}
+	for _, want := range []string{"WARNING", "LIQUIDATION"} {
+		if m := c2.next(); m["channel"] != "margin" || m["data"].(map[string]any)["type"] != want {
+			t.Fatalf("replayed margin push: %v, want %s", m, want)
+		}
 	}
 
 	// At most ten connections per user.
