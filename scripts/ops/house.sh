@@ -32,7 +32,9 @@
 #                               (gen-contracts.go, coin-margined design
 #                               2026-10-06 §3.4) and are still PREPARE move
 #                               to TRADING, N of them (all without N); seed
-#                               and flags first, so HOUSE quotes them.
+#                               and flags first, so HOUSE quotes them. One
+#                               without a mark price yet stays PREPARE
+#                               (review FC, B128): orders need the mark.
 #   scripts/ops/house.sh show   HOUSE's MARKET_MAKER balances.
 #
 # Internal assets need no inventory: HOUSE may sell them short (ADR-0013).
@@ -146,11 +148,18 @@ open-contracts)
   [[ $limit =~ ^[0-9]+$ ]] || { echo "open-contracts N: a count" >&2; exit 2; }
   contracts="$(curl -fsS "$API/v1/market/contracts?margin_type=ALL")"
   opened=0
+  unmarked=""
   for s in $(jq -r '.contracts[] | select(.status == "PREPARE" and (.reference_symbol // "") != "") | .symbol' <<<"$contracts"); do
+    mark="$(curl -fsS "$API/v1/market/$s/mark-price" 2>/dev/null | jq -r '.mark_price // empty')"
+    if [[ -z $mark ]]; then
+      unmarked="$unmarked $s"
+      continue
+    fi
     ctl instrument-service instruments contract-status "$s" --to TRADING --reason "Binance's perpetuals open in batches (G1c)" </dev/null
     opened=$((opened + 1))
     if ((limit > 0 && opened >= limit)); then break; fi
   done
+  [[ -z $unmarked ]] || echo "no mark price yet, left PREPARE:$unmarked" >&2
   echo "$opened contracts opened, $(jq '[.contracts[] | select(.status == "PREPARE" and (.reference_symbol // "") != "")] | length' <<<"$contracts") were PREPARE"
   ;;
 show)
