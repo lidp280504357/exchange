@@ -25,7 +25,7 @@
 | `derivatives_liquidations` | 强平步骤：WARNING、STARTED、FILLED（`adl` 表示是否由自动减仓成交）、ADL（被减仓的对手方），带价格、数量、已实现盈亏、保险基金垫付、标记/破产价、保证金余额与维持保证金 | `derivatives.liquidation.events` |
 | `margin_interest` | 杠杆账户每小时每资产的计息（计息本金、模型与小时利率、利息、计息后的应付利息、整点、分录 journal） | `margin.MarginInterestAccrued`（杠杆设计 2026-10-06 §5.3，迁移 clickhouse 00009） |
 | `margin_liquidations` | 每次杠杆强平一行（AggregatingMergeTree，各列 `anyLast` 取最后一个非 NULL 值）：开始事件写触发时的风险率、总资产与总负债、开始时间，完成事件写各资产归还（JSON 数组）、强平费、保险基金补足、剩余与完成时间，并复述开始时的风险率、总资产、总负债与开始时间（没复述的旧事件留给开始事件）；两个事件都写 `trigger`（AUTO 触线、MANUAL 后台批准）与 `approval_id`（MANUAL 的审批，迁移 00010）；`completed_at` 非空即已完成；两事件先后与重复投递都不影响结果，查询加 `FINAL` | `margin.MarginLiquidationStarted`、`MarginLiquidationCompleted` |
-| `futures_liquidations` | 币安在我们合约上的爆仓单（设计 2026-10-06 §3.3，迁移 clickhouse 00011），保留 7 天：`side` 是被平的仓位方向（LONG/SHORT），`quantity` 与 `filled_quantity` 都是成交量（币，币本位为张），`status` 恒为 FILLED（表按爆仓单的字段起草，事件只带成交部分）；由单独的消费组 `analytics-liquidations` 写入，不进 `events`、不回填 | `market.LiquidationOccurred`（`market.liquidations`） |
+| `futures_liquidations` | 币安在我们合约上的爆仓单（设计 2026-10-06 §3.3），保留 7 天，列与事件一致（迁移 clickhouse 00012 按 G0 契约重建；00011 按爆仓单字段起草的 `side`、`filled_quantity`、`status` 已去掉，审查 EJ ①）：`position_side` 是被平的仓位方向（LONG/SHORT），`price`、`average_price`，`quantity` 是成交量（币，币本位为张），`value_usd`；由单独的消费组 `analytics-liquidations` 写入，不进 `events`、不回填 | `market.LiquidationOccurred`（`market.liquidations`） |
 | `read_model_backfills` | 已完成的回填 | analytics-consumer |
 
 - 充值与提现快照的 `version` = 事件毫秒时间 × 16 + 状态进度，同一毫秒的两个事件（提现申请与风控评分在同一事务里）按状态先后取后者。

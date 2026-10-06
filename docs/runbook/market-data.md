@@ -46,7 +46,7 @@ REST（经网关，无需登录，`Cache-Control: public, max-age=1`）：
 
 WebSocket `wss://astras.vip/v1/ws`：
 
-- 公共频道无需 `auth`：`ticker:{symbol}`、`depth:{symbol}`、`trades:{symbol}`、`candles:{symbol}:{interval}`（交易对与合约），合约另有 `mark-price:{symbol}`、`funding:{symbol}`（见下节）。消息 `{"channel": ..., "type": ..., "data": ...}`；订阅 ticker、K 线时先收到最近一条。
+- 公共频道无需 `auth`：`ticker:{symbol}`、`depth:{symbol}`、`trades:{symbol}`、`candles:{symbol}:{interval}`（交易对与合约），合约另有 `mark-price:{symbol}`、`funding:{symbol}`（见下节）与 `liquidations:{symbol}`（币安在该合约上的爆仓单，见「合约数据」一节）。消息 `{"channel": ..., "type": ..., "data": ...}`；订阅 ticker、K 线时先收到最近一条。
 - `tickers`：一个订阅拿到全部交易对与合约的 ticker（行情列表、首页、跑马灯用，只占 50 个订阅名额中的 1 个）。订阅后先收 `{"channel":"tickers","type":"snapshot","data":[...全部 ticker，按代码排序]}`，之后网关每秒把这一秒内变化过的交易对合成一条 `{"type":"update","data":[...]}` 发出（每个交易对只带最新一条）；没有变化就不发。
 - 深度：订阅后先收 `{"type":"snapshot","seq":n,"data":{"bids":[...],"asks":[...]}}`，之后是 `{"type":"update","seq":n+1,"prev_seq":n,"data":{变化的档位}}`，数量 `"0"` 表示该档消失。`seq` 是本网关实例的计数，`prev_seq` 对不上就重新订阅；每 30 秒重发一次快照。网关按 `market.depth` 消息的 `prev_sequence` 应用增量，接不上的增量丢掉、等下一个快照（最多 10 秒）。
 - 私有频道（需 `auth`，带每用户 `seq`，可用 `last_seq` 补发）新增 `orders`（订单状态变化：NEW、OPEN、PARTIALLY_FILLED、FILLED、CANCELED、REJECTED 及成交累计）与 `fills`（每笔成交的一方：角色、价格、数量、手续费）。
