@@ -326,6 +326,49 @@ else
     echo "ok   the target goes back to $BACK"
   fi
 fi
+echo "== the coin-margined perpetual ASTRA-USD-PERP (design 2026-10-06 §2.3, G2)"
+fresh_auth
+call GET /v1/market/contracts/ASTRA-USD-PERP ""
+COIN_STATUS=$(jq -r '.status // ""' <<<"$BODY")
+COIN_ON=$(simget /internal/sim | jq -r '[.perps[]? | select(.symbol == "ASTRA-USD-PERP")][0].running // false')
+if [[ $COIN_STATUS != TRADING || $COIN_ON != true ]]; then
+  echo "skip: ASTRA-USD-PERP is not trading or the bots are not on it (scripts/ops/astra.sh perp-open ASTRA-USD-PERP, perp-on ASTRA-USDT-PERP ASTRA-USD-PERP)"
+else
+  coin_book() {
+    call GET "/v1/market/ASTRA-USD-PERP/depth?limit=5" "" && [[ $STATUS == 200 ]] && jq -e '(.bids | length) > 0 and (.asks | length) > 0' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "the bots quote both sides of ASTRA-USD-PERP" coin_book
+  check '[.bids[], .asks[]] | all(.[1] | tonumber | . == floor)' "in whole contracts"
+  check '(.asks[0][0] | tonumber) > (.bids[0][0] | tonumber)' "an ask above the bid"
+  margined() {
+    simget /internal/sim | jq -e '[.bots[] | select(.role == "MAKER") | (.futures.ASTRA // "0" | tonumber)] | all(. > 0)' >/dev/null
+  }
+  eventually 60 "the makers' margin is in ASTRA" margined
+  # A user buys ASTRA, moves it to FUTURES and trades three contracts
+  # (30 USD) against the bots, margined in ASTRA.
+  order "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quote_amount\":\"60\"}" coin-buy
+  expect 202 - "a market buy of 60 USDT of ASTRA"
+  eventually 80 "the buy filled against the bots" filled "$(jq -r .order_id <<<"$BODY")"
+  COIN_MARGIN=$(jq -rn "$(balance ASTRA | cut -d' ' -f1) | floor")
+  call POST /v1/account/transfers "{\"asset\":\"ASTRA\",\"amount\":\"$COIN_MARGIN\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" \
+    "${AUTH[@]}" -H "Idempotency-Key: astra-coin-$RUN"
+  expect 201 - "$COIN_MARGIN ASTRA to FUTURES"
+  call POST /v1/derivatives/orders '{"symbol":"ASTRA-USD-PERP","side":"BUY","type":"MARKET","quantity":"3"}' "${AUTH[@]}"
+  expect 202 - "a market buy of 3 ASTRA-USD-PERP"
+  coin_long() {
+    call GET /v1/derivatives/positions "" "${AUTH[@]}" &&
+      [[ $(jq -r '[.positions[] | select(.symbol == "ASTRA-USD-PERP")][0].quantity // "0"' <<<"$BODY") == 3 ]]
+  }
+  eventually 80 "long 3 contracts against the bots" coin_long
+  check '[.positions[] | select(.symbol == "ASTRA-USD-PERP")][0].settle_asset == "ASTRA"' "settled in ASTRA"
+  call POST /v1/derivatives/orders '{"symbol":"ASTRA-USD-PERP","side":"SELL","type":"MARKET","quantity":"3","reduce_only":true}' "${AUTH[@]}"
+  expect 202 - "closed at the market"
+  coin_flat() {
+    call GET /v1/derivatives/positions "" "${AUTH[@]}" &&
+      [[ $(jq -r '[.positions[] | select(.symbol == "ASTRA-USD-PERP")] | length' <<<"$BODY") == 0 ]]
+  }
+  eventually 80 "flat again" coin_flat
+fi
 echo "== flat minutes in ClickHouse (market.flat_minutes)"
 # continuous SYMBOL: a candles_1m row for each of the ten minutes before
 # the last two of its latest (whose flats may still be on their way).

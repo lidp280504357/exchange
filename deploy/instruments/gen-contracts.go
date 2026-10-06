@@ -1,0 +1,336 @@
+//go:build ignore
+
+// gen-contracts lists the perpetuals of the coin-margined design
+// (docs/设计-币本位永续与币安合约数据-2026-10-06.md §3.4, batch G1c) in
+// deploy/instruments/test.json: for every coin the file trades against
+// USDT, Binance's USDⓈ-M perpetual as <BASE>-USDT-PERP and its COIN-M
+// perpetual as <BASE>-USD-PERP, each following its Binance contract
+// (reference_symbol). It reads Binance's contract rules and the risk
+// brackets its site publishes once, at generation time, and keeps
+// everything else in the file:
+//
+//	go run deploy/instruments/gen-contracts.go [-file deploy/instruments/test.json] [-fapi https://fapi.binance.com] [-dapi https://dapi.binance.com] [-web https://www.binance.com]
+//
+// Rules:
+//   - a coin's contracts are the perpetuals trading on <BASE>USDT (USDⓈ-M;
+//     a 1000x coin's base is its 1000 code, as our pair's) and
+//     <BASE>USD_PERP (COIN-M); a coin Binance has none of gets none, and
+//     the platform coin's are its own (ASTRA, listed by hand);
+//   - the tick is Binance's, at least USDT's 0.000001; the lot Binance's
+//     step (a COIN-M lot is one contract), coarsened until tick x lot has
+//     at most USDT's 6 decimals (the instruments' rule); the minimum
+//     quantity the larger of Binance's and the lot; the most per order
+//     MARKET_LOT_SIZE's (here it bounds limit orders too); the minimum
+//     notional 5 USDT, one contract's face value on COIN-M; the price band
+//     PERCENT_PRICE's (at most 15%);
+//   - the risk tiers are Binance's brackets as its site publishes them
+//     (bapi/futures/v1/friendly/{future,delivery}/common/brackets, no
+//     signature): each bracket's notional cap (USDT; the coin on COIN-M),
+//     its top leverage and maintenance rate;
+//   - the impact notional is 10,000 USD: 10,000 USDT, or 10,000 / the face
+//     value in contracts (as BTC's and ETH's);
+//   - funding every 8 hours on the platform's grid, interest 0.01%, a cap
+//     of 0.75%, the perp fee tier;
+//   - new contracts are listed PREPARE (apply never changes a status):
+//     they open once HOUSE quotes the whole list and the reference streams
+//     are grouped (the contract backend's part of G1c); a listed contract
+//     keeps its whole entry (operators may have changed it in the console).
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/shopspring/decimal"
+)
+
+// quoteDecimals are USDT's: a contract's prices are in USDT (a COIN-M
+// contract's in USD, priced as USDT).
+const quoteDecimals = 6
+
+type filter struct {
+	FilterType     string `json:"filterType"`
+	TickSize       string `json:"tickSize"`
+	StepSize       string `json:"stepSize"`
+	MinQty         string `json:"minQty"`
+	MaxQty         string `json:"maxQty"`
+	MultiplierUp   string `json:"multiplierUp"`
+	MultiplierDown string `json:"multiplierDown"`
+}
+
+// remote is one of Binance's perpetuals.
+type remote struct {
+	Symbol         string   `json:"symbol"`
+	BaseAsset      string   `json:"baseAsset"`
+	QuoteAsset     string   `json:"quoteAsset"`
+	MarginAsset    string   `json:"marginAsset"`
+	ContractType   string   `json:"contractType"`
+	Status         string   `json:"status"`         // USDⓈ-M
+	ContractStatus string   `json:"contractStatus"` // COIN-M
+	ContractSize   float64  `json:"contractSize"`   // COIN-M, USD
+	Filters        []filter `json:"filters"`
+}
+
+func (r remote) filter(kind string) filter {
+	for _, f := range r.Filters {
+		if f.FilterType == kind {
+			return f
+		}
+	}
+	return filter{}
+}
+
+type bracket struct {
+	NotionalCap float64 `json:"bracketNotionalCap"`
+	MMR         float64 `json:"bracketMaintenanceMarginRate"`
+	MaxLeverage int     `json:"maxOpenPosLeverage"`
+}
+
+func get(url string, out any) error {
+	c := &http.Client{Timeout: 30 * time.Second}
+	resp, err := c.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// perpetuals are a market's trading perpetuals by symbol.
+func perpetuals(url string) map[string]remote {
+	var info struct {
+		Symbols []remote `json:"symbols"`
+	}
+	if err := get(url, &info); err != nil {
+		log.Fatalf("exchange info: %v", err)
+	}
+	out := map[string]remote{}
+	for _, s := range info.Symbols {
+		if s.ContractType == "PERPETUAL" && (s.Status == "TRADING" || s.ContractStatus == "TRADING") {
+			out[s.Symbol] = s
+		}
+	}
+	return out
+}
+
+// brackets are a market's risk brackets by symbol, as Binance's site
+// publishes them.
+func brackets(url string) map[string][]bracket {
+	var body struct {
+		Code string `json:"code"`
+		Data struct {
+			Brackets []struct {
+				Symbol       string    `json:"symbol"`
+				RiskBrackets []bracket `json:"riskBrackets"`
+			} `json:"brackets"`
+		} `json:"data"`
+	}
+	if err := get(url, &body); err != nil {
+		log.Fatalf("brackets: %v", err)
+	}
+	out := map[string][]bracket{}
+	for _, b := range body.Data.Brackets {
+		out[b.Symbol] = b.RiskBrackets
+	}
+	return out
+}
+
+func main() {
+	file := flag.String("file", "deploy/instruments/test.json", "reference data file to update")
+	fapi := flag.String("fapi", "https://fapi.binance.com", "Binance USDⓈ-M REST base URL")
+	dapi := flag.String("dapi", "https://dapi.binance.com", "Binance COIN-M REST base URL")
+	web := flag.String("web", "https://www.binance.com", "Binance's site, for the public risk brackets")
+	flag.Parse()
+
+	linear := perpetuals(*fapi + "/fapi/v1/exchangeInfo")
+	inverse := perpetuals(*dapi + "/dapi/v1/exchangeInfo")
+	linearTiers := brackets(*web + "/bapi/futures/v1/friendly/future/common/brackets")
+	inverseTiers := brackets(*web + "/bapi/futures/v1/friendly/delivery/common/brackets")
+
+	raw, err := os.ReadFile(*file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var doc struct {
+		FeeSchedules []json.RawMessage `json:"fee_schedules"`
+		Assets       []map[string]any  `json:"assets"`
+		Pairs        []map[string]any  `json:"pairs"`
+		Contracts    []map[string]any  `json:"contracts"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		log.Fatal(err)
+	}
+	decimalsOf := map[string]int{}
+	for _, a := range doc.Assets {
+		decimalsOf[a["asset_code"].(string)] = int(a["decimals"].(float64))
+	}
+	listed := map[string]bool{}
+	for _, c := range doc.Contracts {
+		listed[c["symbol"].(string)] = true
+	}
+
+	contracts := slices.Clone(doc.Contracts)
+	added := 0
+	for _, p := range doc.Pairs {
+		base, quote := p["base_asset"].(string), p["quote_asset"].(string)
+		if quote != "USDT" || base == "ASTRA" {
+			continue
+		}
+		if r, ok := linear[base+"USDT"]; ok && r.QuoteAsset == "USDT" && r.MarginAsset == "USDT" {
+			if c := contract(r, base, decimal.Zero, decimalsOf[base], linearTiers[r.Symbol]); c != nil && !listed[c["symbol"].(string)] {
+				contracts, added = append(contracts, c), added+1
+			}
+		} else {
+			log.Printf("skip %s-USDT-PERP: Binance has no USDⓈ-M perpetual %sUSDT", base, base)
+		}
+		if strings.HasPrefix(base, "1000") {
+			continue // COIN-M has no 1000x contracts
+		}
+		if r, ok := inverse[base+"USD_PERP"]; ok && r.MarginAsset == base && r.ContractSize > 0 {
+			size := decimal.NewFromFloat(r.ContractSize)
+			if c := contract(r, base, size, decimalsOf[base], inverseTiers[r.Symbol]); c != nil && !listed[c["symbol"].(string)] {
+				contracts, added = append(contracts, c), added+1
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("{\n")
+	writeList(&buf, "fee_schedules", rawList(doc.FeeSchedules), false)
+	writeList(&buf, "assets", anyList(doc.Assets), false)
+	writeList(&buf, "pairs", anyList(doc.Pairs), false)
+	writeList(&buf, "contracts", anyList(contracts), true)
+	buf.WriteString("}\n")
+	var check any
+	if err := json.Unmarshal(buf.Bytes(), &check); err != nil {
+		log.Fatalf("generated JSON does not parse: %v", err)
+	}
+	if err := os.WriteFile(*file, buf.Bytes(), 0o644); err != nil {
+		log.Fatal(err)
+	}
+	n := map[string]int{}
+	for _, c := range contracts {
+		n[c["margin_type"].(string)]++
+	}
+	log.Printf("%s: %d contracts (%d USDT-margined, %d coin-margined), %d new", *file, len(contracts), n["USDT"], n["COIN"], added)
+}
+
+// contract is the entry of Binance's perpetual r on base: a linear one
+// (size zero) or a coin-margined one of face value size; nil when its
+// rules cannot be kept (logged).
+func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tiers []bracket) map[string]any {
+	inverse := size.IsPositive()
+	tick := decimal.RequireFromString(r.filter("PRICE_FILTER").TickSize)
+	lot, minQty := decimal.NewFromInt(1), decimal.NewFromInt(1)
+	if !inverse {
+		lot = decimal.RequireFromString(r.filter("LOT_SIZE").StepSize)
+		minQty = decimal.RequireFromString(r.filter("LOT_SIZE").MinQty)
+	}
+	maxQty := decimal.RequireFromString(r.filter("MARKET_LOT_SIZE").MaxQty)
+	tick = decimal.Max(tick, decimal.New(1, -quoteDecimals))
+	for decimals(tick)+decimals(lot) > quoteDecimals {
+		lot = lot.Mul(decimal.NewFromInt(10))
+	}
+	minQty = decimal.Max(minQty, lot).Div(lot).Ceil().Mul(lot)
+	maxQty = maxQty.Div(lot).Floor().Mul(lot)
+	switch {
+	case !inverse && decimals(lot) > baseDecimals:
+		log.Printf("skip %s: its lot %s has more decimals than %s's %d", r.Symbol, lot, base, baseDecimals)
+		return nil
+	case !maxQty.GreaterThan(minQty):
+		log.Printf("skip %s: no room between %s and %s", r.Symbol, minQty, maxQty)
+		return nil
+	case len(tiers) == 0:
+		log.Printf("skip %s: Binance publishes no risk brackets for it", r.Symbol)
+		return nil
+	}
+	band := decimal.NewFromFloat(0.05)
+	if up := r.filter("PERCENT_PRICE").MultiplierUp; up != "" {
+		band = decimal.Min(decimal.Max(decimal.RequireFromString(up).Sub(decimal.NewFromInt(1)), band), decimal.NewFromFloat(0.15))
+	}
+	var riskTiers []map[string]any
+	for _, b := range tiers {
+		riskTiers = append(riskTiers, map[string]any{
+			"max_notional": decimal.NewFromFloat(b.NotionalCap).String(), "max_leverage": b.MaxLeverage,
+			"mmr": decimal.NewFromFloat(b.MMR).String(),
+		})
+	}
+	symbol, quote, margin, settle := base+"-USDT-PERP", "USDT", "USDT", "USDT"
+	minNotional, impact := decimal.NewFromInt(5), decimal.NewFromInt(10000)
+	if inverse {
+		symbol, quote, margin, settle = base+"-USD-PERP", "USD", "COIN", base
+		minNotional, impact = size, decimal.NewFromInt(10000).Div(size).Ceil()
+	}
+	log.Printf("%-18s tick %-10s lot %-8s max %-12s band %-5s %2d tiers to %dx", symbol, tick, lot, maxQty, band, len(riskTiers), tiers[0].MaxLeverage)
+	return map[string]any{
+		"symbol": symbol, "type": "PERPETUAL", "base_asset": base, "quote_asset": quote, "index_symbol": base + "-USDT",
+		"tick_size": tick.String(), "lot_size": lot.String(), "min_quantity": minQty.String(), "max_quantity": maxQty.String(),
+		"min_notional": minNotional.String(), "price_band": band.String(), "risk_tiers": riskTiers,
+		"funding_interval_hours": 8, "interest_rate": "0.0001", "funding_cap": "0.0075", "impact_notional": impact.String(),
+		"fee_tier": "perp", "status": "PREPARE", "margin_type": margin, "settle_asset": settle, "contract_size": size.String(),
+		"reference_symbol": r.Symbol,
+	}
+}
+
+func decimals(d decimal.Decimal) int {
+	if d.Exponent() >= 0 {
+		return 0
+	}
+	// Trailing zeros of the coefficient do not count.
+	s := strings.TrimRight(d.String(), "0")
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		return len(s) - i - 1
+	}
+	return 0
+}
+
+func rawList(in []json.RawMessage) []string {
+	out := make([]string, len(in))
+	for i, r := range in {
+		var v any
+		_ = json.Unmarshal(r, &v)
+		b, _ := json.Marshal(v)
+		out[i] = string(b)
+	}
+	return out
+}
+
+func anyList(in []map[string]any) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		b, err := json.Marshal(v)
+		if err != nil {
+			log.Fatal(err)
+		}
+		out[i] = string(b)
+	}
+	return out
+}
+
+// writeList writes one object a line, the file's compact style.
+func writeList(buf *bytes.Buffer, key string, items []string, last bool) {
+	fmt.Fprintf(buf, "  %q: [\n", key)
+	for i, it := range items {
+		sep := ","
+		if i == len(items)-1 {
+			sep = ""
+		}
+		fmt.Fprintf(buf, "    %s%s\n", it, sep)
+	}
+	if last {
+		buf.WriteString("  ]\n")
+	} else {
+		buf.WriteString("  ],\n")
+	}
+}

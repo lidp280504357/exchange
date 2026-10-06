@@ -83,27 +83,33 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 	if usdt < 50 {
 		t.Fatalf("%d USDT pairs, want the top 50 at least", usdt)
 	}
-	// Every contract valid against its assets; a coin-margined one beside
-	// each linear one, on the same coin and tick (design 2026-10-06 §2.1).
-	ticks := map[string]map[string]decimal.Decimal{}
+	// Every contract valid against its assets, on a listed USDT pair, once;
+	// a coin-margined one beside a linear one on its coin (design
+	// 2026-10-06 §2.1, §3.4: Binance's lists, gen-contracts.go).
+	kinds, listed := map[string]map[string]bool{}, map[string]bool{}
 	for _, c := range cfg.Contracts {
 		c = c.WithDefaults()
 		if err := c.Validate(assets[c.BaseAsset], assets[c.PriceAsset()]); err != nil {
 			t.Errorf("contract %s: %v", c.Symbol, err)
 		}
-		if ticks[c.BaseAsset] == nil {
-			ticks[c.BaseAsset] = map[string]decimal.Decimal{}
+		if listed[c.Symbol] {
+			t.Errorf("contract %s listed twice", c.Symbol)
 		}
-		ticks[c.BaseAsset][c.MarginType] = c.TickSize
+		listed[c.Symbol] = true
+		if !seen[c.IndexSymbol] {
+			t.Errorf("contract %s: its index %s is not a listed pair", c.Symbol, c.IndexSymbol)
+		}
+		if kinds[c.BaseAsset] == nil {
+			kinds[c.BaseAsset] = map[string]bool{}
+		}
+		kinds[c.BaseAsset][c.MarginType] = true
 		if c.BaseAsset != "ASTRA" && c.ReferenceSymbol == "" {
 			t.Errorf("contract %s follows no Binance contract", c.Symbol)
 		}
 	}
-	for base, kinds := range ticks {
-		linear, okL := kinds[domain.MarginUSDT]
-		inverse, okI := kinds[domain.MarginCoin]
-		if !okL || !okI || !linear.Equal(inverse) {
-			t.Errorf("%s: a linear and a coin-margined contract on the same tick, got %v", base, kinds)
+	for base, k := range kinds {
+		if k[domain.MarginCoin] && !k[domain.MarginUSDT] {
+			t.Errorf("%s: a coin-margined contract without a linear one", base)
 		}
 	}
 }
