@@ -170,7 +170,9 @@ type overviewJSON struct {
 	Change            *string `json:"change"`
 	QuoteVolume       *string `json:"quote_volume"`
 	// FuturesData tells whether the data panel has the reference market's
-	// statistics of the contract.
+	// statistics of the contract: one it follows, or, before its list is
+	// read (reading off since the start), one with a reference market,
+	// whose stored data /futures-data answers (review EK).
 	FuturesData bool `json:"futures_data"`
 }
 
@@ -208,7 +210,8 @@ func (h *FuturesData) overview(w http.ResponseWriter, r *http.Request) {
 			volume := t.QuoteVolume.String()
 			o.QuoteVolume = &volume
 		}
-		_, _, o.FuturesData = h.Stats.Market(c.Symbol)
+		_, known, followed := h.Stats.Market(c.Symbol)
+		o.FuturesData = followed || (!known && c.ReferenceSymbol != "")
 		if oi, ok := h.Stats.OpenInterestNow(c.Symbol); ok {
 			qty := oi.Quantity.String()
 			o.OpenInterest = &qty

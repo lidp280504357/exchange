@@ -329,7 +329,8 @@ export interface paths {
          *     service has read the contracts after a start, it serves what is
          *     stored instead); a symbol that is no listed contract is 404
          *     COMMON_NOT_FOUND. market.futures_data turns the reading on; off,
-         *     what is stored is still served. Batch G3b.
+         *     what is stored is still served. A limit above 500 answers the
+         *     latest 500 (not an error). Batch G3b.
          */
         get: operations["getFuturesData"];
         put?: never;
@@ -356,7 +357,9 @@ export interface paths {
          *     §3.3, coordinator 20:45). The same 404s as futures-data:
          *     MARKET_NO_FUTURES_DATA for a contract the reference market does not
          *     trade, COMMON_NOT_FOUND for a symbol that is no listed contract.
-         *     Batch G3b.
+         *     "The last day" is what is kept: an hourly purge removes those older
+         *     than a day, so up to about 25 hours. A limit above 100 answers the
+         *     latest 100 (not an error). Batch G3b.
          */
         get: operations["listLiquidations"];
         put?: never;
@@ -555,7 +558,7 @@ export interface components {
             change: components["schemas"]["NullableDecimal"];
             /** @description The ticker's 24-hour volume in USD (USDT). */
             quote_volume: components["schemas"]["NullableDecimal"];
-            /** @description Whether GET /v1/market/{symbol}/futures-data has the reference market's statistics of the contract. */
+            /** @description Whether GET /v1/market/{symbol}/futures-data has the reference market's statistics of the contract (one the service follows; before it has read the reference market's contracts, one with a reference market). */
             futures_data: boolean;
         };
         /**

@@ -21,6 +21,8 @@ type statsFake struct {
 	markets  map[string]ports.FuturesMarket
 	interest map[string]application.OpenInterest
 	asked    []string
+	// unknown: the reference market's list is not read yet.
+	unknown bool
 }
 
 func (f *statsFake) Series(_ context.Context, symbol, metric, period string, limit int) ([]ports.FuturesStat, error) {
@@ -55,7 +57,7 @@ func (f *statsFake) Liquidations(_ context.Context, symbol string, limit int) ([
 
 func (f *statsFake) Market(symbol string) (ports.FuturesMarket, bool, bool) {
 	m, ok := f.markets[symbol]
-	return m, true, ok
+	return m, !f.unknown, ok
 }
 
 func (f *statsFake) OpenInterestNow(symbol string) (application.OpenInterest, bool) {
@@ -197,6 +199,27 @@ func TestFuturesDataOverview(t *testing.T) {
 	astra := by["ASTRA-USDT-PERP"]
 	if astra.FuturesData || astra.OpenInterest != nil || str(astra.MarkPrice) != "0.25" || str(astra.FundingRate) != "0" {
 		t.Fatalf("the platform coin's perpetual: %+v", astra)
+	}
+}
+
+// Before the reference market's list is read (reading off since the
+// start), the contracts with a reference market have the stored data that
+// /futures-data answers (review EK).
+func TestFuturesDataOverviewBeforeTheList(t *testing.T) {
+	r, stats := futuresRouter()
+	stats.unknown, stats.markets = true, nil
+	var body struct {
+		Contracts []overviewJSON `json:"contracts"`
+	}
+	if err := json.Unmarshal(get(r, "/v1/market/futures/overview").Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	data := map[string]bool{}
+	for _, c := range body.Contracts {
+		data[c.Symbol] = c.FuturesData
+	}
+	if !data["BTC-USDT-PERP"] || !data["BTC-USD-PERP"] || data["ASTRA-USDT-PERP"] || len(data) != 3 {
+		t.Fatalf("futures data before the list %v", data)
 	}
 }
 

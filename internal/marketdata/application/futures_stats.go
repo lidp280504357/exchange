@@ -515,7 +515,7 @@ func (s *FuturesStats) openInterest(ctx context.Context, coinMargined bool) {
 			s.interest[m.Symbol] = OpenInterest{Market: m, Quantity: q, At: at}
 			s.mu.Unlock()
 		}
-		s.sleep(ctx, time.Until(round.Add(time.Minute)))
+		s.sleep(ctx, round.Add(time.Minute).Sub(s.now()))
 	}
 }
 
