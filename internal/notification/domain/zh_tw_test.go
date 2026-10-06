@@ -21,6 +21,17 @@ func TestTraditionalReaders(t *testing.T) {
 	}
 }
 
+func TestContentLocaleOf(t *testing.T) {
+	for tag, want := range map[string]string{
+		"zh-TW": LocaleTW, "zh-tw": LocaleTW, "zh-HK": LocaleTW, "zh-Hant": LocaleTW, "en": LocaleEN, "en-US": LocaleEN,
+		"zh-CN": LocaleZH, "zh": LocaleZH, "": LocaleZH, "ja": LocaleZH,
+	} {
+		if got := LocaleOf(tag); got != want {
+			t.Errorf("LocaleOf(%q) = %q", tag, got)
+		}
+	}
+}
+
 func TestMessagesInTraditionalChinese(t *testing.T) {
 	at := time.Date(2026, 10, 6, 4, 5, 6, 0, time.UTC)
 	data := map[string]string{

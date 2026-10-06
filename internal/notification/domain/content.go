@@ -75,6 +75,20 @@ var Locales = []string{LocaleZH, LocaleTW, LocaleEN}
 // ValidLocale reports a content locale.
 func ValidLocale(l string) bool { return l == LocaleZH || l == LocaleTW || l == LocaleEN }
 
+// LocaleOf is the content locale of a language tag the sites or a client
+// ask in: English for en*, Traditional Chinese for the readers the
+// messages write it for (zh-TW, zh-HK, zh-MO, zh-Hant*), Simplified
+// otherwise.
+func LocaleOf(tag string) string {
+	switch {
+	case english(tag):
+		return LocaleEN
+	case traditional(tag):
+		return LocaleTW
+	}
+	return LocaleZH
+}
+
 var (
 	slugRE     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 	categoryRE = regexp.MustCompile(`^[a-z0-9_-]{0,32}$`)

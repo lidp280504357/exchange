@@ -43,16 +43,8 @@ func (h *Content) Routes(r chi.Router) {
 	r.Post("/internal/notification/broadcasts/{id}/resume", h.resumeBroadcast)
 }
 
-// locale is the sites' language: en, zh-TW, else Simplified Chinese.
-func locale(r *http.Request) string {
-	switch l := r.URL.Query().Get("locale"); {
-	case strings.HasPrefix(l, "en"):
-		return domain.LocaleEN
-	case l == domain.LocaleTW:
-		return domain.LocaleTW
-	}
-	return domain.LocaleZH
-}
+// locale is the content locale asked for (domain.LocaleOf).
+func locale(r *http.Request) string { return domain.LocaleOf(r.URL.Query().Get("locale")) }
 
 // summaryJSON is an article as a list shows it, in one language.
 type summaryJSON struct {
