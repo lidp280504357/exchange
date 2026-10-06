@@ -328,7 +328,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 ### 资产资料与图标
 
-资产与交易对 → 资产 → 打开一个资产，「资料与图标」（C4c）：显示名（2–32 字符，留空用资产名称）、中英文简介（各 1,000 字以内）、链接（官网、区块浏览器、白皮书，https）与图标（PNG、SVG 或 WebP，正方形，200 KB 以内；页面先检查类型、大小与正方形并预览，instrument-service 再查一遍，SVG 按白名单重建）。保存要理由，确认词为资产代码的小写；审计 `admin.instruments.profile_updated`，对象 `asset:<代码>`，图标只记类型与大小。接口 `GET/PUT /admin/v1/assets/{code}/profile`（读要 `instruments.read`，改要 `instruments.write`）。新图标有新的地址（`/v1/market/assets/{code}/logo?v=<版本>`），三个站点 1 分钟内显示；后台域名也转发这个地址（nginx `site-admin.conf`），在后台的 CSP 下同源显示。
+资产与交易对 → 资产 → 打开一个资产，「资料与图标」（C4c）：显示名（2–32 字符，留空用资产名称）、简体、繁体与英文简介（各 1,000 字以内；繁体可留空，显示简体，G7b）、链接（官网、区块浏览器、白皮书，https）与图标（PNG、SVG 或 WebP，正方形，200 KB 以内；页面先检查类型、大小与正方形并预览，instrument-service 再查一遍，SVG 按白名单重建）。保存要理由，确认词为资产代码的小写；审计 `admin.instruments.profile_updated`，对象 `asset:<代码>`，图标只记类型与大小。接口 `GET/PUT /admin/v1/assets/{code}/profile`（读要 `instruments.read`，改要 `instruments.write`）。新图标有新的地址（`/v1/market/assets/{code}/logo?v=<版本>`），三个站点 1 分钟内显示；后台域名也转发这个地址（nginx `site-admin.conf`），在后台的 CSP 下同源显示。
 
 ## 模拟市场
 
@@ -390,7 +390,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 `/announcements`、`/help-articles`；任何管理员可读，写要 `content.write`（ADMIN 与 OPERATOR）。
 
-- 一篇文章 = 栏目、slug（小写字母、数字、连字符）、适用模式、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。
+- 一篇文章 = 栏目、slug（小写字母、数字、连字符）、适用模式、分类、置顶（公告）、排序（帮助）与简体、繁体、英文三种文本（简体必填；繁体与英文可选，写了就要标题与正文都写；没有该语言时读者看简体，G7b）。固定页面的默认稿也有繁体（由简体生成的 `*.zh-TW.md`），「复制默认稿」三种一起带上。
 - 适用模式（设计 2026-10-04 §4.4，D4）：`TEST`（测试模式）、`FORMAL`（正式模式）或 `BOTH`（通用，新建时的默认；修改时不填保持原样）。平台资料的测试模式开着时站点只出 TEST 与 BOTH 的文章，关掉后只出 FORMAL 与 BOTH，切换模式即自动换稿。同一栏目的一个 slug 可以并存一篇 TEST 与一篇 FORMAL，或只有一篇 BOTH，重叠的返回 409 `NOTIFY_ARTICLE_EXISTS`。编辑器顶部选模式，列表里测试稿与正式稿带标记；列表上方可按模式筛选（全部、测试模式、正式模式、通用，在地址栏 `?modes=`，A43 ⑪），「站点自带的文章」也标出各文件 front matter 的模式并跟着筛选。正文里 `:::test` 与 `:::` 之间的段落只在测试模式显示，`:::formal` 与 `:::` 之间的只在正式模式显示（站点渲染时过滤，服务端原样保存）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站；通用稿的预览先按平台现在的模式显示（读平台资料的测试模式，A43 ⑫），可切换。
 - 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`，详情带 `modes`（同一 slug 可有测试稿与正式稿）。
 - 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。列表分页（`limit` 默认 20、最多 100，`cursor` 用上一页的 `next_cursor`），只回摘要：没写摘要的从正文前 4,000 个字符里取第一段，列表从不读整篇正文（C5.5 ⑫）；两个站点读第一页 100 篇，更早的仍可凭链接打开。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准（与设计 §4.5"替代仓库内 Markdown"的偏差，见设计稿 §0）；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
@@ -411,7 +411,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 `/broadcasts`；任何管理员可读，发送要 `notices.send`（ADMIN 与 OPERATOR）。
 
-- 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，英文可选；跳转路径只能是站内路径（如 `/assets`，`//` 与反斜杠开头的拒绝）；可勾选同时发邮件。带 `Idempotency-Key`（消息 ID 取自它）。
+- 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，繁体与英文可选（各要标题与正文都写，没写的语言其读者收到简体，G7b）；跳转路径只能是站内路径（如 `/assets`，`//` 与反斜杠开头的拒绝）；可勾选同时发邮件。带 `Idempotency-Key`（消息 ID 取自它）。
 - 送达：notification-service 分批写进每位用户的通知（类型 `BROADCAST`，实时推送到 `notifications` 频道），见 [accounts.md](accounts.md)「用户通知」。列表与详情显示对象人数、已收到、已读与完成时间，发送中每几秒刷新。发出后不能撤回。审计 `admin.notices.sent`，对象 `broadcast:<id>`。
 - 失败（C5.5 ⑫）：某条消息的一轮出错（例如 user-service 不可用）只影响它自己，其它消息照常送达；它下一轮等 3 秒、6 秒……翻倍，最多 10 分钟，连续 10 轮（约半小时）失败后标为「发送失败」（`FAILED`）。列表标出「已连续失败 n 轮」，详情显示最近一次的错误与下一轮时间；排除原因后有 `notices.send` 的管理员在详情里「继续发送」（理由，确认词为 ID 后 4 位），从中断处接着发，已收到的用户不会再收到。审计 `admin.notices.resumed` 在请求 notification-service 之前写；对方拒绝（例如已不是 `FAILED`）时另记 `admin.notices.resume_failed` 与错误（C5.5 ㉓）。
 - 邮件排队（C5.5 ⑫、㉓）：勾选了邮件的，每位用户一封进 `deliveries` 队列，按轮次重试（1、5、15、60 分钟，第 5 轮失败记 `FAILED`），超过 24 小时放弃；发出的不再重发。

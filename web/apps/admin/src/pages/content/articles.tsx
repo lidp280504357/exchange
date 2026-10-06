@@ -28,7 +28,9 @@ export type Section = Article["section"];
 type ListSection = Extract<Section, "ANNOUNCEMENT" | "HELP">;
 type Locale = Text["locale"];
 
-const LOCALES: Locale[] = ["zh-CN", "en"];
+const LOCALES: Locale[] = ["zh-CN", "zh-TW", "en"];
+/** Each language's tab label. */
+const LOCALE_LABEL: Record<Locale, string> = { "zh-CN": "admin.content.zh", "zh-TW": "admin.content.zhTW", en: "admin.content.en" };
 const CATEGORIES: Record<ListSection, string[]> = {
   ANNOUNCEMENT: ["notice", "product", "security"],
   HELP: ["account", "funds", "trading", "futures", "faq"],
@@ -79,22 +81,37 @@ export type Draft = { slug: string; modes: Modes; category: string; pinned: bool
 
 type Source = NonNullable<Awaited<ReturnType<typeof bundledSource>>>;
 
-/** seedOf is the draft of a bundled file, in Chinese and (when there is one) English, for modes (its front matter's by default). */
-export function seedOf(slug: string, zh: Source, en: Source | null, modes: Modes = zh.modes): Draft {
-  const text = (s: Source, locale: Locale): Text => ({ locale, title: s.title, summary: s.summary, body: s.body.trim() });
+/**
+ * seedOf is the draft of a bundled file, in Chinese and (when there are
+ * ones) English and Traditional Chinese (generated, G7), for modes (its
+ * front matter's by default).
+ */
+export function seedOf(slug: string, zh: Source, en: Source | null, modes: Modes = zh.modes, tw: Source | null = null): Draft {
+  const text = (s: Source | null, locale: Locale): Text =>
+    s ? { locale, title: s.title, summary: s.summary, body: s.body.trim() } : { locale, title: "", summary: "", body: "" };
   return {
     slug, modes, category: zh.category, pinned: zh.pinned, order: String(zh.order),
-    texts: { "zh-CN": text(zh, "zh-CN"), en: en ? text(en, "en") : { locale: "en", title: "", summary: "", body: "" } },
+    texts: { "zh-CN": text(zh, "zh-CN"), "zh-TW": text(tw, "zh-TW"), en: text(en, "en") },
   };
 }
 
-/** articleBody is a draft as the API takes it, the English text only when written; it throws a FormError on what is missing. */
+/** bundledSeed is the draft of a bundled file in its three languages, or null without the Chinese one. */
+export async function bundledSeed(section: ContentSection, slug: string): Promise<Draft | null> {
+  const [zh, en, tw] = await Promise.all([bundledSource(section, slug, "zh-CN"), bundledSource(section, slug, "en"), bundledSource(section, slug, "zh-TW")]);
+  return zh ? seedOf(slug, zh, en, zh.modes, tw) : null;
+}
+
+/**
+ * articleBody is a draft as the API takes it, the Traditional Chinese and
+ * English texts only when written (empty, the sites show the Simplified);
+ * it throws a FormError on what is missing.
+ */
 export function articleBody(d: Draft, t: (key: string) => string) {
   if (!slugRE.test(d.slug)) throw new FormError(t("admin.content.badSlug"));
   const zh = d.texts["zh-CN"];
   if (!zh.title.trim() || !zh.body.trim()) throw new FormError(t("admin.content.needChinese"));
-  const en = d.texts.en;
-  const texts = [zh, ...(en.title.trim() || en.body.trim() ? [en] : [])];
+  const written = (x: Text) => x.title.trim() !== "" || x.body.trim() !== "";
+  const texts = [zh, ...[d.texts["zh-TW"], d.texts.en].filter(written)];
   if (texts.some((x) => !x.title.trim() || !x.body.trim())) throw new FormError(t("admin.content.needBoth"));
   const order = Number(d.order);
   if (!Number.isInteger(order)) throw new FormError(t("admin.content.badOrder"));
@@ -128,6 +145,7 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
             </span>
             <span className="font-mono text-xs text-fg-3">
               {a.slug} · {t(`admin.content.categories.${a.category}`, { defaultValue: a.category })}
+              {a.texts.some((x) => x.locale === "zh-TW") ? " · 繁" : ""}
               {a.texts.some((x) => x.locale === "en") ? " · EN" : ""}
             </span>
           </span>
@@ -262,9 +280,11 @@ function BundledFiles({
     queryFn: async () =>
       Promise.all(
         listSlugs(FILES[section]).map(async (slug): Promise<Bundled | null> => {
-          const [zh, en] = await Promise.all([bundledSource(FILES[section], slug, "zh-CN"), bundledSource(FILES[section], slug, "en")]);
+          const [zh, en, tw] = await Promise.all([
+            bundledSource(FILES[section], slug, "zh-CN"), bundledSource(FILES[section], slug, "en"), bundledSource(FILES[section], slug, "zh-TW"),
+          ]);
           if (!zh) return null;
-          return { slug, title: zh.title, category: zh.category, date: zh.date, seed: seedOf(slug, zh, en) };
+          return { slug, title: zh.title, category: zh.category, date: zh.date, seed: seedOf(slug, zh, en, zh.modes, tw) };
         }),
       ),
   });
@@ -318,6 +338,7 @@ function draftOf(section: Section, a: Article | null): Draft {
     order: String(a?.order ?? 0),
     texts: {
       "zh-CN": a?.texts.find((x) => x.locale === "zh-CN") ?? empty("zh-CN"),
+      "zh-TW": a?.texts.find((x) => x.locale === "zh-TW") ?? empty("zh-TW"),
       en: a?.texts.find((x) => x.locale === "en") ?? empty("en"),
     },
   };
@@ -495,7 +516,7 @@ export function ArticleEditor({
             size="sm"
             value={locale}
             onValueChange={(v) => setLocale(v as Locale)}
-            items={LOCALES.map((l) => ({ value: l, label: t(l === "zh-CN" ? "admin.content.zh" : "admin.content.en") }))}
+            items={LOCALES.map((l) => ({ value: l, label: t(LOCALE_LABEL[l]) }))}
             aria-label={t("admin.content.language")}
           />
           <Tabs
@@ -510,6 +531,7 @@ export function ArticleEditor({
           />
         </div>
         {locale === "en" && <p className="text-xs text-fg-3">{t("admin.content.enHint")}</p>}
+        {locale === "zh-TW" && <p className="text-xs text-fg-3">{t("admin.content.zhTWHint")}</p>}
         {view === "edit" ? (
           <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1.5 text-sm text-fg-2">

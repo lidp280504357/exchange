@@ -2035,9 +2035,10 @@ echo "== an announcement on both sites within a minute"
 # publishes it, edits it while shown and takes it off.
 SLUG=e2e-console
 M_BASE="${M_BASE:-https://m.astras.vip}"
-announcement() { # announcement ENGLISH_TITLE: the e2e announcement as the console writes it
+announcement() { # announcement ENGLISH_TITLE: the e2e announcement as the console writes it, in three languages (G7b)
   jq -nc --arg s "$SLUG" --arg t "$1" --arg run "$RUN" '{slug: $s, category: "notice", pinned: false, order: 0, texts: [
     {locale: "zh-CN", title: "端到端检查公告", summary: "", body: ("## 检查\n\n第 " + $run + " 次运行；资金为模拟资产。")},
+    {locale: "zh-TW", title: "端到端檢查公告", summary: "", body: ("## 檢查\n\n第 " + $run + " 次運行；資金為模擬資產。")},
     {locale: "en", title: $t, summary: "", body: ("## Check\n\nRun " + $run + "; funds are simulated.")}]}'
 }
 as AUDITOR GET "/admin/v1/articles?section=ANNOUNCEMENT" ""
@@ -2088,6 +2089,9 @@ grep -qi '^cache-control: public, max-age=15' "$WORK/announcements.headers" || {
 call GET "/v1/announcements/$SLUG" ""
 expect 200 - "the article, public"
 check '.title == "端到端检查公告" and .locale == "zh-CN" and (.body | contains("模拟资产"))' "in Chinese by default, its Markdown body"
+call GET "/v1/announcements/$SLUG?locale=zh-TW" ""
+expect 200 - "the article in Traditional Chinese (G7b)"
+check '.title == "端到端檢查公告" and .locale == "zh-TW" and .fallback == false and (.body | contains("模擬資產"))' "as the console wrote it, not the Simplified"
 as OPERATOR PUT "/admin/v1/articles/$ART_ID" "$(announcement "E2E check $RUN, edited" | jq -c --argjson v "$ART_V" '. + {version: $v, reason: "e2e edits it while shown"}')"
 expect 200 - "OPERATOR edits it while shown"
 ART_V=$(jq -r .version <<<"$BODY")
@@ -2192,7 +2196,8 @@ expect 422 ADMIN_TAG_EMPTY "a tag nobody has reaches nobody"
 as OPERATOR POST /admin/v1/broadcasts "{\"audience\":\"USER\",\"user_id\":\"$USER_ID\",\"title\":{\"zh-CN\":\"外链\"},\"body\":{\"zh-CN\":\"外链\"},\"link\":\"//evil.example\",\"reason\":\"e2e leads off the sites\"}"
 expect 400 COMMON_INVALID_ARGUMENT "a link off the sites is refused"
 MESSAGE=$(jq -nc --arg u "$USER_ID" --arg run "$RUN" '{audience: "USER", user_id: $u,
-  title: {"zh-CN": ("端到端消息 " + $run), en: ("E2E message " + $run)}, body: {"zh-CN": "请查看资产。", en: "Have a look at your assets."},
+  title: {"zh-CN": ("端到端消息 " + $run), "zh-TW": ("端到端訊息 " + $run), en: ("E2E message " + $run)},
+  body: {"zh-CN": "请查看资产。", "zh-TW": "請查看資產。", en: "Have a look at your assets."},
   link: "/assets", email: false, reason: "e2e writes to its user"}')
 KEY="e2e-message-$RUN"
 as OPERATOR POST /admin/v1/broadcasts "$MESSAGE"

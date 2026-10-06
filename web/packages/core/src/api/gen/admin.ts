@@ -1654,8 +1654,9 @@ export interface paths {
         put?: never;
         /**
          * Write a draft
-         * @description Chinese (zh-CN) title and Markdown body required, English
-         *     optional. A slug holds one article per mode in its section: a TEST
+         * @description Chinese (zh-CN) title and Markdown body required, Traditional
+         *     Chinese (zh-TW) and English optional (a reader without their
+         *     language gets the Simplified; G7b). A slug holds one article per mode in its section: a TEST
          *     and a FORMAL one side by side, or one for BOTH; another that
          *     overlaps is NOTIFY_ARTICLE_EXISTS (409). Audited as
          *     admin.content.created on <section>:<slug>. Needs content.write.
@@ -4140,7 +4141,7 @@ export interface components {
         AssetProfile: {
             /** @description Replaces the asset's name on the sites when set. */
             display_name: string;
-            /** @description Introductions by language (zh-CN, en), up to 1,000 characters each. */
+            /** @description Introductions by language (zh-CN, zh-TW, en; G7b), up to 1,000 characters each. */
             description: {
                 [key: string]: string;
             };
@@ -4169,9 +4170,10 @@ export interface components {
             logo_mime?: "image/png" | "image/svg+xml" | "image/webp";
             clear_logo?: boolean;
         };
-        /** @description A text by language; zh-CN stands in for a language without one. */
+        /** @description A text by language; zh-CN stands in for a language without one (an empty zh-TW shows the Simplified; G7b, instrument-service answers all three keys since G7). */
         PlatformTexts: {
             "zh-CN": string;
+            "zh-TW": string;
             en: string;
         };
         WelcomeCredit: {
@@ -4216,7 +4218,7 @@ export interface components {
                 url: string;
             }[];
             /** @enum {string} */
-            default_locale: "zh-CN" | "en";
+            default_locale: "zh-CN" | "zh-TW" | "en";
             /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is true, text in a banner at the top. text is required only while enabled and banner. */
             test_mode: {
                 enabled: boolean;
@@ -4265,7 +4267,7 @@ export interface components {
                 url: string;
             }[];
             /** @enum {string} */
-            default_locale: "zh-CN" | "en";
+            default_locale: "zh-CN" | "zh-TW" | "en";
             /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is true, text in a banner at the top. text is required only while enabled and banner. */
             test_mode: {
                 enabled: boolean;
@@ -4312,14 +4314,15 @@ export interface components {
             from: string;
             to: string;
         };
-        /** @description By locale; zh-CN required, en optional. */
+        /** @description By locale; zh-CN required, zh-TW and en optional (a reader of a language without both its title and body gets the Simplified; G7b). */
         LocalizedText: {
             "zh-CN": string;
+            "zh-TW"?: string;
             en?: string;
         };
         ArticleText: {
             /** @enum {string} */
-            locale: "zh-CN" | "en";
+            locale: "zh-CN" | "zh-TW" | "en";
             title: string;
             summary: string;
             /** @description Markdown. */

@@ -1,5 +1,5 @@
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
-import { bundledSource, LEGAL_SLUGS } from "@exchange/core/content/loader";
+import { LEGAL_SLUGS } from "@exchange/core/content/loader";
 import { Badge, Button, DataTable, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, FileCheck2, Pencil, Plus, Undo2 } from "lucide-react";
@@ -10,7 +10,7 @@ import { TimeText } from "../../kit/format";
 import { RowActions } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
 import { useSiteMode } from "../../kit/profile";
-import { ArticleEditor, articleBody, articlesKey, FILES, seedOf, shown, SITE, StatusBadge, type Article, type Draft } from "./articles";
+import { ArticleEditor, articleBody, articlesKey, bundledSeed, FILES, shown, SITE, StatusBadge, type Article, type Draft } from "./articles";
 import { ReadOnly } from "../../kit/ReadOnly";
 
 // The fixed pages (design 2026-10-04 §4.4): the legal and information
@@ -53,7 +53,10 @@ const TONE: Record<OnSite, "success" | "info" | "neutral" | "warn" | "danger"> =
 
 const empty = (slug: string): Draft => ({
   slug, modes: "BOTH", category: "", pinned: false, order: "0",
-  texts: { "zh-CN": { locale: "zh-CN", title: "", summary: "", body: "" }, en: { locale: "en", title: "", summary: "", body: "" } },
+  texts: {
+    "zh-CN": { locale: "zh-CN", title: "", summary: "", body: "" }, "zh-TW": { locale: "zh-TW", title: "", summary: "", body: "" },
+    en: { locale: "en", title: "", summary: "", body: "" },
+  },
 });
 
 /** FixedPages lists the legal pages and the home hero with what the sites show of each in test mode and live, and edits, publishes or takes them off. */
@@ -77,8 +80,8 @@ export default function FixedPages({ admin }: { admin: Admin }) {
       const out = new Map<string, Draft>();
       await Promise.all(
         PAGES.map(async ({ section, slug }) => {
-          const [zh, en] = await Promise.all([bundledSource(FILES[section], slug, "zh-CN"), bundledSource(FILES[section], slug, "en")]);
-          if (zh) out.set(slug, seedOf(slug, zh, en));
+          const seed = await bundledSeed(FILES[section], slug);
+          if (seed) out.set(slug, seed);
         }),
       );
       return out;

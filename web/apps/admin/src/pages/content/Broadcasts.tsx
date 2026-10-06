@@ -19,6 +19,12 @@ import { Card, Page } from "../../kit/Page";
 type Broadcast = AdminSchemas["Broadcast"];
 type Audience = "ALL" | "USER" | "TAG";
 
+/** A message's languages: Simplified Chinese required, Traditional (G7b) and English optional. */
+type Locale = "zh-CN" | "zh-TW" | "en";
+const LOCALES: Locale[] = ["zh-CN", "zh-TW", "en"];
+const LANGUAGE: Record<Locale, string> = { "zh-CN": "admin.content.zh", "zh-TW": "admin.content.zhTW", en: "admin.content.en" };
+const LEGEND: Record<Locale, string> = { "zh-CN": "admin.broadcasts.chinese", "zh-TW": "admin.broadcasts.traditional", en: "admin.broadcasts.english" };
+
 const broadcastsKey = ["admin", "broadcasts"];
 const right: DataColumnMeta = { align: "right" };
 const uuidRE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -184,11 +190,11 @@ function BroadcastDrawer({ admin, id, initial, onClose }: { admin: Admin; id: st
             <Progress value={Math.min(100, (b.recipients / b.users) * 100)} />
           </div>
         )}
-        {(["zh-CN", "en"] as const).map(
+        {LOCALES.map(
           (l) =>
             b.title[l] && (
               <section key={l} className="rounded-2 border border-line-1 p-4">
-                <div className="mb-2 text-xs text-fg-3">{t(l === "zh-CN" ? "admin.content.zh" : "admin.content.en")}</div>
+                <div className="mb-2 text-xs text-fg-3">{t(LANGUAGE[l])}</div>
                 <h3 className="font-semibold text-fg-1">{b.title[l]}</h3>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-fg-2">{b.body[l]}</p>
               </section>
@@ -205,8 +211,8 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
   const [audience, setAudience] = useState<Audience>("USER");
   const [userId, setUserId] = useState("");
   const [tag, setTag] = useState("");
-  const [title, setTitle] = useState({ "zh-CN": "", en: "" });
-  const [body, setBody] = useState({ "zh-CN": "", en: "" });
+  const [title, setTitle] = useState<Record<Locale, string>>({ "zh-CN": "", "zh-TW": "", en: "" });
+  const [body, setBody] = useState<Record<Locale, string>>({ "zh-CN": "", "zh-TW": "", en: "" });
   const [link, setLink] = useState("");
   const [email, setEmail] = useState(false);
   const word = audience === "ALL" ? "all" : audience === "USER" ? lastFour(userId) || "user" : tag.toLowerCase() || "tag";
@@ -224,9 +230,11 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
     if (audience === "TAG" && !tagRE.test(tag)) throw new FormError(t("admin.broadcasts.badTag"));
     if (!title["zh-CN"].trim() || !body["zh-CN"].trim()) throw new FormError(t("admin.broadcasts.needChinese"));
     if (!title.en.trim() !== !body.en.trim()) throw new FormError(t("admin.broadcasts.needBoth"));
+    if (!title["zh-TW"].trim() !== !body["zh-TW"].trim()) throw new FormError(t("admin.broadcasts.needBothTW"));
     if (link && !linkRE.test(link)) throw new FormError(t("admin.broadcasts.badLink"));
-    const en = title.en.trim() ? { en: title.en.trim() } : {};
-    const enBody = body.en.trim() ? { en: body.en.trim() } : {};
+    // The optional languages only when written: their readers get the Simplified otherwise.
+    const written = (m: Record<Locale, string>) =>
+      Object.fromEntries((["zh-TW", "en"] as const).filter((l) => m[l].trim()).map((l) => [l, m[l].trim()]));
     return adminData(
       await adminApi.POST("/admin/v1/broadcasts", {
         params: { header: { "Idempotency-Key": key } },
@@ -234,8 +242,8 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
           audience,
           ...(audience === "USER" ? { user_id: uid } : {}),
           ...(audience === "TAG" ? { tag } : {}),
-          title: { "zh-CN": title["zh-CN"].trim(), ...en },
-          body: { "zh-CN": body["zh-CN"].trim(), ...enBody },
+          title: { "zh-CN": title["zh-CN"].trim(), ...written(title) },
+          body: { "zh-CN": body["zh-CN"].trim(), ...written(body) },
           ...(link ? { link } : {}),
           email,
           reason,
@@ -316,9 +324,9 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
           </label>
         )}
         {audience === "ALL" && <p className="rounded-2 bg-warn/10 px-3 py-2 text-sm text-warn-strong">{t("admin.broadcasts.allWarning")}</p>}
-        {(["zh-CN", "en"] as const).map((l) => (
+        {LOCALES.map((l) => (
           <fieldset key={l} className="flex flex-col gap-3 rounded-2 border border-line-1 p-4">
-            <legend className="px-1 text-xs text-fg-3">{t(l === "zh-CN" ? "admin.broadcasts.chinese" : "admin.broadcasts.english")}</legend>
+            <legend className="px-1 text-xs text-fg-3">{t(LEGEND[l])}</legend>
             <label className="flex flex-col gap-1.5 text-sm text-fg-2">
               {t("admin.content.title")}
               <Input id={`broadcast-title-${l}`} value={title[l]} maxLength={100} onValueChange={(v) => setTitle({ ...title, [l]: v })} />

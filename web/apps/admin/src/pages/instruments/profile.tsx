@@ -20,11 +20,28 @@ const MAX_LOGO = 200 * 1024;
 const LINKS = ["website", "explorer", "whitepaper"] as const;
 const profileKey = (code: string) => ["admin", "asset-profile", code];
 
-type Draft = { name: string; zh: string; en: string; links: Record<string, string>; logo?: { data: string; mime: Mime; preview: string }; clear: boolean };
+type Draft = {
+  name: string;
+  zh: string;
+  /** tw is the Traditional Chinese introduction (G7b): empty, its readers get the Simplified. */
+  tw: string;
+  en: string;
+  links: Record<string, string>;
+  logo?: { data: string; mime: Mime; preview: string };
+  clear: boolean;
+};
 
 const draftOf = (p: Profile): Draft => ({
-  name: p.display_name, zh: p.description["zh-CN"] ?? "", en: p.description.en ?? "", links: { ...p.links }, clear: false,
+  name: p.display_name, zh: p.description["zh-CN"] ?? "", tw: p.description["zh-TW"] ?? "", en: p.description.en ?? "", links: { ...p.links },
+  clear: false,
 });
+
+/** The introductions' languages and their field labels. */
+const LANGS = [
+  ["zh", "admin.profile.descriptionZh"],
+  ["tw", "admin.profile.descriptionTW"],
+  ["en", "admin.profile.descriptionEn"],
+] as const;
 
 /** readLogo checks a chosen file as instrument-service will (type, size, square) and reads it. */
 async function readLogo(file: File, t: (k: string, o?: Record<string, unknown>) => string): Promise<NonNullable<Draft["logo"]>> {
@@ -53,6 +70,7 @@ export function AssetProfileSection({ code, writable }: { code: string; writable
     if (Object.values(links).some((v) => !/^https:\/\/[^\s/]+\.[^\s]+$/.test(v))) throw new FormError(t("admin.profile.badLink"));
     const description: Record<string, string> = {};
     if (draft.zh.trim()) description["zh-CN"] = draft.zh.trim();
+    if (draft.tw.trim()) description["zh-TW"] = draft.tw.trim();
     if (draft.en.trim()) description.en = draft.en.trim();
     return adminData(
       await adminApi.PUT("/admin/v1/assets/{code}/profile", {
@@ -90,8 +108,8 @@ export function AssetProfileSection({ code, writable }: { code: string; writable
             <FormField label={t("admin.profile.displayName")} hint={t("admin.profile.displayNameHint")}>
               <Input id="profile-name" value={draft.name} maxLength={32} onValueChange={(v) => setDraft({ ...draft, name: v })} />
             </FormField>
-            {(["zh", "en"] as const).map((l) => (
-              <FormField key={l} label={t(l === "zh" ? "admin.profile.descriptionZh" : "admin.profile.descriptionEn")}>
+            {LANGS.map(([l, label]) => (
+              <FormField key={l} label={t(label)}>
                 <textarea
                   id={`profile-description-${l}`}
                   value={draft[l]}

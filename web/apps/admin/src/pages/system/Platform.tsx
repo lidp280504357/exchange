@@ -71,13 +71,16 @@ export default function Platform({ admin }: { admin: Admin }) {
   );
 }
 
-/** TextsField edits a text in Chinese and English. */
+/**
+ * TextsField edits a text in Simplified Chinese, Traditional Chinese
+ * (G7b; empty, the sites show the Simplified) and English.
+ */
 function TextsField({ label, value, onChange, disabled, long }: { label: string; value: Texts; onChange: (v: Texts) => void; disabled: boolean; long?: boolean }) {
   const { t } = useTranslation();
-  const box = (lang: "zh-CN" | "en") =>
+  const box = (lang: "zh-CN" | "zh-TW" | "en") =>
     long ? (
       <textarea
-        value={value[lang]}
+        value={value[lang] ?? ""}
         disabled={disabled}
         rows={2}
         onChange={(e) => onChange({ ...value, [lang]: e.target.value })}
@@ -85,14 +88,18 @@ function TextsField({ label, value, onChange, disabled, long }: { label: string;
         aria-label={`${label} ${lang}`}
       />
     ) : (
-      <Input size="sm" value={value[lang]} disabled={disabled} onValueChange={(v) => onChange({ ...value, [lang]: v })} aria-label={`${label} ${lang}`} />
+      <Input size="sm" value={value[lang] ?? ""} disabled={disabled} onValueChange={(v) => onChange({ ...value, [lang]: v })} aria-label={`${label} ${lang}`} />
     );
   return (
     <FormField label={label}>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-3">
         <label className="flex flex-col gap-1 text-xs text-fg-3">
           {t("admin.platform.zh")}
           {box("zh-CN")}
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-fg-3" title={t("admin.platform.zhTWHint")}>
+          {t("admin.platform.zhTW")}
+          {box("zh-TW")}
         </label>
         <label className="flex flex-col gap-1 text-xs text-fg-3">
           {t("admin.platform.en")}
@@ -181,7 +188,7 @@ function ProfileForm({ profile, edit }: { profile: Profile; edit: boolean }) {
               value={d.default_locale}
               disabled={off}
               onValueChange={(v) => set({ default_locale: v as Draft["default_locale"] })}
-              items={[{ value: "zh-CN", label: "中文" }, { value: "en", label: "English" }]}
+              items={[{ value: "zh-CN", label: "简体中文" }, { value: "zh-TW", label: "繁體中文" }, { value: "en", label: "English" }]}
             />
           </FormField>
         </fieldset>
