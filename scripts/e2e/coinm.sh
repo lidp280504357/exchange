@@ -7,12 +7,18 @@
 # DERIV_SETTLE_ASSET_MISMATCH; 1.5 contracts are
 # DERIV_CONTRACTS_NOT_INTEGER. A market buy of 3 contracts (300 USD) opens
 # a long against HOUSE (cross, 20x): 3 contracts of 100 USD settled in
-# BTC, worth 300 USD and 300 / mark in BTC, the reservation in BTC. A
-# reduce-only market sell closes it: the realized PnL and the fees are in
-# BTC, the FUTURES BTC holds nothing frozen and is what went in plus the
-# PnL less the fees, and it moves back to SPOT. The derivatives
+# BTC, worth 300 USD and 300 / mark in BTC, the reservation in BTC; a
+# reduce-only market sell closes it. A market sell of 3 opens a short the
+# same way and a reduce-only market buy closes it. Every fill is settled in
+# BTC; the realized PnL and the fees are in BTC, the FUTURES BTC holds
+# nothing frozen and is what went in plus the PnL less the fees. Then HOUSE
+# has no room for the contract (market.house_liquidity off for it, put back
+# when the script ends): a market buy fills nothing, ends canceled and
+# leaves nothing frozen. The BTC moves back to SPOT and the derivatives
 # reconciliation (invariant 6 per settlement asset) passes. Prices come
-# from the mark price and HOUSE's book (Binance COIN-M's).
+# from the mark price and HOUSE's book (Binance COIN-M's). Liquidation and
+# ADL are covered by the application tests (internal/derivatives/
+# application/coinm_test.go): no price here can be moved on purpose.
 # Needs derivatives.trading and derivatives.coin_m on, BTC-USD-PERP TRADING
 # with HOUSE liquidity (scripts/ops/house.sh seed and flags) and a mark
 # price (docs/runbook/derivatives.md), and ssh to the server.
@@ -75,52 +81,104 @@ MARK=$(jq -r .mark_price <<<"$BODY")
 offered() {
   call GET "/v1/market/$SYMBOL/depth?limit=5" "" && [[ $STATUS == 200 ]] && [[ -n $(jq -r '.asks[0][0] // empty' <<<"$BODY") ]]
 }
-eventually 40 "$SYMBOL shows HOUSE's asks" offered
+eventually 40 "$SYMBOL shows the reference book's asks" offered
+quoting() { [[ $(metric market-maker 9091 market_house_active "symbol=\"$SYMBOL\"") == "$1" ]]; }
+eventually 60 "HOUSE quotes $SYMBOL" quoting 1
 echo "ok   mark $MARK"
 
 echo "== whole contracts only"
 call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1.5\"}" "${AUTH[@]}"
 expect 400 DERIV_CONTRACTS_NOT_INTEGER "1.5 contracts"
 
-echo "== open: a market buy of 3 contracts against HOUSE"
-call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"3\"}" "${AUTH[@]}"
-expect 202 - "a market buy of 3"
-check '.settle_asset == "BTC" and (.reserved | tonumber) > 0' "its margin and fee reserved in BTC"
-OPEN=$(jq -r .order_id <<<"$BODY")
 position() {
   call GET "/v1/derivatives/positions?symbol=$SYMBOL" "" "${AUTH[@]}" && jq -e '.positions | length == 1' <<<"$BODY" >/dev/null
 }
-eventually 40 "the long is open" position
-check '.positions[0].quantity == "3" and .positions[0].contracts == "3" and .positions[0].settle_asset == "BTC" and .positions[0].value_usd == "300"' \
-  "3 contracts of 100 USD settled in BTC"
-check '((.positions[0].value_coin | tonumber) - 300 / (.positions[0].mark_price | tonumber) | fabs) < 1e-8' "worth 300 / mark in BTC"
-call GET "/v1/derivatives/orders/$OPEN" "" "${AUTH[@]}"
-check '.status == "FILLED" and .reserved == "0" and (.fee | tonumber) > 0 and .settle_asset == "BTC"' "filled, a fee paid in BTC"
-
-echo "== close: a reduce-only market sell"
-call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"3\",\"reduce_only\":true}" "${AUTH[@]}"
-expect 202 - "the reduce-only sell of 3"
 flat() {
   call GET "/v1/derivatives/positions?symbol=$SYMBOL" "" "${AUTH[@]}" && jq -e '.positions | length == 0' <<<"$BODY" >/dev/null
 }
-eventually 40 "flat" flat
-# books: every fill settled in BTC, 3 closed; sets PNL and FEES.
+# round_trip SIDE CLOSE SIGN: a market order of 3 contracts on SIDE opens a
+# position (quantity SIGN3) against HOUSE; a reduce-only market order on
+# CLOSE takes it back to flat.
+round_trip() {
+  local side=$1 close=$2 sign=$3 open
+  echo "== open: a market $side of 3 contracts against HOUSE"
+  call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"$side\",\"type\":\"MARKET\",\"quantity\":\"3\"}" "${AUTH[@]}"
+  expect 202 - "a market $side of 3"
+  check '.settle_asset == "BTC" and (.reserved | tonumber) > 0' "its margin and fee reserved in BTC"
+  open=$(jq -r .order_id <<<"$BODY")
+  eventually 40 "the position is open" position
+  check ".positions[0].quantity == \"${sign}3\" and .positions[0].contracts == \"${sign}3\" and .positions[0].settle_asset == \"BTC\" and .positions[0].value_usd == \"300\"" \
+    "${sign}3 contracts of 100 USD settled in BTC"
+  check '((.positions[0].value_coin | tonumber) - 300 / (.positions[0].mark_price | tonumber) | fabs) < 1e-8' "worth 300 / mark in BTC"
+  call GET "/v1/derivatives/orders/$open" "" "${AUTH[@]}"
+  check '.status == "FILLED" and .reserved == "0" and (.fee | tonumber) > 0 and .settle_asset == "BTC"' "filled, a fee paid in BTC"
+
+  echo "== close: a reduce-only market $close"
+  call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"$close\",\"type\":\"MARKET\",\"quantity\":\"3\",\"reduce_only\":true}" "${AUTH[@]}"
+  expect 202 - "the reduce-only $close of 3"
+  eventually 40 "flat" flat
+}
+round_trip BUY SELL ""
+round_trip SELL BUY -
+
+# books: every fill settled in BTC, 6 closed; sets PNL and FEES.
 books() {
   call GET "/v1/derivatives/fills?symbol=$SYMBOL&limit=50" "" "${AUTH[@]}"
-  jq -e '(.items | length) >= 2 and all(.items[]; .settled and .settle_asset == "BTC")
-    and ([.items[].closed_quantity | tonumber] | add) == 3' <<<"$BODY" >/dev/null || return 1
+  jq -e '(.items | length) >= 4 and all(.items[]; .settled and .settle_asset == "BTC")
+    and ([.items[].closed_quantity | tonumber] | add) == 6' <<<"$BODY" >/dev/null || return 1
   PNL=$(jq '[.items[].realized_pnl | tonumber] | add' <<<"$BODY")
   FEES=$(jq '[.items[].fee | tonumber] | add' <<<"$BODY")
 }
-eventually 20 "the fills: settled in BTC, 3 closed" books
+eventually 20 "the fills: settled in BTC, 6 closed" books
 echo "ok   PnL $PNL BTC, fees $FEES BTC"
 settled() {
   call GET "/v1/derivatives/account?asset=BTC" "" "${AUTH[@]}" && jq -e '.frozen == "0" and .order_margin == "0" and .position_margin == "0"' <<<"$BODY" >/dev/null
 }
 eventually 20 "the BTC FUTURES holds nothing frozen" settled
 check "((.wallet_balance | tonumber) - ($IN + $PNL - $FEES) | fabs) < 1e-8" "$IN + the PnL less the fees"
+WALLET=$(jq -r .wallet_balance <<<"$BODY")
+
+echo "== HOUSE without room: an order fills nothing and leaves nothing frozen"
+# HOUSE's room for a contract comes from its coin account (the publisher's
+# rooms, tested in internal/marketmaker and internal/matching); taking the
+# contract off market.house_liquidity for a moment leaves HOUSE no room at
+# all, as an account used up would.
+HOUSE_STATE=$(exchangectl flags show market.house_liquidity)
+HOUSE_ALLOW=$(jq -r '(.rules.symbols.allow // []) | join(",")' <<<"$HOUSE_STATE")
+[[ $(jq -r .enabled <<<"$HOUSE_STATE") == true && ",$HOUSE_ALLOW," == *",$SYMBOL,"* ]] ||
+  fail "market.house_liquidity does not name $SYMBOL (scripts/ops/house.sh flags)"
+# house_back puts the switch back once; one that cannot go back fails the
+# run.
+HOUSE_OFF=""
+house_back() {
+  [[ -n $HOUSE_OFF ]] || return 0
+  if exchangectl flags set market.house_liquidity --on --allow-symbols "$HOUSE_ALLOW" --reason "e2e coinm.sh: HOUSE quotes $SYMBOL again" >/dev/null; then
+    HOUSE_OFF=""
+    return 0
+  fi
+  echo "FAIL market.house_liquidity not put back; by hand: exchangectl flags set market.house_liquidity --on --allow-symbols '$HOUSE_ALLOW' --reason ..." >&2
+  EXIT_FAILED=1
+}
+at_exit house_back
+HOUSE_OFF=1
+exchangectl flags set market.house_liquidity --on --allow-symbols "$(jq -r --arg s "$SYMBOL" '[(.rules.symbols.allow // [])[] | select(. != $s)] | join(",")' <<<"$HOUSE_STATE")" \
+  --reason "e2e coinm.sh: HOUSE without room on $SYMBOL for a moment" >/dev/null
+eventually 60 "HOUSE stops quoting $SYMBOL" quoting 0
+call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1\"}" "${AUTH[@]}"
+expect 202 - "a market buy of 1 is taken"
+REFUSED=$(jq -r .order_id <<<"$BODY")
+ended() {
+  call GET "/v1/derivatives/orders/$REFUSED" "" "${AUTH[@]}" &&
+    jq -e '(.status | IN("CANCELED", "REJECTED")) and .filled_quantity == "0" and .reserved == "0"' <<<"$BODY" >/dev/null
+}
+eventually 40 "it fills nothing and ends canceled, its reservation released" ended
+eventually 20 "nothing frozen" settled
+check ".wallet_balance == \"$WALLET\"" "the balance unchanged"
+house_back
+eventually 60 "HOUSE quotes $SYMBOL again" quoting 1
 
 echo "== back to SPOT"
+call GET "/v1/derivatives/account?asset=BTC" "" "${AUTH[@]}"
 AVAILABLE=$(jq -r .available <<<"$BODY")
 call POST /v1/account/transfers "{\"asset\":\"BTC\",\"amount\":\"$AVAILABLE\",\"from_account_type\":\"FUTURES\",\"to_account_type\":\"SPOT\"}" \
   "${AUTH[@]}" -H "Idempotency-Key: coinm-out-$RUN"

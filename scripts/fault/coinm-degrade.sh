@@ -19,7 +19,10 @@ set -euo pipefail
 source "$(dirname "$0")/../e2e/lib/common.sh"
 # shellcheck source=../e2e/lib/remote.sh
 source "$(dirname "$0")/../e2e/lib/remote.sh"
-trap 'unblock_egress market-data-service >/dev/null 2>&1 || true; cleanup_remote' EXIT
+# Through common.sh's EXIT trap, not a trap of our own: replacing it would
+# skip the at_exit commands (the bid's cancel below). Registered first, the
+# egress comes back last.
+at_exit 'unblock_egress market-data-service >/dev/null 2>&1 || true'
 
 SYMBOL=BTC-USD-PERP
 call GET "/v1/market/contracts/$SYMBOL" ""
