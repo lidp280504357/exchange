@@ -88,7 +88,7 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   marginStatus: { NORMAL: "success", WARNED: "warn", LIQUIDATING: "danger", FROZEN: "danger" },
   marginType: { MARGIN_CROSS: "brand", MARGIN_ISOLATED: "info" },
   marginTrigger: { AUTO: "neutral", MANUAL: "warn" },
-  marginLiquidationStatus: { STARTED: "danger", COMPLETED: "neutral" },
+  marginLiquidationStatus: { STARTED: "danger", SHORTFALL: "danger", COMPLETED: "neutral" },
   rateModel: { FIXED: "neutral", FLOATING: "info" },
   loanKind: { BORROW: "warn", REPAY: "success", INTEREST: "info" },
   loanStatus: { PENDING: "warn", DONE: "success", FAILED: "danger" },

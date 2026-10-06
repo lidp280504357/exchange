@@ -456,6 +456,17 @@ func (r memApprovals) PendingOf(_ context.Context, kind, requestedBy string) ([]
 	return out, nil
 }
 
+func (r memApprovals) PendingOfKind(_ context.Context, kind string) ([]domain.Approval, error) {
+	var out []domain.Approval
+	for _, a := range r.m.approvals {
+		if a.Status == domain.ApprovalPending && a.Kind == kind {
+			out = append(out, a)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Approval) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return out, nil
+}
+
 func (r memApprovals) CountPending(context.Context) (int, error) {
 	n := 0
 	for _, a := range r.m.approvals {

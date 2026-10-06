@@ -30,10 +30,11 @@ const (
 )
 
 // The launch items in the order the design lists them, then HOUSE's
-// (review ㉚: design §3 row E).
+// (review ㉚: design §3 row E) and margin trading's (margin design
+// 2026-10-06 §8, E5).
 var launchKeys = []string{
 	"welcome_credits", "test_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
-	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house",
+	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin",
 }
 
 // launchDefaultName is the name the platform is seeded with (migration
@@ -135,8 +136,10 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 	put("admins")(s.launchAdmins(ctx))
 	if err != nil {
 		set("house", LaunchUnknown, map[string]any{"flag": flags.KeyHouseLiquidity})
+		set("margin", LaunchUnknown, map[string]any{"flag": flags.KeyMarginEnabled})
 	} else {
 		put("house")(s.launchHouse(ctx, flagged[flags.KeyHouseLiquidity]))
+		put("margin")(launchMargin(flagged))
 	}
 
 	out := LaunchChecklist{Ready: true, CheckedAt: s.Now()}
@@ -401,6 +404,38 @@ func (s *Service) launchThirdParties(ctx context.Context) (string, map[string]an
 		return LaunchFail, value
 	case unreported:
 		return LaunchUnknown, value
+	}
+	return LaunchOK, value
+}
+
+// hasRules reports whether a flag is narrowed to some users, regions,
+// statuses, assets or symbols.
+func hasRules(f ports.Flag) bool {
+	return len(f.Rules) > 0 && string(f.Rules) != "{}" && string(f.Rules) != "null"
+}
+
+// launchMargin: margin trading off, or on with the liquidations on (off,
+// an account at its liquidation level is only warned and HOUSE carries
+// what it cannot repay) and neither it nor the orders that borrow
+// (margin.auto_borrow) on for everyone without rules: the test server
+// switched both on for all, and they go back to the users' and regions'
+// rules before a launch (the coordinator, 2026-10-06 07:40 ③).
+func launchMargin(flagged map[string]ports.Flag) (string, map[string]any) {
+	on, liquidation, borrow := flagged[flags.KeyMarginEnabled], flagged[flags.KeyMarginLiquidation], flagged[flags.KeyMarginAutoBorrow]
+	global := on.Enabled && !hasRules(on)
+	borrowGlobal := on.Enabled && borrow.Enabled && !hasRules(borrow)
+	value := map[string]any{
+		"flag": flags.KeyMarginEnabled, "enabled": on.Enabled, "liquidation": liquidation.Enabled, "auto_borrow": borrow.Enabled,
+		"global": global, "auto_borrow_global": borrowGlobal,
+	}
+	if hasRules(on) {
+		value["rules"] = on.Rules
+	}
+	if !on.Enabled {
+		return LaunchOK, value
+	}
+	if !liquidation.Enabled || global || borrowGlobal {
+		return LaunchFail, value
 	}
 	return LaunchOK, value
 }

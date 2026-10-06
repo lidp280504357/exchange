@@ -14,8 +14,8 @@
 // administrators (the roles' permissions; the creation form, canceled),
 // system health, the operations pages, the simulated market (overview,
 // price control with an event's impact, never started; events, bots, the
-// coin's holders; the bots' orders), the margin pages hidden while
-// margin.enabled is off (their own checks come with E5), the fund
+// coin's holders; the bots' orders), the margin pages (hidden while
+// margin.enabled is off; read and an editor opened while it is on), the fund
 // operations (approval mode, form, records), the settings and the event
 // stream, the account page; the
 // search opens a user; signing out from the account menu ends the session,
@@ -590,17 +590,73 @@ try {
   await noError("the bots' orders");
   ok("the simulated market: overview, price control with an event's impact (not started) and a target's preview, events, bots, the coin's holders; the bots' orders");
 
-  // 9e. Margin trading (design 2026-10-06 §8, A55): its pages sit behind
+  // 9e. Margin trading (design 2026-10-06 §8, E5): its pages sit behind
   // margin.enabled. Off, the sidebar has none of them and their addresses
-  // lead to the overview. On, they show sample data until E5 serves the
-  // API: their checks (each page, the parameters' editors confirmed and
-  // canceled, an account's detail) come with E5, skipped until then.
+  // lead to the overview. On, each page reads margin-service's terms and
+  // accounts or the read models; the editors open and close without a
+  // change (nothing is asked for), a pair's new leverage offers its
+  // suggested thresholds without filling them in (A57).
   const marginOn = await page.evaluate(async () => {
     const r = await fetch("/admin/v1/flags");
     return r.ok && (await r.json()).items.some((f) => f.key === "margin.enabled" && f.enabled);
   });
   if (marginOn) {
-    console.log("SKIP margin pages: margin.enabled is on; their checks come with E5 (the API is a draft)");
+    await go("/margin/params");
+    await rows(1);
+    await waitText("USDT");
+  }
+  // A console from before E5 shows sample data under a preview banner.
+  const marginSample = marginOn && (await page.$("[data-testid=margin-preview]"));
+  if (marginSample) {
+    console.log("SKIP margin pages: this console is from before E5 (sample data under a preview banner)");
+  } else if (marginOn) {
+    await noError("the margin assets");
+    await t.shot("4h-margin-params");
+    await page.click("[data-testid=margin-edit-USDT]");
+    await page.waitForSelector("[role=dialog] [data-testid=margin-asset-save]");
+    if (!(await page.$eval("[data-testid=margin-asset-save]", (b) => b.disabled))) throw new Error("the USDT editor offers to save nothing");
+    await clickButton("取消", "[role=dialog]");
+    await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+    await go("/margin/params?tab=pairs");
+    await rows(1);
+    await noError("the margin pairs");
+    const pair = await page.$eval('main tbody tr[data-row-id] [data-testid^="margin-pair-"]', (b) => b.dataset.testid);
+    await page.click(`[data-testid="${pair}"]`);
+    await page.waitForSelector("[role=dialog] [data-testid=margin-pair-save]");
+    const levels = () => page.$$eval("[role=dialog] input[inputmode=decimal]", (inputs) => inputs.slice(0, 2).map((i) => i.value).join(" / "));
+    const before = await levels();
+    // Another leverage than the pair's: its thresholds stay as they are, the suggestion is offered.
+    const other = await page.$$eval("[role=dialog] [role=radio]", (radios) => {
+      const r = radios.find((x) => x.getAttribute("data-state") !== "on");
+      r?.click();
+      return r?.textContent ?? "";
+    });
+    if (!other) throw new Error("the pair editor offers no other leverage");
+    await page.waitForSelector("[role=dialog] [data-testid=margin-suggested]");
+    if ((await levels()) !== before) throw new Error(`a new leverage overwrote the thresholds: ${before} -> ${await levels()}`);
+    await t.shot("4h-margin-pair");
+    await clickButton("取消", "[role=dialog]");
+    await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+    await go("/margin/params?tab=settings");
+    await waitText("全仓条款");
+    await noError("the cross terms");
+    await go("/margin/accounts");
+    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    await noError("the margin accounts");
+    if (await page.$("main table[aria-label=margin-accounts] tbody tr[data-row-id]")) {
+      await openRow("main table[aria-label=margin-accounts] tbody tr");
+      await page.waitForSelector("[role=dialog] [data-testid=margin-account] table");
+      await t.shot("4h-margin-account");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+    }
+    await go("/margin/liquidations");
+    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    await noError("the margin liquidations");
+    await go("/margin/interest");
+    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    await noError("the margin interest");
+    ok("margin trading: the parameters (an editor opened and closed unchanged; a pair's new leverage keeps its thresholds and offers the suggested), the accounts, the liquidations and the interest");
   } else {
     await go("/margin/params");
     await waitPath("/");

@@ -40,9 +40,11 @@
 # event within one operator's share and one beyond it approved by a second
 # administrator, both starting tomorrow and canceled; settings changed and
 # put back, one beyond the share rejected; who holds the coin; a cent
-# minted for every bot; the bots' orders and trades), the margin
-# parameters and accounts once E5 serves them (design 2026-10-06 §8;
-# skipped until then), the audit trail with its CSV export, and sign-out. Every request that moves money carries an
+# minted for every bot; the bots' orders and trades), margin trading
+# (design 2026-10-06 §8, E5: the terms with a change asked for and
+# withdrawn, a cross account the run's user opens frozen and unfrozen, a
+# liquidation by hand refused; skipped on an admin-service before E5),
+# the audit trail with its CSV export, and sign-out. Every request that moves money carries an
 # Idempotency-Key (C5.5 ⑥): an adjustment, a hold, its release and the
 # in-app message are sent twice under theirs and made once, another
 # request under a key is refused, and one without is too.
@@ -1781,8 +1783,13 @@ check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without 
 echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
 as AUDITOR GET /admin/v1/launch-checklist ""
 expect 200 - "every administrator reads the launch checklist"
-check '(.items | length) == 15 and ([.items[].key] | unique | length) == 15 and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
-  "fifteen items, each with its state"
+# Sixteen with margin trading's (E5); fifteen from an admin-service before it.
+check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 16 or ((.items | length) == 15 and all(.items[]; .key != "margin")))
+  and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
+  "sixteen items, each with its state"
+check '[.items[] | select(.key == "margin")] | all(.value.flag == "margin.enabled" and (.value.enabled | type) == "boolean"
+  and (.status == "FAIL" or .value.global == false))' \
+  "margin trading's item reads its switches, and fails while it is on for everyone"
 check '.items[] | select(.key == "house") | .value.flag == "market.house_liquidity" and (.value.backed | has("USDT"))' \
   "HOUSE's item reads its flag and its inventory of the backed assets"
 check '.ready == false and ([.items[] | select(.key == "admin_totp" or .key == "test_assets")] | all(.status == "FAIL"))' \
@@ -1869,14 +1876,16 @@ as OPERATOR POST /admin/v1/articles '{"section":"LEGAL","slug":"e2e-not-fixed","
 expect 400 COMMON_INVALID_ARGUMENT "a legal page is one of the six fixed slugs"
 
 echo "== margin trading (design 2026-10-06 §8, E5)"
-# A draft until E5 serves it (api/admin/admin.yaml, tag margin): skipped
-# while admin-service answers 404. It changes nothing: a rate change waits
-# for a second ADMIN and is withdrawn. A freeze and unfreeze, and a
-# liquidation asked for and withdrawn, need the run's user to have a margin
-# account (E1's transfer): added with E5.
+# admin-service's margin API over margin-service's internal one (skipped
+# while an admin-service from before E5 answers 404). It changes no terms:
+# a rate change waits for a second ADMIN and is withdrawn. The run's user
+# moves 10 USDT into a cross margin account (while margin.enabled lets it)
+# that an OPERATOR freezes and unfreezes; a liquidation by hand of an
+# account that owes nothing is refused, and so is any while margin-service
+# liquidates nothing (margin.liquidation off).
 as AUDITOR GET /admin/v1/margin/assets ""
 if [[ $STATUS == 404 ]]; then
-  echo "skip margin trading: admin-service serves no margin API yet (E5 follows E0's contract)"
+  echo "skip margin trading: admin-service serves no margin API yet"
 else
   expect 200 - "every administrator reads the margin assets"
   check '(.items | length) > 0 and all(.items[]; (.lent | tonumber) <= (.pool_cap | tonumber) and (.user_cap | tonumber) <= (.pool_cap | tonumber)
@@ -1921,6 +1930,69 @@ else
   as AUDITOR GET "/admin/v1/margin/accounts?limit=50" ""
   expect 200 - "every administrator reads the margin accounts"
   check '[.items[] | .margin_level // "1e9" | tonumber] | . == sort' "the lowest margin level first, those without debts last"
+  check 'all(.items[]; (.frozen_reason | type) == "string" and has("pending_approval_id"))' \
+    "each with its freeze reason as a text (empty unless frozen) and the liquidation by hand waiting for it"
+  call POST /v1/margin/transfer '{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"10"}' "${UAUTH[@]}" \
+    -H "Idempotency-Key: e2e-admin-margin-$RUN-in"
+  if [[ $STATUS != 200 ]]; then
+    echo "note margin account: the transfer in answered $STATUS $(jq -r '.code // empty' <<<"$BODY") (margin.enabled closed to the run's user?)"
+  else
+    # shellcheck disable=SC2016 # expanded when the script ends
+    at_exit 'call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"10\"}" "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-margin-$RUN-out" >/dev/null'
+    margin_listed() {
+      as AUDITOR GET "/admin/v1/margin/accounts?user_id=$USER_ID" ""
+      [[ $STATUS == 200 ]] && jq -e '.items | length == 1' <<<"$BODY" >/dev/null
+    }
+    eventually 20 "the run's margin account is listed" margin_listed
+    check '.items[0].account == "MARGIN_CROSS" and .items[0].status == "NORMAL" and .items[0].margin_level == null and .items[0].frozen_by == null
+      and .items[0].frozen_reason == "" and .items[0].pending_approval_id == null' "holding 10 USDT, owing nothing, not frozen"
+    MACCT="/admin/v1/margin/accounts/$USER_ID/MARGIN_CROSS"
+    as AUDITOR GET "$MACCT" ""
+    expect 200 - "every administrator reads the account in full"
+    check '([.balances[] | select(.asset == "USDT")] | length) == 1 and .loan_changes == [] and .liquidations == []' "its USDT, no loan changes, no liquidation"
+    as FINANCE POST "$MACCT/freeze" '{"reason":"e2e: finance freezes no margin account"}'
+    expect 403 ADMIN_FORBIDDEN "freezing takes derivatives.write"
+    as OPERATOR POST "$MACCT/freeze" '{"reason":"e2e: a freeze, lifted"}'
+    expect 200 - "an OPERATOR freezes it at once"
+    # shellcheck disable=SC2016 # expanded when the script ends
+    at_exit 'as OPERATOR POST "$MACCT/unfreeze" "{\"reason\":\"e2e cleanup\"}" >/dev/null'
+    check ".status == \"FROZEN\" and .frozen_by == \"$EMAIL_OPERATOR\" and .frozen_reason == \"e2e: a freeze, lifted\"" "frozen in the OPERATOR's name, with the reason"
+    call POST /v1/margin/transfer '{"direction":"OUT","account":"MARGIN_CROSS","asset":"USDT","amount":"1"}' "${UAUTH[@]}" \
+      -H "Idempotency-Key: e2e-admin-margin-$RUN-frozen"
+    expect 409 MARGIN_FROZEN "nothing moves out of a frozen account"
+    as OPERATOR POST "$MACCT/freeze" '{"reason":"e2e: a freeze, lifted"}'
+    expect 200 - "the same freeze again (a retry whose answer was lost) finds it"
+    as ADMIN POST "$MACCT/freeze" '{"reason":"e2e: frozen twice"}'
+    expect 409 MARGIN_FROZEN "another freeze of a frozen account is refused"
+    margin_freeze_audited() {
+      as AUDITOR GET "/admin/v1/audit-logs?target=user:$USER_ID" ""
+      [[ $STATUS == 200 ]] && jq -e 'any(.items[]; .payload.action == "admin.margin.account_frozen" and (.payload.details | contains("MARGIN_CROSS")))' \
+        <<<"$BODY" >/dev/null
+    }
+    eventually 60 "the freeze audited on the user" margin_freeze_audited
+    as OPERATOR POST "$MACCT/unfreeze" '{"reason":"e2e: the freeze lifted"}'
+    expect 200 - "and unfreezes it"
+    check '.status == "NORMAL" and .frozen_by == null and .frozen_reason == ""' "not frozen any more"
+    as OPERATOR POST "$MACCT/unfreeze" '{"reason":"e2e: unfrozen twice"}'
+    expect 409 MARGIN_NOT_FROZEN "an account not frozen is not unfrozen"
+    as FINANCE POST "$MACCT/liquidate" '{"reason":"e2e: finance liquidates nothing"}'
+    expect 403 ADMIN_FORBIDDEN "a liquidation by hand takes derivatives.write"
+    # margin.liquidation as admin-service reads it for the run's user: off,
+    # on for everyone, or on by rules (the margin e2e's own users, a
+    # region), which may or may not take in the run's user.
+    as AUDITOR GET /admin/v1/flags ""
+    LIQ=$(jq -r '[.items[] | select(.key == "margin.liquidation")][0] | if . == null or (.enabled | not) then "off"
+      elif ((.rules // {}) | length) == 0 then "all" else "rules" end' <<<"$BODY")
+    as OPERATOR POST "$MACCT/liquidate" '{"reason":"e2e: an account owing nothing"}'
+    case $LIQ in
+      off) expect 409 ADMIN_MARGIN_LIQUIDATION_OFF "no liquidation by hand while margin-service liquidates nothing" ;;
+      all) expect 409 ADMIN_MARGIN_NOTHING_OWED "an account that owes nothing is not liquidated" ;;
+      *)
+        [[ $STATUS == 409 ]] || fail "a liquidation by hand of an account owing nothing answered $STATUS: $BODY"
+        check '.code | IN("ADMIN_MARGIN_LIQUIDATION_OFF", "ADMIN_MARGIN_NOTHING_OWED")' "refused: liquidations off for the user, or nothing owed"
+        ;;
+    esac
+  fi
   as AUDITOR GET "/admin/v1/margin/liquidations?days=30&limit=5" ""
   expect 200 - "every administrator reads the margin liquidations"
   as AUDITOR GET "/admin/v1/margin/interest?days=7" ""

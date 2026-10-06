@@ -119,3 +119,60 @@ func TestRequestsOfOneAdminOneAtATime(t *testing.T) {
 		t.Fatalf("the other ADMIN's %v %v", pending, err)
 	}
 }
+
+// TestPendingOfKindSeesEveryRequester checks PendingOfKind (margin E5):
+// the pending requests of a kind, whoever asked them, oldest first; a
+// decided one and another kind's are not among them.
+func TestPendingOfKindSeesEveryRequester(t *testing.T) {
+	db := testenv.Postgres(t)
+	ctx, log := context.Background(), slog.New(slog.DiscardHandler)
+	if err := migrate.UpPlatform(ctx, db, log); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, db, migrations.Admin(), log); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.NewStore(db, event.NewFactory("admin-test", "t"))
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	ask := func(kind, status string, at time.Time) domain.Approval {
+		a, err := domain.NewAdmin(uuid.Must(uuid.NewV7()).String(), "margin-"+uuid.NewString()[:8]+"@example.com", "Test", domain.RoleAdmin, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.PasswordHash, a.TOTPSealed = "h", []byte{1}
+		if err := store.Read().Admins().Insert(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		r := domain.Approval{
+			ID: uuid.Must(uuid.NewV7()).String(), Kind: kind, Status: status, RequestedBy: a.ID, CreatedAt: at, Mode: domain.ModeTwoPerson,
+			Escalation: domain.EscalationMarginRisk, Reason: "margin terms", Payload: map[string]string{"target": "asset:USDT"},
+		}
+		if status != domain.ApprovalPending {
+			r.DecidedBy, r.DecidedAt = a.ID, at // withdrawn by its requester
+		}
+		if err := store.Read().Approvals().Insert(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	later := ask(domain.KindMarginParams, domain.ApprovalPending, now.Add(time.Second))
+	earlier := ask(domain.KindMarginParams, domain.ApprovalPending, now)
+	decided := ask(domain.KindMarginParams, domain.ApprovalRejected, now)
+	other := ask(domain.KindMarginLiquidate, domain.ApprovalPending, now)
+	pending, err := store.Read().Approvals().PendingOfKind(ctx, domain.KindMarginParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, a := range pending {
+		switch a.ID {
+		case earlier.ID, later.ID:
+			ids = append(ids, a.ID)
+		case decided.ID, other.ID:
+			t.Fatalf("PendingOfKind returned %s (%s %s)", a.ID, a.Kind, a.Status)
+		}
+	}
+	if len(ids) != 2 || ids[0] != earlier.ID || ids[1] != later.ID {
+		t.Fatalf("pending of the kind, oldest first: %v, want %s then %s", ids, earlier.ID, later.ID)
+	}
+}

@@ -82,8 +82,12 @@ type Service struct {
 	// simulated market's pages).
 	SimBots ports.SimBots
 	Sim     ports.Sim
-	Log     *slog.Logger
-	Now     func() time.Time
+	// Margin is margin-service's internal API for the console (margin
+	// trading's terms and accounts); MarginReports reads its read models.
+	Margin        ports.Margin
+	MarginReports ports.MarginReports
+	Log           *slog.Logger
+	Now           func() time.Time
 	// CloseWait is the pause between attempts to close a position while
 	// its closing orders are being canceled (700 ms when zero).
 	CloseWait time.Duration

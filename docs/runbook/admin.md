@@ -97,7 +97,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 | 分组 | 页面 | 内容 |
 |---|---|---|
-| 概览 | 概览 `/` | 待办（待审提现、待处理资金操作、身份变更申请、待处理充值、待生效修改）、24 小时指标（数字滚动，可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
+| 概览 | 概览 `/` | 待办（待审提现、待处理资金操作、身份变更申请、待处理充值、待生效修改）、24 小时指标（数字滚动，可点进对应列表）、近 7/30 天成交与新增用户图、18 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
 | 用户 | 用户 `/users`、用户页 `/users/<id>` | 按 ID/邮箱/手机号查找，按状态、地区、注册时间筛选，列表带标签；用户页见「用户页」 |
 | 用户 | 身份变更申请 `/identity-requests` | 待审核的换绑（值脱敏），通过或拒绝 |
 | 资金 | 充值 `/deposits` | 三个视图：全部（按用户、资产、网络、状态、交易哈希筛选）、待处理（入账给用户、驳回、无主充值记给用户）、补记待回调；「补记充值」抽屉 |
@@ -113,6 +113,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 交易 | HOUSE 敞口 `/house` | 合计、近 30 日盈亏、敞口、库存、各交易对、各合约净头寸（C6 重做） |
 | 市场 | 资产与交易对 `/instruments` | 交易对、资产（含网络与资料）、合约（含风险阶梯）、费率档、上架向导、待生效修改六个标签，可搜索；先预览再生效 |
 | 模拟市场 | 概览、价格控制、事件日程、机器人集群、代币信息 `/sim/*` | 见「模拟市场」 |
+| 杠杆 | 杠杆账户 `/margin/accounts`、杠杆强平 `/margin/liquidations`、利息报表 `/margin/interest`、杠杆参数 `/margin/params` | 见「杠杆」；开关 `margin.enabled` 关着时不显示 |
 | 风控 | 功能开关 `/risk` | 全部功能开关（说明、规则摘要、最后修改人），切换要确认 |
 | 运营 | 公告 `/announcements`、帮助中心 `/help-articles` | 文章列表、中英文编辑器与预览、发布（立即或定时）与下线；站点自带文章可复制来编辑 |
 | 运营 | 固定页面 `/pages` | 六个法律页与首页横幅：测试模式与正式模式下站点各显示覆盖稿还是默认稿，编辑、以默认稿发布、撤回 |
@@ -354,6 +355,25 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **代币信息**（`/sim/token`）：币的资料（与资产抽屉里的同一编辑器，要 `instruments.write`），以及持有分布（`GET /admin/v1/sim/token`）：发行总量（`ADJUSTMENT` 账户的借方）、市值（按最近成交价）、机器人与用户各自持有多少、多少个账户持有、平台账户（手续费等）与最大的 20 个持有者。数据来自 ClickHouse 的账本流水（`ledger_entries FINAL`），晚几秒；机器人名单来自 market-sim。
 - **审计**：对象 `sim`，动作 `admin.sim.event_created/event_ended/params_changed`，审批的 `admin.sim.event_requested/approved/rejected/failed`、`admin.sim.params_*`、`admin.sim.mint_*`；market-sim 自己另记 `market.sim.*`（含 `approved_by`）。
 
+## 杠杆
+
+（杠杆交易设计 2026-10-06 §8，批次 E5）侧栏「杠杆」四页，开关 `margin.enabled` 关着时不显示、地址回到概览。admin-service 经 margin-service 的内部接口读写条款与账户（`MARGIN_SERVICE_URL`，`/internal/margin/*`，只在 compose 网络：网关与 nginx 不转发，带 `X-User-Id` 的请求被拒；写操作带 `X-Admin-Id`，即管理员邮箱，margin-service 记为条款的 `updated_by` 与账户的 `frozen_by`）；强平记录与利息报表来自 ClickHouse 读模型。权限沿用现有：读参数 `instruments.read`、读账户 `derivatives.read`、读强平与利息 `reports.read`；改参数 `instruments.trading`（仅 ADMIN），冻结与手工强平 `derivatives.write`（ADMIN、OPERATOR）。
+
+- **杠杆参数**（`/margin/params`）：资产（`GET /admin/v1/margin/assets`）、交易对的逐仓条款（`/margin/pairs`）、全仓条款与各逐仓倍数的建议阈值（`/margin/settings`）。修改（`PUT …/assets/{asset}`、`…/pairs/{symbol}`、`…/settings`）带读到的版本（`expected_version`）与理由，每个字段都要给：
+  - 只停止新借款的改动立即生效（200，审计 `admin.margin.asset_changed`、`admin.margin.pair_changed`，带前后值与改动的字段）：关闭借币、调低池上限或单用户上限、关闭逐仓。已有借款不受影响。
+  - 其余一律等第二位有 `instruments.trading` 的 ADMIN（202，审批 `MARGIN_PARAMS`，升级原因 `MARGIN_RISK`，单人与双人模式都一样，协调会话 2026-10-06 03:24 ② 的严版）：计息方式与利率、折扣、保证金资格（两个方向）、开启借币、调高上限、倍数、阈值、强平费、开启逐仓；混在一起的整体等批准；全仓条款的任何改动都等批准。
+  - 同一对象（资产、交易对、全仓条款）对同一版本一次只有一条待审，不论谁申请（409 `ADMIN_MARGIN_CHANGE_PENDING`，详情 `approval_id`）；停止新借款的改动不受它挡。版本已变时 409 `MARGIN_PARAMS_CHANGED`，批准时遇到则申请失败。一天未决即过期（批准只记失败）。
+  - 批准后 margin-service 以申请人的名义设置（`updated_by` 是申请人，批准人在申请与审计里）。应答丢失后再批准时，条款若已在下一版本、由申请人设置且与申请一致，按"已由前一次设置"记为执行；读不到条款时申请保持待处理。
+  - 倍数集合（逐仓 3/5/10、全仓 3/5）只在 margin-service 定义与校验（批准时不合规则申请失败），后台不重复；阈值、强平费、折扣、利率的范围与小数位在提交审批前就检查（400），没有改动也是 400。页面改倍数不改动已填的阈值，只给出该倍数的建议阈值供采用（A57）。
+  - 列表与全仓条款上有待审申请时显示「待审批」（`pending_approval_id`，点进审批页）。
+- **杠杆账户**（`/margin/accounts`）：一次查询（类型、交易对、用户交给服务端，状态页签在返回的列表上筛），按风险率从低到高、最多 500 个（`truncated` 提示还有更多）；`frozen_reason` 不是管理员冻结时为空串；每个账户带待审的手工强平（`pending_approval_id`）。详情（`GET …/accounts/{user_id}/{account}`，`account` 为 `MARGIN_CROSS` 或 `MARGIN_ISOLATED:<交易对>`）：余额与估值、借款、借还流水（`journal_key` 是账本分录的幂等键，如 `margin-interest:<资产>:<整点 Unix 秒>`）、计息、最近 20 次强平（margin-service 自己的记录，带步骤与说明；`SHORTFALL` 表示保险基金缺某个资产，负债保留到补足后的下一轮）。
+  - 冻结与解冻：`POST …/freeze`、`…/unfreeze`（带理由，冻结理由最多 500 字节），立即生效，审计 `admin.margin.account_frozen`、`admin.margin.account_unfrozen`（对象 `user:<id>`，详情有账户）。冻结时 margin-service 撤销账户的全部挂单（E3；撤单失败只记日志、冻结照样生效，可再撤），冻结后不能下单、借币或划出，可以还款，利息照常计、到强平线仍会强平。已冻结或强平中 409 `MARGIN_FROZEN`；同一管理员以同样理由再冻结（应答丢失后的重试）返回账户并补记审计。不是管理员冻结的（强平中）不能解冻：409 `MARGIN_NOT_FROZEN`。
+  - 手工强平：`POST …/liquidate`（带 `Idempotency-Key`），一律等第二位有 `derivatives.write` 的管理员（202，审批 `MARGIN_LIQUIDATE`，`value_usdt` 为总负债，载荷保留申请时的状态、风险率与资产负债）。只有 margin-service 在强平时（开关 `margin.liquidation`，E3）才能申请和执行：关着时 409 `ADMIN_MARGIN_LIQUIDATION_OFF`（页面按钮置灰并说明）；没有负债 409 `ADMIN_MARGIN_NOTHING_OWED`；强平中 409 `MARGIN_FROZEN`；同一账户一次一条待审。批准后 margin-service 以申请人的名义、按审批 ID 只启动一次（`POST /internal/margin/accounts/{user}/{account}/liquidate`，请求体只有 `approval_id`，触发方式 `MANUAL`），申请结果写强平 ID；开关按账户所属用户判断（与 margin-service 的监控相同）；一天未决即过期。
+- **杠杆强平**（`/margin/liquidations`）：读模型 `margin_liquidations`（按 `liquidation_id` 合并开始与完成两条事件，`anyLast` 跳过空值），近 1/7/30/90 天，按类型、交易对、触发方式、用户筛选，游标分页。只见到完成事件的行没有开始的字段，ClickHouse 00010 之前的行没有触发方式与审批号，页面显示「—」。
+- **利息报表**（`/margin/interest`）：按天、周或月与资产：计息与已还（账本 `ledger_entries` 的全仓/逐仓利息行：计息使其减少、还款使其增加）、期末未还（加上期初以前的累计）、平均本金与小时利率、计息账户数（`margin_interest` 的逐小时计息），折合 USDT 按该资产 USDT 交易对在桶内最后一笔成交价（没有则为空，USDT 按 1）。
+- **审批页**：`MARGIN_PARAMS` 显示对象与每个改动字段的前后值，`MARGIN_LIQUIDATE` 显示用户、账户与申请时的风险率、负债；决定分别要 `instruments.trading` 与 `derivatives.write`；一天后标「已过期」。
+- **审计**：立即生效的 `admin.margin.asset_changed`、`admin.margin.pair_changed`（对象 `margin:asset:<资产>`、`margin:pair:<交易对>`）；申请与决定 `admin.margin.params_requested/approved/rejected/failed`（对象 `margin:<目标>`，目标为 `asset:<资产>`、`pair:<交易对>` 或 `cross`）与 `admin.margin.liquidation_requested/approved/rejected/failed`（对象 `user:<id>`）；冻结与解冻见上。
+
 ## 风控
 
 ### 功能开关
@@ -414,7 +434,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 `/health`（`reports.read`，C4a）：
 
-- `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。
+- `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 18 个服务（2026-10-06 起含 margin-service），可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。
 - `?details=true` 还读各服务的 `/metrics`：版本（`exchange_build_info` 的 `version`，部署后应全部一致，不一致时标出几个版本）、Kafka 消费滞后（`kafka_consumer_lag` 求和，> 1000 标黄）、启动以来转入死信的条数（`kafka_consumer_records_total{result="dlq"}`，> 0 标红，用 `exchangectl dlq` 查看与重放），以及行情源状态（market-data 的 `/internal/market/feed`）；没有 Kafka 消费者的服务这两列为空。
 - 页面另有对账（每项检查最近一次）与托管方状态，每 15 秒刷新。
 - 带 details 时还读 `exchange_config_present{item}`（各服务用到的第三方是否已配置：auth 的 `turnstile`、notification 的 `mail`、wallet 的 `alchemy`，只有是/否，不含值），供「上线检查清单」用（`config_present`）。
@@ -452,6 +472,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 管理员 `admins` | 后台名册 | 至少 2 名启用的 ADMIN，全部绑定身份验证器 | 管理员与角色 |
 | 域名 `domain` | 平台资料的 `domain` 与访问后台用的主机名（nginx 转来的 Host） | 后台在 admin.<资料里的域名> | 平台设置 |
 | HOUSE 报价与资金 `house` | 开关 `market.house_liquidity` 与 HOUSE 库存（MARKET_MAKER 账户） | 开，且每个组成交易对的背书资产（有充值或提现的资产，如 USDT、BTC、ETH；没有交易对的托管方测试资产不算）余额大于 0（复审 ㉚ 补的第 15 项，设计 §3 E 行） | HOUSE 敞口 |
+| 杠杆交易 `margin` | 开关 `margin.enabled`、`margin.liquidation`、`margin.auto_borrow` | 关；或开着且强平开着，杠杆与自动借款都按用户或地区规则开放（对所有人全局打开即未达标，测试服现在如此，协调会话 2026-10-06 07:40 ③；杠杆设计 §8，E5） | 功能开关 |
 
 ### 审计
 
@@ -523,7 +544,8 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
   - 后台建管理员（C4a、C5.5 ⑪：ADMIN 建 OPERATOR，响应 `no-store`、只有一次性设置链接；设置前登录不了；不带会话打开链接看到账号与要绑定的密钥，短口令与错的验证码被拒，设好后链接作废、用自己设的登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、旧的立即失效，各自的链接设好后可登录；自己改口令时错的当前口令被拒、改后用新的登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；链接、口令与密钥不出现在任何输出与审计里）。
   - 模拟市场（不改动线上价格：两个事件都排在明天并取消，其中 35% 的那个由 OPERATOR 申请、ADMIN 批准，检查 market-sim 记下的发起人与批准人；参数改了再改回，超出份额的参数改动被拒绝；每个机器人增发 0.01 USDT，20 万 USDT 的增发被拒绝）。
   - 运营：固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）——定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。另有固定 slug `e2e-console-test` 的公告只用于测试模式（D4）：发布后测试模式下站点接口一分钟内列出它，ADMIN 在平台资料里关掉测试模式后一分钟内不再列出，打开后又列出，最后下线；测试模式按运行前的样子恢复（运行中断时由退出钩子恢复）。
-  - 平台设置与上线检查清单（D2）：清单 15 项、测试服未就绪（后台免验证码登录与测试资产开着）；OPERATOR 改不了平台资料，ADMIN 改名为 `E2E Exchange <运行编号末 4 位>` 后按读到的版本改回（旧版本 409，运行中断时退出钩子改回；名称里不放 6 位以上的数字：邮件带着平台名称、notification-service 缓存 10 分钟，而 e2e 取验证码取邮件里第一个 6 位数）；注册赠送：提高超过 10,000 USDT 422、旧版本 409、提高 1 USDT 进入 `WELCOME_CREDIT` 审批（申请人与 FINANCE 批不了），ADMIN 撤回后版本不变；审计里有改名与申请；LEGAL 栏目可读，六个固定 slug 以外的被拒（400，什么都不写）。
+  - 平台设置与上线检查清单（D2）：清单 16 项（E5 加杠杆交易一项，E5 之前的后台为 15 项）、测试服未就绪（后台免验证码登录与测试资产开着）；OPERATOR 改不了平台资料，ADMIN 改名为 `E2E Exchange <运行编号末 4 位>` 后按读到的版本改回（旧版本 409，运行中断时退出钩子改回；名称里不放 6 位以上的数字：邮件带着平台名称、notification-service 缓存 10 分钟，而 e2e 取验证码取邮件里第一个 6 位数）；注册赠送：提高超过 10,000 USDT 422、旧版本 409、提高 1 USDT 进入 `WELCOME_CREDIT` 审批（申请人与 FINANCE 批不了），ADMIN 撤回后版本不变；审计里有改名与申请；LEGAL 栏目可读，六个固定 slug 以外的被拒（400，什么都不写）。
+  - 杠杆（E5；后台答 404 时跳过）：三类条款的读取与约束；OPERATOR 改不了参数，ADMIN 改 USDT 的利率得到 `MARGIN_PARAMS` 申请，同一资产再改 409 `ADMIN_MARGIN_CHANGE_PENDING`，自己不能批准、撤回后版本不变；账户列表按风险率排序、冻结理由为文本。本次的测试用户划入 10 USDT 开全仓账户（`margin.enabled` 不对它开放时跳过这一段）：列出与详情，FINANCE 冻结不了，OPERATOR 冻结（`frozen_by` 是它的邮箱、理由照记）、冻结中划不出、同样理由再冻结返回账户、ADMIN 再冻结 409、冻结审计在用户上，解冻、再解冻 409 `MARGIN_NOT_FROZEN`；手工强平 FINANCE 403，`margin.liquidation` 开着时没有负债 409 `ADMIN_MARGIN_NOTHING_OWED`、关着时 409 `ADMIN_MARGIN_LIQUIDATION_OFF`；结束时解冻并划回。强平与利息报表可读。
   - 系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用。
 - **浏览器冒烟** `web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用；1440 × 900）：登录、概览、从侧栏第一次打开审计页（块扣住时显示骨架、只取一个文件，A40）、空闲时取完各节页面后再打开三节不再请求 JS（A43 ⑩）、用户页与各标签、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）、提现队列（带筛选）与一笔提现的详情（地址簿、该用户最近的提现）、托管方（优盾的页面能打开，不论连着哪个网关；替身 `UDUNMOCK`：可访问、TUSD 币种、它的对账行、一条回调的原始请求与来源地址、托管方手续费，C6 起按协调会话 ⑤ 离开优盾）、交易对改状态的确认框（取消，不真的改）、资产的资料与图标、合约、仓位、强平记录、HOUSE（近 30 日盈亏、敞口、各交易对、各合约净头寸）、开关、对账、审计（一条的详情、CSV 导出）、报表（含用户增长与 HOUSE 盈亏）、管理员与角色（新建表单打开后取消）、系统健康、上线检查清单（结论与各项状态）、平台设置、固定页面（七行在两种模式下各自的站点显示，恰好一栏按平台资料的测试模式标「当前」，首页横幅的编辑器从默认稿打开、不保存）、公告列表按模式筛选（地址栏带 `modes=TEST`、每行都标测试模式）、公告编辑器（新稿默认通用，选测试模式后预览只留 `:::test` 段落，不保存）、帮助中心、站内信与发送表单（不发送）、模拟市场五页（价格控制的确认框显示影响后取消，不发起事件）与机器人的订单、资金调整页、审批、设置（含每页条数）、事件流、账号与安全（不修改）、从账户菜单退出、不带链接的设置页；所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`。
 - **Lighthouse**：`task web:lighthouse` 跑登录页（`web/lighthouse/admin.json`，性能 ≥ 90）与登录后的页面（`web/lighthouse/console.sh`：经 ssh 建一个临时 ADMIN（口令与密钥从标准输入传入、不打印），会话以请求头文件交给 Lighthouse，结束时退出并停用；设计 §6 要求性能 ≥ 85；C6 收尾时登录后的十一页为 90–95，见上文「首屏」）。报告在 `.lighthouseci/`。
@@ -560,6 +582,13 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_SIM_TOO_FAR_AHEAD` | 价格事件（或目标的预览）的开始时间超过 24 小时之后（market-sim 的 MaxLead） |
 | `ADMIN_WELCOME_RAISE_CAP` | 一次提高注册赠送超过 10,000 USDT 等值，谁批准都不行 |
 | `ADMIN_WELCOME_UNPRICED` | 要提高的资产没有新鲜的 USDT 价格，无法折算 |
+| `ADMIN_MARGIN_CHANGE_PENDING` | 同一资产、交易对、全仓条款或账户已有一条待审的杠杆申请（409，`details.approval_id`）；先批准、拒绝或撤回它 |
+| `ADMIN_MARGIN_NOTHING_OWED` | 手工强平：账户没有负债 |
+| `ADMIN_MARGIN_LIQUIDATION_OFF` | 手工强平：开关 `margin.liquidation` 关着，margin-service 不强平（申请与批准时都检查） |
+| `MARGIN_PARAMS_CHANGED` | 杠杆参数的版本已变（期间有人改过），刷新后再改；批准时遇到则申请失败 |
+| `MARGIN_FROZEN` | 杠杆账户已冻结或在强平中（margin-service 返回） |
+| `MARGIN_NOT_FROZEN` | 解冻：这个杠杆账户不是管理员冻结的 |
+| `MARGIN_ACCOUNT_NOT_FOUND` | 用户没有这个杠杆账户 |
 | `ADMIN_WELCOME_RAISE_PENDING` | 同一位管理员对同一版本的同样提高已在等第二人批准（409，`details.approval_id` 是那条申请） |
 | `INSTRUMENT_PLATFORM_CHANGED` | 保存平台资料时版本已过期（期间有人保存过），刷新后再改 |
 | `LEDGER_SETTINGS_CHANGED` | 修改注册赠送时版本已过期；批准时遇到它，申请记为失败 |

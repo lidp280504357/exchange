@@ -274,6 +274,15 @@ const (
 	// welcome credits, design 2026-10-04 §4.2): always a second ADMIN's,
 	// at most WelcomeRaiseCap in USDT a change (D2).
 	KindWelcomeCredit = "WELCOME_CREDIT"
+	// KindMarginParams changes margin terms that always take a second
+	// ADMIN (margin design 2026-10-06 §8, the coordinator's strict scope):
+	// an asset's interest, haircut, collateral or more to lend, a pair's or
+	// the cross account's leverage, thresholds or fee, isolated accounts
+	// switched on. margin-service sets them as of the version read.
+	KindMarginParams = "MARGIN_PARAMS"
+	// KindMarginLiquidate liquidates a margin account by hand, whatever its
+	// margin level: margin-service's liquidation with the approval's ID.
+	KindMarginLiquidate = "MARGIN_LIQUIDATE"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"
@@ -305,6 +314,10 @@ const (
 	// credits raised, or from nothing to something), whatever the mode
 	// (design 2026-10-04 §5).
 	EscalationWelcomeRaise = "WELCOME_RAISE"
+	// EscalationMarginRisk: a margin change that always takes two (its
+	// terms beyond stopping new borrowing, a liquidation by hand), whatever
+	// the mode.
+	EscalationMarginRisk = "MARGIN_RISK"
 )
 
 // Approval is a fund operation (§5.12: manual ledger adjustments and

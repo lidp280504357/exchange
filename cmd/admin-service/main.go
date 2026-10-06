@@ -80,6 +80,10 @@ type settings struct {
 	// (design 2026-10-04, D2).
 	InstrumentURL string `koanf:"instrument_service_url"`
 	LedgerURL     string `koanf:"ledger_service_url"`
+	// MarginURL is margin-service's HTTP API (MARGIN_SERVICE_URL): margin
+	// trading's terms and accounts under /internal/margin, on the compose
+	// network only (margin design 2026-10-06 §8, E5).
+	MarginURL string `koanf:"margin_service_url"`
 	// SimSecret signs the console's changes to the simulated market with
 	// the key "admin" (SIM_ADMIN_API_SECRET, in sim/admin.env only);
 	// without it the market is read-only here.
@@ -113,7 +117,7 @@ var defaultHealthTargets = []string{
 	"matching-engine=http://matching-engine:9089", "market-data-service=http://market-data-service:9090",
 	"market-maker=http://market-maker:9091", "wallet-service=http://wallet-service:9092", "signer=http://signer:9093",
 	"admin-service=http://127.0.0.1:9094", "derivatives-service=http://derivatives-service:9095",
-	"derivatives-engine=http://derivatives-engine:9096",
+	"derivatives-engine=http://derivatives-engine:9096", "margin-service=http://margin-service:9099",
 }
 
 // healthTargets parses "name=url" entries.
@@ -147,7 +151,7 @@ func setup(ctx context.Context, a *app.App) error {
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
 		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098", InstrumentURL: "http://localhost:8084",
-		LedgerURL: "http://localhost:8085", PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
+		LedgerURL: "http://localhost:8085", MarginURL: "http://localhost:8099", PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -244,6 +248,8 @@ func setup(ctx context.Context, a *app.App) error {
 		Platform:         backends.Platform{REST: rest, Instruments: cfg.InstrumentURL, Ledger: cfg.LedgerURL},
 		SimBots:          sim,
 		Sim:              sim,
+		Margin:           backends.Margin{REST: rest, Base: cfg.MarginURL},
+		MarginReports:    backends.Reports{Conn: ch},
 		Log:              a.Logger(),
 		Now:              time.Now,
 	}

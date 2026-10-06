@@ -1,25 +1,39 @@
 import { dec, formatDecimal, formatPercent } from "@exchange/core";
-import { can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
+import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import {
   Badge, Button, DataTable, Drawer, ErrorState, Progress, Segmented, Skeleton, Switch, Tabs, type ColumnDef, type DataColumnMeta,
 } from "@exchange/ui";
 import { Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { DangerAction } from "../../kit/actions";
 import { EnumBadge } from "../../kit/enums";
 import { useFilters } from "../../kit/filters";
 import { TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
-import { useMarginAssets, useMarginPairs, useMarginSettings } from "./api";
-import { Changes, Field, fromPercent, isNumber, lineText, PreviewBanner, previewed, Rate, toPercent, type Change } from "./common";
-import type { MarginAsset, MarginPair, MarginSettings } from "./mock";
+import { marginKey, useMarginAssets, useMarginPairs, useMarginSettings, type MarginAsset, type MarginPair, type MarginSettings } from "./api";
+import { Changes, Field, fromPercent, isNumber, lineText, outcome, Rate, toPercent, type Change } from "./common";
 
 type AssetParams = AdminSchemas["MarginAssetParams"];
 type Leverage = AdminSchemas["MarginLeverage"];
 
 const right: DataColumnMeta = { align: "right" };
 const LEVERAGES: Leverage[] = [3, 5, 10];
+
+/** A change reloads the terms and the approvals that may now list it. */
+const changed = [marginKey, ["admin", "approvals"]];
+
+/** Pending marks terms a request waits to change, linking to the approvals. */
+function Pending({ id }: { id: string | null }) {
+  const { t } = useTranslation();
+  if (!id) return null;
+  return (
+    <Link to="/approvals" title={id} data-testid="margin-pending">
+      <Badge tone="warn">{t("admin.margin.pending")}</Badge>
+    </Link>
+  );
+}
 
 /**
  * Margin parameters (design 2026-10-06 §4, §8; A55, A56): the assets that
@@ -37,7 +51,6 @@ export default function Params({ admin }: { admin: Admin }) {
   const edit = can(admin, "instruments.trading");
   return (
     <Page title={t("admin.nav.marginParams")} help={t("admin.margin.params.help")}>
-      <PreviewBanner />
       <Tabs
         items={[
           { value: "assets", label: t("admin.margin.params.assets") },
@@ -119,7 +132,7 @@ function Assets({ edit }: { edit: boolean }) {
         id: "act", header: "", meta: right,
         cell: ({ row: { original: a } }) => (
           <span className="inline-flex items-center gap-2">
-            {a.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
+            <Pending id={a.pending_approval_id} />
             {edit && (
               <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(a)} data-testid={`margin-edit-${a.asset}`}>
                 {t("admin.margin.edit")}
@@ -177,8 +190,6 @@ function braking(a: AssetParams, b: AssetParams): boolean {
 const differs = (x: string | boolean, y: string | boolean) =>
   typeof x === "string" && typeof y === "string" && isNumber(x) && isNumber(y) ? !dec.eq(x.trim(), y.trim()) : x !== y;
 
-const FLOATING_FIELDS = ["base", "kink", "kink_rate", "max"];
-
 function AssetDrawer({ asset: a, onClose }: { asset: MarginAsset; onClose: () => void }) {
   const { t } = useTranslation();
   const [f, setF] = useState<Form>(() => toForm(a));
@@ -206,9 +217,8 @@ function AssetDrawer({ asset: a, onClose }: { asset: MarginAsset; onClose: () =>
   const before = toForm(a);
   const after = ok ? fromForm(f) : null;
   const approval = after ? !braking(a, after) : true;
+  // Every field is sent (margin-service sets them all), so every one changed is shown, the other model's rates too.
   const changes: Change[] = (Object.keys(before) as (keyof Form)[])
-    // The floating curve's fields count while it is the model, the fixed rate while it is.
-    .filter((k) => (f.interest_model === "FIXED" ? !FLOATING_FIELDS.includes(k) : k !== "fixed"))
     .filter((k) => differs(before[k], f[k]))
     .map((k) => ({ label: t(`admin.margin.form.${k}`), from: shown(k, before[k]), to: shown(k, f[k]) }));
   return (
@@ -261,8 +271,15 @@ function AssetDrawer({ asset: a, onClose }: { asset: MarginAsset; onClose: () =>
             description={approval ? t("admin.margin.askHint") : t("admin.margin.applyHint")}
             target={<Changes changes={changes} />}
             confirmWord={a.asset}
-            run={async () => null}
-            success={() => previewed(approval)}
+            run={async (reason) =>
+              adminData(
+                await adminApi.PUT("/admin/v1/margin/assets/{asset}", {
+                  params: { path: { asset: a.asset } }, body: { ...fromForm(f), expected_version: a.version, reason },
+                }),
+              )
+            }
+            success={outcome}
+            invalidate={changed}
             onDone={onClose}
           />
         </div>
@@ -299,7 +316,7 @@ function Pairs({ edit }: { edit: boolean }) {
         id: "act", header: "", meta: right,
         cell: ({ row: { original: p } }) => (
           <span className="inline-flex items-center gap-2">
-            {p.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
+            <Pending id={p.pending_approval_id} />
             {edit && (
               <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(p)} data-testid={`margin-pair-${p.symbol}`}>
                 {t("admin.margin.edit")}
@@ -336,10 +353,29 @@ function useFeeError() {
 }
 
 /**
+ * Suggested offers a leverage's suggested thresholds when the ones typed
+ * differ from them: a new leverage never overwrites what is filled in or
+ * stored (A57), the administrator takes the suggestion or not.
+ */
+function Suggested({ lev, levels, warn, liq, onUse }: { lev: number; levels?: { warn_level: string; liquidation_level: string }; warn: string;
+  liq: string; onUse: (warn: string, liq: string) => void }) {
+  const { t } = useTranslation();
+  if (!levels || (isNumber(warn) && isNumber(liq) && dec.eq(warn, levels.warn_level) && dec.eq(liq, levels.liquidation_level))) return null;
+  return (
+    <p className="flex flex-wrap items-center gap-2 text-xs text-fg-3" data-testid="margin-suggested">
+      {t("admin.margin.suggested", { lev, warn: lineText(levels.warn_level), liq: lineText(levels.liquidation_level) })}
+      <Button size="sm" variant="ghost" onClick={() => onUse(levels.warn_level, levels.liquidation_level)}>
+        {t("admin.margin.useSuggested")}
+      </Button>
+    </p>
+  );
+}
+
+/**
  * PairDrawer changes a pair's isolated terms: switching isolated accounts
- * off applies at once; the leverage (bringing the design's thresholds for
- * it, which can still be changed), the thresholds, the fee and switching
- * isolated accounts on wait for a second ADMIN.
+ * off applies at once; the leverage (with the design's thresholds for it
+ * offered, not filled in), the thresholds, the fee and switching isolated
+ * accounts on wait for a second ADMIN.
  */
 function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults: Levels; onClose: () => void }) {
   const { t } = useTranslation();
@@ -371,20 +407,21 @@ function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults
           <span className="text-sm text-fg-2">{t("admin.margin.fields.isolatedLeverage")}</span>
           <Segmented
             value={String(lev)}
-            onValueChange={(v) => {
-              // A leverage brings the design's thresholds for it (§4.4); they can still be changed.
-              const next = Number(v) as Leverage;
-              const d = defaults.find((x) => x.leverage === next);
-              setLev(next);
-              if (d) {
-                setWarn(d.warn_level);
-                setLiq(d.liquidation_level);
-              }
-            }}
+            onValueChange={(v) => setLev(Number(v) as Leverage)}
             items={LEVERAGES.map((l) => ({ value: String(l), label: `${l}x` }))}
             aria-label={t("admin.margin.fields.isolatedLeverage")}
           />
         </div>
+        <Suggested
+          lev={lev}
+          levels={defaults.find((x) => x.leverage === lev)}
+          warn={warn}
+          liq={liq}
+          onUse={(w, l) => {
+            setWarn(w);
+            setLiq(l);
+          }}
+        />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={errors.levels} />
           <Field label={t("admin.margin.fields.liquidation")} value={liq} onChange={setLiq} />
@@ -406,8 +443,19 @@ function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults
             description={approval ? t("admin.margin.askHint") : t("admin.margin.pairOffHint")}
             target={<Changes changes={changes} />}
             confirmWord={p.base}
-            run={async () => null}
-            success={() => previewed(approval)}
+            run={async (reason) =>
+              adminData(
+                await adminApi.PUT("/admin/v1/margin/pairs/{symbol}", {
+                  params: { path: { symbol: p.symbol } },
+                  body: {
+                    isolated, leverage: lev, warn_level: warn.trim(), liquidation_level: liq.trim(), liquidation_fee: fromPercent(fee),
+                    expected_version: p.version, reason,
+                  },
+                }),
+              )
+            }
+            success={outcome}
+            invalidate={changed}
             onDone={onClose}
           />
         </div>
@@ -429,7 +477,7 @@ function Settings({ edit }: { edit: boolean }) {
         title={t("admin.margin.params.cross")}
         extra={
           <span className="flex items-center gap-2">
-            {s.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
+            <Pending id={s.pending_approval_id} />
             {edit && (
               <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(true)} data-testid="margin-settings-edit">
                 {t("admin.margin.edit")}
@@ -488,8 +536,11 @@ function Settings({ edit }: { edit: boolean }) {
   );
 }
 
-/** The cross account's thresholds when its leverage changes (design §4.4): 3x 1.30/1.10, 5x 1.20/1.10. */
-const CROSS_LEVELS: Record<3 | 5, [string, string]> = { 3: ["1.3", "1.1"], 5: ["1.2", "1.1"] };
+/** The cross account's suggested thresholds by leverage (design §4.4): 3x 1.30/1.10, 5x 1.20/1.10. */
+const CROSS_LEVELS: Record<3 | 5, { warn_level: string; liquidation_level: string }> = {
+  3: { warn_level: "1.3", liquidation_level: "1.1" },
+  5: { warn_level: "1.2", liquidation_level: "1.1" },
+};
 
 function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void }) {
   const { t } = useTranslation();
@@ -517,13 +568,7 @@ function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void
           <span className="text-sm text-fg-2">{t("admin.margin.fields.crossLeverage")}</span>
           <Segmented
             value={String(lev)}
-            onValueChange={(v) => {
-              // A leverage brings its thresholds (design §4.4); they can still be changed.
-              const next = v === "5" ? 5 : 3;
-              setLev(next);
-              setWarn(CROSS_LEVELS[next][0]);
-              setLiq(CROSS_LEVELS[next][1]);
-            }}
+            onValueChange={(v) => setLev(v === "5" ? 5 : 3)}
             items={[
               { value: "3", label: "3x" },
               { value: "5", label: "5x" },
@@ -531,6 +576,16 @@ function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void
             aria-label={t("admin.margin.fields.crossLeverage")}
           />
         </div>
+        <Suggested
+          lev={lev}
+          levels={CROSS_LEVELS[lev]}
+          warn={warn}
+          liq={liq}
+          onUse={(w, l) => {
+            setWarn(w);
+            setLiq(l);
+          }}
+        />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={errors.levels} />
           <Field label={t("admin.margin.fields.liquidation")} value={liq} onChange={setLiq} />
@@ -551,8 +606,18 @@ function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void
             description={t("admin.margin.askHint")}
             target={<Changes changes={changes} />}
             confirmWord="margin"
-            run={async () => null}
-            success={() => previewed(true)}
+            run={async (reason) =>
+              adminData(
+                await adminApi.PUT("/admin/v1/margin/settings", {
+                  body: {
+                    cross: { leverage: lev, warn_level: warn.trim(), liquidation_level: liq.trim(), liquidation_fee: fromPercent(fee) },
+                    expected_version: s.version, reason,
+                  },
+                }),
+              )
+            }
+            success={outcome}
+            invalidate={changed}
             onDone={onClose}
           />
         </div>

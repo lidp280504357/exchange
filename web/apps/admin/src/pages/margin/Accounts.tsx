@@ -1,19 +1,19 @@
-import { dec } from "@exchange/core";
-import { can, type Admin } from "@exchange/core/api/admin";
+import { dec, i18n } from "@exchange/core";
+import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import {
-  Badge, Button, DataTable, Drawer, ErrorState, KeyValue, Skeleton, Stat, Tabs, type ColumnDef, type DataColumnMeta,
+  Badge, Button, CopyButton, DataTable, Drawer, ErrorState, KeyValue, Skeleton, Stat, Tabs, type ColumnDef, type DataColumnMeta,
 } from "@exchange/ui";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CopyButton } from "@exchange/ui";
+import { Link } from "react-router";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText, useEnum } from "../../kit/enums";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
+import { useFlagCheck } from "../../kit/flags";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
 import { Page } from "../../kit/Page";
-import { useMarginAccount, useMarginAccounts } from "./api";
-import { Level, lineText, PreviewBanner, previewed, Rate } from "./common";
-import { keyOf, type MarginAccount, type MarginAccountDetail } from "./mock";
+import { keyOf, marginKey, useMarginAccount, useMarginAccounts, type AccountQuery, type MarginAccount, type MarginAccountDetail } from "./api";
+import { Level, lineText, Rate } from "./common";
 
 const right: DataColumnMeta = { align: "right" };
 const STATUSES = ["WARNED", "LIQUIDATING", "FROZEN"];
@@ -33,7 +33,9 @@ export default function Accounts({ admin }: { admin: Admin }) {
   const filters = useFilters(["status", "account", "symbol", "user_id"]);
   const f = filters.values;
   const status = STATUSES.includes(f.status ?? "") ? f.status : undefined;
-  const scope = useMarginAccounts({ account: f.account || undefined, symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined });
+  const scope = useMarginAccounts({
+    account: (f.account || undefined) as AccountQuery["account"], symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined,
+  });
   const [open, setOpen] = useState<MarginAccount | null>(null);
   const columns = useMemo<ColumnDef<MarginAccount, unknown>[]>(
     () => [
@@ -68,7 +70,6 @@ export default function Accounts({ admin }: { admin: Admin }) {
   const count = (s: string) => rows.filter((a) => a.status === s).length;
   return (
     <Page title={t("admin.nav.marginAccounts")} help={t("admin.margin.accounts.help")}>
-      <PreviewBanner />
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat size="sm" label={t("admin.margin.accounts.owing")} value={owing.length} loading={scope.isPending} />
         <Stat size="sm" label={t("admin.enum.marginStatus.WARNED")} value={count("WARNED")} loading={scope.isPending} />
@@ -108,7 +109,7 @@ export default function Accounts({ admin }: { admin: Admin }) {
           empty={<p className="py-4 text-center text-sm text-fg-3">{t("admin.margin.accounts.none")}</p>}
         />
       )}
-      {open && <AccountDrawer admin={admin} account={open} onClose={() => setOpen(null)} />}
+      {open && <AccountDrawer admin={admin} row={open} onClose={() => setOpen(null)} />}
     </Page>
   );
 }
@@ -135,12 +136,14 @@ function Status({ a }: { a: MarginAccount }) {
   );
 }
 
-function AccountDrawer({ admin, account: a, onClose }: { admin: Admin; account: MarginAccount; onClose: () => void }) {
+function AccountDrawer({ admin, row, onClose }: { admin: Admin; row: MarginAccount; onClose: () => void }) {
   const { t } = useTranslation();
-  const q = useMarginAccount(a.user_id, keyOf(a));
+  const q = useMarginAccount(row.user_id, keyOf(row));
   const [tab, setTab] = useState("balances");
   const act = can(admin, "derivatives.write");
   const d = q.data;
+  // The account as read now once it is (frozen, unfrozen or asked to be liquidated since the list was), the list's row until then.
+  const a: MarginAccount = d ?? row;
   return (
     <Drawer
       open
@@ -148,7 +151,7 @@ function AccountDrawer({ admin, account: a, onClose }: { admin: Admin; account: 
       title={<AccountName a={a} />}
       description={<Status a={a} />}
       width={760}
-      actions={act ? <Actions a={a} onDone={onClose} /> : undefined}
+      actions={act ? <Actions a={a} /> : undefined}
     >
       <div className="flex flex-col gap-4" data-testid="margin-account">
         <KeyValue
@@ -169,7 +172,15 @@ function AccountDrawer({ admin, account: a, onClose }: { admin: Admin; account: 
         />
         {a.frozen_by && (
           <p className="rounded-2 border border-danger bg-danger/10 px-3 py-2 text-sm text-danger-strong">
-            {t("admin.margin.frozenBy", { by: a.frozen_by, reason: a.frozen_reason ?? "" })} <TimeText value={a.frozen_at} />
+            {t("admin.margin.frozenBy", { by: a.frozen_by, reason: a.frozen_reason })} <TimeText value={a.frozen_at} />
+          </p>
+        )}
+        {a.pending_approval_id && (
+          <p className="text-sm text-warn-strong" data-testid="margin-liquidation-pending">
+            {t("admin.margin.liquidationPending")}{" "}
+            <Link to="/approvals" className="text-info-strong hover:underline">
+              {t("admin.margin.toApprovals")}
+            </Link>
           </p>
         )}
         {a.unpriced.length > 0 && <p className="text-sm text-warn-strong">{t("admin.margin.unpricedHint", { assets: a.unpriced.join(", ") })}</p>}
@@ -316,19 +327,30 @@ function JournalKey({ value }: { value: string }) {
   );
 }
 
-/** Actions are the account's operations: freeze or unfreeze at once, a liquidation by hand with a second administrator. */
-function Actions({ a, onDone }: { a: MarginAccount; onDone: () => void }) {
+/** A freeze, an unfreeze or a request reloads the accounts and the approvals that may now list it. */
+const changed = [marginKey, ["admin", "approvals"]];
+
+/**
+ * Actions are the account's operations: freeze (its open orders canceled)
+ * or unfreeze at once, a liquidation by hand with a second administrator,
+ * offered while margin-service liquidates (margin.liquidation) and the
+ * account owes.
+ */
+function Actions({ a }: { a: MarginAccount }) {
   const { t } = useTranslation();
+  const liquidating = useFlagCheck()("margin.liquidation") === true;
   const target = (
     <span className="inline-flex flex-wrap items-center gap-2">
       <span className="font-mono text-xs">{a.user_id}</span>
       <AccountName a={a} />
     </span>
   );
+  // Frozen by an administrator: a liquidation's freeze ends with it, nobody unfreezes that.
   const frozen = a.frozen_by !== null;
   const owes = a.margin_level !== null;
+  const path = { user_id: a.user_id, account: keyOf(a) };
   return (
-    <span className="flex flex-wrap gap-2">
+    <span className="flex flex-wrap items-center gap-2">
       <DangerAction
         trigger={(open) => (
           <Button size="sm" variant="secondary" onClick={open} disabled={a.status === "LIQUIDATING"} data-testid="margin-freeze">
@@ -340,12 +362,26 @@ function Actions({ a, onDone }: { a: MarginAccount; onDone: () => void }) {
         description={t(frozen ? "admin.margin.unfreezeHint" : "admin.margin.freezeHint")}
         target={target}
         confirmWord={lastFour(a.user_id)}
-        run={async () => null}
-        success={() => previewed(false)}
+        run={async (reason) =>
+          adminData(
+            frozen
+              ? await adminApi.POST("/admin/v1/margin/accounts/{user_id}/{account}/unfreeze", { params: { path }, body: { reason } })
+              : await adminApi.POST("/admin/v1/margin/accounts/{user_id}/{account}/freeze", { params: { path }, body: { reason } }),
+          )
+        }
+        success={() => i18n.t(frozen ? "admin.margin.unfrozen" : "admin.margin.frozen")}
+        invalidate={changed}
       />
       <DangerAction
         trigger={(open) => (
-          <Button size="sm" variant="danger" onClick={open} disabled={!owes || a.status === "LIQUIDATING"} data-testid="margin-liquidate">
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={open}
+            disabled={!liquidating || !owes || a.status === "LIQUIDATING" || !!a.pending_approval_id}
+            title={liquidating ? undefined : t("admin.margin.liquidationOff")}
+            data-testid="margin-liquidate"
+          >
             {t("admin.margin.liquidate")}
           </Button>
         )}
@@ -353,10 +389,17 @@ function Actions({ a, onDone }: { a: MarginAccount; onDone: () => void }) {
         description={t("admin.margin.liquidateHint")}
         target={target}
         confirmWord={lastFour(a.user_id)}
-        run={async () => null}
-        success={() => previewed(true)}
-        onDone={onDone}
+        run={async (reason, key) =>
+          adminData(
+            await adminApi.POST("/admin/v1/margin/accounts/{user_id}/{account}/liquidate", {
+              params: { path, header: { "Idempotency-Key": key } }, body: { reason },
+            }),
+          )
+        }
+        success={() => i18n.t("admin.margin.liquidationRequested")}
+        invalidate={changed}
       />
+      {!liquidating && <span className="text-xs text-fg-3">{t("admin.margin.liquidationOff")}</span>}
     </span>
   );
 }

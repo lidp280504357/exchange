@@ -103,6 +103,23 @@ export function ApprovalsTable({ admin, list }: { admin: Admin; list: CursorList
 /** simKind reports whether a request is a simulated market's change (C5). */
 const simKind = (kind: string) => kind === "SIM_EVENT" || kind === "SIM_PARAMS";
 
+/** marginKind reports whether a request is margin trading's (E5): its terms, or a liquidation by hand. */
+const marginKind = (kind: string) => kind === "MARGIN_PARAMS" || kind === "MARGIN_LIQUIDATE";
+
+/** decidePermission is the permission that decides a request of a kind. */
+function decidePermission(kind: string) {
+  if (simKind(kind)) return "sim.control" as const;
+  switch (kind) {
+    case "WELCOME_CREDIT":
+      return "settings.write" as const;
+    case "MARGIN_PARAMS":
+      return "instruments.trading" as const;
+    case "MARGIN_LIQUIDATE":
+      return "derivatives.write" as const;
+  }
+  return "ledger.adjust.approve" as const;
+}
+
 /** attempted reports whether a pending operation's attempt did not finish: it may have booked, so it is finished, never rejected (C5.5 ⑥). */
 const attempted = (a: Approval) => a.status === "PENDING" && !!a.attempted_at;
 
@@ -174,12 +191,64 @@ function WelcomeChange({ a }: { a: Approval }) {
   );
 }
 
+/** termsOf reads a MARGIN_PARAMS request's terms (as JSON in its payload); none when unreadable. */
+function termsOf(raw?: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw ?? "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * MarginChange says what a MARGIN_PARAMS request changes (design
+ * 2026-10-06 §8, E5): its target, and each field it changes from and to,
+ * as margin-service stores them (rates are fractions an hour).
+ */
+function MarginChange({ a }: { a: Approval }) {
+  const { t } = useTranslation();
+  const p = a.payload as Record<string, string>;
+  const [kind, key] = (p.target ?? "").split(":");
+  const what = kind === "asset" ? t("admin.marginApproval.asset", { code: key }) : kind === "pair" ? t("admin.marginApproval.pair", { symbol: key })
+    : t("admin.marginApproval.cross");
+  const before = termsOf(p.previous);
+  const after = termsOf(p.terms);
+  const shown = (v: unknown) => (typeof v === "boolean" ? t(v ? "admin.launch.on" : "admin.launch.off") : String(v ?? "—"));
+  return (
+    <span className="flex flex-col" data-testid="margin-change">
+      <span>{what}</span>
+      {(p.changed ?? "").split(",").filter(Boolean).map((f) => (
+        <span key={f} className="text-xs">
+          <span className="text-fg-3">{t(`admin.marginApproval.fields.${f}`, { defaultValue: f })}</span>{" "}
+          <span className="font-mono">{shown(before[f])}</span> → <span className="font-mono text-fg-1">{shown(after[f])}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** MarginLiquidation names the account a MARGIN_LIQUIDATE request liquidates, as it stood when asked. */
+function MarginLiquidation({ a }: { a: Approval }) {
+  const { t } = useTranslation();
+  const p = a.payload as Record<string, string>;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2" data-testid="margin-liquidation">
+      {p.user_id && <UserCell id={p.user_id} />}
+      <span className="font-mono text-xs">{p.account}</span>
+      {p.margin_level && <span className="text-xs text-fg-3">{t("admin.marginApproval.level", { level: p.margin_level })}</span>}
+      {p.total_liability && <span className="text-xs text-fg-3">{t("admin.marginApproval.owes", { usdt: p.total_liability })}</span>}
+    </span>
+  );
+}
+
 function Payload({ a }: { a: Approval }) {
   const { t } = useTranslation();
   const p = a.payload as Record<string, string>;
   if (simKind(a.kind)) return <SimChange a={a} />;
   if (a.kind === "SIM_MINT") return <MintShares payload={p} />;
   if (a.kind === "WELCOME_CREDIT") return <WelcomeChange a={a} />;
+  if (a.kind === "MARGIN_PARAMS") return <MarginChange a={a} />;
+  if (a.kind === "MARGIN_LIQUIDATE") return <MarginLiquidation a={a} />;
   return (
     <span className="inline-flex items-center gap-2">
       {p.user_id && <UserCell id={p.user_id} />}
@@ -228,12 +297,13 @@ export function Mode({ a }: { a: Approval }) {
 
 /**
  * lapsed reports whether a request that lapses did: a simulated market's
- * (a day after it was asked for, or when its event was to start, C5.5 ④)
- * or a welcome credits raise (a day after, review ㉚), as the server judged
- * it by its clock when it listed it (review ⑭).
+ * (a day after it was asked for, or when its event was to start, C5.5 ④),
+ * a welcome credits raise (a day after, review ㉚) or a margin request (a
+ * day after, E5), as the server judged it by its clock when it listed it
+ * (review ⑭).
  */
 function lapsed(a: Approval): boolean {
-  return (simKind(a.kind) || a.kind === "WELCOME_CREDIT") && a.expired === true;
+  return (simKind(a.kind) || a.kind === "WELCOME_CREDIT" || marginKind(a.kind)) && a.expired === true;
 }
 
 /**
@@ -244,7 +314,7 @@ function lapsed(a: Approval): boolean {
  */
 function Decide({ admin, a }: { admin: Admin; a: Approval }) {
   const { t } = useTranslation();
-  if (!can(admin, simKind(a.kind) ? "sim.control" : a.kind === "WELCOME_CREDIT" ? "settings.write" : "ledger.adjust.approve")) return null;
+  if (!can(admin, decidePermission(a.kind))) return null;
   const p = a.payload as Record<string, string>;
   const mine = a.requested_by === admin.id;
   const finish = mine || attempted(a);
@@ -257,6 +327,10 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
         <MintShares payload={p} full />
       ) : a.kind === "WELCOME_CREDIT" ? (
         <WelcomeChange a={a} />
+      ) : a.kind === "MARGIN_PARAMS" ? (
+        <MarginChange a={a} />
+      ) : a.kind === "MARGIN_LIQUIDATE" ? (
+        <MarginLiquidation a={a} />
       ) : (
         <Num value={p.amount} unit={p.asset} signed />
       )}

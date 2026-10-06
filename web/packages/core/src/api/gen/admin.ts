@@ -2171,10 +2171,10 @@ export interface paths {
          *     handbook's. PENDING: its source is not there yet; UNKNOWN: its
          *     source did not answer. The 14 items of §4.6 and house (review ㉚:
          *     market.house_liquidity on, HOUSE holding every backed asset a
-         *     pair is made of). Every administrator reads it. margin (design
-         *     2026-10-06 §8: margin.enabled, and every margin asset's pool cap
-         *     and rates at their launch values) is a draft: admin-service does
-         *     not report it yet.
+         *     pair is made of), then margin (margin design 2026-10-06 §8):
+         *     margin.enabled off, or on with margin.liquidation on and neither it
+         *     nor margin.auto_borrow on for everyone without rules (the test
+         *     server's are). Every administrator reads it.
          */
         get: operations["getLaunchChecklist"];
         put?: never;
@@ -2482,12 +2482,16 @@ export interface paths {
          *     was asked for, or when its event was to start) fails it, result
          *     "expired at <time>", nothing sent to market-sim. A welcome credits
          *     raise (WELCOME_CREDIT) needs settings.write and lapses a day after
-         *     it was asked for, the same way. A change (SIM_EVENT, SIM_PARAMS,
-         *     WELCOME_CREDIT) is not marked attempted: when its service cannot be
-         *     reached, or the welcome credits changed and cannot be read again,
-         *     the answer is 503 COMMON_UNAVAILABLE with details.approval_id, the
+         *     it was asked for, the same way; so do margin terms (MARGIN_PARAMS,
+         *     instruments.trading) and a margin liquidation by hand
+         *     (MARGIN_LIQUIDATE, derivatives.write). A change (SIM_EVENT,
+         *     SIM_PARAMS, WELCOME_CREDIT, MARGIN_PARAMS, MARGIN_LIQUIDATE) is not
+         *     marked attempted: when its service cannot be reached, or the welcome
+         *     credits or margin terms changed and cannot be read again, the
+         *     answer is 503 COMMON_UNAVAILABLE with details.approval_id, the
          *     request stays PENDING as it was and can be approved again (or
-         *     rejected).
+         *     rejected); margin terms found set as asked at the next version by
+         *     the request's requester are that earlier attempt's.
          */
         post: operations["decideApproval"];
         delete?: never;
@@ -3193,11 +3197,12 @@ export interface paths {
         };
         /**
          * The margin assets' parameters, with what is lent of each now
-         * @description Draft (design 2026-10-06 §4.1, §8; margin-service's asset_terms).
-         *     Every asset that can be borrowed or counts as collateral, with its
-         *     terms (seeded from deploy/instruments/margin.json), what users owe
-         *     of it now (HOUSE's lending, −Σ the users' debt rows) and the rate
-         *     the next hour's interest takes. Needs instruments.read.
+         * @description Design 2026-10-06 §4.1, §8 (margin-service's asset_terms). Every
+         *     asset that can be borrowed or counts as collateral, with its terms
+         *     (seeded from deploy/instruments/margin.json), what users owe of it
+         *     now (HOUSE's lending, −Σ the users' debt rows), the rate the hour's
+         *     interest takes, and the request waiting to change it. Needs
+         *     instruments.read.
          */
         get: operations["listMarginAssets"];
         put?: never;
@@ -3220,25 +3225,30 @@ export interface paths {
         get?: never;
         /**
          * Change an asset's margin parameters
-         * @description Draft (design §8). Needs instruments.trading (ADMIN: the trading
-         *     parameters); admin-service asks margin-service to change it. What
-         *     only stops new borrowing applies at once: 200, audited as
+         * @description Design §8. Needs instruments.trading (ADMIN: the trading
+         *     parameters); every field is given, as margin-service sets them all.
+         *     What only stops new borrowing applies at once: 200, audited as
          *     admin.margin.asset_changed with the fields before and after
          *     (borrowing switched off, a lower pool or user cap; the loans stay).
          *     Anything else waits for a second ADMIN with instruments.trading in
-         *     either approval mode: 202 with a MARGIN_PARAMS request, escalation
-         *     MARGIN_RISK (the interest model and its rates; the haircut and
-         *     collateral switched either way, which move every holder's margin
-         *     level; borrowing switched on, a higher cap). A request mixing both
-         *     waits whole. expected_version is the version read: 409
+         *     either approval mode: 202 with a MARGIN_PARAMS request (payload
+         *     target asset:<asset>, terms, previous, changed, expected_version),
+         *     escalation MARGIN_RISK, audited as admin.margin.params_requested
+         *     (the interest model and its rates; the haircut and collateral
+         *     switched either way, which move every holder's margin level;
+         *     borrowing switched on, a higher cap). A request mixing both waits
+         *     whole. Approved, margin-service sets the terms in its requester's
+         *     name. expected_version is the version read: 409
          *     MARGIN_PARAMS_CHANGED when it moved, then and when the request is
-         *     approved. A change of the asset waiting already: 409
-         *     ADMIN_MARGIN_CHANGE_PENDING (details approval_id). A request lapses
-         *     a day after it was asked for. 400 unless haircut is above 0 and at
-         *     most 1, user_cap at most pool_cap, the rates at least 0 and the
-         *     floating curve rising (float_base ≤ float_kink_rate ≤
-         *     float_max_rate, float_kink above 0 and under 1), as asset_terms'
-         *     constraints.
+         *     approved (the request fails). A request for the asset waiting
+         *     already, against the version now: 409 ADMIN_MARGIN_CHANGE_PENDING
+         *     (details approval_id); stopping new borrowing is never held up by
+         *     one. A request lapses a day after it was asked for. 404 for an
+         *     asset margin-service does not list. 400 when nothing changes, and
+         *     unless haircut is above 0 and at most 1 (4 decimals), user_cap at
+         *     most pool_cap, the rates at least 0 (12 decimals) and the floating
+         *     curve rising (float_base ≤ float_kink_rate ≤ float_max_rate,
+         *     float_kink above 0 and under 1), as asset_terms' constraints.
          */
         put: operations["setMarginAsset"];
         post?: never;
@@ -3257,24 +3267,26 @@ export interface paths {
         };
         /**
          * The cross account's terms
-         * @description Draft (design §4.2, §4.4, §8; margin-service's cross_terms). The
-         *     cross account's leverage, thresholds and liquidation fee, and the
-         *     design's thresholds by isolated leverage, which the console offers
-         *     when a pair's leverage changes. Needs instruments.read.
+         * @description Design §4.2, §4.4, §8 (margin-service's cross_terms). The cross
+         *     account's leverage, thresholds and liquidation fee, the design's
+         *     thresholds by isolated leverage, which the console offers when a
+         *     pair's leverage changes, and the request waiting to change them.
+         *     Needs instruments.read.
          */
         get: operations["getMarginSettings"];
         /**
          * Change the cross account's terms
-         * @description Draft (design §8). Needs instruments.trading; every change waits
-         *     for a second ADMIN with it, in either approval mode: 202 with a
-         *     MARGIN_PARAMS request, escalation MARGIN_RISK (a threshold moved
-         *     either way liquidates or spares accounts at once, a leverage
-         *     changes what may be borrowed, the fee what a liquidation costs).
-         *     400 unless the leverage is 3 or 5 (margin-service's policy), the
-         *     liquidation_level above 1 and under the warn_level, and the
-         *     liquidation_fee 0 to 0.1. expected_version, a change waiting
-         *     already and the lapse as for an asset. Audited as
-         *     admin.margin.settings_changed once applied.
+         * @description Design §8. Needs instruments.trading; every change waits for a
+         *     second ADMIN with it, in either approval mode: 202 with a
+         *     MARGIN_PARAMS request (target cross), escalation MARGIN_RISK,
+         *     audited as admin.margin.params_requested (a threshold moved either
+         *     way liquidates or spares accounts at once, a leverage changes what
+         *     may be borrowed, the fee what a liquidation costs). 400 when
+         *     nothing changes, and unless the liquidation_level is above 1 and
+         *     under the warn_level (4 decimals) and the liquidation_fee 0 to 0.1
+         *     (6 decimals); the leverage is margin-service's policy (3 or 5),
+         *     checked when the request is approved. expected_version, a request
+         *     waiting already and the lapse as for an asset.
          */
         put: operations["setMarginSettings"];
         post?: never;
@@ -3293,11 +3305,12 @@ export interface paths {
         };
         /**
          * The pairs margin trades on, with their isolated terms
-         * @description Draft (design §4.2, §8; margin-service's pair_terms). The pairs
-         *     whose two assets are both margin assets: whether each takes
-         *     isolated accounts, its isolated leverage, thresholds and
-         *     liquidation fee, and the isolated accounts on it. The cross account
-         *     trades all of them on its own terms. Needs instruments.read.
+         * @description Design §4.2, §8 (margin-service's pair_terms). The pairs whose two
+         *     assets are both margin assets: whether each takes isolated
+         *     accounts, its isolated leverage, thresholds and liquidation fee,
+         *     the isolated accounts on it, and the request waiting to change it.
+         *     The cross account trades all of them on its own terms. Needs
+         *     instruments.read.
          */
         get: operations["listMarginPairs"];
         put?: never;
@@ -3320,17 +3333,20 @@ export interface paths {
         get?: never;
         /**
          * Change a pair's isolated terms
-         * @description Draft (design §8). Needs instruments.trading. Switching isolated
-         *     accounts off applies at once (200: no new isolated account on the
-         *     pair, those open stay; audited as admin.margin.pair_changed).
-         *     Anything else waits for a second ADMIN with it, in either approval
-         *     mode (202 with a MARGIN_PARAMS request, escalation MARGIN_RISK):
-         *     the leverage, the thresholds and the liquidation fee, which the
-         *     pair's accounts take at once, and switching isolated accounts on.
-         *     400 unless the leverage is 3, 5 or 10 (margin-service's policy),
-         *     liquidation_level above 1 and under warn_level, and
-         *     liquidation_fee 0 to 0.1. expected_version, a change waiting
-         *     already and the lapse as for an asset.
+         * @description Design §8. Needs instruments.trading; every field is given.
+         *     Switching isolated accounts off applies at once (200: no new
+         *     isolated account on the pair, those open stay; audited as
+         *     admin.margin.pair_changed). Anything else waits for a second ADMIN
+         *     with it, in either approval mode (202 with a MARGIN_PARAMS request,
+         *     target pair:<symbol>, escalation MARGIN_RISK): the leverage, the
+         *     thresholds and the liquidation fee, which the pair's accounts take
+         *     at once, and switching isolated accounts on. 400 when nothing
+         *     changes, and unless liquidation_level is above 1 and under
+         *     warn_level and liquidation_fee 0 to 0.1; the leverage is
+         *     margin-service's policy (3, 5 or 10), checked when the request is
+         *     approved. 404 for a pair margin-service does not list.
+         *     expected_version, a request waiting already and the lapse as for an
+         *     asset.
          */
         put: operations["setMarginPair"];
         post?: never;
@@ -3349,11 +3365,12 @@ export interface paths {
         };
         /**
          * Margin accounts, riskiest first
-         * @description Draft (design §2, §8). From margin-service, valued as it values
-         *     them (§2): the lowest margin level (total assets ÷ total
-         *     liabilities) first, the accounts without liabilities last, by net
-         *     assets. Accounts that hold or owe nothing are left out. At most
-         *     `limit`; truncated says there are more. Needs derivatives.read.
+         * @description Design §2, §8. From margin-service, valued as it values them (§2):
+         *     the lowest margin level (total assets ÷ total liabilities) first,
+         *     the accounts without liabilities last, by net assets. Accounts that
+         *     hold or owe nothing are left out. At most `limit`; truncated says
+         *     there are more. Each with the liquidation by hand waiting for it.
+         *     Needs derivatives.read.
          */
         get: operations["listMarginAccounts"];
         put?: never;
@@ -3377,10 +3394,13 @@ export interface paths {
         };
         /**
          * A margin account with its balances and debts, loans, interest and liquidations
-         * @description Draft (design §8). The account as listed; each asset it holds or
-         *     owes, with its worth; its loans by asset; the latest 50 loan
-         *     changes (borrows, repayments and interest in margin-service's one
-         *     view); the latest 50 interest charges; the latest 20 liquidations.
+         * @description Design §8. The account as listed; each asset it holds or owes, with
+         *     its worth; its loans by asset; the latest 50 loan changes (borrows,
+         *     repayments and interest in margin-service's one view); the latest
+         *     50 interest charges; the latest 20 liquidations (margin-service's
+         *     own, with their step: SHORTFALL while the insurance fund lacks an
+         *     asset). 404
+         *     MARGIN_ACCOUNT_NOT_FOUND for an account the user never opened.
          *     Needs derivatives.read.
          */
         get: operations["getMarginAccount"];
@@ -3407,11 +3427,16 @@ export interface paths {
         put?: never;
         /**
          * Freeze a margin account
-         * @description Draft (design §8). Cancels its open orders; no orders, borrowing
-         *     or transfers out until it is unfrozen (status FROZEN). Interest
-         *     goes on, and the system still liquidates it at the liquidation
-         *     line. Needs derivatives.write; one administrator, at once; audited
-         *     as admin.margin.account_frozen. Frozen already: 409 MARGIN_FROZEN.
+         * @description Design §8. Its open orders are canceled (margin-service's E3: a
+         *     cancel that fails is logged, the freeze stands and the orders can
+         *     be canceled again); no new orders, borrowing or transfers out until
+         *     it is unfrozen (status FROZEN). Repaying stays open, interest goes
+         *     on, and the system still liquidates it at the liquidation line. Needs derivatives.write; one administrator, at
+         *     once; audited on the user as admin.margin.account_frozen. Frozen
+         *     or being liquidated already: 409 MARGIN_FROZEN, except that the
+         *     same administrator freezing it again for the same reason (a retry
+         *     whose first answer was lost) gets the account. The reason is kept
+         *     with the freeze, at most 500 bytes.
          */
         post: operations["freezeMarginAccount"];
         delete?: never;
@@ -3435,10 +3460,10 @@ export interface paths {
         put?: never;
         /**
          * Unfreeze a margin account an administrator froze
-         * @description Draft (design §8). Needs derivatives.write; one administrator, at
-         *     once; audited as admin.margin.account_unfrozen. Not frozen by an
-         *     administrator (a liquidation's freeze ends with it): 409
-         *     ADMIN_MARGIN_NOT_FROZEN.
+         * @description Design §8. Needs derivatives.write; one administrator, at once;
+         *     audited on the user as admin.margin.account_unfrozen. Not frozen by
+         *     an administrator (a liquidation's freeze ends with it): 409
+         *     MARGIN_NOT_FROZEN.
          */
         post: operations["unfreezeMarginAccount"];
         delete?: never;
@@ -3462,17 +3487,23 @@ export interface paths {
         put?: never;
         /**
          * Ask for a margin account's liquidation (a second administrator approves)
-         * @description Draft (design §4.5, §8). Liquidates the account as the system does
-         *     at the liquidation line, whatever its margin level: frozen, its
-         *     orders canceled, its assets sold to HOUSE at the market to repay
-         *     its debts, the fee to the insurance fund (INSURANCE_FUND), a
-         *     shortfall from it. Needs derivatives.write; always waits for a
-         *     second administrator with it, in either approval mode (202 with a
-         *     MARGIN_LIQUIDATE request, escalation MARGIN_RISK); approved, it
-         *     starts at once and the request's result names the liquidation.
-         *     Nothing owed: 409 ADMIN_MARGIN_NOTHING_OWED; a liquidation under
-         *     way: 409 MARGIN_FROZEN; a request for the account waiting already:
-         *     409 ADMIN_MARGIN_CHANGE_PENDING (details approval_id).
+         * @description Design §4.5, §8. Liquidates the account as the system does at the
+         *     liquidation line, whatever its margin level: frozen, its orders
+         *     canceled, its assets sold to HOUSE at the market to repay its
+         *     debts, the fee to the insurance fund (INSURANCE_FUND), a shortfall
+         *     from it. Needs derivatives.write; always waits for a second
+         *     administrator with it, in either approval mode (202 with a
+         *     MARGIN_LIQUIDATE request, escalation MARGIN_RISK, value_usdt its
+         *     total liabilities; the payload keeps the account as it stood);
+         *     approved, margin-service starts it at once in the requester's name
+         *     (MANUAL, with the approval: once per approval), and the request's
+         *     result names the liquidation. Only while margin-service liquidates
+         *     the user's accounts (the flag margin.liquidation for the user): 409
+         *     ADMIN_MARGIN_LIQUIDATION_OFF otherwise, then and when the request is
+         *     approved. Nothing owed: 409 ADMIN_MARGIN_NOTHING_OWED; a
+         *     liquidation under way: 409 MARGIN_FROZEN; a request for the account
+         *     waiting already: 409 ADMIN_MARGIN_CHANGE_PENDING (details
+         *     approval_id). A request lapses a day after it was asked for.
          */
         post: operations["liquidateMarginAccount"];
         delete?: never;
@@ -3490,11 +3521,13 @@ export interface paths {
         };
         /**
          * Margin liquidations, newest first
-         * @description Draft (design §8). From the ClickHouse read model
-         *     margin_liquidations: one row a liquidation, at the liquidation
-         *     line or approved by hand, with the debts it repaid, what stayed,
-         *     its fee to the insurance fund and any shortfall the fund covered.
-         *     Needs reports.read.
+         * @description Design §8. From the ClickHouse read model margin_liquidations: one
+         *     row a liquidation, at the liquidation line or approved by hand,
+         *     with the debts it repaid, what stayed, its fee to the insurance
+         *     fund and any shortfall the fund covered; started in the last
+         *     `days` (seen completed only: completed). A row seen completed only
+         *     has no start fields, and one from before ClickHouse 00010 no
+         *     trigger or approval. Needs reports.read.
          */
         get: operations["listMarginLiquidations"];
         put?: never;
@@ -3514,12 +3547,13 @@ export interface paths {
         };
         /**
          * Margin interest per day, week or month (UTC) and asset, oldest first
-         * @description Draft (design §4.3, §8). From the ClickHouse read model
-         *     margin_interest: per bucket and asset, the interest charged
-         *     (MARGIN_INTEREST, income at accrual) and repaid, what users owe at
-         *     the bucket's end, the average principal and hourly rate, and the
-         *     accounts charged; in the asset, and in USDT at the bucket's last
-         *     price (null without one). Needs reports.read.
+         * @description Design §4.3, §8. From the ClickHouse read models: per bucket and
+         *     asset, the interest charged and repaid (the ledger's interest rows,
+         *     ledger_entries), what users owe at the bucket's end, the average
+         *     principal and hourly rate and the accounts charged
+         *     (margin_interest's hourly charges), in the asset and in USDT at the
+         *     bucket's last trade of its USDT pair (null without one). Needs
+         *     reports.read.
          */
         get: operations["marginInterestReport"];
         put?: never;
@@ -5156,10 +5190,12 @@ export interface components {
              *     SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
              *     one role's bots; its journal_id is the first bot's. For DEPOSIT_ASSIGN user_id (the user it is credited to),
              *     deposit_id, asset, amount, network, address, tx_hash, and former_holder (a retired address's holder) or
-             *     address_owner (its holder now) when it has one; its journal_id is the release's. For MARGIN_PARAMS (a draft,
-             *     design 2026-10-06 §8) target (asset:<code>, settings or pair:<symbol>), before and after (the parameters as
-             *     JSON) and expected_version; the result names the version applied. For MARGIN_LIQUIDATE (a draft) user_id,
-             *     account, symbol and margin_level when asked; the result names the liquidation.
+             *     address_owner (its holder now) when it has one; its journal_id is the release's. For MARGIN_PARAMS (design
+             *     2026-10-06 §8) target (asset:<code>, pair:<symbol> or cross), terms and previous (the terms asked for and those
+             *     they replace, as JSON), changed (the fields, comma-separated), expected_version and actor (the requester, in
+             *     whose name margin-service sets them); the result names the version set. For MARGIN_LIQUIDATE user_id, account
+             *     (MARGIN_CROSS or MARGIN_ISOLATED:<symbol>), and the account when asked: status, margin_level (empty without
+             *     debts), total_asset, total_liability; actor; the result names the liquidation.
              */
             payload: {
                 [key: string]: string;
@@ -5198,8 +5234,8 @@ export interface components {
              *     deposit of nobody credited to a user other than its address's
              *     holder, or a margin change that always takes two (the interest
              *     model and rates, leverage, thresholds, fees, haircuts,
-             *     collateral, more to lend, a manual liquidation; a draft); empty
-             *     in single-person mode.
+             *     collateral, more to lend, a manual liquidation); empty in
+             *     single-person mode.
              * @enum {string}
              */
             escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER" | "WELCOME_RAISE" | "MARGIN_RISK";
@@ -5214,8 +5250,8 @@ export interface components {
             attempted_at: string | null;
             /**
              * @description In the list: a simulated market's pending request past its expiry (a day after it was asked for, or when its
-             *     event was to start), or a welcome credits raise's (a day after), by the server's clock; approving it only marks
-             *     it FAILED. False otherwise.
+             *     event was to start), or a welcome credits raise's or a margin request's (a day after), by the server's clock;
+             *     approving it only marks it FAILED. False otherwise.
              */
             expired?: boolean;
         };
@@ -5616,7 +5652,7 @@ export interface components {
             borrowers: number;
             /** Format: int64 */
             version: number;
-            /** @description The administrator's email; empty for the seed (deploy/instruments/margin.json). */
+            /** @description The email margin-service recorded from X-Admin-Id when the terms last changed (a two-person change's requester; the approver is in the request); empty for the seed (deploy/instruments/margin.json). */
             updated_by: string;
             /** Format: date-time */
             updated_at: string;
@@ -5656,7 +5692,7 @@ export interface components {
             } & components["schemas"]["MarginLevels"])[];
             /** Format: int64 */
             version: number;
-            /** @description The administrator's email; empty for the seed. */
+            /** @description The email margin-service recorded from X-Admin-Id, as for an asset; empty for the seed. */
             updated_by: string;
             /** Format: date-time */
             updated_at: string;
@@ -5676,13 +5712,15 @@ export interface components {
         MarginPair: components["schemas"]["MarginPairParams"] & {
             /** @example BTC-USDT */
             symbol: string;
+            /** @description The base asset (margin-service's pair_terms.base_asset). */
             base: string;
+            /** @description The quote asset (pair_terms.quote_asset). */
             quote: string;
             /** @description The isolated accounts on it that hold or owe anything. */
             accounts: number;
             /** Format: int64 */
             version: number;
-            /** @description The administrator's email; empty for the seed. */
+            /** @description The email margin-service recorded from X-Admin-Id, as for an asset; empty for the seed. */
             updated_by: string;
             /** Format: date-time */
             updated_at: string;
@@ -5721,15 +5759,21 @@ export interface components {
              * @description When it last went under the warning level; null above it.
              */
             warned_at: string | null;
-            /** @description The administrator who froze it (email); null unless an administrator did. */
+            /** @description The email margin-service recorded from X-Admin-Id when an administrator froze it; null unless one did. */
             frozen_by: string | null;
-            frozen_reason: string | null;
+            /** @description The freeze's reason; empty unless an administrator froze it (margin-service's column, NOT NULL DEFAULT ''). */
+            frozen_reason: string;
             /** Format: date-time */
             frozen_at: string | null;
             /** @description The assets it holds or owes without a fresh price (design §2, E0 decision ④): a debt takes the last known price; an account with an asset never priced is not liquidated but may not borrow, transfer out or open orders. */
             unpriced: string[];
             /** Format: date-time */
             updated_at: string;
+            /**
+             * Format: uuid
+             * @description A liquidation by hand waiting for a second administrator (one at a time).
+             */
+            pending_approval_id: string | null;
         };
         /** @description An asset a margin account holds or owes (api/openapi/margin.yaml's MarginBalance with its worth). */
         MarginBalance: {
@@ -5761,8 +5805,11 @@ export interface components {
             /** @enum {string} */
             interest_model: "FIXED" | "FLOATING";
             hourly_rate: components["schemas"]["Decimal"];
-            /** Format: date-time */
-            opened_at: string;
+            /**
+             * Format: date-time
+             * @description When it last went from owing nothing to owing something; null when margin-service does not know.
+             */
+            opened_at: string | null;
             /** Format: date-time */
             updated_at: string;
         };
@@ -5793,7 +5840,10 @@ export interface components {
             order_id: string | null;
             /** Format: uuid */
             liquidation_id: string | null;
-            /** @description The ledger journal's idempotency key (margin-borrow:<id>, margin-repay:<id>, …). */
+            /**
+             * @description The ledger journal's idempotency key: margin:margin-borrow:<id>:0 for a borrow (:1 its first hour's interest), margin:margin-repay:<id>:0 for a repayment, trade-repay:<trade>:<buyer|seller> for an order's AUTO_REPAY, margin-interest:<asset>:<unix hour> for an hour's charge (then :<n> for the hour's n-th journal).
+             * @example margin-interest:BTC:1759708800
+             */
             journal_key: string;
             /** Format: date-time */
             created_at: string;
@@ -5817,14 +5867,17 @@ export interface components {
             hour: string;
             /** @enum {string} */
             status: "PENDING" | "DONE";
-            /** @description The ledger journal's idempotency key. */
+            /**
+             * @description The ledger journal's idempotency key: margin-interest:<asset>:<unix hour> (then :<n> for the hour's n-th journal), or margin:margin-borrow:<id>:1 for a borrow's first hour; empty while PENDING.
+             * @example margin-interest:BTC:1759708800
+             */
             journal_key: string;
         };
         MarginAmount: {
             asset: string;
             amount: components["schemas"]["Decimal"];
         };
-        /** @description A margin account's liquidation (design §4.5; api/openapi/margin.yaml's MarginLiquidation with its holder, its trigger and what stayed). */
+        /** @description A margin account's liquidation (design §4.5; api/openapi/margin.yaml's MarginLiquidation with its holder, its trigger and what stayed), as the read model merges its two events: a row seen completed only has null start fields (margin_level, total_asset, total_liability, started_at), and one from before ClickHouse 00010 a null trigger and approval_id. */
         MarginLiquidation: {
             /** Format: uuid */
             liquidation_id: string;
@@ -5833,30 +5886,37 @@ export interface components {
             account: components["schemas"]["MarginAccountType"];
             symbol: string | null;
             /**
-             * @description At the liquidation line, or approved by hand (approval_id).
-             * @enum {string}
+             * @description At the liquidation line, or approved by hand (approval_id); null when the read model does not know.
+             * @enum {string|null}
              */
-            trigger: "AUTO" | "MANUAL";
+            trigger: "AUTO" | "MANUAL" | null;
             /** Format: uuid */
             approval_id: string | null;
-            /** @enum {string} */
-            status: "STARTED" | "COMPLETED";
-            /** @description The margin level that triggered it (by hand, the level when approved). */
-            margin_level: components["schemas"]["Decimal"];
+            /**
+             * @description SHORTFALL (an account's detail only, margin-service's) while the insurance fund lacks an asset to cover what the account could not repay: the debt stays owed until the fund has it and the next attempt goes on.
+             * @enum {string}
+             */
+            status: "STARTED" | "SHORTFALL" | "COMPLETED";
+            /** @description An account's detail only - margin-service's step of the liquidation. */
+            step?: string;
+            /** @description An account's detail only - margin-service's note on the step (why it waits). */
+            note?: string;
+            /** @description The margin level that triggered it (by hand, the level when approved); null when not known. */
+            margin_level: components["schemas"]["NullableDecimal"];
             /** @description Total assets at its start, in USDT. */
-            total_asset: components["schemas"]["Decimal"];
+            total_asset: components["schemas"]["NullableDecimal"];
             /** @description Total liabilities at its start, in USDT. */
-            total_liability: components["schemas"]["Decimal"];
+            total_liability: components["schemas"]["NullableDecimal"];
             /** @description Debts repaid, per asset (principal and interest). */
             repaid: components["schemas"]["MarginAmount"][];
             /** @description What stayed in the account, per asset. */
             remaining: components["schemas"]["MarginAmount"][];
-            /** @description The liquidation fee in USDT, to the insurance fund. */
-            fee: components["schemas"]["Decimal"];
-            /** @description In USDT, what the insurance fund paid of debts the assets did not cover; 0 without a shortfall. */
-            insurance_covered: components["schemas"]["Decimal"];
+            /** @description The liquidation fee in USDT, to the insurance fund; null until it completed. */
+            fee: components["schemas"]["NullableDecimal"];
+            /** @description In USDT, what the insurance fund paid of debts the assets did not cover; 0 without a shortfall, null until it completed. */
+            insurance_covered: components["schemas"]["NullableDecimal"];
             /** Format: date-time */
-            started_at: string;
+            started_at: string | null;
             /** Format: date-time */
             completed_at: string | null;
         };
@@ -5868,7 +5928,7 @@ export interface components {
             loan_changes: components["schemas"]["MarginLoanChange"][];
             /** @description The latest 50 charges, newest first. */
             interest: components["schemas"]["MarginInterestCharge"][];
-            /** @description The latest 20, newest first. */
+            /** @description The latest 20, newest first (margin-service's own, with step and note). */
             liquidations: components["schemas"]["MarginLiquidation"][];
         };
         MarginInterestBucket: {

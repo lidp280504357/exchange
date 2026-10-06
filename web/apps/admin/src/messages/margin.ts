@@ -1,8 +1,8 @@
 // The margin strings the rest of the console shows (design 2026-10-06
-// §8, A55, A56): the sidebar's, the approvals', the launch checklist's,
-// the ledger's account types and reconciliation checks, merged with the
-// pages' (pageMessages.ts). The margin pages' own come with their chunks
-// (pages/margin/messages.ts).
+// §8, A55, A56, E5): the sidebar's, the approvals' (and their payloads),
+// the launch checklist's, the ledger's account types and reconciliation
+// checks, merged with the pages' (pageMessages.ts). The margin pages' own
+// come with their chunks (pages/margin/messages.ts).
 export const marginZh = {
   admin: {
     groups: { margin: "杠杆" },
@@ -23,7 +23,23 @@ export const marginZh = {
     },
     launch: {
       items: {
-        margin: { name: "杠杆参数", source: "开关 margin.enabled 与杠杆参数", required: "各资产的池上限、利率已按正式值配置" },
+        margin: {
+          name: "杠杆交易", source: "开关 margin.enabled、margin.liquidation、margin.auto_borrow",
+          required: "不开放；或已开启强平，且杠杆与自动借款都按用户/地区规则开放（不对所有人全局打开）",
+        },
+      },
+      marginGlobal: "对所有人",
+    },
+    marginApproval: {
+      asset: "资产 {{code}}",
+      pair: "交易对 {{symbol}}",
+      cross: "全仓条款",
+      level: "风险率 {{level}}",
+      owes: "负债 {{usdt}} USDT",
+      fields: {
+        borrowable: "可借", collateral: "保证金", haircut: "折扣", pool_cap: "池上限", user_cap: "单用户上限", interest_model: "计息方式",
+        fixed_rate: "固定利率", float_base: "基准利率", float_kink: "拐点", float_kink_rate: "拐点利率", float_max_rate: "满池利率",
+        isolated: "逐仓", leverage: "倍数", warn_level: "预警线", liquidation_level: "强平线", liquidation_fee: "强平费",
       },
     },
   },
@@ -49,7 +65,24 @@ export const marginEn = {
     },
     launch: {
       items: {
-        margin: { name: "Margin parameters", source: "Flag margin.enabled and the margin parameters", required: "Every asset's pool cap and rates at their launch values" },
+        margin: {
+          name: "Margin trading", source: "Flags margin.enabled, margin.liquidation and margin.auto_borrow",
+          required: "Off; or on with liquidations on, margin and auto-borrowing open by user or region rules (not for everyone)",
+        },
+      },
+      marginGlobal: "for everyone",
+    },
+    marginApproval: {
+      asset: "Asset {{code}}",
+      pair: "Pair {{symbol}}",
+      cross: "Cross terms",
+      level: "Margin level {{level}}",
+      owes: "Owes {{usdt}} USDT",
+      fields: {
+        borrowable: "Borrowable", collateral: "Collateral", haircut: "Haircut", pool_cap: "Pool cap", user_cap: "User cap",
+        interest_model: "Interest model", fixed_rate: "Fixed rate", float_base: "Base rate", float_kink: "Kink", float_kink_rate: "Kink rate",
+        float_max_rate: "Full pool rate", isolated: "Isolated", leverage: "Leverage", warn_level: "Warning level",
+        liquidation_level: "Liquidation level", liquidation_fee: "Liquidation fee",
       },
     },
   },

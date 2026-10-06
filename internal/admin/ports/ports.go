@@ -145,6 +145,9 @@ type ApprovalRepo interface {
 	// PendingOf returns every pending request of a kind by one
 	// administrator, oldest first.
 	PendingOf(ctx context.Context, kind, requestedBy string) ([]domain.Approval, error)
+	// PendingOfKind returns every pending request of a kind, whoever asked,
+	// oldest first.
+	PendingOfKind(ctx context.Context, kind string) ([]domain.Approval, error)
 	// MarkAttempted records that an attempt to carry a pending one out
 	// began (it keeps the first time); a note says how the last attempt
 	// ended when it did not finish ("" keeps the note).
@@ -1020,6 +1023,126 @@ type Reports interface {
 	// (in bots) apart from the other users, the system accounts, and the
 	// top largest holders.
 	Holdings(ctx context.Context, asset string, bots []string, top int) (Holdings, error)
+}
+
+// Margin is margin-service's internal API for the console
+// (/internal/margin/* on its HTTP port, the compose network only; margin
+// design 2026-10-06 §8, C5). The answers pass through as it renders them,
+// with its column names; writes carry the administrator (X-Admin-Id: their
+// email, its updated_by and frozen_by) and margin-service checks its own
+// rules (MARGIN_PARAMS_CHANGED for a version moved).
+type Margin interface {
+	// Assets returns {items}: each asset's terms with what is lent.
+	Assets(ctx context.Context) (json.RawMessage, error)
+	// SetAsset replaces an asset's terms (body: its asset_terms columns)
+	// as of expectedVersion; the answer is the asset.
+	SetAsset(ctx context.Context, asset string, terms json.RawMessage, expectedVersion int64, admin string) (json.RawMessage, error)
+	// Settings returns the cross account's terms, the thresholds by
+	// isolated leverage and the version.
+	Settings(ctx context.Context) (json.RawMessage, error)
+	// SetCross replaces the cross account's terms as of expectedVersion;
+	// the answer is the settings.
+	SetCross(ctx context.Context, cross json.RawMessage, expectedVersion int64, admin string) (json.RawMessage, error)
+	// Pairs returns {items}: each pair's isolated terms.
+	Pairs(ctx context.Context) (json.RawMessage, error)
+	// SetPair replaces a pair's isolated terms (isolated, leverage, levels,
+	// fee) as of expectedVersion; the answer is the pair.
+	SetPair(ctx context.Context, symbol string, terms json.RawMessage, expectedVersion int64, admin string) (json.RawMessage, error)
+	// Accounts returns {items, truncated}: the accounts riskiest first.
+	Accounts(ctx context.Context, q MarginAccountQuery) (json.RawMessage, error)
+	// Account returns one account in full; account is MARGIN_CROSS or
+	// MARGIN_ISOLATED:<symbol>.
+	Account(ctx context.Context, userID, account string) (json.RawMessage, error)
+	// Freeze and Unfreeze set and lift an administrator's freeze; the
+	// answer is the account as listed.
+	Freeze(ctx context.Context, userID, account, admin, reason string) (json.RawMessage, error)
+	Unfreeze(ctx context.Context, userID, account, admin string) (json.RawMessage, error)
+	// Liquidate starts the liquidation an approved MARGIN_LIQUIDATE asks
+	// for (margin-service's E3: MANUAL, once per approval, the same
+	// approval again returns it); the answer is the liquidation
+	// ({liquidation_id, ...}).
+	Liquidate(ctx context.Context, userID, account, approvalID, admin string) (json.RawMessage, error)
+}
+
+// MarginAccountQuery selects margin accounts; empty fields match every
+// one, Limit is 1 to 500.
+type MarginAccountQuery struct {
+	Status  string
+	Account string
+	Symbol  string
+	UserID  string
+	Limit   int
+}
+
+// MarginReports reads margin trading's read models (ClickHouse
+// margin_liquidations, margin_interest, and the ledger's interest rows in
+// ledger_entries), a few seconds behind.
+type MarginReports interface {
+	// MarginLiquidations returns a page of liquidations, newest first, and
+	// the cursor of the next ("" on the last).
+	MarginLiquidations(ctx context.Context, q MarginLiquidationQuery) ([]MarginLiquidation, string, error)
+	// MarginInterest returns the interest per bucket and asset of the
+	// period (one asset unless empty), oldest first.
+	MarginInterest(ctx context.Context, r ReportRange, asset string) ([]MarginInterestBucket, error)
+}
+
+// MarginLiquidationQuery selects liquidations started in the last Days:
+// of one account type, pair, trigger or user unless empty.
+type MarginLiquidationQuery struct {
+	Days    int
+	Account string
+	Symbol  string
+	Trigger string
+	UserID  string
+	Cursor  string
+	Limit   int
+}
+
+// MarginAmount is an amount of an asset.
+type MarginAmount struct {
+	Asset  string `json:"asset"`
+	Amount string `json:"amount"`
+}
+
+// MarginLiquidation is a margin account's liquidation as the read model
+// merges its two events; what an event published before it was known
+// leaves out is empty (Trigger, ApprovalID, the started fields of a row
+// seen completed only).
+type MarginLiquidation struct {
+	ID               string         `json:"liquidation_id"`
+	UserID           string         `json:"user_id"`
+	Account          string         `json:"account"`
+	Symbol           *string        `json:"symbol"`
+	Trigger          *string        `json:"trigger"`
+	ApprovalID       *string        `json:"approval_id"`
+	Status           string         `json:"status"`
+	MarginLevel      *string        `json:"margin_level"`
+	TotalAsset       *string        `json:"total_asset"`
+	TotalLiability   *string        `json:"total_liability"`
+	Repaid           []MarginAmount `json:"repaid"`
+	Remaining        []MarginAmount `json:"remaining"`
+	Fee              *string        `json:"fee"`
+	InsuranceCovered *string        `json:"insurance_covered"`
+	StartedAt        *time.Time     `json:"started_at"`
+	CompletedAt      *time.Time     `json:"completed_at"`
+}
+
+// MarginInterestBucket is one bucket's interest of an asset: charged and
+// repaid (the ledger's interest rows), owed at its end, the principal
+// averaged over the hours charged, the rate that gives, the accounts
+// charged, and the two amounts in USDT at the bucket's last price (nil
+// without one).
+type MarginInterestBucket struct {
+	Day           string          `json:"day"`
+	Asset         string          `json:"asset"`
+	Charged       decimal.Decimal `json:"charged"`
+	Repaid        decimal.Decimal `json:"repaid"`
+	Owed          decimal.Decimal `json:"owed"`
+	PrincipalAvg  decimal.Decimal `json:"principal_avg"`
+	HourlyRateAvg decimal.Decimal `json:"hourly_rate_avg"`
+	Accounts      uint64          `json:"accounts"`
+	ChargedUSDT   *string         `json:"charged_usdt"`
+	RepaidUSDT    *string         `json:"repaid_usdt"`
 }
 
 // Holder is a user's holding of an asset, in all its accounts.

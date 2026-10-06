@@ -8,9 +8,8 @@ import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
 import { ListTable, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
-import { liquidationsPage, marginKey } from "./api";
-import { lineText, PreviewBanner } from "./common";
-import type { MarginLiquidation } from "./mock";
+import { liquidationsPage, marginKey, type LiquidationQuery, type MarginLiquidation } from "./api";
+import { lineText } from "./common";
 
 const right: DataColumnMeta = { align: "right" };
 const DAYS = ["1", "7", "30", "90"];
@@ -33,18 +32,20 @@ function Amounts({ items }: { items: MarginLiquidation["repaid"] }) {
  * liquidation, newest first, at the liquidation line or approved by hand:
  * the margin level that started it, the debts it repaid and what stayed
  * in the account, the fee to the insurance fund and the shortfall the
- * fund covered (the read model margin_liquidations, seconds behind).
+ * fund covered (the read model margin_liquidations, seconds behind). A
+ * row seen completed only has no start, and one from before ClickHouse
+ * 00010 no trigger: their cells say "—".
  */
 export default function MarginLiquidations(_: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
   const filters = useFilters(["account", "symbol", "trigger", "user_id", "days"]);
   const f = filters.values;
-  const q = {
-    days: DAYS.includes(f.days ?? "") ? Number(f.days) : 30, account: f.account || undefined, symbol: f.symbol?.toUpperCase() || undefined,
-    trigger: f.trigger || undefined, user_id: f.user_id || undefined,
+  const q: LiquidationQuery = {
+    days: DAYS.includes(f.days ?? "") ? Number(f.days) : 30, account: (f.account || undefined) as LiquidationQuery["account"],
+    symbol: f.symbol?.toUpperCase() || undefined, trigger: (f.trigger || undefined) as LiquidationQuery["trigger"], user_id: f.user_id || undefined,
   };
-  const list = useCursorList<MarginLiquidation>([...marginKey, "liquidations", q], () => liquidationsPage(q));
+  const list = useCursorList<MarginLiquidation>([...marginKey, "liquidations", q], (cursor) => liquidationsPage(q, cursor));
   const columns = useMemo<ColumnDef<MarginLiquidation, unknown>[]>(
     () => [
       { id: "started", header: t("admin.margin.started"), cell: ({ row }) => <TimeText value={row.original.started_at} /> },
@@ -87,7 +88,11 @@ export default function MarginLiquidations(_: { admin: Admin }) {
       {
         id: "ins", header: t("admin.margin.insuranceCovered"), meta: right,
         cell: ({ row }) => (
-          <Num value={row.original.insurance_covered} decimals={2} className={dec.gt(row.original.insurance_covered, "0") ? "text-danger-strong" : undefined} />
+          <Num
+            value={row.original.insurance_covered}
+            decimals={2}
+            className={row.original.insurance_covered && dec.gt(row.original.insurance_covered, "0") ? "text-danger-strong" : undefined}
+          />
         ),
       },
       { id: "remaining", header: t("admin.margin.remaining"), meta: right, cell: ({ row }) => <Amounts items={row.original.remaining} /> },
@@ -96,7 +101,6 @@ export default function MarginLiquidations(_: { admin: Admin }) {
   );
   return (
     <Page title={t("admin.nav.marginLiquidations")} help={t("admin.margin.liquidations.help")}>
-      <PreviewBanner />
       <FilterBar
         page="margin-liquidations"
         filters={filters}

@@ -464,13 +464,16 @@ func sameCredits(a, b []ports.WelcomeCredit) bool {
 const welcomeApprovalTTL = 24 * time.Hour
 
 // approvalExpiry is when a pending request lapses: a simulated market's
-// (simExpiry) and a welcome credits raise do; ok is false for the others.
+// (simExpiry), a welcome credits raise and margin trading's do; ok is
+// false for the others.
 func approvalExpiry(a domain.Approval) (at time.Time, ok bool) {
 	switch {
 	case simKind(a.Kind):
 		return simExpiry(a), true
 	case a.Kind == domain.KindWelcomeCredit:
 		return a.CreatedAt.Add(welcomeApprovalTTL), true
+	case marginKind(a.Kind):
+		return a.CreatedAt.Add(marginApprovalTTL), true
 	}
 	return time.Time{}, false
 }

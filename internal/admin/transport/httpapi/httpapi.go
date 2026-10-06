@@ -205,6 +205,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/ledger/reconciliation", h.reconciliation)
 			r.Get("/ledger/system-balances", h.systemBalances)
 			r.With(needKey).Post("/derivatives/insurance-fund/contributions", h.requestInsuranceFunding)
+			h.marginRoutes(r)
 		})
 	})
 }

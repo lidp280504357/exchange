@@ -6,9 +6,8 @@ import { useTranslation } from "react-i18next";
 import { FilterBar, useFilters } from "../../kit/filters";
 import { Num } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
-import { useMarginInterest, type InterestQuery } from "./api";
-import { PreviewBanner, Rate } from "./common";
-import type { MarginInterestBucket } from "./mock";
+import { useMarginInterest, type InterestQuery, type MarginInterestBucket } from "./api";
+import { Rate } from "./common";
 
 const right: DataColumnMeta = { align: "right" };
 const BUCKETS = ["day", "week", "month"] as const;
@@ -17,8 +16,8 @@ const BUCKETS = ["day", "week", "month"] as const;
  * Margin interest (design 2026-10-06 §4.3, §8; A55): per day, week or
  * month (UTC) and asset, the interest charged and repaid, what users owe
  * at the bucket's end, the average principal and hourly rate, and the
- * accounts charged (the read model margin_interest); the chart sums the
- * assets in USDT.
+ * accounts charged (the ledger's interest rows and the read model
+ * margin_interest); the chart sums the assets in USDT.
  */
 export default function Interest(_: { admin: Admin }) {
   const { t } = useTranslation();
@@ -66,7 +65,6 @@ export default function Interest(_: { admin: Admin }) {
         />
       }
     >
-      <PreviewBanner />
       <FilterBar page="margin-interest" filters={filters} defs={[{ key: "asset", label: t("admin.common.asset"), kind: "text", placeholder: "USDT", width: 120 }]} />
       {q.isError ? (
         <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />

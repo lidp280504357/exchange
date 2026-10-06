@@ -1,36 +1,23 @@
 import { dec, formatDecimal, formatPercent, i18n } from "@exchange/core";
 import { Badge, FormField, Input } from "@exchange/ui";
-import { FlaskConical } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { Notice } from "../../kit/actions";
 import { registerMarginMessages } from "./messages";
 
-// What the margin pages share (design 2026-10-06 §8, A55): their strings,
-// the preview banner and outcome while the API is a draft, margin levels
-// toned by their thresholds, hourly rates with their yearly equivalent.
+// What the margin pages share (design 2026-10-06 §8, E5): their strings,
+// what a change came to, margin levels toned by their thresholds, hourly
+// rates with their yearly equivalent.
 
 // The pages' strings come with their chunks, before any of them renders.
 registerMarginMessages();
 
-/** PreviewBanner says the page shows sample data and its changes go nowhere until the API is served (E5). */
-export function PreviewBanner() {
-  const { t } = useTranslation();
-  return (
-    <div data-testid="margin-preview" className="flex items-start gap-2 rounded-2 border border-warn bg-warn/10 px-3 py-2 text-sm text-warn-strong">
-      <FlaskConical size={16} className="mt-0.5 shrink-0" />
-      <span>{t("admin.margin.preview.banner")}</span>
-    </div>
-  );
+/** outcome says what a change of terms came to: applied at once (200), or a request waiting for a second ADMIN (202). */
+export function outcome(res: unknown): string {
+  return i18n.t((res as { approval?: unknown } | null)?.approval ? "admin.margin.requested" : "admin.margin.applied");
 }
 
-/** previewed is a change's outcome in the preview: nothing sent, and what it would do (apply at once, or wait for a second administrator). */
-export function previewed(approval: boolean): Notice {
-  return { info: i18n.t(approval ? "admin.margin.preview.wouldAsk" : "admin.margin.preview.wouldApply") };
-}
-
-/** lineText is a margin level threshold as the pages show it: two decimals (1.10). */
-export const lineText = (v: string) => formatDecimal(v, { decimals: 2 });
+/** lineText is a margin level or threshold as the pages show it: two decimals (1.10), "—" for none. */
+export const lineText = (v: string | null) => formatDecimal(v, { decimals: 2 });
 
 /** Level is a margin level toned by its account's thresholds; ∞ without liabilities. */
 export function Level({ level, warning, liquidation }: { level: string | null; warning: string; liquidation: string }) {

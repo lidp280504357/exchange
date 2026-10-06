@@ -446,6 +446,18 @@ func (r approvals) PendingOf(ctx context.Context, kind, requestedBy string) ([]d
 	return out, nil
 }
 
+func (r approvals) PendingOfKind(ctx context.Context, kind string) ([]domain.Approval, error) {
+	rows, err := r.q.Query(ctx, approvalSelect+` WHERE a.status = 'PENDING' AND a.kind = $1 ORDER BY a.created_at, a.id`, kind)
+	if err != nil {
+		return nil, fmt.Errorf("pending requests of a kind: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Approval, error) { return scanApproval(row, true) })
+	if err != nil {
+		return nil, fmt.Errorf("pending requests of a kind: %w", err)
+	}
+	return out, nil
+}
+
 func (r approvals) CountPending(ctx context.Context) (int, error) {
 	var n int
 	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status = 'PENDING'`).Scan(&n); err != nil {

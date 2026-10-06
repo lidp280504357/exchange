@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -71,15 +72,27 @@ var fundActions = map[string]struct{ requested, approved, rejected, executed, fa
 		"admin.platform.welcome_requested", "admin.platform.welcome_approved", "admin.platform.welcome_rejected",
 		"admin.platform.welcome_changed", "admin.platform.welcome_failed", "admin.platform.welcome_unfinished",
 	},
+	domain.KindMarginParams: {
+		"admin.margin.params_requested", "admin.margin.params_approved", "admin.margin.params_rejected",
+		"admin.margin.params_changed", "admin.margin.params_failed", "admin.margin.params_unfinished",
+	},
+	domain.KindMarginLiquidate: {
+		"admin.margin.liquidation_requested", "admin.margin.liquidation_approved", "admin.margin.liquidation_rejected",
+		"admin.margin.liquidation_started", "admin.margin.liquidation_failed", "admin.margin.liquidation_unfinished",
+	},
 }
 
 // simKind reports whether an approval is a simulated market's change.
 func simKind(kind string) bool { return kind == domain.KindSimEvent || kind == domain.KindSimParams }
 
 // changeKind reports whether an approval sets something rather than books
-// it: a simulated market's change, the welcome credits. Its attempt is not
-// marked (the service refuses it twice), a failure leaves it as it was.
-func changeKind(kind string) bool { return simKind(kind) || kind == domain.KindWelcomeCredit }
+// it: a simulated market's change, the welcome credits, margin terms and a
+// margin liquidation (margin-service starts one per approval). Its attempt
+// is not marked (the service refuses it twice), a failure leaves it as it
+// was.
+func changeKind(kind string) bool {
+	return simKind(kind) || kind == domain.KindWelcomeCredit || marginKind(kind)
+}
 
 // fundTarget is the audit target of an operation.
 func fundTarget(a domain.Approval) string {
@@ -90,6 +103,8 @@ func fundTarget(a domain.Approval) string {
 		return simAuditTarget
 	case a.Kind == domain.KindWelcomeCredit:
 		return platformTarget
+	case a.Kind == domain.KindMarginParams:
+		return "margin:" + a.Payload["target"]
 	}
 	return "user:" + a.Payload["user_id"]
 }
@@ -508,6 +523,22 @@ func fundDetails(a domain.Approval) string {
 		})
 		return string(d)
 	}
+	switch a.Kind {
+	case domain.KindMarginParams:
+		d, _ := json.Marshal(map[string]any{
+			"approval_id": a.ID, "target": a.Payload["target"], "terms": json.RawMessage(orEmptyObject(a.Payload["terms"])),
+			"previous": json.RawMessage(orEmptyObject(a.Payload["previous"])), "changed": a.Payload["changed"],
+			"expected_version": a.Payload["expected_version"], "mode": a.Mode, "escalation": a.Escalation, "status": a.Status, "result": a.Result,
+		})
+		return string(d)
+	case domain.KindMarginLiquidate:
+		d, _ := json.Marshal(map[string]any{
+			"approval_id": a.ID, "user_id": a.Payload["user_id"], "account": a.Payload["account"], "account_status": a.Payload["status"],
+			"margin_level": a.Payload["margin_level"], "total_asset": a.Payload["total_asset"], "total_liability": a.Payload["total_liability"],
+			"mode": a.Mode, "escalation": a.Escalation, "status": a.Status, "result": a.Result,
+		})
+		return string(d)
+	}
 	value := "null"
 	if a.ValueUSDT != nil {
 		value = fmt.Sprintf("%q", a.ValueUSDT.String())
@@ -586,8 +617,10 @@ func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor str
 // decider's decision repeated returns the operation as it left it.
 func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, approve bool, reason string) (domain.Approval, error) {
 	// A fund operation needs ledger.adjust.approve, a simulated market's
-	// change sim.control (checked once the request is read).
-	if p.require(domain.PermAdjustApprove) != nil && p.require(domain.PermSimControl) != nil {
+	// change sim.control, margin terms instruments.trading and a margin
+	// liquidation derivatives.write (checked once the request is read).
+	if !slices.ContainsFunc([]string{domain.PermAdjustApprove, domain.PermSimControl, domain.PermInstrumentsTrading, domain.PermDerivativesEdit},
+		func(perm string) bool { return p.require(perm) == nil }) {
 		return domain.Approval{}, p.require(domain.PermAdjustApprove)
 	}
 	if err := needReason(reason); err != nil {
@@ -618,6 +651,10 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 			perm = domain.PermSimControl
 		case cur.Kind == domain.KindWelcomeCredit:
 			perm = domain.PermSettingsEdit
+		case cur.Kind == domain.KindMarginParams:
+			perm = domain.PermInstrumentsTrading
+		case cur.Kind == domain.KindMarginLiquidate:
+			perm = domain.PermDerivativesEdit
 		}
 		if err := p.require(perm); err != nil {
 			return err
@@ -729,8 +766,13 @@ func decidedAlike(a domain.Approval, decider string, approve bool) bool {
 func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) error {
 	if changeKind(a.Kind) {
 		run := s.executeSim
-		if a.Kind == domain.KindWelcomeCredit {
+		switch a.Kind {
+		case domain.KindWelcomeCredit:
 			run = s.executeWelcome
+		case domain.KindMarginParams:
+			run = s.executeMarginParams
+		case domain.KindMarginLiquidate:
+			run = s.executeMarginLiquidate
 		}
 		result, err := run(ctx, *a, p)
 		if err != nil {
@@ -956,6 +998,14 @@ func limitsJSON(s domain.Settings) string {
 }
 
 // orEmptyList is a JSON list kept in a payload, [] when there is none.
+// orEmptyObject is a JSON object kept as text, {} when there is none.
+func orEmptyObject(v string) string {
+	if v == "" {
+		return "{}"
+	}
+	return v
+}
+
 func orEmptyList(v string) string {
 	if v == "" {
 		return "[]"
