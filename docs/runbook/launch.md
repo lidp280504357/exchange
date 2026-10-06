@@ -47,7 +47,7 @@
 1. **强平开关先开**：`margin.liquidation` 必须开着——关着时风险率跌到强平线的账户只会被记为待强平（告警 `MarginLiquidationDue`），负债越滚越大。确认 §1 步 10 的保险基金已按每种可借资产注资。
 2. **杠杆开关按人或按地区开**：`margin.enabled`（划入、借币、杠杆下单）与 `margin.auto_borrow`（自动借款）从"对所有人"改为按用户（`--allow-users`）或按地区（`--allow-regions`）的规则开放，或在上线时先关着、按运营节奏逐步放开（`exchangectl flags set`，见 `feature-flags.md`）。还币与划回现货不受开关影响：关掉后用户仍能用账户里的币还清负债、把资产划回现货（杠杆账户上下单则要开关开着）。
 3. **参数**：后台「杠杆参数」核对各资产的可借与保证金资格、借贷池与单用户上限、利率模型与利率、折扣，各交易对的逐仓倍数与预警/强平线，全仓倍数与阈值（提高风险的改动走双人审批，只收紧的单人即时生效）。
-4. **上线检查清单的 margin 项**：杠杆关着（`margin.enabled` 对任何人都不开）为 OK；开着时要求 `margin.liquidation` 也开，且 `margin.enabled`、`margin.auto_borrow` 都不是对所有人全局打开（按用户或地区的规则才算），否则为 FAIL——测试服现在 FAIL 是对的。
+4. **上线检查清单的 margin 项**：杠杆关着（`margin.enabled` 对任何人都不开）为 OK；开着时要求 `margin.liquidation` 也开，且 `margin.enabled`、`margin.auto_borrow` 都不是对所有人全局打开（开关带任何规则——按用户、地区等——就不算全局），否则为 FAIL——测试服现在 FAIL 是对的。
 5. **站点**：行情列表里逐仓交易对的倍数标记对所有访客显示（按公开的 `/v1/margin/pairs`，与币安一致，B108）；交易页的账户切换、资产页的杠杆账户只对 `MARGIN_TRADE` 资格开放的人显示（关掉后还有杠杆资产或负债的人仍看得到入口，用来还币与划出）。帮助中心有《杠杆交易入门》（`help/margin-trading`，两种语言）。
 
 ## 3. 演练
