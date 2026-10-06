@@ -108,7 +108,7 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchangectl derivatives resume BTC-USDT-PERP
 ```
 
-故障注入 `scripts/fault/contract-degrade.sh` 演练整个过程：切断 market-data-service 的外网 → 标记价报 `degraded` → 合约只减仓、开仓单被拒 → 恢复外网后仍只减仓（开仓单报 `DERIV_REDUCE_ONLY_MODE`）→ `resume` 后恢复。
+故障注入 `scripts/fault/contract-degrade.sh` 演练整个过程：切断 market-data-service 的外网 → 标记价报 `degraded` → 合约只减仓、开仓单被拒 → 恢复外网后仍只减仓（开仓单报 `DERIV_REDUCE_ONLY_MODE`）→ `resume` 后恢复。`scripts/fault/coinm-degrade.sh` 在币本位的 BTC-USD-PERP 上演练同一过程（BTC 保证金、整张开仓，合约不在 TRADING 时跳过）。
 
 部署会重启 market-data-service，标记价可能中断超过 10 秒，合约因此进入只减仓（2026-10-01 有一次 ETH-USDT-PERP 停在只减仓几个小时，直到端到端测试失败才发现）。`deploy/server-update.sh` 最后等 20 秒，解除部署期间开始、原因为 `INDEX_SOURCES` 或 `MARK_PRICE_STALE` 的只减仓，解除人记为 `deploy-<版本>`（`exchangectl` 读 `EXCHANGECTL_ACTOR`）；价源若真断了，10 秒后又会只减仓。部署之外开始的只减仓仍须人工解除。
 
@@ -122,6 +122,8 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 - 结算：账本 `SettleFutures` 按资产；HOUSE 的 BTC/ETH 不能为负，亏损超过余额的部分由同一资产的保险基金补，基金不够时整笔拒绝、不入账（账本集成测试 `TestCoinSettledFutures`）。保险基金与杠杆交易共用 `INSURANCE_FUND` 的同一行（协调会话 20:45 决定 ⑦）。
 - 事件与推送：`Position`、`FillSettled` 带 `settle_asset`、`contract_size`，`LiquidationWarning`、`LiquidationFilled`、`AdlExecuted` 带 `settle_asset`（全仓预警的是该账户的资产）；发给引擎的 `PlaceOrder` 带两者，引擎的 `TradeExecuted` 也带，币本位成交的 `quote_quantity` 是张数 × 面值（美元），订单的 `filled_quote` 仍是价格 × 数量之和（平均价由它算）。网关的 `orders`（受理时）、`fills`、`positions`、`risk` 推送带 `settle_asset`，合约成交的 `fee_asset` 是结算资产。ClickHouse 的 `trades`、`derivatives_positions`、`derivatives_fills`、`derivatives_funding` 记 `settle_asset`，币本位成交的 `notional` 是美元价值。
 - REST：仓位多了 `settle_asset`、`contracts`（币本位的有符号张数，线性为 null）、`value_coin`（币本位按标记价的币价值）、`value_usd`（币本位张数 × 面值，线性为名义价值）；订单、成交、资金费记录带 `settle_asset`。
+- 测试服（C39，2026-10-06）：BTC-USD-PERP、ETH-USD-PERP 在 `house.sh seed`（HOUSE 的 BTC 6、ETH 200 合约保证金，保险基金 BTC +2、ETH +40、ASTRA 100,000）与 `house.sh flags` 之后转 TRADING；两站在 G4 之前不列币本位合约（合约列表缺省只给 U 本位），只有端到端账户在交易。ASTRA-USD-PERP 没有币安参考、仍是 PREPARE。
+- 端到端 `scripts/e2e/coinm.sh`（新用户买 BTC、转 0.002 BTC 到合约账户，`?asset=BTC` 的账户与两个错误码，市价开 3 张多单、只减仓平掉，核对仓位字段、按 BTC 的盈亏与手续费、余额与转回，最后对账）；故障注入 `scripts/fault/coinm-degrade.sh`（见上节）。两者在合约不在 TRADING 时跳过。
 
 ## 对账（不变量 6）
 
