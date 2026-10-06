@@ -2,8 +2,9 @@
 // deployed sites with live market data (BTC-USDT streams Binance's book
 // through HOUSE, about ten depth messages a second):
 //
-//   node perf.mjs            terminal pages of both sites, the phone's market list, the 1000-row table
+//   node perf.mjs            terminal pages of both sites, the phone's market list, the 1000-row table, margin trading
 //   node perf.mjs table      the 1000-row table alone
+//   node perf.mjs margin     margin trading alone (both sites)
 //   node perf.mjs memory     the PC terminal's heap over 30 minutes (MINUTES)
 //
 // For each terminal: main-thread long tasks (> 50 ms) per minute over a
@@ -18,10 +19,15 @@
 // ms); p50, p95 and the longest of each. The phone runs with
 // the CPU slowed four times, as a mid-range phone. The 1000-row table is
 // the design system's virtual DataTable, scrolled for three seconds.
+// Margin trading (margin design 2026-10-06 §7, B108) is measured as a new
+// account with 20 USDT in its cross account (signed up over the API, the
+// human check passed with CAPTCHA_BYPASS_TOKEN, from .env when not
+// exported): see margin().
 // Prints one line per measurement; exits non-zero when a budget is missed
 // (BUDGET=warn only reports).
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
+import { api, register } from "./flows-lib.mjs";
 
 const PC = process.env.PC_BASE ?? "https://astras.vip";
 const M = process.env.M_BASE ?? "https://m.astras.vip";
@@ -79,6 +85,10 @@ function instrument() {
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) window.__perf.longTasks.push({ at: e.startTime, duration: e.duration });
   }).observe({ type: "longtask", buffered: true });
+  new PerformanceObserver((list) => {
+    const last = list.getEntries().at(-1);
+    if (last) window.__perf.lcp = last.startTime;
+  }).observe({ type: "largest-contentful-paint", buffered: true });
   // The book's two sides only, once shown (the phone mounts its panels
   // hidden): the row between them shows the last trade and the mark price,
   // which are not the book's and redraw on their own.
@@ -368,6 +378,202 @@ async function markets(browser) {
   await page.browserContext().close();
 }
 
+// --- margin trading (B108) ----------------------------------------------
+
+function bypassToken() {
+  if (process.env.CAPTCHA_BYPASS_TOKEN) return process.env.CAPTCHA_BYPASS_TOKEN;
+  const env = new URL("../../.env", import.meta.url);
+  return existsSync(env) ? readFileSync(env, "utf8").match(/^CAPTCHA_BYPASS_TOKEN="?([^"\n]*)"?$/m)?.[1] : undefined;
+}
+
+// clickTo clicks, in the page, the visible button labelled label within
+// scope, and measures from the click to the first frame on which selector
+// is visible (-1 without such a button, Infinity after 15 seconds).
+const clickTo = (page, label, scope, selector) =>
+  page.evaluate(
+    (label, scope, selector) =>
+      new Promise((resolve) => {
+        const button = [...document.querySelectorAll(`${scope} button`)].find((b) => b.textContent.trim() === label && b.checkVisibility());
+        if (!button) return resolve(-1);
+        const t = performance.now();
+        button.click();
+        const check = () => {
+          if (document.querySelector(selector)?.checkVisibility()) resolve(performance.now() - t);
+          else if (performance.now() - t > 15000) resolve(Infinity);
+          else requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
+      }),
+    label,
+    scope,
+    selector,
+  );
+
+// routeTo moves the single-page app to path, as a link does, and measures
+// to the first frame on which selector is visible (Infinity after 15 s).
+const routeTo = (page, path, selector) =>
+  page.evaluate(
+    (path, selector) =>
+      new Promise((resolve) => {
+        const t = performance.now();
+        history.pushState({}, "", path);
+        dispatchEvent(new PopStateEvent("popstate"));
+        const check = () => {
+          if (document.querySelector(selector)?.checkVisibility()) resolve(performance.now() - t);
+          else if (performance.now() - t > 15000) resolve(Infinity);
+          else requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
+      }),
+    path,
+    selector,
+  );
+
+/**
+ * margin measures margin trading on a site, as a new account with 20 USDT
+ * in its cross account, signed in through the form: the margin accounts
+ * page loaded afresh (its LCP, and the JavaScript it fetched, compressed,
+ * against the first-screen budget); reached again from the assets
+ * overview (the route budget: content within 200 ms); on the terminal,
+ * the order form switched to the cross account (its gauge on screen, the
+ * same budget), the borrow dialog opened the first time (a lazy chunk; no
+ * budget, reported), and a minute of streaming in margin mode (the
+ * terminal's long-task budget). Skipped when margin trading is not open
+ * to new accounts.
+ */
+async function margin(browser, { site, base, device, budgets, sheet }) {
+  const bypass = bypassToken();
+  if (!bypass) return console.log(`skip ${site} margin: no CAPTCHA_BYPASS_TOKEN`);
+  const password = `e2e perf margin ${Date.now()}`;
+  const user = await register(base, bypass, `e2e-perf-${site.toLowerCase()}-${Date.now()}@example.com`, password);
+  const auth = { Authorization: `Bearer ${user.accessToken}` };
+  const eligible = await api(base, "GET", "/v1/user/eligibility?feature=MARGIN_TRADE", undefined, auth);
+  if (eligible.body?.allowed !== true) return console.log(`skip ${site} margin: not open to new accounts (${eligible.body?.reason_code ?? eligible.status})`);
+  // The welcome funds land a moment after the sign-up. Idempotency keys
+  // take letters, digits, dashes and underscores.
+  const key = `perf-${site}-${Date.now()}`;
+  for (let i = 0; ; i++) {
+    const r = await api(base, "POST", "/v1/margin/transfer", { direction: "IN", account: "MARGIN_CROSS", asset: "USDT", amount: "20" }, {
+      ...auth,
+      "Idempotency-Key": `${key}-in-${i}`,
+    });
+    if (r.status === 200) break;
+    if (i >= 20) return report(`${site} margin: 20 USDT into the cross account`, `${r.status} ${r.body?.code}`, "200", false);
+    await sleep(2000);
+  }
+
+  const page = await open(browser, device);
+  await page.evaluateOnNewDocument((token) => {
+    window.__E2E_CAPTCHA_TOKEN__ = token;
+  }, bypass);
+  const done = () => page.browserContext().close();
+  await page.goto(`${base}/login?next=%2Fassets`, { waitUntil: "networkidle2", timeout: 60000 });
+  await page.type('input[autocomplete="username"]', user.email);
+  await page.type('input[autocomplete="current-password"]', password);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => location.pathname === "/assets", { timeout: 30000 });
+
+  // A page loaded afresh: its LCP, and the JavaScript fetched (compressed,
+  // as served) by the frame that first showed selector, its first screen.
+  const fresh = async (path, selector) => {
+    await page.evaluateOnNewDocument((sel) => {
+      const check = () => {
+        if (document.querySelector(sel)) window.__perfShown = performance.now();
+        else requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    }, selector);
+    await page.goto(`${base}${path}`, { waitUntil: "networkidle2", timeout: 60000 });
+    await page.waitForSelector(selector, { visible: true, timeout: 30000 });
+    await sleep(1500);
+    return page.evaluate(() => {
+      const shown = window.__perfShown ?? Infinity;
+      const js = performance.getEntriesByType("resource").filter((r) => /\.js($|\?)/.test(new URL(r.name).pathname) && r.responseEnd <= shown);
+      return {
+        lcp: window.__perf.lcp ?? null,
+        kb: js.reduce((s, r) => s + (r.encodedBodySize || 0), 0) / 1024,
+        files: js.length,
+        largest: js
+          .sort((a, b) => b.encodedBodySize - a.encodedBodySize)
+          .slice(0, 12)
+          .map((r) => `${new URL(r.name).pathname.split("/").pop()} ${(r.encodedBodySize / 1024).toFixed(1)}`),
+      };
+    });
+  };
+  // The assets overview first, for comparison: the same shell and session.
+  const overview = await fresh("/assets", '[data-testid="assets-total"]');
+  const account = '[data-testid="margin-account-MARGIN_CROSS"]';
+  const load = await fresh("/assets/margin", account);
+  if (process.env.PERF_DEBUG) {
+    console.log(`     ${site} overview's largest first-screen files (KB): ${overview.largest.join(", ")}`);
+    console.log(`     ${site} margin page's largest first-screen files (KB): ${load.largest.join(", ")}`);
+  }
+  report(`${site} margin page loaded afresh: LCP`, load.lcp === null ? "none" : ms(load.lcp), `≤ ${budgets.lcp} ms`, load.lcp !== null && load.lcp <= budgets.lcp);
+  report(
+    `${site} margin page loaded afresh: JavaScript by its first screen (${load.files} files, compressed as served; the assets overview's ${overview.kb.toFixed(0)} KB in ${overview.files})`,
+    `${load.kb.toFixed(0)} KB`,
+    `≤ ${budgets.js} KB`,
+    load.kb <= budgets.js,
+  );
+
+  // Back from the overview by a link: the cached accounts at once.
+  await routeTo(page, "/assets", '[data-testid="assets-total"]');
+  await sleep(1000);
+  const route = await routeTo(page, "/assets/margin", account);
+  report(`${site} assets overview to the margin page: accounts on screen`, ms(route), "≤ 200 ms", route <= 200);
+
+  // The terminal: the order form on the cross account.
+  await routeTo(page, "/trade/BTC-USDT", "[data-book-row]");
+  await sleep(3000);
+  let bar = '[data-testid="margin-bar"]';
+  if (sheet) {
+    const opened = await clickTo(page, "买入 BTC", "", '[role=dialog] [data-testid="margin-bar"]');
+    if (opened < 0 || opened === Infinity) {
+      report(`${site} the order sheet`, opened < 0 ? "no 买入 BTC button" : "no margin bar", "found", false);
+      return done();
+    }
+    bar = `[role=dialog] ${bar}`;
+    await sleep(800); // the sheet slides in
+  }
+  const level = `${bar} [data-testid="margin-level"]`;
+  const cross = await clickTo(page, "全仓", bar, level);
+  report(`${site} order form switched to the cross account: its gauge on screen`, cross < 0 ? "no 全仓 button" : ms(cross), "≤ 200 ms", cross >= 0 && cross <= 200);
+  const borrow = await clickTo(page, "借币", bar, 'form[data-testid="margin-borrow-form"]');
+  report(`${site} borrow dialog first opened (a lazy chunk): its form on screen`, borrow < 0 ? "no 借币 button" : ms(borrow), "— (reported)", borrow >= 0 && borrow !== Infinity);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector('form[data-testid="margin-borrow-form"]'), { timeout: 10000 });
+  await sleep(1000);
+
+  // A minute of streaming in margin mode.
+  const from = await page.evaluate(() => performance.now());
+  await sleep(60000);
+  const tasks = await page.evaluate((t0) => window.__perf.longTasks.filter((l) => l.at >= t0).map((l) => l.duration), from);
+  report(
+    `${site} long tasks in a minute of streaming on the cross account${sheet ? " (its order sheet open)" : ""}`,
+    `${tasks.length}${tasks.length ? `, longest ${ms(Math.max(...tasks))}` : ""}`,
+    `≤ ${budgets.longTasks}`,
+    tasks.length <= budgets.longTasks,
+  );
+  await done();
+  // The 20 USDT back to spot (nothing was borrowed).
+  await api(base, "POST", "/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: "20" }, {
+    ...auth,
+    "Idempotency-Key": `${key}-out`,
+  });
+}
+
+const PC_DEVICE = { viewport: { width: 1440, height: 900 } };
+const PHONE_DEVICE = {
+  viewport: { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+  cpu: 4,
+};
+
+async function margins(browser) {
+  await margin(browser, { site: "PC", base: PC, device: PC_DEVICE, budgets: { lcp: 2000, js: 250, longTasks: 0 } });
+  await margin(browser, { site: "phone", base: M, device: PHONE_DEVICE, budgets: { lcp: 2500, js: 200, longTasks: 2 }, sheet: true });
+}
+
 async function memory(browser) {
   const minutes = Number(process.env.MINUTES ?? 30);
   const page = await open(browser, { viewport: { width: 1440, height: 900 } });
@@ -405,6 +611,8 @@ try {
     await memory(browser);
   } else if (process.argv[2] === "table") {
     await table(browser);
+  } else if (process.argv[2] === "margin") {
+    await margins(browser);
   } else {
     await terminal(browser, {
       site: "PC",
@@ -427,6 +635,7 @@ try {
     });
     await markets(browser);
     await table(browser);
+    await margins(browser);
   }
 } finally {
   await browser.close();
