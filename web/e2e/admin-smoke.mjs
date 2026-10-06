@@ -664,9 +664,22 @@ try {
         const d = document.querySelector("[role=dialog]")?.getBoundingClientRect();
         return d && Math.abs(d.right - innerWidth) < 2;
       });
-      for (const tab of ["借款与借还记录", "计息", "杠杆强平", "资产与负债"]) {
+      // Each tab selected and its own table rendered (review DX (a)): a tab that fails to render is not hidden by the last one's.
+      for (const [tab, table] of [
+        ["借款与借还记录", "margin-loan-changes"],
+        ["计息", "margin-interest"],
+        ["杠杆强平", "margin-account-liquidations"],
+        ["资产与负债", "margin-balances"],
+      ]) {
         await clickButton(tab, "[role=dialog]");
-        await page.waitForSelector("[role=dialog] [data-testid=margin-account] table");
+        await page.waitForFunction(
+          (name, label) =>
+            document.querySelector('[role=dialog] [role=tab][aria-selected="true"]')?.textContent?.trim() === name &&
+            !!document.querySelector(`[role=dialog] table[aria-label="${label}"]`),
+          { timeout: 10000 },
+          tab,
+          table,
+        );
       }
       await t.shot("4h-margin-account");
       await page.keyboard.press("Escape");
