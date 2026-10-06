@@ -28,6 +28,9 @@ type docCatalog struct {
 	// fails its move for a moment (nothing moved).
 	down, lost          bool
 	refuse, unavailable string
+	// beforeMove sets a symbol's status just before a move of it (a
+	// change in between the round's read and the move).
+	beforeMove map[string]string
 }
 
 var entityKeys = map[string]struct{ section, key string }{
@@ -134,6 +137,9 @@ func (c *docCatalog) setStatus(entity, symbol, to string) (string, error) {
 	}
 	if symbol == c.unavailable {
 		return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is busy")
+	}
+	if st, ok := c.beforeMove[symbol]; ok {
+		it["status"] = st
 	}
 	from := it["status"].(string)
 	it["status"], it["version"] = to, it["version"].(float64)+1

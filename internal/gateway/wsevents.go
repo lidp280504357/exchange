@@ -446,7 +446,7 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 		if ok, err := marginOf(h, p); ok {
 			return err
 		}
-		if ok, err := liquidationsOf(h, p); ok {
+		if ok, err := liquidationsOf(h, p, env.GetEventId()); ok {
 			return err
 		}
 		if wd, ok := withdrawalOf(p); ok {

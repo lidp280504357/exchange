@@ -216,13 +216,20 @@ func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange
 			continue
 		}
 		attempted = true
-		if _, err := s.moveStatus(ctx, domain.ChangeContractStatus, m.Symbol, m.To, c.Reason, c.RequestedByEmail); err != nil {
+		was, err := s.moveStatus(ctx, domain.ChangeContractStatus, m.Symbol, m.To, c.Reason, c.RequestedByEmail)
+		if err != nil {
 			if waits(err) {
 				return "", true, err
 			}
 			failed++
 			lines = append(lines, line+" failed: "+err.Error())
 			continue
+		}
+		// Moved from another status than the round read (changed in
+		// between, a move instrument-service allowed): said so (review
+		// FD, A68 ②).
+		if was != "" && was != m.From {
+			m.From, line = was, fmt.Sprintf("%s: %s → %s (%s when confirmed)", m.Symbol, was, m.To, m.From)
 		}
 		s.auditCoinMove(ctx, c, m)
 		lines = append(lines, line)

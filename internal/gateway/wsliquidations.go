@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -25,12 +26,45 @@ type liquidationData struct {
 	TradedAt     string `json:"traded_at"`
 }
 
-// liquidationsOf pushes a LiquidationOccurred to its contract's channel;
-// false for any other payload.
+// liquidationsRemembered bounds the event IDs a hub remembers to push a
+// liquidation once: market-data publishes a batch again under the same IDs
+// when its first try failed, which may have reached Kafka in part (C40 ⑥;
+// review FD, A68 ①). Seconds of liquidations at Binance's busiest.
+const liquidationsRemembered = 4096
+
+// recentIDs remembers the last event IDs seen, at most a fixed number.
+type recentIDs struct {
+	mu   sync.Mutex
+	ring []string
+	next int
+	seen map[string]struct{}
+}
+
+// first reports whether id was not seen yet, and remembers it.
+func (r *recentIDs) first(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.seen[id]; ok {
+		return false
+	}
+	if old := r.ring[r.next]; old != "" {
+		delete(r.seen, old)
+	}
+	r.ring[r.next] = id
+	r.next = (r.next + 1) % len(r.ring)
+	r.seen[id] = struct{}{}
+	return true
+}
+
+// liquidationIDs are each hub's recent liquidation event IDs.
+var liquidationIDs sync.Map // *Hub -> *recentIDs
+
+// liquidationsOf pushes a LiquidationOccurred to its contract's channel,
+// once per event ID (eventID empty: always); false for any other payload.
 func liquidationsOf(h *Hub, p interface {
 	MessageIs(proto.Message) bool
 	UnmarshalTo(proto.Message) error
-},
+}, eventID string,
 ) (bool, error) {
 	var l marketv1.LiquidationOccurred
 	if !p.MessageIs(&l) {
@@ -38,6 +72,12 @@ func liquidationsOf(h *Hub, p interface {
 	}
 	if err := p.UnmarshalTo(&l); err != nil {
 		return true, err
+	}
+	if eventID != "" {
+		ids, _ := liquidationIDs.LoadOrStore(h, &recentIDs{ring: make([]string, liquidationsRemembered), seen: map[string]struct{}{}})
+		if !ids.(*recentIDs).first(eventID) {
+			return true, nil
+		}
 	}
 	h.OnMarket(wsMarket{Channel: "liquidations:" + l.GetSymbol(), Data: liquidationData{
 		Symbol: l.GetSymbol(), PositionSide: l.GetPositionSide(), Price: l.GetPrice(), AveragePrice: l.GetAveragePrice(),

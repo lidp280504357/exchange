@@ -323,9 +323,10 @@ cancel_coin_changes() {
     as ADMIN POST "/admin/v1/instruments/changes/$id/cancel" '{"reason":"e2e cleanup"}' >/dev/null
   done
 }
-# BTC has contracts: a 404 here is an admin-service without the route.
+# An admin-service without the route answers 405, or 404 "no such
+# endpoint" (review FD, A68 ③); any other answer is checked.
 as OPERATOR POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"CANCEL_ONLY"}'
-if [[ $STATUS == 404 || $STATUS == 405 ]]; then
+if [[ $STATUS == 405 ]] || [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
   echo "skip a coin's contracts at once: this admin-service is from before A63"
 else
   expect 403 ADMIN_FORBIDDEN "an OPERATOR closes no coin"
