@@ -76,7 +76,8 @@ try {
     () => getComputedStyle([...document.querySelectorAll("header nav .group")].find((g) => g.firstElementChild?.textContent.trim() === "资产").lastElementChild).visibility === "visible",
     { timeout: 5000 },
   );
-  await clickButton("充值", "header nav");
+  // Its entries carry a line under their titles (B135): the deposit one by its link.
+  await page.click('header nav .group a[href="/assets/deposit"]');
   await waitPath("/assets/deposit");
   await page.mouse.move(10, 700);
   await page.waitForFunction(

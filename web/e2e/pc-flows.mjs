@@ -218,8 +218,11 @@ await f.step("1", "every link of the top bar (menus included) and the footer ope
 });
 
 await f.step("1", "a top-bar menu opened over the markets table's stuck header shows its first item on top (合约, 资产)", async () => {
-  // The markets: a new account's assets page is too short for its header to stick.
-  await nav(A, "/markets");
+  // The markets: a new account's assets page is too short for its header to
+  // stick. The spot category, as the page scrolls it: all the markets are
+  // more than 200 rows since every Binance perpetual trades and scroll in a
+  // box of their own.
+  await nav(A, "/markets?cat=spot");
   await menuOnTop(A.page, "合约");
   await menuOnTop(A.page, "资产");
 });

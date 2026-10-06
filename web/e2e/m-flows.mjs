@@ -42,6 +42,18 @@ const fieldError = (tab, selector) => tab.fieldError(selector);
 /** signedInTab opens a tab on device signed in as the flows' account. */
 const signedInTab = (name, device = phone(390), extra = {}) => f.signedIn(user, { name, device, ...extra });
 
+/** clickSettled presses a button by its text, again when the page re-rendered it between finding and pressing it. */
+async function clickSettled(tab, label, scope) {
+  for (let i = 0; ; i++) {
+    try {
+      return await tab.clickButton(label, scope);
+    } catch (e) {
+      if (i >= 4 || !/detached/i.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+}
+
 /** sheet waits for a bottom sheet to be open and still (its slide finished). */
 async function sheet(tab) {
   await tab.page.waitForSelector("[role=dialog][data-state=open]", { visible: true, timeout: 10000 });
@@ -885,9 +897,13 @@ else await f.step("G4", G4, async () => {
     await nav(T, "/futures/BTC-USDT-PERP");
     await T.clickButton("币本位", '[aria-label="合约类型"]');
     await T.waitPath("/futures/BTC-USD-PERP", 15000);
-    // The new contract's terminal settles once its mark price is in (its bars re-render until then).
-    await T.page.waitForFunction(() => /标记价格\s*[\d,]+\.\d/.test(document.body.innerText), { timeout: 20000 });
-    await T.clickButton("开多");
+    // The new contract's terminal settles once its title and mark price are in;
+    // its bars may still re-render a button between finding and pressing it.
+    await T.page.waitForFunction(
+      () => /\bBTCUSD\b/.test(document.querySelector("header")?.innerText ?? "") && /标记价格\s*[\d,]+\.\d/.test(document.body.innerText),
+      { timeout: 20000 },
+    );
+    await clickSettled(T, "开多");
     await sheet(T);
     const field = '[role=dialog] input[aria-label="数量"]';
     await T.page.waitForSelector(field, { visible: true, timeout: 10000 });
