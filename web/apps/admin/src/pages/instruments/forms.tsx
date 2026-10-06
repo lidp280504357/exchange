@@ -422,7 +422,7 @@ export function ContractDrawer({ cfg, contract, onClose }: { cfg: InstrumentConf
         <FormField label={t("admin.listing.fields.fee_tier")}>
           <Select value={v.fee_tier} onValueChange={set("fee_tier")} options={cfg.fee_schedules.map((f) => ({ value: f.tier, label: feeLabel(f) }))} />
         </FormField>
-        <RiskTiers tiers={v.risk_tiers} problems={tiers} onChange={(risk_tiers) => setV({ ...v, risk_tiers })} />
+        <RiskTiers tiers={v.risk_tiers} problems={tiers} onChange={(risk_tiers) => setV({ ...v, risk_tiers })} notionalIn={v.settle_asset || quote} />
         <Footer busy={busy} disabled={!ok} onSave={save} onCancel={onClose} />
       </div>
       {dialog}
@@ -431,7 +431,15 @@ export function ContractDrawer({ cfg, contract, onClose }: { cfg: InstrumentConf
 }
 
 /** RiskTiers edits a contract's risk ladder row by row, marking the cells instrument-service would refuse. */
-function RiskTiers({ tiers, problems, onChange }: { tiers: RiskTier[]; problems: string[]; onChange: (t: RiskTier[]) => void }) {
+function RiskTiers({
+  tiers, problems, onChange, notionalIn,
+}: {
+  tiers: RiskTier[];
+  problems: string[];
+  onChange: (t: RiskTier[]) => void;
+  /** The asset the notionals are in: the contract's settlement asset (coins of a coin-margined one, G0). */
+  notionalIn?: string;
+}) {
   const { t } = useTranslation();
   const bad = (kind: string, i: number) => problems.includes(`${kind}:${i}`);
   const put = (i: number, patch: Partial<RiskTier>) => onChange(tiers.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -450,7 +458,10 @@ function RiskTiers({ tiers, problems, onChange }: { tiers: RiskTier[]; problems:
           {t("admin.listing.addTier")}
         </Button>
       </div>
-      <p className="text-xs text-fg-3">{t("admin.listing.tiersHint")}</p>
+      <p className="text-xs text-fg-3">
+        {t("admin.listing.tiersHint")}
+        {notionalIn ? ` ${t("admin.coinm.tiersIn", { asset: notionalIn })}` : ""}
+      </p>
       <table className="w-full text-left text-sm">
         <thead className="text-xs text-fg-3">
           <tr>

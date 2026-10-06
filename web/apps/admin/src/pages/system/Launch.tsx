@@ -24,7 +24,8 @@ const tone: Record<Status, "success" | "danger" | "neutral" | "warn"> = { OK: "s
 const FIX: Record<Key, string | null> = {
   welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
-  third_party: null, admins: "/admins", domain: "/platform", house: "/house", margin: "/risk",
+  third_party: null, admins: "/admins", domain: "/platform", house: "/house", margin: "/risk", insurance: "/derivatives",
+  coin_m: "/risk",
 };
 
 export const launchKey = ["admin", "launch-checklist"];
@@ -217,6 +218,40 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
         </>
       );
       break;
+    case "insurance": {
+      // Each settlement asset of a contract in trading, its fund now (design 2026-10-06 §2.7).
+      const balances = Object.entries((v.balances as Record<string, string> | undefined) ?? {}).sort(([a], [b]) => a.localeCompare(b));
+      const short = (v.short as string[] | undefined) ?? [];
+      body = (
+        <>
+          {balances.length
+            ? balances.map(([asset, balance], i) => (
+                <span key={asset} className={short.includes(asset) ? "text-danger-strong" : undefined}>
+                  {i > 0 && " · "}
+                  <Num value={balance} unit={asset} />
+                </span>
+              ))
+            : t("admin.launch.nothing")}
+          {short.length > 0 && <span className="text-danger-strong"> · {t("admin.launch.insuranceShort", { assets: short.join(", ") })}</span>}
+        </>
+      );
+      break;
+    }
+    case "coin_m": {
+      // On for everyone without rules is the test server's.
+      const global = v.enabled === true && !v.rules;
+      body = (
+        <>
+          <span className="font-mono text-xs text-fg-3">{String(v.flag)}</span>{" "}
+          <span className={global ? "text-danger-strong" : undefined}>
+            {on(v.enabled)}
+            {global ? ` · ${t("admin.launch.coinMGlobal")}` : ""}
+          </span>
+          {v.rules ? <span className="text-fg-3"> · {t("admin.launch.rules")}</span> : null}
+        </>
+      );
+      break;
+    }
     case "house": {
       const backed = Object.entries((v.backed as Record<string, string> | undefined) ?? {});
       body = (

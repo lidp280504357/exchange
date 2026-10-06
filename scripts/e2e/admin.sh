@@ -480,6 +480,16 @@ else
 fi
 as AUDITOR GET /admin/v1/instruments ""
 check '[.contracts[].symbol] | index("ETH-USDT-PERP") != null' "the instruments list the contracts"
+# Both margin types (G5): the coin-margined contracts with their fields, the
+# linear ones settled in USDT; an admin-service before G5 lists the linear
+# ones alone.
+if jq -e '[.contracts[] | select(.margin_type == "COIN")] | length > 0' <<<"$BODY" >/dev/null; then
+  check '.contracts[] | select(.symbol == "BTC-USD-PERP") | .margin_type == "COIN" and .settle_asset == "BTC" and (.contract_size | tonumber) == 100
+    and .reference_symbol == "BTCUSD_PERP"' "BTC-USD-PERP is coin-margined: settled in BTC, 100 USD a contract, following BTCUSD_PERP"
+  check '.contracts[] | select(.symbol == "ETH-USDT-PERP") | .margin_type == "USDT" and .settle_asset == "USDT"' "ETH-USDT-PERP is linear, settled in USDT"
+else
+  echo "skip the coin-margined contracts: this admin-service lists the linear ones alone (before G5)"
+fi
 as AUDITOR GET /admin/v1/derivatives/risk ""
 expect 200 - "positions near liquidation"
 check '.positions | type == "array"' "a list"
@@ -501,6 +511,17 @@ as AUDITOR GET "/admin/v1/positions?watch=true" ""
 expect 200 - "every user's positions at risk"
 check '(.positions | type) == "array" and (.truncated | type) == "boolean" and all(.positions[]; .margin_ratio == null or (.margin_ratio | tonumber) >= 0)' \
   "a list, riskiest first"
+
+echo "== the insurance fund of every settlement asset (G5)"
+as AUDITOR GET /admin/v1/derivatives/insurance-funds ""
+if [[ $STATUS == 404 ]]; then
+  echo "skip the funds by asset: this admin-service is from before G5"
+else
+  expect 200 - "the insurance fund of every settlement asset"
+  check '.funds[0].asset == "USDT" and ([.funds[].asset] | index("BTC") != null and index("ETH") != null)
+    and all(.funds[]; (.balance | test("^-?[0-9.]+$")) and (.pnl_clearing | test("^-?[0-9.]+$")))' \
+    "USDT first, then BTC and ETH (the coin-margined contracts' settlement assets), each with its balance"
+fi
 
 echo "== a two-person insurance fund contribution"
 as AUDITOR GET /admin/v1/derivatives/insurance-fund ""
@@ -1783,10 +1804,19 @@ check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without 
 echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
 as AUDITOR GET /admin/v1/launch-checklist ""
 expect 200 - "every administrator reads the launch checklist"
-# Sixteen with margin trading's (E5); fifteen from an admin-service before it.
-check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 16 or ((.items | length) == 15 and all(.items[]; .key != "margin")))
+# Eighteen with the contracts' (G5), sixteen with margin trading's (E5);
+# fewer from an admin-service before them.
+check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 18
+    or ((.items | length) == 16 and all(.items[]; .key != "insurance" and .key != "coin_m"))
+    or ((.items | length) == 15 and all(.items[]; .key != "margin")))
   and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
-  "sixteen items, each with its state"
+  "eighteen items, each with its state"
+check '[.items[] | select(.key == "coin_m")] | all(.value.flag == "derivatives.coin_m" and (.value.enabled | type) == "boolean"
+  and (.status == "OK" or (.value.enabled == true and (.value | has("rules") | not))))' \
+  "the coin-margined contracts' item reads its switch, and fails only while it is on for everyone"
+check '[.items[] | select(.key == "insurance")] | all((.value.balances | type) == "object" and (.value.short | type) == "array"
+  and ((.status == "OK") == (.value.short | length == 0)))' \
+  "the insurance item lists each open contract's settlement asset and fails while one has no fund"
 check '[.items[] | select(.key == "margin")] | all(.value.flag == "margin.enabled" and (.value.enabled | type) == "boolean"
   and (.status == "FAIL" or .value.global == false))' \
   "margin trading's item reads its switches, and fails while it is on for everyone"

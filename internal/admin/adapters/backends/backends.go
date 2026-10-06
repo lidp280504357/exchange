@@ -184,7 +184,9 @@ func (i Instruments) List(ctx context.Context) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	contracts, err := i.C.ListContracts(ctx, &instrumentv1.ListContractsRequest{})
+	// Both margin types: the console shows the inverse contracts too
+	// (instrument-service lists the linear ones alone unless asked, G0).
+	contracts, err := i.C.ListContracts(ctx, &instrumentv1.ListContractsRequest{MarginType: "ALL"})
 	if err != nil {
 		return nil, err
 	}

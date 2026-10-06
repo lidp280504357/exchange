@@ -1,6 +1,6 @@
 import { dec, errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, DataTable, ErrorState, Input, Stat, Tabs, type DataColumnMeta, type ColumnDef } from "@exchange/ui";
+import { Badge, Button, DataTable, ErrorState, Input, Select, Tabs, type DataColumnMeta, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 
 import { useMemo, useState } from "react";
@@ -12,8 +12,10 @@ import { FundAction } from "../kit/funds";
 import { Card, Page } from "../kit/Page";
 import { ModeBanner } from "./funds/ModeBanner";
 import { StatusActions } from "./Instruments";
+import { useInstrumentConfig } from "./instruments/config";
 
 type ContractState = AdminSchemas["ContractState"];
+type InsuranceFund = AdminSchemas["InsuranceFund"];
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -45,9 +47,13 @@ function Contracts({ admin }: { admin: Admin }) {
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/derivatives/contracts")).contracts,
     refetchInterval: 15_000,
   });
+  // The settlement asset is the contract's specification's (G0): USDT until a listing says otherwise.
+  const cfg = useInstrumentConfig();
+  const settles = useMemo(() => new Map((cfg.data?.contracts ?? []).map((c) => [c.symbol, c.settle_asset || "USDT"])), [cfg.data]);
   const columns = useMemo<ColumnDef<ContractState, unknown>[]>(
     () => [
       { accessorKey: "symbol", header: t("admin.common.symbol") },
+      { id: "settle", header: t("admin.coinm.settle"), cell: ({ row }) => <span className="font-mono text-xs">{settles.get(row.original.symbol) ?? "USDT"}</span> },
       { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="pairStatus" code={row.original.status} /> },
       {
         id: "reduce",
@@ -80,7 +86,7 @@ function Contracts({ admin }: { admin: Admin }) {
         ),
       },
     ],
-    [t, admin],
+    [t, admin, settles],
   );
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   return <DataTable columns={columns} data={q.data ?? []} getRowId={(c) => c.symbol} loading={q.isPending} density="compact" />;
@@ -105,26 +111,47 @@ function Lift({ symbol }: { symbol: string }) {
   );
 }
 
+/**
+ * The insurance fund of every settlement asset (design 2026-10-06 §2.7):
+ * USDT and each coin-margined contract's coin, contributed to per asset
+ * under the same two-person rules.
+ */
 function Insurance({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const [amount, setAmount] = useState("");
-  const q = useQuery({ queryKey: ["admin", "derivatives", "insurance"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/derivatives/insurance-fund")) });
+  const [asset, setAsset] = useState("USDT");
+  const q = useQuery({
+    queryKey: ["admin", "derivatives", "insurance"],
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/derivatives/insurance-funds")).funds,
+  });
   const valid = dec.isDecimal(amount) && dec.gt(amount, "0");
+  const columns = useMemo<ColumnDef<InsuranceFund, unknown>[]>(
+    () => [
+      { id: "asset", header: t("admin.coinm.asset"), cell: ({ row }) => <span className="font-mono">{row.original.asset}</span> },
+      { id: "fund", header: t("admin.derivatives.fund"), meta: right, cell: ({ row }) => <Num value={row.original.balance} unit={row.original.asset} /> },
+      {
+        id: "pnl", header: t("admin.derivatives.pnlClearing"), meta: right,
+        cell: ({ row }) => <Num value={row.original.pnl_clearing} unit={row.original.asset} signed />,
+      },
+    ],
+    [t],
+  );
+  if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="rounded-3 border border-line-1 bg-bg-1 p-4">
-          <Stat label={t("admin.derivatives.fund")} value={q.data ? <Num value={q.data.balance} decimals={2} unit={q.data.asset} /> : undefined} loading={q.isPending} />
-        </div>
-        <div className="rounded-3 border border-line-1 bg-bg-1 p-4">
-          <Stat label={t("admin.derivatives.pnlClearing")} value={q.data ? <Num value={q.data.pnl_clearing} decimals={2} unit={q.data.asset} signed /> : undefined} loading={q.isPending} />
-        </div>
-      </div>
+      <Card title={t("admin.coinm.funds")}>
+        <p className="mb-3 text-xs text-fg-3">{t("admin.coinm.fundsHint")}</p>
+        <DataTable columns={columns} data={q.data ?? []} getRowId={(f) => f.asset} loading={q.isPending} density="compact" aria-label="insurance funds" />
+      </Card>
       {can(admin, "ledger.adjust.request") && (
         <Card title={t("admin.derivatives.contribute")}>
           <ModeBanner className="mb-4" />
           <div className="flex flex-wrap items-end gap-2">
-            <Input size="sm" value={amount} onValueChange={setAmount} unit="USDT" inputMode="decimal" placeholder="100000" containerClassName="w-56" error={amount !== "" && !valid} />
+            <Select
+              size="sm" value={asset} onValueChange={setAsset} aria-label={t("admin.coinm.asset")}
+              options={(q.data ?? [{ asset: "USDT" }]).map((f) => ({ value: f.asset, label: f.asset }))}
+            />
+            <Input size="sm" value={amount} onValueChange={setAmount} unit={asset} inputMode="decimal" placeholder="100000" containerClassName="w-56" error={amount !== "" && !valid} />
             <FundAction
               trigger={(open) => (
                 <Button size="sm" disabled={!valid} onClick={open}>
@@ -132,14 +159,14 @@ function Insurance({ admin }: { admin: Admin }) {
                 </Button>
               )}
               danger={false}
-              title={t("admin.derivatives.contributeTitle")}
-              target={<Num value={amount} unit="USDT" />}
+              title={t("admin.coinm.contributeAsset", { asset })}
+              target={<Num value={amount} unit={asset} />}
               confirmWord={amount}
               run={async (reason, key) =>
                 adminData(
                   await adminApi.POST("/admin/v1/derivatives/insurance-fund/contributions", {
                     params: { header: { "Idempotency-Key": key } },
-                    body: { asset: "USDT", amount, reason, direct: true },
+                    body: { asset, amount, reason, direct: true },
                   }),
                 )
               }

@@ -200,6 +200,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/derivatives/liquidations", h.liquidations)
 			r.Get("/positions", h.positions)
 			r.Get("/derivatives/insurance-fund", h.insuranceFund)
+			r.Get("/derivatives/insurance-funds", h.insuranceFunds)
 			r.Get("/house", h.house)
 			r.Get("/health", h.health)
 			r.Get("/ledger/reconciliation", h.reconciliation)

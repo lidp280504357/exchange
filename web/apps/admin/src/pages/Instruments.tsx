@@ -212,6 +212,19 @@ function Contracts({
     () => [
       { accessorKey: "symbol", header: t("admin.common.symbol") },
       { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="pairStatus" code={row.original.status} /> },
+      // Coin-margined contracts (G0): their kind, the asset amounts are in, and the face value of a contract.
+      {
+        id: "kind", header: t("admin.coinm.kind"),
+        cell: ({ row }) => (
+          <Badge tone={row.original.margin_type === "COIN" ? "info" : "neutral"}>{t(`admin.coinm.marginType.${row.original.margin_type ?? "USDT"}`)}</Badge>
+        ),
+      },
+      { id: "settle", header: t("admin.coinm.settle"), cell: ({ row }) => <span className="font-mono text-xs">{row.original.settle_asset || row.original.quote_asset}</span> },
+      {
+        id: "size", header: t("admin.coinm.size"), meta: right,
+        cell: ({ row }) =>
+          row.original.margin_type === "COIN" && row.original.contract_size ? t("admin.coinm.sizeValue", { size: row.original.contract_size }) : <span className="text-fg-3">—</span>,
+      },
       { accessorKey: "index_symbol", header: t("admin.instruments.index") },
       { id: "tick", header: t("admin.instruments.tick"), meta: right, cell: ({ row }) => <Num value={row.original.tick_size} /> },
       { id: "lot", header: t("admin.instruments.lot"), meta: right, cell: ({ row }) => <Num value={row.original.lot_size} /> },

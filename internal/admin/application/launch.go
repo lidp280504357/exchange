@@ -30,11 +30,12 @@ const (
 )
 
 // The launch items in the order the design lists them, then HOUSE's
-// (review ㉚: design §3 row E) and margin trading's (margin design
-// 2026-10-06 §8, E5).
+// (review ㉚: design §3 row E), margin trading's (margin design
+// 2026-10-06 §8, E5) and the contracts' (coin-margined design 2026-10-06
+// §2.7, G5).
 var launchKeys = []string{
 	"welcome_credits", "test_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
-	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin",
+	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin", "insurance", "coin_m",
 }
 
 // launchDefaultName is the name the platform is seeded with (migration
@@ -137,10 +138,13 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 	if err != nil {
 		set("house", LaunchUnknown, map[string]any{"flag": flags.KeyHouseLiquidity})
 		set("margin", LaunchUnknown, map[string]any{"flag": flags.KeyMarginEnabled})
+		set("coin_m", LaunchUnknown, map[string]any{"flag": flags.KeyCoinM})
 	} else {
 		put("house")(s.launchHouse(ctx, flagged[flags.KeyHouseLiquidity]))
 		put("margin")(launchMargin(flagged))
+		put("coin_m")(launchCoinM(flagged))
 	}
+	put("insurance")(s.launchInsurance(ctx))
 
 	out := LaunchChecklist{Ready: true, CheckedAt: s.Now()}
 	for _, key := range launchKeys {

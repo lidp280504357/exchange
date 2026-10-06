@@ -2174,7 +2174,10 @@ export interface paths {
          *     pair is made of), then margin (margin design 2026-10-06 §8):
          *     margin.enabled off, or on with margin.liquidation on and neither it
          *     nor margin.auto_borrow on for everyone without rules (the test
-         *     server's are). Every administrator reads it.
+         *     server's are), then the contracts' (coin-margined design 2026-10-06
+         *     §2.7): insurance, the fund of every open contract's settlement
+         *     asset above zero, and coin_m, derivatives.coin_m never on for
+         *     everyone. Every administrator reads it.
          */
         get: operations["getLaunchChecklist"];
         put?: never;
@@ -2886,6 +2889,33 @@ export interface paths {
          *     derivatives.read.
          */
         get: operations["getInsuranceFund"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/insurance-funds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The insurance fund of every settlement asset
+         * @description One InsuranceFund per asset a listed contract settles in (USDT, and
+         *     the base asset of each coin-margined contract) and per other asset
+         *     the fund holds: USDT first, then by asset (coin-margined design
+         *     2026-10-06 §2.7). A liquidation's loss beyond its margin is paid
+         *     from its settlement asset's fund, margin trading's from the same
+         *     rows. Contributions as POST
+         *     /admin/v1/derivatives/insurance-fund/contributions with the asset.
+         *     Needs derivatives.read.
+         */
+        get: operations["listInsuranceFunds"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4252,8 +4282,15 @@ export interface components {
             expected_version: number;
         };
         LaunchItem: {
-            /** @enum {string} */
-            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin";
+            /**
+             * @description insurance (coin-margined design 2026-10-06 §2.7): the insurance
+             *     fund of the settlement asset of every contract in TRADING holds
+             *     something (value: balances by asset, contracts by asset, short:
+             *     the assets without); coin_m: derivatives.coin_m off, or on by
+             *     rules, never for everyone (value: flag, enabled, rules).
+             * @enum {string}
+             */
+            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
@@ -5064,6 +5101,17 @@ export interface components {
             /** @enum {string} */
             status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
             version?: number;
+            /**
+             * @description USDT (linear, the default) or COIN (inverse, quoted in USD, settled in the base asset); fixed once listed (G0).
+             * @enum {string}
+             */
+            margin_type?: "USDT" | "COIN";
+            /** @description The asset amounts are in; a risk tier's max_notional is in it (coins of an inverse contract). */
+            settle_asset?: string;
+            /** @description An inverse contract's face value in USD; quantities are whole contracts. */
+            contract_size?: components["schemas"]["Decimal"];
+            /** @description The Binance contract it follows (BTCUSDT, BTCUSD_PERP); may change. */
+            reference_symbol?: string;
         };
         RiskTier: {
             max_notional: components["schemas"]["Decimal"];
@@ -5369,6 +5417,17 @@ export interface components {
             /** @enum {string} */
             status?: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
             version?: string;
+            /**
+             * @description USDT for a linear contract, COIN for an inverse (coin-margined) one such as BTC-USD-PERP (G0).
+             * @enum {string}
+             */
+            margin_type?: "USDT" | "COIN";
+            /** @description The asset its margin, PnL, fees and funding are in (USDT, or the base asset of an inverse contract). */
+            settle_asset?: string;
+            /** @description An inverse contract's face value in USD ("0" for a linear one, whose quantities are in the base asset). */
+            contract_size?: components["schemas"]["Decimal"];
+            /** @description The Binance contract it follows (BTCUSDT, BTCUSD_PERP); empty for none (the platform coin's). */
+            reference_symbol?: string;
         };
         ContractState: {
             symbol: string;
@@ -9931,6 +9990,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InsuranceFund"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInsuranceFunds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The funds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        funds: components["schemas"]["InsuranceFund"][];
+                    };
                 };
             };
             default: components["responses"]["Error"];

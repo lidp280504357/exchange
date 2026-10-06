@@ -284,6 +284,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - 每个永续合约的状态、只减仓（原因与时间、谁解除的）、标记价是否新鲜、持仓量与持仓数。
 - 解除只减仓（`derivatives.write`，标记价恢复后才可操作，审计 `admin.derivatives.reduce_only_lifted`）；改合约状态（交易参数，只有 ADMIN，见「交易参数的护栏」；暂停立即生效）。
 - 保险基金余额与 `PNL_CLEARING`；注资（资金操作 `INSURANCE_FUND`，金额为正；单人模式限额内立即记账，否则另一位管理员批准；批准后账本 `FundInsurance` 以幂等键 `approval:<id>` 记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），需开关 `ledger.manual_adjustment`），审计 `admin.derivatives.insurance_*`。
+- 币本位合约（设计 2026-10-06 §2.7，G5 第一部分）：后台读 instrument-service 的合约时要两种保证金类型（`margin_type=ALL`），`/admin/v1/instruments` 与配置导出的合约都带 `margin_type`（`USDT`/`COIN`）、`settle_asset`、`contract_size`（币本位的面值，美元）与 `reference_symbol`；「交易品种」的合约页签显示类型、结算币与面值，合约编辑里的档位名义价值按结算币标单位（币本位以币计）；本页的合约表加结算币列。保险基金页签按资产列出（`GET /admin/v1/derivatives/insurance-funds`：USDT 在前，再是各未下架合约的结算币与基金里有余额的其他资产），注资可选资产，双人规则不变（估值用 `<资产>-USDT` 价）。合约状态、持仓等仍来自 derivatives-service，它在 G1 之前只列线性合约。
 - 强平监控与强平记录 C3 起各有一页（见上）。
 
 ### HOUSE 敞口
@@ -474,6 +475,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 域名 `domain` | 平台资料的 `domain` 与访问后台用的主机名（nginx 转来的 Host） | 后台在 admin.<资料里的域名> | 平台设置 |
 | HOUSE 报价与资金 `house` | 开关 `market.house_liquidity` 与 HOUSE 库存（MARKET_MAKER 账户） | 开，且每个组成交易对的背书资产（有充值或提现的资产，如 USDT、BTC、ETH；没有交易对的托管方测试资产不算）余额大于 0（复审 ㉚ 补的第 15 项，设计 §3 E 行） | HOUSE 敞口 |
 | 杠杆交易 `margin` | 开关 `margin.enabled`、`margin.liquidation`、`margin.auto_borrow` | 关；或开着且强平开着，杠杆与自动借款都按用户或地区规则开放（对所有人全局打开即未达标，测试服现在如此，协调会话 2026-10-06 07:40 ③；杠杆设计 §8，E5） | 功能开关 |
+| 合约保险基金 `insurance` | 账本 `INSURANCE_FUND`（各资产）与交易中的合约 | 每个 TRADING 合约的结算币（U 本位为 USDT，币本位为该币）保险基金余额大于 0（币本位设计 2026-10-06 §2.7，协调会话 20:45，G5） | 合约与保险基金 |
+| 币本位合约 `coin_m` | 开关 `derivatives.coin_m` | 关；或按用户或地区规则开放（对所有人全局打开即未达标，测试服现在如此） | 功能开关 |
 
 ### 审计
 
