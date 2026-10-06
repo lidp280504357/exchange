@@ -4,7 +4,7 @@ import { useContentMode } from "../platform/hooks";
 import { useSettings } from "../settings/store";
 import { frontString, parseFrontMatter } from "./frontmatter";
 import { useModeKnown } from "./hooks";
-import { articleModes, bundledFile, CONTENT_FALLBACK, fetchOne, shownIn, type ContentLocale } from "./loader";
+import { articleModes, bundledFile, CONTENT_FALLBACK, fetchOne, listedAs, shownIn, type ContentLocale } from "./loader";
 import { renderByMode, type ContentMode } from "./markdown";
 
 // The home page's hero (design 2026-10-04 §4.4, slug home-hero of the HOME
@@ -30,14 +30,24 @@ export function heroFrom(title: string, subtitle: string, body: string): Hero {
   return { title: title.trim(), subtitle: subtitle.trim(), cta: m && href ? { text: m[1]!.trim(), href } : null };
 }
 
-/** loadHero returns the hero in a language and mode, null when the console took it off or there is none. */
+/**
+ * loadHero returns the hero in a language and mode, null when the console
+ * took it off or there is none. The home section's list says whether the
+ * console published one (listedAs): the hero itself is asked for only
+ * then, or when the list cannot tell, so a site without one logs no 404
+ * (B117).
+ */
 export async function loadHero(locale: ContentLocale, mode: ContentMode): Promise<Hero | null> {
-  try {
-    const a = await fetchOne("home", "home-hero", locale);
-    return heroFrom(a.title, a.summary, renderByMode(a.body, mode));
-  } catch (err) {
-    if (err instanceof ApiError && err.code === "NOTIFY_ARTICLE_WITHDRAWN") return null;
-    // Not published (404) or the API out of reach: the bundled draft.
+  const listed = await listedAs("home", "home-hero", locale);
+  if (listed === "withdrawn") return null;
+  if (listed !== "none") {
+    try {
+      const a = await fetchOne("home", "home-hero", locale);
+      return heroFrom(a.title, a.summary, renderByMode(a.body, mode));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "NOTIFY_ARTICLE_WITHDRAWN") return null;
+      // Not published (404) or the API out of reach: the bundled draft.
+    }
   }
   const src = (await bundledFile("home", "home-hero", locale)) ?? (await bundledFile("home", "home-hero", CONTENT_FALLBACK));
   if (src === null) return null;

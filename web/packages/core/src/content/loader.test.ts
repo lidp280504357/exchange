@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadHero } from "./hero";
 import { plainText, type Block, type Inline } from "./markdown";
 import {
   bundledSource,
+  forgetPublished,
   HELP_CATEGORIES,
   indexFiles,
   latestArticles,
@@ -20,6 +22,7 @@ import {
 // bundled files are what the tests read, unless a test answers otherwise.
 let api: (url: string) => Response = () => new Response(JSON.stringify({ code: "COMMON_NOT_FOUND", message: "none" }), { status: 404 });
 beforeEach(() => {
+  forgetPublished();
   vi.stubGlobal("fetch", (input: Request | string) => Promise.resolve(api(typeof input === "string" ? input : input.url)));
 });
 afterEach(() => {
@@ -248,5 +251,62 @@ describe("the console's articles", () => {
       throw new TypeError("offline");
     };
     expect((await loadArticles("help", "en", "formal")).length).toBe(listSlugs("help").length);
+  });
+});
+
+describe("the section's list asked first (B117)", () => {
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  const path = (url: string) => new URL(url, "https://astras.vip").pathname;
+  const summary = (slug: string) => ({
+    slug, category: "notice", pinned: false, order: 0, title: `T ${slug}`, summary: "", published_at: "2026-10-02T08:00:00Z", locale: "zh-CN", fallback: false, version: 1,
+  });
+  // answer serves the section's list at listPath and records every path asked for.
+  const answer = (listPath: string, list: unknown, article?: unknown) => {
+    const asked: string[] = [];
+    api = (url) => {
+      const p = path(url);
+      asked.push(p);
+      if (p === listPath) return json(list);
+      if (article !== undefined && p.startsWith(`${listPath}/`)) return json(article);
+      return new Response(JSON.stringify({ code: "COMMON_NOT_FOUND", message: "none" }), { status: 404 });
+    };
+    return asked;
+  };
+
+  it("reads a page the console has not published from its file, never asking the API for it (no 404 in the browser)", async () => {
+    const asked = answer("/v1/legal", { items: [], withdrawn: [] });
+    expect((await loadArticle("legal", "terms", "zh-CN", "test"))?.slug).toBe("terms");
+    expect(asked).toEqual(["/v1/legal"]);
+  });
+
+  it("asks for an article the list shows, and leaves out one it says was taken off without asking", async () => {
+    const asked = answer("/v1/legal", { items: [summary("terms")], withdrawn: ["privacy"] }, { ...summary("terms"), title: "Console terms", body: "Console body." });
+    expect((await loadArticle("legal", "terms", "zh-CN", "test"))?.title).toBe("Console terms");
+    expect(await loadArticle("legal", "privacy", "zh-CN", "test")).toBeNull();
+    expect(asked).toEqual(["/v1/legal", "/v1/legal/terms"]);
+  });
+
+  it("asks for the article when a full first page cannot tell", async () => {
+    const slug = listSlugs("help")[0]!;
+    const asked = answer("/v1/help", { items: Array.from({ length: 100 }, (_, i) => summary(`old-${i}`)), withdrawn: [] });
+    expect((await loadArticle("help", slug, "zh-CN", "test"))?.slug).toBe(slug);
+    expect(asked).toEqual(["/v1/help", `/v1/help/${slug}`]);
+  });
+
+  it("asks the list once a minute for a section and language", async () => {
+    const asked = answer("/v1/legal", { items: [], withdrawn: [] });
+    await loadArticle("legal", "terms", "zh-CN", "test");
+    await loadArticle("legal", "fees", "zh-CN", "test");
+    await loadArticles("legal", "zh-CN", "test");
+    expect(asked).toEqual(["/v1/legal"]);
+  });
+
+  it("draws the home page's hero from its draft when the console published none, never asking for it; none once taken off", async () => {
+    const asked = answer("/v1/home", { items: [], withdrawn: [] });
+    expect((await loadHero("zh-CN", "test"))?.title.length).toBeGreaterThan(0);
+    expect(asked).toEqual(["/v1/home"]);
+    forgetPublished();
+    answer("/v1/home", { items: [], withdrawn: ["home-hero"] });
+    expect(await loadHero("zh-CN", "test")).toBeNull();
   });
 });

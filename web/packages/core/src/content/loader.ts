@@ -206,6 +206,48 @@ async function fetchPublished(section: ContentSection, locale: ContentLocale): P
   return { articles: page.items.map((s) => fromPublished(section, s)), withdrawn: new Set(page.withdrawn ?? []) };
 }
 
+// The lists ask for this many: a shorter page is the whole list.
+const LIST_LIMIT = 100;
+// How long a section's list is reused: what the console publishes shows
+// within a minute, as its other settings do.
+const LIST_FOR = 60_000;
+const lists = new Map<string, { at: number; list: Promise<Published & { slugs: ReadonlySet<string>; whole: boolean }> }>();
+
+/** publishedList is fetchPublished's answer for a section and language, asked at most once a minute (a failure is not kept). */
+function publishedList(section: ContentSection, locale: ContentLocale) {
+  const key = `${section}|${locale}`;
+  const hit = lists.get(key);
+  if (hit && Date.now() - hit.at < LIST_FOR) return hit.list;
+  const list = fetchPublished(section, locale).then((p) => ({ ...p, slugs: new Set(p.articles.map((a) => a.slug)), whole: p.articles.length < LIST_LIMIT }));
+  list.catch(() => {
+    if (lists.get(key)?.list === list) lists.delete(key);
+  });
+  lists.set(key, { at: Date.now(), list });
+  return list;
+}
+
+/** forgetPublished drops the lists kept by publishedList (tests). */
+export function forgetPublished() {
+  lists.clear();
+}
+
+/**
+ * listedAs tells from the section's list whether the console published
+ * slug, took it off, or published none, so that a page asks for an
+ * article only when there is one: the API answers 404 for an article the
+ * console has none of, which the browser logs as a failed request on every
+ * page with a bundled draft (B117, the home page's hero and the fixed
+ * pages). "unknown" when the list is out of reach or is a full first page
+ * (an older article is still there by its link).
+ */
+export async function listedAs(section: ContentSection, slug: string, locale: ContentLocale): Promise<"listed" | "withdrawn" | "none" | "unknown"> {
+  const list = await publishedList(section, locale).catch(() => null);
+  if (!list) return "unknown";
+  if (list.withdrawn.has(slug)) return "withdrawn";
+  if (list.slugs.has(slug)) return "listed";
+  return list.whole ? "none" : "unknown";
+}
+
 /** The console took the article off: no file stands in for it. */
 const WITHDRAWN = "withdrawn";
 
@@ -241,10 +283,14 @@ export function fetchOne(section: ContentSection, slug: string, locale: ContentL
 /**
  * loadArticle loads one article in a language and mode: the console's
  * when it published one, else the bundled file; null when neither, or
- * when the console took it off.
+ * when the console took it off. The section's list says which (listedAs);
+ * the article itself is asked for only when listed, or when the list
+ * cannot tell.
  */
 export async function loadArticle(section: ContentSection, slug: string, locale: ContentLocale, mode: ContentMode): Promise<Article | null> {
-  const published = await fetchPublishedArticle(section, slug, locale, mode).catch(() => null);
+  const listed = await listedAs(section, slug, locale);
+  if (listed === "withdrawn") return null;
+  const published = listed === "none" ? null : await fetchPublishedArticle(section, slug, locale, mode).catch(() => null);
   if (published === WITHDRAWN) return null;
   return published ?? loadBundledArticle(section, slug, locale, mode);
 }
@@ -280,7 +326,7 @@ export function sortArticles<T extends ArticleMeta>(section: ContentSection, lis
 export async function loadArticles(section: ContentSection, locale: ContentLocale, mode: ContentMode): Promise<Article[]> {
   const [bundled, published] = await Promise.all([
     Promise.all(listSlugs(section).map((slug) => loadBundledArticle(section, slug, locale, mode))),
-    fetchPublished(section, locale).catch((): Published => ({ articles: [], withdrawn: new Set() })),
+    publishedList(section, locale).catch((): Published => ({ articles: [], withdrawn: new Set() })),
   ]);
   const bySlug = new Map<string, Article>();
   for (const a of bundled) if (a && !published.withdrawn.has(a.slug)) bySlug.set(a.slug, a);
