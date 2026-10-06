@@ -136,6 +136,17 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
   - 写稿约定：只在测试环境成立的话（Sepolia、模拟短信、1 分钟冷却、「测试环境」字样）放进 `:::test`，需要正式说法的写 `:::formal`；充提与费率的正式说法指向充值、提现页与费率说明，不点名网络；两种模式都不写死注册赠送的数额。模拟资金的提示由内容页底部的提示统一给出，稿子里不再各写一句。模式块里再出现的 `:::test`、`:::formal` 行按普通文字显示；模式块里单独一行 `:::` 就结束这个模式块，所以块里不要再套其它 `:::` 容器（它的结束行会提前结束模式块）。core 的单测断言正式模式下的稿子不含这些字样，演练（`launch-drill.sh`）在两种模式下检查帮助中心的渲染结果。
   - 查询键带上模式（`contentKeys.list(section, locale, mode)`），切换模式是一次新的查询。
 
+## 语言：简体、繁体与英文（繁体设计 2026-10-06，G7）
+
+- 语言有 `zh-CN`（简体中文）、`zh-TW`（繁體中文）、`en`（core 的 `LOCALES`）；菜单里每种语言用它自己的文字写名称（`LOCALE_NAMES`，不随界面语言翻译）。首次访问取浏览器的第一语言：`zh-TW`、`zh-HK`、`zh-MO`、`zh-Hant*` 为繁体，其它中文为简体，其余为英文（core `localeOf`）；之后按设置，存在本机。切换入口：PC 顶栏的地球菜单（悬停或键盘聚焦展开，三种语言）、页脚、设置页；手机站设置页。
+- `<html lang>` 跟着语言；繁体时字体栈换成繁体字体（ui `styles/index.css` 的 `:root:lang(zh-TW)`：PingFang TC、Microsoft JhengHei、Noto Sans TC、Hiragino Sans TC 排在简体字体之前、系统界面字体之后，拉丁字母与简体时一致；不下载字体文件）。图表的字体随 `lang` 一起更新。
+- 繁体文案由简体生成，不手写：`web/packages/core/scripts/gen-zh-tw.mjs`（`pnpm i18n`，即 `task web:i18n`）用 OpenCC 的简→台湾正体（含台湾用语，s2twp）转换，再叠加术语表 `web/packages/core/src/i18n/zh-TW.overrides.ts`。术语表两站共用，按币安繁体站的用语：數據、數位資產、電子郵件、手機號碼、用戶、帳本、登出、註銷（帐户注销，不是登出）、綁定、審核、查看、類型、項目、權限、代碼（币种代码）、重設、取得等；「臺」一律写「台」，「賬」写「帳」。生成物入库：core `src/i18n/zh-TW.ts`、ui `src/i18n.zh-TW.ts`、两站 `src/i18n.zh-TW.ts` 与各分区的 `src/i18n/<分区>.zh-TW.ts`、内容 `content/<栏目>/<slug>.zh-TW.md`、币种资料 `src/coins.zh-TW.ts`（名称与简介）。
+- 改文案只改简体（`zh-CN`）与英文，然后 `pnpm i18n` 并提交生成的文件；`task web:check`（CI 同）用 `pnpm i18n:check` 核对生成物与源一致，不一致就失败。某个词转得不对就加进术语表（左边是简体词，右边是繁体写法；最长匹配优先，OpenCC 自己认识的更长的词仍按它的，如 数据库 → 資料庫），再生成。`node scripts/gen-zh-tw.mjs --convert 文字…` 试转换；`--review` 列出台湾用语的替换、术语表的命中与一对多字的转换结果，供人工过一遍。三种语言的键集合一致由两站的 `src/i18n.test.ts` 检查（core、ui、外壳与每个分区）；两站的页面渲染测试也跑繁体（`pages.tw.test.tsx`）。
+- 回落：某个键缺繁体时显示简体（i18next 的 `fallbackLng`）。内容缺繁体文件、后台文章没写繁体时显示简体，并提示「本文暫無繁體中文版，以下為簡體中文原文」。平台资料的文本（`textOf`）与后台写的币种简介同样回落简体；后台只写了简体简介时，繁体页面显示后台的简体，而不是仓库里较旧的繁体。
+- 后台（`admin.astras.vip`）不提供繁体界面：`initI18n` 的参数里没有 `zh-TW` 的应用，在繁体浏览器上按简体显示（存下的语言也改回简体）。后台内容编辑器的繁体页签是 G7b（后台会话）。
+- 体积：繁体文案和英文一样，与各自的页面块打在一起，不另外请求。入口 JS 增加约 3.5 KB（本机 gzip -9：PC 158.9 → 162.4 KB，手机站 146.4 → 150.0 KB）；全部 JS 约增加 16 KB，主要在币种资料块（约 3.7 KB）与各分区的块（0.3–2.8 KB）。
+- 冒烟：两站在设置页切到繁体，检查首页、行情、交易、资产、帮助五页的繁体文字与繁体字体，截图到 `SHOTS`（检查按钮、页签与表头在繁体下的宽度），再切回简体。
+
 ## 无障碍与状态
 
 - 减少动效：系统开了"减少动态效果"时，两个用户站的 `MotionConfig` 带 `skipAnimations={prefersReducedMotion()}`（`packages/ui/src/lib/motion.ts`），motion 的淡入、错开入场一并跳过（只设 `reducedMotion="user"` 时不透明度动画仍在）；全局 CSS 把动画与过渡的时长和延迟都清零（`packages/ui/src/styles/index.css`），`Drawer`、`Sheet` 也各自用 `useReducedMotion`。
