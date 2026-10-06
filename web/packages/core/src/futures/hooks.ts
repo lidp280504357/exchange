@@ -3,27 +3,19 @@ import { coinProfile } from "../coins";
 import { buildRows, type MarketRow } from "../markets/list";
 import type { MarketRows } from "../markets/hooks";
 import { useContracts, usePairs } from "../trading/pairs";
-import { useAllContracts, useFuturesOverview, type ContractSpec, type FuturesOverviewItem } from "./data";
+import { useFuturesOverview, type ContractSpec, type FuturesOverviewItem } from "./data";
 import { groupOf, openContracts, overviewRows, type MarginGroup, type OverviewOf, type OverviewRow } from "./list";
 
-// Hooks over ./list for the pages: the market rows with the contracts of
-// both margin types the terminal can open, and the overview's rows.
+// Hooks over ./list for the pages: the market rows with the contracts the
+// futures terminal opens (both margin types), and the overview's rows.
 
-/** useOpenContracts lists the contracts of both margin types the futures terminal can open (openContracts). */
-export function useOpenContracts(enabled = true): { contracts: ContractSpec[]; loading: boolean; error: unknown; refetch: () => void } {
-  const all = useAllContracts(enabled);
+/** useOpenContracts lists the contracts the futures terminal opens: its own list (useContracts), none still PREPARE. */
+export function useOpenContracts(): { contracts: ContractSpec[]; loading: boolean; error: unknown; refetch: () => void } {
   const terminal = useContracts();
-  const contracts = useMemo(
-    () => openContracts(all.data?.contracts ?? terminal.data?.contracts ?? [], terminal.data?.contracts ?? []),
-    [all.data, terminal.data],
-  );
-  const { refetch: refetchAll } = all;
+  const contracts = useMemo(() => openContracts(terminal.data?.contracts ?? []), [terminal.data]);
   const { refetch: refetchTerminal } = terminal;
-  const refetch = useCallback(() => {
-    void refetchAll();
-    void refetchTerminal();
-  }, [refetchAll, refetchTerminal]);
-  return { contracts, loading: all.isPending && terminal.isPending, error: all.error ?? terminal.error, refetch };
+  const refetch = useCallback(() => void refetchTerminal(), [refetchTerminal]);
+  return { contracts, loading: terminal.isPending, error: terminal.error, refetch };
 }
 
 export type FuturesMarketRows = MarketRows & {
@@ -32,9 +24,8 @@ export type FuturesMarketRows = MarketRows & {
 };
 
 /**
- * useFuturesMarketRows is the market list's rows (useMarketRows) with the
- * contracts of both margin types the terminal can open, and each
- * contract's group.
+ * useFuturesMarketRows is the market list's rows (useMarketRows) with
+ * each contract's group (USDⓈ-M or COIN-M).
  */
 export function useFuturesMarketRows(): FuturesMarketRows {
   const pairs = usePairs();
@@ -69,7 +60,7 @@ function coinNames(base: string): string[] {
   return p ? [p.name["zh-CN"], p.name["zh-TW"], p.name.en] : [];
 }
 
-/** useOverviewRows is the futures data overview's rows: every contract the terminal can open, with its figures. */
+/** useOverviewRows is the futures data overview's rows: every contract the terminal opens, with its figures. */
 export function useOverviewRows(): { rows: OverviewRow[]; loading: boolean; error: unknown; refetch: () => void; updatedAt: number } {
   const overview = useFuturesOverview();
   const open = useOpenContracts();

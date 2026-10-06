@@ -64,6 +64,7 @@ export default {
       groups: { usdt: "U 本位", coin: "幣本位" },
       search: "搜尋合約",
       count: "{{count}} 個合約",
+      count_one: "{{count}} 個合約",
       totals: {
         oiValue: "持倉總價值(USD)",
         volume: "24h 成交額(USD)",

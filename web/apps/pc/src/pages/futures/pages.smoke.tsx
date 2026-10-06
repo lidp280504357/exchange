@@ -56,7 +56,6 @@ function seed(terminal: ContractSpec[]) {
   qc.setQueryData(qk.platform, DEFAULT_PROFILE);
   qc.setQueryData(qk.pairs, { pairs: [] });
   qc.setQueryData(qk.contracts, { contracts: terminal });
-  qc.setQueryData(futuresKeys.contracts, { contracts: all });
   qc.setQueryData(futuresKeys.overview, { contracts: overview });
 }
 

@@ -26,16 +26,14 @@ export function groupOf(c: { margin_type?: string | null } | undefined): MarginG
 }
 
 /**
- * openContracts keeps the contracts the futures terminal can open: none
- * still PREPARE (Binance's perpetuals are listed PREPARE and open in
- * batches; the sites leave them out until then, review EY), and the
- * coin-margined ones only once the terminal's own list (useContracts)
- * has them, so that no list links to a contract the terminal does not
- * know yet (the sites list coin-margined contracts from G4 on).
+ * openContracts keeps the contracts a list shows: none still PREPARE
+ * (Binance's perpetuals are listed PREPARE and open in batches; the sites
+ * leave them out until then, review EY). The lists take the terminal's
+ * own list (useContracts), so they never link to a contract the terminal
+ * does not open: the coin-margined ones came with G4 part 2.
  */
-export function openContracts<C extends { margin_type?: string | null; status?: string }>(all: readonly C[], terminal: readonly { margin_type?: string | null }[]): C[] {
-  const coin = terminal.some((c) => c.margin_type === "COIN");
-  return all.filter((c) => c.status !== "PREPARE" && (coin || c.margin_type !== "COIN"));
+export function openContracts<C extends { status?: string }>(list: readonly C[]): C[] {
+  return list.filter((c) => c.status !== "PREPARE");
 }
 
 /** The sort keys of the futures category: the list's, the open interest (by its USD value) and the funding rate. */

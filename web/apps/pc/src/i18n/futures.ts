@@ -68,6 +68,7 @@ export default {
         groups: { usdt: "U 本位", coin: "币本位" },
         search: "搜索合约",
         count: "{{count}} 个合约",
+        count_one: "{{count}} 个合约",
         totals: {
           oiValue: "持仓总价值(USD)",
           volume: "24h 成交额(USD)",
@@ -162,6 +163,7 @@ export default {
         groups: { usdt: "USDⓈ-M", coin: "COIN-M" },
         search: "Search contracts",
         count: "{{count}} contracts",
+        count_one: "{{count}} contract",
         totals: {
           oiValue: "Open interest (USD)",
           volume: "24h volume (USD)",

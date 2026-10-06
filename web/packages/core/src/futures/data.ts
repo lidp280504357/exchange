@@ -54,8 +54,6 @@ export const FUTURES_DATA_EVERY = 60_000;
 export const FUTURES_OVERVIEW_EVERY = 30_000;
 
 export const futuresKeys = {
-  /** Every listed contract of both margin types. */
-  contracts: ["market", "contracts", "ALL"] as const,
   overview: ["market", "futures", "overview"] as const,
   data: (symbol: string, metric: FuturesMetric, period: string, limit: number) => ["market", "futures", "data", symbol, metric, period, limit] as const,
   liquidations: (symbol: string) => ["market", "futures", "liquidations", symbol] as const,
@@ -82,21 +80,6 @@ export function hasFuturesData(c: Pick<ContractSpec, "reference_symbol"> | undef
 function retryServerErrors(failures: number, error: unknown): boolean {
   if (error instanceof ApiError && error.status < 500) return false;
   return failures < 1;
-}
-
-/**
- * useAllContracts lists the contracts of both margin types (the default
- * list keeps to the linear ones), cached for a minute.
- */
-export function useAllContracts(enabled = true) {
-  return useQuery({
-    queryKey: futuresKeys.contracts,
-    queryFn: () => unwrap(marketApi.GET("/v1/market/contracts", { params: { query: { margin_type: "ALL" } } })),
-    enabled,
-    staleTime: 60_000,
-    refetchInterval: enabled ? 60_000 : false,
-    retry: retryServerErrors,
-  });
 }
 
 /** useFuturesOverview follows every contract's mark, funding, open interest and day, read again every 30 seconds. */

@@ -145,17 +145,13 @@ describe("liquidations", () => {
 describe("contract lists", () => {
   const all = [contract("BTC-USDT-PERP"), contract("BTC-USD-PERP"), contract("ETH-USD-PERP"), contract("ASTRA-USDT-PERP")];
 
-  it("groups by margin type and keeps the coin-margined ones until the terminal lists them", () => {
+  it("groups by margin type and leaves out the contracts still PREPARE", () => {
     expect(parseMarginGroup("coin")).toBe("coin");
     expect(parseMarginGroup("x")).toBe("usdt");
     expect(groupOf(all[1])).toBe("coin");
     expect(groupOf({})).toBe("usdt");
-    const linear = all.filter((c) => c.margin_type === "USDT");
-    expect(openContracts(all, linear).map((c) => c.symbol)).toEqual(["BTC-USDT-PERP", "ASTRA-USDT-PERP"]);
-    expect(openContracts(all, all)).toHaveLength(4);
-    // A contract still PREPARE (listed, not opened yet) is left out either way.
     const listed = [...all, contract("SOL-USDT-PERP", { status: "PREPARE" }), contract("SOL-USD-PERP", { status: "PREPARE" })];
-    expect(openContracts(listed, all)).toHaveLength(4);
+    expect(openContracts(listed).map((c) => c.symbol)).toEqual(all.map((c) => c.symbol));
   });
 
   it("sorts the futures category by open interest value and funding", () => {
