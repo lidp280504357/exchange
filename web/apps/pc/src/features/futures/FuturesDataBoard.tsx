@@ -72,7 +72,7 @@ export default FuturesDataBoard;
 
 function MetricSlot({ contract, metric, period, active, height }: { contract: ContractSpec; metric: Metric; period: FuturesPeriod; active: boolean; height: number }) {
   const labels = useFuturesLabels();
-  const q = useFuturesData(contract.symbol, metric, period, { enabled: active });
+  const q = useFuturesData(contract.symbol, metric, period, { enabled: active, fundingHours: contract.funding_interval_hours });
   const state = q.isPending ? "loading" : q.isError && !q.data ? (noFuturesData(q.error) ? "empty" : "error") : "ready";
   return (
     <FuturesMetric

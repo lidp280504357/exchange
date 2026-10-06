@@ -5,7 +5,7 @@
 
 export default {
   mFutures: {
-    tabs: { label: "圖表與合約數據", chart: "圖表", data: "數據" },
+    tabs: { data: "數據" },
     periods: { "5m": "5分鐘", "15m": "15分鐘", "1h": "1小時", "4h": "4小時", "1d": "1天" },
     period: "週期",
     allData: "全部合約數據",
@@ -59,8 +59,6 @@ export default {
     },
     overview: {
       title: "合約數據",
-      subtitle: "每個永續合約的標記價格、資金費率、持倉量與成交額，選一個合約查看它的多空比、主動買賣量、基差與爆倉",
-      updated: "每 30 秒更新",
       groups: { usdt: "U 本位", coin: "幣本位" },
       search: "搜尋合約",
       count: "{{count}} 個合約",
@@ -69,23 +67,8 @@ export default {
         oiValue: "持倉總價值",
         volume: "24h 成交額",
         funding: "資金費率 正/負",
-        fundingValue: "{{positive}} / {{negative}}",
       },
-      columns: {
-        contract: "合約",
-        mark: "標記價格",
-        index: "指數價格",
-        change: "24h 漲跌",
-        volume: "24h 成交額",
-        oi: "持倉量",
-        funding: "資金費率",
-        countdown: "下次結算",
-        actions: "操作",
-      },
-      data: "數據",
-      trade: "交易",
       board: "{{symbol}} 合約數據",
-      pick: "選擇合約",
       noMatch: "沒有匹配的合約",
       goTrade: "去交易",
       sort: "排序",
@@ -100,10 +83,6 @@ export default {
       perpetual: "永續",
     },
     list: {
-      oi: "持倉量",
-      funding: "資金費率",
-      oiHint: "未平倉合約的美元價值",
-      fundingHint: "本期預估資金費率",
       rateShort: "費率",
       oiShort: "持倉",
       sorts: { oiDesc: "持倉量從高到低", fundingDesc: "資金費率從高到低", fundingAsc: "資金費率從低到高" },

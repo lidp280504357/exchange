@@ -281,6 +281,11 @@ try {
   // asked for it), the market list's futures category shows each
   // contract's funding and open interest, and /futures/data opens a
   // contract's board in a sheet.
+  // Preconditions: market-data-service reads the reference market's
+  // statistics (market.futures_data on; BTC-USDT-PERP follows BTCUSDT and
+  // has points of every statistic and period), the platform coin's
+  // ASTRA-USDT-PERP follows none (no reference_symbol); a day without
+  // liquidations passes (the card says so).
   const futuresReads = [];
   const onFuturesRead = (r) => {
     const u = new URL(r.url());

@@ -73,7 +73,6 @@ export default {
           oiValue: "持仓总价值(USD)",
           volume: "24h 成交额(USD)",
           funding: "资金费率 正 / 负",
-          fundingValue: "{{positive}} / {{negative}}",
         },
         columns: {
           contract: "合约",
@@ -83,7 +82,6 @@ export default {
           volume: "24h 成交额",
           oi: "持仓量",
           funding: "资金费率",
-          countdown: "下次结算",
           actions: "操作",
         },
         data: "数据",
@@ -168,7 +166,6 @@ export default {
           oiValue: "Open interest (USD)",
           volume: "24h volume (USD)",
           funding: "Funding positive / negative",
-          fundingValue: "{{positive}} / {{negative}}",
         },
         columns: {
           contract: "Contract",
@@ -178,7 +175,6 @@ export default {
           volume: "24h volume",
           oi: "Open interest",
           funding: "Funding rate",
-          countdown: "Next funding",
           actions: "Actions",
         },
         data: "Data",

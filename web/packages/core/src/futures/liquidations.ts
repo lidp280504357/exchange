@@ -1,18 +1,22 @@
 import type { components } from "../api/gen/market";
 
 // A contract's liquidation stream: the REST list of the last day merged
-// with the pushes of liquidations:{symbol}, newest first. The reference
-// market streams the latest liquidation of a contract within a second,
-// so the same order can come twice (in the list and pushed after it).
+// with the pushes of liquidations:{symbol}, newest first. The same order
+// can come twice (in the list and pushed after it): it is one by its
+// primary key.
 
 type Liquidation = components["schemas"]["Liquidation"];
 
 /** How many liquidations a stream keeps (the REST list's largest page). */
 export const LIQUIDATIONS_KEPT = 100;
 
-/** liquidationKey tells one liquidation from another: no two orders share time, side, price and quantity. */
-export function liquidationKey(l: Pick<Liquidation, "traded_at" | "position_side" | "price" | "quantity">): string {
-  return `${Date.parse(l.traded_at)}|${l.position_side}|${l.price}|${l.quantity}`;
+/**
+ * liquidationKey is a liquidation's identity, the service's primary key
+ * (market 00008: symbol, traded_at, position_side): the reference market
+ * sends a contract's latest liquidation per side at most once a millisecond.
+ */
+export function liquidationKey(l: Pick<Liquidation, "symbol" | "traded_at" | "position_side">): string {
+  return `${l.symbol}|${Date.parse(l.traded_at)}|${l.position_side}`;
 }
 
 /**

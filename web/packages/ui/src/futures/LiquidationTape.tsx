@@ -78,7 +78,8 @@ const Row = memo(function Row({ item, priceDecimals, qtyDecimals, labels, locale
   );
 });
 
-const keyOf = (l: Liquidation) => `${l.traded_at}|${l.position_side}|${l.price}|${l.quantity}`;
+// A liquidation's identity is the service's primary key (core liquidationKey).
+const keyOf = (l: Liquidation) => `${l.symbol}|${Date.parse(l.traded_at)}|${l.position_side}`;
 
 export function LiquidationTape({ items, priceDecimals, qtyDecimals, labels, max = 30, rowHeight = 24, className }: LiquidationTapeProps) {
   const { locale, timeZone } = useFormatContext();

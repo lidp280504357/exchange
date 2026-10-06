@@ -69,7 +69,6 @@ export default {
         oiValue: "持倉總價值(USD)",
         volume: "24h 成交額(USD)",
         funding: "資金費率 正 / 負",
-        fundingValue: "{{positive}} / {{negative}}",
       },
       columns: {
         contract: "合約",
@@ -79,7 +78,6 @@ export default {
         volume: "24h 成交額",
         oi: "持倉量",
         funding: "資金費率",
-        countdown: "下次結算",
         actions: "操作",
       },
       data: "數據",

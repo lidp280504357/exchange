@@ -25,17 +25,6 @@ export function groupOf(c: { margin_type?: string | null } | undefined): MarginG
   return c?.margin_type === "COIN" ? "coin" : "usdt";
 }
 
-/**
- * openContracts keeps the contracts a list shows: none still PREPARE
- * (Binance's perpetuals are listed PREPARE and open in batches; the sites
- * leave them out until then, review EY). The lists take the terminal's
- * own list (useContracts), so they never link to a contract the terminal
- * does not open: the coin-margined ones came with G4 part 2.
- */
-export function openContracts<C extends { status?: string }>(list: readonly C[]): C[] {
-  return list.filter((c) => c.status !== "PREPARE");
-}
-
 /** The sort keys of the futures category: the list's, the open interest (by its USD value) and the funding rate. */
 export type FuturesSortKey = SortKey | "oi" | "funding";
 export type FuturesSort = { key: FuturesSortKey; desc: boolean };
@@ -91,8 +80,8 @@ export type OverviewRow = FuturesOverviewItem & {
 /**
  * overviewRows joins the overview with the contracts' specifications:
  * a contract the specifications do not list (delisted meanwhile) is left
- * out, and so is a contract the terminal cannot open (see openContracts:
- * pass the open ones). names adds a coin's names to what the search box
+ * out, and so is a contract the terminal does not open (pass the
+ * terminal's list: useContracts, none still PREPARE). names adds a coin's names to what the search box
  * matches.
  */
 export function overviewRows(items: readonly FuturesOverviewItem[], contracts: readonly ContractSpec[], names: (base: string) => readonly string[] = () => []): OverviewRow[] {

@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { TickerData } from "../ws/types";
 import { buildRows, type PairLike } from "../markets/list";
 import type { ContractSpec, FuturesDataPoint, FuturesOverviewItem, Liquidation } from "./data";
-import { hasFuturesData, isFuturesPeriod, noFuturesData } from "./data";
+import { hasFuturesData, isFuturesPeriod, nextRead, noFuturesData, POINT_DELAY } from "./data";
 import {
   filterOverview,
   groupOf,
-  openContracts,
   overviewRows,
   overviewTotals,
   parseFuturesSort,
@@ -56,6 +55,27 @@ describe("futures data", () => {
     expect(hasFuturesData(contract("BTC-USDT-PERP"))).toBe(true);
     expect(hasFuturesData(contract("ASTRA-USDT-PERP"))).toBe(false);
     expect(hasFuturesData(undefined)).toBe(false);
+  });
+});
+
+describe("reading again", () => {
+  const at = (iso: string) => Date.parse(iso);
+  it("waits for the next point, then reads every minute while it is late", () => {
+    const last = at("2026-10-06T18:05:00Z");
+    // A 5-minute snapshot: the 18:10 point is in by 18:11:30.
+    expect(nextRead("open_interest", "5m", last, at("2026-10-06T18:06:00Z"))).toBe(5.5 * 60_000);
+    expect(nextRead("open_interest", "5m", last, at("2026-10-06T18:11:20Z"))).toBe(30_000);
+    expect(nextRead("open_interest", "5m", last, at("2026-10-06T18:12:00Z"))).toBe(60_000);
+    // The takers' volume is stamped with the start of its period: one more period.
+    expect(nextRead("taker_ratio", "5m", last, at("2026-10-06T18:06:00Z"))).toBe(10.5 * 60_000);
+    // Hours and days.
+    expect(nextRead("basis", "1d", at("2026-10-06T00:00:00Z"), at("2026-10-06T12:00:00Z"))).toBe(12 * 3_600_000 + POINT_DELAY);
+    // Funding: the next settlement of the contract's interval.
+    expect(nextRead("funding", "5m", at("2026-10-06T16:00:00Z"), at("2026-10-06T20:00:00Z"))).toBe(4 * 3_600_000 + POINT_DELAY);
+    expect(nextRead("funding", "5m", at("2026-10-06T16:00:00Z"), at("2026-10-06T18:00:00Z"), 4)).toBe(2 * 3_600_000 + POINT_DELAY);
+    // Nothing yet.
+    expect(nextRead("open_interest", "5m", undefined, 0)).toBe(5 * 60_000);
+    expect(nextRead("open_interest", "5m", Number.NaN, 0)).toBe(5 * 60_000);
   });
 });
 
@@ -123,8 +143,9 @@ describe("liquidations", () => {
     const b = liq("2026-10-06T18:03:14.099Z", { quantity: "0.019" });
     const list = mergeLiquidations([], [a, b]);
     expect(list).toEqual([a, b]);
-    // The same order pushed again (another object, the same fields) changes nothing.
+    // The same order pushed again (another object; its time written to the nanosecond) changes nothing.
     expect(mergeLiquidations(list, [{ ...a }])).toBe(list);
+    expect(mergeLiquidations(list, [{ ...a, traded_at: "2026-10-06T18:03:17.209000000Z" }])).toBe(list);
     const c = liq("2026-10-06T18:05:00Z", { position_side: "LONG" });
     expect(mergeLiquidations(list, [c])).toEqual([c, a, b]);
     // An older one from a reload goes in its place.
@@ -145,13 +166,11 @@ describe("liquidations", () => {
 describe("contract lists", () => {
   const all = [contract("BTC-USDT-PERP"), contract("BTC-USD-PERP"), contract("ETH-USD-PERP"), contract("ASTRA-USDT-PERP")];
 
-  it("groups by margin type and leaves out the contracts still PREPARE", () => {
+  it("groups by margin type", () => {
     expect(parseMarginGroup("coin")).toBe("coin");
     expect(parseMarginGroup("x")).toBe("usdt");
     expect(groupOf(all[1])).toBe("coin");
     expect(groupOf({})).toBe("usdt");
-    const listed = [...all, contract("SOL-USDT-PERP", { status: "PREPARE" }), contract("SOL-USD-PERP", { status: "PREPARE" })];
-    expect(openContracts(listed).map((c) => c.symbol)).toEqual(all.map((c) => c.symbol));
   });
 
   it("sorts the futures category by open interest value and funding", () => {

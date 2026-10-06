@@ -27,12 +27,12 @@ import {
   createColumnHelper,
   cn,
   prefersReducedMotion,
-  useNow,
+  subscribeClock,
   type ColumnDef,
   type SortingState,
 } from "@exchange/ui";
 import { Search } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { FuturesDataBoard } from "../../features/futures/FuturesDataBoard";
@@ -338,13 +338,30 @@ function OpenInterest({ row, locale }: { row: OverviewRow; locale: string }) {
 const RATE_TONE = { 1: "text-up", 0: "text-fg-2", [-1]: "text-down" } as const;
 
 function FundingCell({ row }: { row: OverviewRow }) {
-  const now = useNow(1000);
-  const at = row.next_funding_time ? Date.parse(row.next_funding_time) : NaN;
   const sign = row.funding_rate && dec.isDecimal(row.funding_rate) ? dec.sign(row.funding_rate) : 0;
   return (
     <div className="flex flex-col items-end leading-tight">
       <span className={cn("tabular-nums", RATE_TONE[sign])}>{formatPercent(row.funding_rate, 4)}</span>
-      <span className="text-xs tabular-nums text-fg-3">{Number.isNaN(at) ? "--:--:--" : countdown(at, now)}</span>
+      <Countdown at={row.next_funding_time ? Date.parse(row.next_funding_time) : Number.NaN} />
     </div>
+  );
+}
+
+/**
+ * Countdown is the time left to the next funding, written into its text by
+ * the shared one-second clock: the rows do not render every second.
+ */
+function Countdown({ at }: { at: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (Number.isNaN(at)) return;
+    return subscribeClock(1000, () => {
+      if (ref.current) ref.current.textContent = countdown(at, Date.now());
+    });
+  }, [at]);
+  return (
+    <span ref={ref} className="text-xs tabular-nums text-fg-3">
+      {Number.isNaN(at) ? "--:--:--" : countdown(at, Date.now())}
+    </span>
   );
 }

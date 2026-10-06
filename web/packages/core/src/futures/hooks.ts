@@ -4,15 +4,19 @@ import { buildRows, type MarketRow } from "../markets/list";
 import type { MarketRows } from "../markets/hooks";
 import { useContracts, usePairs } from "../trading/pairs";
 import { useFuturesOverview, type ContractSpec, type FuturesOverviewItem } from "./data";
-import { groupOf, openContracts, overviewRows, type MarginGroup, type OverviewOf, type OverviewRow } from "./list";
+import { groupOf, overviewRows, type MarginGroup, type OverviewOf, type OverviewRow } from "./list";
 
 // Hooks over ./list for the pages: the market rows with the contracts the
 // futures terminal opens (both margin types), and the overview's rows.
 
-/** useOpenContracts lists the contracts the futures terminal opens: its own list (useContracts), none still PREPARE. */
+/**
+ * useOpenContracts lists the contracts the futures terminal opens: its own
+ * list (useContracts: both margin types, none still PREPARE), so a list
+ * never links to a contract the terminal does not know.
+ */
 export function useOpenContracts(): { contracts: ContractSpec[]; loading: boolean; error: unknown; refetch: () => void } {
   const terminal = useContracts();
-  const contracts = useMemo(() => openContracts(terminal.data?.contracts ?? []), [terminal.data]);
+  const contracts = useMemo(() => terminal.data?.contracts ?? [], [terminal.data]);
   const { refetch: refetchTerminal } = terminal;
   const refetch = useCallback(() => void refetchTerminal(), [refetchTerminal]);
   return { contracts, loading: terminal.isPending, error: terminal.error, refetch };

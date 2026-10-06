@@ -47,8 +47,26 @@ export function isFuturesPeriod(v: string | null | undefined): v is FuturesPerio
 /** Points a chart shows: as many as the reference market's own pages (30 days of 1d). */
 export const FUTURES_POINTS = 30;
 
-/** How often a shown series is read again: the shortest period is 5 minutes. */
-export const FUTURES_DATA_EVERY = 60_000;
+/** How long after a period ends its point is in: the service reads the reference market about 70 seconds after (G3b). */
+export const POINT_DELAY = 90_000;
+
+const MINUTE = 60_000;
+const PERIOD_MS: Record<FuturesPeriod, number> = { "5m": 5 * MINUTE, "15m": 15 * MINUTE, "1h": 60 * MINUTE, "4h": 240 * MINUTE, "1d": 1440 * MINUTE };
+
+/**
+ * nextRead is how long until a shown statistic is read again (ms): until
+ * its next point is due — the latest point's time and a period (two for
+ * the takers' volume, stamped with the start of the period it was traded
+ * in; the funding interval for funding) and the service's delay — then
+ * every minute while it is late (the service reads the coarser periods up
+ * to half an hour after they end); without a point, in five minutes.
+ */
+export function nextRead(metric: FuturesMetric, period: FuturesPeriod, latest: number | undefined, now: number, fundingHours = 8): number {
+  if (latest === undefined || !Number.isFinite(latest)) return 5 * MINUTE;
+  const p = metric === "funding" ? fundingHours * 60 * MINUTE : PERIOD_MS[period];
+  const due = latest + (metric === "taker_ratio" ? 2 * p : p) + POINT_DELAY;
+  return due > now ? Math.max(MINUTE / 2, due - now) : MINUTE;
+}
 
 /** How often the overview is read again while a list shows it. */
 export const FUTURES_OVERVIEW_EVERY = 30_000;
@@ -97,18 +115,25 @@ export function useFuturesOverview({ enabled = true, every = FUTURES_OVERVIEW_EV
 export type FuturesDataOptions = {
   /** Points (at most 500). */
   limit?: number;
+  /** The contract's funding interval (hours), when the next settled rate is due. */
+  fundingHours?: number;
   /** Off: nothing is read (a hidden panel, a contract without data). */
   enabled?: boolean;
 };
 
 /**
  * useFuturesData reads one statistic of a contract, oldest point first,
- * again every minute while enabled. Changing the period keeps the points
- * of the one before on screen until the new ones arrive (the panels dim
- * them), so the cards keep their size; another contract or statistic
- * starts empty.
+ * and again when its next point is due while enabled (nextRead). Changing
+ * the period keeps the points of the one before on screen until the new
+ * ones arrive (the panels dim them), so the cards keep their size;
+ * another contract or statistic starts empty.
  */
-export function useFuturesData(symbol: string, metric: FuturesMetric, period: FuturesPeriod, { limit = FUTURES_POINTS, enabled = true }: FuturesDataOptions = {}) {
+export function useFuturesData(
+  symbol: string,
+  metric: FuturesMetric,
+  period: FuturesPeriod,
+  { limit = FUTURES_POINTS, enabled = true, fundingHours = 8 }: FuturesDataOptions = {},
+) {
   // Funding has a point per settlement and takes no period.
   const p = metric === "funding" ? "" : period;
   const on = enabled && symbol !== "";
@@ -118,7 +143,7 @@ export function useFuturesData(symbol: string, metric: FuturesMetric, period: Fu
       unwrap(marketApi.GET("/v1/market/{symbol}/futures-data", { params: { path: { symbol }, query: { metric, period: p || undefined, limit } } })),
     enabled: on,
     staleTime: 30_000,
-    refetchInterval: on ? FUTURES_DATA_EVERY : false,
+    refetchInterval: on ? (query) => nextRead(metric, period, Date.parse(query.state.data?.points.at(-1)?.time ?? ""), Date.now(), fundingHours) : false,
     retry: retryServerErrors,
     placeholderData: (previous, query) => (query?.queryKey[3] === symbol && query.queryKey[4] === metric ? previous : undefined),
   });
