@@ -31,19 +31,57 @@ func show(ls []Level) string {
 
 func TestLevelsSitOnTheGridAwayFromTheSpread(t *testing.T) {
 	// Bids round down, asks up; 60000.05 and 60000.01 meet at 60000.
-	bids := Levels(levels("60000.05", "0.1", "60000.01", "0.2", "59999.95", "0.3"), true, btc, d("20000"), 20)
+	bids := Levels(levels("60000.05", "0.1", "60000.01", "0.2", "59999.95", "0.3"), true, btc, d("20000"), 20, 0)
 	if got := show(bids); got != "60000x0.3 59999.9x0.3 " {
 		t.Fatalf("bids %s", got)
 	}
-	asks := Levels(levels("60000.06", "0.1", "60000.12", "0.00005"), false, btc, d("20000"), 20)
+	asks := Levels(levels("60000.06", "0.1", "60000.12", "0.00005"), false, btc, d("20000"), 20, 0)
 	if got := show(asks); got != "60000.1x0.1 " { // 60000.2 holds less than a lot
 		t.Fatalf("asks %s", got)
 	}
 	// A level worth more than the cap is cut to it, in whole lots; n caps
 	// the count.
-	big := Levels(levels("60000", "5", "59999", "5", "59998", "5"), true, btc, d("20000"), 2)
+	big := Levels(levels("60000", "5", "59999", "5", "59998", "5"), true, btc, d("20000"), 2, 0)
 	if got := show(big); got != "60000x0.3333 59999x0.3333 " {
 		t.Fatalf("capped %s", got)
+	}
+}
+
+// Past the best n levels the rest of the book goes out merged, 2, 4, ...
+// levels at a time, the last taking what is left, each at its worst price
+// (review FI, C46): a market order larger than the best levels walks on.
+func TestTheRestOfTheBookGoesOutMerged(t *testing.T) {
+	var asks, bids []string
+	for i := range 10 {
+		asks = append(asks, d("100").Add(d("0.1").Mul(decimal.NewFromInt(int64(i)))).String(), "1")
+		bids = append(bids, d("100.9").Sub(d("0.1").Mul(decimal.NewFromInt(int64(i)))).String(), "1")
+	}
+	tenth := Spec{Symbol: "X-USDT", Base: "X", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.0001")}
+	if got := show(Levels(levels(asks...), false, tenth, d("0"), 2, 3)); got != "100x1 100.1x1 100.3x2 100.7x4 100.9x2 " {
+		t.Fatalf("asks %s", got)
+	}
+	if got := show(Levels(levels(bids...), true, tenth, d("0"), 2, 3)); got != "100.9x1 100.8x1 100.6x2 100.2x4 100x2 " {
+		t.Fatalf("bids %s", got)
+	}
+	// Without deep levels, the best n only; with more deep levels than
+	// the book needs, every level of it.
+	if got := show(Levels(levels(asks...), false, tenth, d("0"), 2, 0)); got != "100x1 100.1x1 " {
+		t.Fatalf("no deep levels %s", got)
+	}
+	if got := show(Levels(levels(asks...), false, tenth, d("0"), 2, 10)); got != "100x1 100.1x1 100.3x2 100.7x4 100.9x2 " {
+		t.Fatalf("more deep levels than needed %s", got)
+	}
+	// Each merged level is capped like any other (250 USDT is 2.4826 at
+	// 100.7).
+	if got := show(Levels(levels(asks...), false, tenth, d("250"), 2, 3)); got != "100x1 100.1x1 100.3x2 100.7x2.4826 100.9x2 " {
+		t.Fatalf("capped %s", got)
+	}
+	// On a coarser grid than the reference market's a merged level that
+	// meets the one before joins it.
+	half := tenth
+	half.TickSize = d("0.5")
+	if got := show(Levels(levels(asks...), false, half, d("0"), 2, 2)); got != "100x1 100.5x5 101x4 " {
+		t.Fatalf("coarser grid %s", got)
 	}
 }
 
@@ -187,7 +225,7 @@ func TestCoinMarginedRooms(t *testing.T) {
 		t.Fatalf("buy %s sell %s", buy, sell)
 	}
 	// A level offers at most 20,000 USD: 200 contracts.
-	levels := Levels([]Level{{Price: d("50000.05"), Quantity: d("4500")}}, true, perp, d("20000"), 5)
+	levels := Levels([]Level{{Price: d("50000.05"), Quantity: d("4500")}}, true, perp, d("20000"), 5, 0)
 	if len(levels) != 1 || levels[0].Quantity.String() != "200" || levels[0].Price.String() != "50000" {
 		t.Fatalf("levels %+v", levels)
 	}

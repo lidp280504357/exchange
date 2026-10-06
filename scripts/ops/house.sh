@@ -2,10 +2,10 @@
 # HOUSE's virtual liquidity on the test server (ADR-0013, ADR-0015,
 # docs/runbook/market-maker.md):
 #
-#   scripts/ops/house.sh seed   HOUSE's funds: spot inventory of 5,000,000
-#                               USDT, 11.74 BTC and 370.4 ETH (MARKET_MAKER;
-#                               about half the pair cap each, so HOUSE can
-#                               sell and buy about 1,000,000 USDT of them),
+#   scripts/ops/house.sh seed   HOUSE's funds: spot inventory of 100,000,000
+#                               USDT, 31.74 BTC and 670.4 ETH (MARKET_MAKER;
+#                               each book that spends an asset gets an equal
+#                               share, at least 10 BTC's worth),
 #                               and 2,000,000 USDT of contract margin in its
 #                               FUTURES account (HOUSE_USER_ID), 6 BTC and 200
 #                               ETH in its coin-margined ones, and the
@@ -59,7 +59,14 @@ seed)
   # stops HOUSE buying it on every pair. Under the design's 100,000 USDT cap
   # a v2 top-up of 1 BTC and 30 ETH did exactly that and was undone (keys
   # *-v2-undo); v3 came with the test server's 2,000,000 (2026-10-02).
-  for spec in "USDT 500000 v1" "BTC 0.24 v1" "ETH 7.4 v1" "USDT 4500000 v3" "BTC 11.5 v3" "ETH 363 v3"; do
+  # v4 (review FI, C46 5, 2026-10-07): with the caps at 500,000,000 the
+  # inventory is what limits a book, each book that spends an asset getting
+  # an equal share of it (domain.SpotRooms): 5,000,000 USDT over 87 USDT
+  # books let a user sell 0.67 BTC at once. Now every book has at least
+  # 10 BTC's worth (BTC 85,600, ETH 2,700): USDT 100,000,000 over 87 books,
+  # BTC 31.74 over 3 (BTC-USDT, ETH-BTC, LINK-BTC), ETH 669.6 over 2.
+  for spec in "USDT 500000 v1" "BTC 0.24 v1" "ETH 7.4 v1" "USDT 4500000 v3" "BTC 11.5 v3" "ETH 363 v3" \
+    "USDT 95000000 v4" "BTC 20 v4" "ETH 300 v4"; do
     read -r asset amount version <<<"$spec"
     ctl ledger-service ledger adjust --house --asset "$asset" --amount "$amount" \
       --reason "HOUSE inventory (ADR-0013)" --key "seed-house-$asset-$version"

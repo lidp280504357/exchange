@@ -35,8 +35,11 @@ type Config struct {
 	// HouseUser is HOUSE's user ID on the trades (HOUSE_USER_ID).
 	HouseUser string
 	Caps      domain.Caps
-	// Levels is how many levels a side HOUSE offers.
+	// Levels is how many of the reference market's levels a side HOUSE
+	// offers as they are; Deep how many more it merges the rest of that
+	// side's book into (domain.Levels).
 	Levels int
+	Deep   int
 	// Interval is how often books go out when they changed, Heartbeat how
 	// often an unchanged one does, Stale how long a reference book may go
 	// without a message before HOUSE stops offering on it.
@@ -48,15 +51,16 @@ type Config struct {
 // DefaultConfig follows the design (§8.6): levels up to 20,000 USDT, a
 // symbol's position up to 100,000, all spot positions up to 1,000,000,
 // 1,000 of backed inventory kept back, all contract positions up to 10
-// times HOUSE's contract equity; the best 20 levels, every 250 ms at most,
-// every 2 s at least.
+// times HOUSE's contract equity; the best 20 levels and the rest of the
+// book in 6 more (the next 2, 4, 8, 16, 32 and all that is left of the 200
+// market-data sends), every 250 ms at most, every 2 s at least.
 func DefaultConfig() Config {
 	return Config{
 		Caps: domain.Caps{
 			Level: decimal.NewFromInt(20000), Symbol: decimal.NewFromInt(100000), Total: decimal.NewFromInt(1000000),
 			Contract: decimal.NewFromInt(100000), Safety: decimal.NewFromInt(1000), ContractLeverage: decimal.NewFromInt(10),
 		},
-		Levels:   20,
+		Levels: 20, Deep: 6,
 		Interval: 250 * time.Millisecond, Heartbeat: 2 * time.Second, Stale: 3 * time.Second,
 	}
 }
@@ -451,8 +455,8 @@ func (p *Publisher) round() []outgoing {
 		msg := &orderv1.ReferenceBookUpdate{Symbol: spec.Symbol, HouseUserId: p.cfg.HouseUser}
 		levelCap, _ := domain.LevelCap(spec, p.cfg.Caps, prices)
 		if usable[i] {
-			bids := domain.Levels(b.bids, true, spec, levelCap, p.cfg.Levels)
-			asks := domain.Levels(b.asks, false, spec, levelCap, p.cfg.Levels)
+			bids := domain.Levels(b.bids, true, spec, levelCap, p.cfg.Levels, p.cfg.Deep)
+			asks := domain.Levels(b.asks, false, spec, levelCap, p.cfg.Levels, p.cfg.Deep)
 			var buy, sell decimal.Decimal
 			if spec.Contract {
 				pos, mid := p.contracts.Positions[spec.Symbol], midOf(b)

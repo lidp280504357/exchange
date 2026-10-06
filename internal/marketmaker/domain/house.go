@@ -70,10 +70,19 @@ type Caps struct {
 // symbol's tick grid, rounded away from the other side (bids down, asks
 // up) so HOUSE never gives more than the reference market, levels that
 // meet on the grid merged, each worth at most levelCap in the quote asset
-// (LevelCap), in whole lots, the best n.
-func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n int) []Level {
+// (LevelCap), in whole lots. The best n are offered as they are; the rest
+// of the book (as deep as market-data sends it) in at most deep levels
+// more, each merging twice as many of the reference market's levels as
+// the one before (2, 4, 8, ...; the last all that is left) at the worst
+// price among them: a market order larger than the best n levels walks on
+// as it would on the reference market, a little worse within a merged
+// level, rather than stopping (review FI, C46: the best 20 levels of
+// BTCUSDT held 2.6 BTC at times, and a 5 BTC market order filled half).
+func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n, deep int) []Level {
 	var out []Level
-	for _, l := range ref {
+	i := 0
+	for ; i < len(ref); i++ {
+		l := ref[i]
 		p := onGrid(l.Price, spec.TickSize, !bids)
 		if !p.IsPositive() || !l.Quantity.IsPositive() {
 			continue
@@ -86,6 +95,28 @@ func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n int) 
 			break
 		}
 		out = append(out, Level{Price: p, Quantity: l.Quantity})
+	}
+	rest := ref[i:]
+	for size := 2; len(rest) > 0 && deep > 0; size, deep = size*2, deep-1 {
+		take := len(rest)
+		if deep > 1 {
+			take = min(size, len(rest))
+		}
+		q := decimal.Zero
+		for _, l := range rest[:take] {
+			if l.Quantity.IsPositive() {
+				q = q.Add(l.Quantity)
+			}
+		}
+		p := onGrid(rest[take-1].Price, spec.TickSize, !bids)
+		rest = rest[take:]
+		switch k := len(out); {
+		case !p.IsPositive() || !q.IsPositive():
+		case k > 0 && out[k-1].Price.Equal(p): // a coarser grid than the reference market's
+			out[k-1].Quantity = out[k-1].Quantity.Add(q)
+		default:
+			out = append(out, Level{Price: p, Quantity: q})
+		}
 	}
 	kept := out[:0]
 	for _, l := range out {

@@ -7,12 +7,15 @@
 # against HOUSE at the shown ask, a market sell of what it got fills at the
 # bid, a limit buy above the ask fills at once at the ask (not its limit);
 # a limit buy below the book rests until canceled; ETH-BTC (quoted in BTC)
-# fills at HOUSE's ask and bid too; on each contract a market buy opens a
-# long against HOUSE and a reduce-only market sell closes it; a market buy
-# of 5 BTC on BTC-USDT-PERP and the reduce-only sell closing it each fill
-# whole in one order; afterwards the ledger invariants hold (HOUSE's
-# MARKET_MAKER accounts are the exception to invariant 3). Needs
-# market.reference_depth and
+# fills at HOUSE's ask and bid too; a market buy of about 5 BTC on
+# BTC-USDT and a market sell of 5 each fill whole in one order; on each
+# contract a market buy opens a long against HOUSE and a reduce-only market
+# sell closes it; a market buy of 5 BTC on BTC-USDT-PERP and the
+# reduce-only sell closing it each fill whole in one order; afterwards the
+# ledger invariants hold (HOUSE's MARKET_MAKER accounts are the exception
+# to invariant 3). The 5 BTC steps credit the user what they need (ledger
+# adjustments, ledger.manual_adjustment) and take it back at the end.
+# Needs market.reference_depth and
 # market.house_liquidity on for every symbol, HOUSE seeded and the pairs
 # open (scripts/ops/house.sh), and ssh to the server.
 #
@@ -71,6 +74,7 @@ EMAIL="e2e-house-$RUN@example.com"
 echo "== register $EMAIL"
 register "$EMAIL" "e2e-house-$RUN" "e2e house $RUN"
 AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+USER_ID=$(jq -r .user_id <<<"$BODY")
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'call DELETE /v1/orders "" "${AUTH[@]}"; for p in "${PERPS[@]}"; do call DELETE "/v1/derivatives/orders?symbol=$p" "" "${AUTH[@]}"; done'
 balance() { # balance ASSET prints the SPOT account's available amount
@@ -79,6 +83,33 @@ balance() { # balance ASSET prints the SPOT account's available amount
 }
 funded() { [[ $(balance USDT) != 0 ]]; }
 eventually 40 "welcome funds arrived" funded
+# The 5 BTC steps need more than the welcome funds: credit AMOUNT USDT
+# (a test-server ledger adjustment, as the bots get theirs; needs
+# ledger.manual_adjustment), given back as the script ends.
+CREDITED=0
+credit() { # credit AMOUNT KEY
+  remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger adjust --user $USER_ID --asset USDT --amount $1 --reason $(printf %q "e2e house.sh: the 5 BTC market orders") --key e2e-house-$RUN-$2" >/dev/null
+  CREDITED=$(awk -v a="$CREDITED" -v b="$1" 'BEGIN { printf "%.2f", a + b }')
+}
+# give_back: the futures balance back to SPOT, then what was credited
+# taken back (at most what SPOT holds); a failure only warns.
+give_back() {
+  [[ $CREDITED != 0 ]] || return 0
+  local futures back
+  call GET /v1/account/balances "" "${AUTH[@]}" || true
+  futures=$(jq -r '[.balances[] | select(.asset == "USDT" and .account_type == "FUTURES")][0].available // "0"' <<<"$BODY")
+  if awk -v f="$futures" 'BEGIN { exit !(f > 0) }'; then
+    call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$futures\",\"from_account_type\":\"FUTURES\",\"to_account_type\":\"SPOT\"}" \
+      "${AUTH[@]}" -H "Idempotency-Key: house-out-$RUN" || true
+  fi
+  back=$(awk -v c="$CREDITED" -v s="$(balance USDT)" 'BEGIN { m = (s < c) ? s : c; printf "%.2f", int(m * 100) / 100 }')
+  if ! remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger adjust --user $USER_ID --asset USDT --amount -$back --reason $(printf %q "e2e house.sh: the credit given back") --key e2e-house-$RUN-back" >/dev/null; then
+    echo "WARN the $CREDITED USDT credited to $USER_ID were not taken back" >&2
+  fi
+  CREDITED=0
+}
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'give_back'
 
 place() { # place JSON; sets ORDER
   call POST /v1/orders "$1" "${AUTH[@]}" -H "Idempotency-Key: $(uuidgen 2>/dev/null || date +%s%N)"
@@ -160,6 +191,25 @@ FILL=$(jq -r '.fills[0].price' <<<"$BODY")
 near "$FILL" "$BID" || fail "filled at $FILL, the bid was $BID"
 echo "ok   sold at $FILL (the bid was $BID)"
 
+# One market order of about 5 BTC each way on BTC-USDT fills whole (review
+# FI, C46 5): HOUSE's room on a book is its inventory over the books that
+# spend it, so the test server holds at least 10 BTC's worth for each
+# (scripts/ops/house.sh seed, v4), and HOUSE offers the reference market's
+# book past its best 20 levels (they held 2.6 BTC at times), the rest of it
+# merged into a few levels more.
+echo "== BTC-USDT: a market buy of about 5 BTC and a market sell of 5, each filled whole"
+eventually 30 "BTC-USDT shows a two-sided book" shown BTC-USDT
+SPEND=$(jq -r '.asks[0][0] | tonumber * 500 | ceil / 100' <<<"$BODY")
+credit "$(awk -v s="$SPEND" 'BEGIN { printf "%.2f", s + 100 }')" spot
+place "{\"symbol\":\"BTC-USDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quote_amount\":\"$SPEND\"}"
+BIG=$ORDER
+eventually 40 "the market buy of $SPEND USDT is FILLED" status_is "$BIG" FILLED
+check '(.filled_quantity | tonumber) > 4.9' "about 5 BTC bought in one order ($(jq -r .filled_quantity <<<"$BODY"))"
+place '{"symbol":"BTC-USDT","side":"SELL","type":"MARKET","quantity":"5"}'
+BIG=$ORDER
+eventually 40 "the market sell of 5 BTC is FILLED" status_is "$BIG" FILLED
+check '(.filled_quantity | tonumber) == 5' "all 5 sold in one order"
+
 call POST /v1/account/transfers '{"asset":"USDT","amount":"200","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
   "${AUTH[@]}" -H "Idempotency-Key: house-in-$RUN"
 expect 201 - "200 USDT to FUTURES"
@@ -181,12 +231,23 @@ done
 
 # One market order of 5 BTC, opening and closing, fills whole (review FE,
 # C44: with levels of at most 20,000 USDT a reduce-only market sell of 5
-# BTC filled 1.567 and the user had to repeat it); about 9,000 USDT of
-# margin at 50x.
+# BTC filled 1.567 and the user had to repeat it). A market buy reserves
+# at its protection price, the mark plus the contract's band: the margin
+# at 50x (the most for 5 BTC's notional) and the taker fee there, 2% over
+# (review FI, C46 3: a fixed 9,500 USDT was refused with BTC above about
+# 90,000), credited.
 echo "== BTC-USDT-PERP: a market buy of 5 and a reduce-only market sell of 5, each filled whole"
-call POST /v1/account/transfers '{"asset":"USDT","amount":"9500","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+call GET /v1/market/contracts/BTC-USDT-PERP ""
+expect 200 - "BTC-USDT-PERP's terms"
+SPEC=$BODY
+call GET /v1/market/BTC-USDT-PERP/mark-price ""
+expect 200 - "BTC-USDT-PERP's mark price"
+NEED=$(jq -rn --argjson spec "$SPEC" --argjson m "$(jq .mark_price <<<"$BODY")" \
+  '5 * ($m | tonumber) * (1 + ($spec.price_band | tonumber)) * (1 / 50 + ($spec.taker_fee_rate | tonumber)) * 1.02 | ceil')
+credit "$NEED" perp
+call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$NEED\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" \
   "${AUTH[@]}" -H "Idempotency-Key: house-big-in-$RUN"
-expect 201 - "9,500 USDT more to FUTURES"
+expect 201 - "$NEED USDT more to FUTURES"
 call PUT /v1/derivatives/settings/BTC-USDT-PERP '{"leverage":50}' "${AUTH[@]}"
 expect 200 - "50x"
 whole() { # whole ORDER: FILLED, all 5
