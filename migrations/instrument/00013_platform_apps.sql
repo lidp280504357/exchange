@@ -11,8 +11,9 @@
 --   files: every file kept for the platform, newest first, the same
 --     objects (the current app and configuration profile among them);
 --   notes: the version notes by language ({"zh-CN", "zh-TW", "en"}).
--- version goes up with every change (a setting, an upload, a deletion);
--- the public answer's ETag carries the larger of the two rows'.
+-- version goes up by one with every change (a setting, an upload, a
+-- deletion); the public answer's ETag is the sum of the two rows', which
+-- every change raises (review FF ①).
 
 -- +goose Up
 CREATE TABLE platform_apps (

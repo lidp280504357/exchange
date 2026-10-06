@@ -3519,9 +3519,9 @@ paths:
         smaller), so that no request passes Cloudflare's 100 MB (§1.2 #5):
         PUT each part (any order, again to resume), then complete. The
         platform and kind fix the extension: ANDROID APP .apk, IOS APP .ipa,
-        IOS MOBILECONFIG .mobileconfig; at most 500 MB, a .mobileconfig
-        1 MB. An upload not completed within 24 hours is dropped with its
-        parts. settings.write.
+        IOS MOBILECONFIG .mobileconfig; at most 500 MiB (524,288,000
+        bytes), a .mobileconfig 1 MiB. An upload not completed within 24
+        hours is dropped with its parts. settings.write.
       tags: [platform]
       requestBody:
         required: true
@@ -7204,8 +7204,7 @@ components:
         public:
           description: What GET /v1/platform/apps answers for the platform now.
           oneOf:
-            - type: object
-              additionalProperties: true
+            - $ref: '../openapi/platform.yaml#/components/schemas/AppDownload'
             - type: 'null'
         version:
           type: integer
@@ -7264,6 +7263,8 @@ components:
           enum: [OFF, LINK, FILE]
         link_url:
           type: string
+          maxLength: 500
+          pattern: '^(https://.+)?$'
           description: https only, at most 500 characters; empty for none (a LINK needs one).
         notes:
           $ref: '#/components/schemas/PlatformTexts'
@@ -7282,6 +7283,8 @@ components:
           description: MOBILECONFIG on IOS only.
         name:
           type: string
+          maxLength: 200
+          pattern: '\.(apk|ipa|mobileconfig)$'
           description: The file's name, ending .apk, .ipa or .mobileconfig as the platform and kind say; at most 200 characters.
         size:
           type: integer

@@ -76,8 +76,9 @@ export interface paths {
          *     /downloads/ on each of the sites — while it is enabled and
          *     complete; null otherwise (the sites leave the platform out, and
          *     hide the download entries while both are null). Cacheable for a
-         *     minute; the ETag is the apps' version (If-None-Match answers 304
-         *     while it has not changed). Batch H0.
+         *     minute; the ETag is the sum of the two platforms' versions, which
+         *     every change raises (If-None-Match answers 304 while it has not
+         *     changed). Batch H0.
          */
         get: operations["getPlatformApps"];
         put?: never;

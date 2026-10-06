@@ -181,6 +181,19 @@ func TestInstrumentSchema(t *testing.T) {
 	rejects(t, db, "an inverse contract's index is the USDT pair", `UPDATE contracts SET index_symbol = 'BTC-USD' WHERE symbol = 'BTC-USD-PERP'`)
 	rejects(t, db, "a known margin type", `UPDATE contracts SET margin_type = 'USDC' WHERE symbol = 'BTC-USDT-PERP'`)
 	rejects(t, db, "a reference symbol of letters, digits and _", `UPDATE contracts SET reference_symbol = 'btc-usd' WHERE symbol = 'BTC-USD-PERP'`)
+	// The apps to download (App download page H0): one row per platform, OFF
+	// until set; a link is https, a FILE has its app, a configuration
+	// profile is iOS's (review FF ②).
+	accepts(t, db, `UPDATE platform_apps SET mode = 'LINK', link_url = 'https://apps.apple.com/app/id1' WHERE platform = 'IOS'`)
+	accepts(t, db, `UPDATE platform_apps SET mode = 'FILE', current = '{"file_id": "x"}' WHERE platform = 'ANDROID'`)
+	accepts(t, db, `UPDATE platform_apps SET mobileconfig = '{"file_id": "y"}' WHERE platform = 'IOS'`)
+	rejects(t, db, "a LINK has its link", `UPDATE platform_apps SET mode = 'LINK', link_url = '' WHERE platform = 'ANDROID'`)
+	rejects(t, db, "links are https", `UPDATE platform_apps SET link_url = 'http://example.com/app.apk' WHERE platform = 'ANDROID'`)
+	rejects(t, db, "two platforms", `INSERT INTO platform_apps (platform, mode, link_url, enabled, files, notes, version, updated_by, updated_at)
+		VALUES ('HARMONY', 'OFF', '', false, '[]', '{}', 1, 'x', now())`)
+	rejects(t, db, "a configuration profile is iOS's", `UPDATE platform_apps SET mobileconfig = '{"file_id": "z"}' WHERE platform = 'ANDROID'`)
+	rejects(t, db, "a FILE has its app", `UPDATE platform_apps SET current = NULL WHERE platform = 'ANDROID'`)
+	rejects(t, db, "the files are a list", `UPDATE platform_apps SET files = '{}' WHERE platform = 'IOS'`)
 }
 
 func TestLedgerSchema(t *testing.T) {

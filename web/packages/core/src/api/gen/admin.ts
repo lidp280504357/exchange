@@ -2180,9 +2180,9 @@ export interface paths {
          *     smaller), so that no request passes Cloudflare's 100 MB (§1.2 #5):
          *     PUT each part (any order, again to resume), then complete. The
          *     platform and kind fix the extension: ANDROID APP .apk, IOS APP .ipa,
-         *     IOS MOBILECONFIG .mobileconfig; at most 500 MB, a .mobileconfig
-         *     1 MB. An upload not completed within 24 hours is dropped with its
-         *     parts. settings.write.
+         *     IOS MOBILECONFIG .mobileconfig; at most 500 MiB (524,288,000
+         *     bytes), a .mobileconfig 1 MiB. An upload not completed within 24
+         *     hours is dropped with its parts. settings.write.
          */
         post: operations["startAppUpload"];
         delete?: never;
@@ -4480,9 +4480,7 @@ export interface components {
             /** @description Every file kept on the server for the platform, newest first (the current app and configuration profile among them). */
             files: components["schemas"]["AppFile"][];
             /** @description What GET /v1/platform/apps answers for the platform now. */
-            public: {
-                [key: string]: unknown;
-            } | null;
+            public: components["schemas"]["AppDownload"] | null;
             /**
              * Format: int64
              * @description Goes up with every change (a setting, an upload, a deletion); PUT brings it back as expected_version.
@@ -6465,6 +6463,68 @@ export interface components {
             details?: {
                 [key: string]: unknown;
             };
+        };
+        /** @description A text by language; zh-CN is the fallback of a language without one. zh-TW (Traditional Chinese, design 2026-10-06 繁体中文 §2.1) is absent or empty until operators write it. */
+        Texts: {
+            "zh-CN": string;
+            "zh-TW"?: string;
+            en: string;
+        };
+        /**
+         * @description One platform's app. A link (mode LINK) has no file facts (null);
+         *     an uploaded file (FILE) has them as read from the package when it
+         *     was uploaded. URLs are absolute: a file's on https://<the
+         *     profile's domain>/downloads/... (any of the three sites serves it).
+         */
+        AppDownload: {
+            /** @enum {string} */
+            mode: "LINK" | "FILE";
+            /**
+             * @description The link, or the file (an .apk to download; an .ipa, which iOS installs through install_url).
+             * @example https://astras.vip/downloads/android/0192a000-0000-7000-8000-000000000001.apk
+             */
+            url: string;
+            /** @description An uploaded iOS app's over-the-air install link, itms-services://?action=download-manifest&url=<its manifest.plist>; null otherwise (open url). */
+            install_url: string | null;
+            /**
+             * @description iOS: APP_STORE for a link (the App Store, TestFlight or another page), OTA for an uploaded .ipa (an enterprise or Ad Hoc signed app, installed with install_url); null on Android.
+             * @enum {string|null}
+             */
+            ios_install: "APP_STORE" | "OTA" | null;
+            /**
+             * @description The Android package name or the iOS bundle identifier of an uploaded file.
+             * @example vip.astras.app
+             */
+            package: string | null;
+            /**
+             * @description versionName (Android) or CFBundleShortVersionString (iOS) of an uploaded file.
+             * @example 1.2.0
+             */
+            version: string | null;
+            /**
+             * @description versionCode (Android) or CFBundleVersion (iOS) of an uploaded file.
+             * @example 42
+             */
+            build: string | null;
+            /**
+             * @description The lowest system it installs on (Android API level, iOS version) when the package says.
+             * @example 24
+             * @example 15.0
+             */
+            min_os: string | null;
+            /**
+             * Format: int64
+             * @description An uploaded file's size in bytes.
+             */
+            size: number | null;
+            /** @description An uploaded file's SHA-256, lowercase hex. */
+            sha256: string | null;
+            /** @description iOS only, optional - a configuration profile (.mobileconfig) uploaded beside the app, downloaded on its own. */
+            mobileconfig_url: string | null;
+            /** @description The version notes; empty for none. */
+            notes: components["schemas"]["Texts"];
+            /** Format: date-time */
+            updated_at: string;
         };
     };
     responses: {
