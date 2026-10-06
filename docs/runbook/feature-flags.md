@@ -31,7 +31,7 @@
 | `margin.auto_borrow` | 杠杆下单 `side_effect=AUTO_BORROW` 时自动借入可用余额的差额（杠杆设计 §5.1，批次 E2） | 5 |
 | `derivatives.coin_m` | 币本位永续（`BTC-USD-PERP` 等，以币结算）：下单、仓位与 BTC/ETH/ASTRA 的合约账户；按用户或地区开放（资格 `COIN_M_TRADE`，同时要 `derivatives.trading`；币本位设计 2026-10-06 §2，derivatives-service 从批次 G1 读取）。默认关，测试服对所有人打开 | 6 |
 | `market.reference_mark` | 合约的标记价、指数价与资金费率跟它跟随的币安合约（`reference_symbol`），自算保留为流断 10 秒后的后备；按交易对（`--allow-symbols`；ASTRA 永续无币安市场，不适用）。币本位设计 §3.1，market-data-service 从批次 G3a 读取。默认关，测试服对有币安市场的合约打开 | 6 |
-| `market.futures_data` | 合约数据：币安的持仓量、多空比、主动买卖比、基差、资金费率历史与强平流（`GET /v1/market/{symbol}/futures-data`、`GET /v1/market/futures/overview`、公共频道 `liquidations:`）；关闭时两个接口答 404。币本位设计 §3.3，批次 G3b。默认关，测试服对所有人打开 | 6 |
+| `market.futures_data` | 合约数据：读取币安的持仓量、多空比、主动买卖比、基差、资金费率历史与强平流（`GET /v1/market/{symbol}/futures-data`、`GET /v1/market/futures/overview`、公共频道 `liquidations:`）；关闭时停止读取，已存的照常提供（全局）。币本位设计 §3.3，批次 G3b（market-data.md「合约数据」）。默认关，测试服打开 | 6 |
 | `market.flat_minutes` | 不跟随参考市场的交易对与合约（平台币 ASTRA-USDT、ASTRA-USDT-PERP）在下一笔成交被应用时，把与上一根 1m K 线之间没有成交的分钟存成平盘 K 线并发到 `market.candle.flats`（ClickHouse `candles_1m`），图表与读模型都连续（按交易对；默认关；测试服对这两个打开，见 [market-data.md](market-data.md#规则)） | 4 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |
 | `wallet.test_assets` | 隐藏测试资产（ADR-0017，TUSD）的网络、充值地址、地址簿与提现只对这些规则放行的用户开放（资格 `TEST_ASSETS`），其他人一律当作没有这个网络（404）；关闭时谁都没有。wallet-service 按用户缓存资格结果 1 分钟（改开关后最多 1 分钟生效）；user-service 答不上来时按没有资格处理，隐藏网络不可见、其他网络照常列出（审查 AQ）。测试服只对地区 `AQ` 打开：`exchangectl flags set wallet.test_assets --on --allow-regions AQ --reason "..."`，端到端用 `AQ` 注册（[custody.md](custody.md)） | 4 |
