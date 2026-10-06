@@ -26,3 +26,19 @@ export function updateMode(prev: CandleDataState | null, key: string, next: Cand
   if (added > 0 && next[added]?.open_time === prev.firstTime && next[added]?.open === prev.firstOpen && last.open_time === prev.lastTime) return "prepend";
   return "reset";
 }
+
+// The candles' price scale leaves room at the top for the legend, which
+// sits over the plot: the legend's height (with its 6 px offset and 6 px
+// to spare) as a share of the pane, at least the 8 % it always had and at
+// most half (B116: on the phone's coin page the legend wraps to three to
+// five lines, 58–100 px, over a 232 px pane, and covered the highest
+// candles with 8 %).
+const LEGEND_SPARE = 12;
+const TOP_MIN = 0.08;
+const TOP_MAX = 0.5;
+
+/** topMargin is the candles' top scale margin for a legend legendPx high over a pane panePx high. */
+export function topMargin(legendPx: number, panePx: number): number {
+  if (!(panePx > 0) || !(legendPx > 0)) return TOP_MIN;
+  return Math.min(TOP_MAX, Math.max(TOP_MIN, (legendPx + LEGEND_SPARE) / panePx));
+}

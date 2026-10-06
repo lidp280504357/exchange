@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import { IconButton } from "../components/IconButton";
 import { cn } from "../lib/cn";
 import { useFormatContext } from "../lib/settings";
-import { intervalParts, updateMode, type CandleDataState, type UpdateMode } from "./candles";
+import { intervalParts, topMargin, updateMode, type CandleDataState, type UpdateMode } from "./candles";
 import { createIndicatorClient, type IndicatorClient } from "./indicatorClient";
 import type { IndicatorResult } from "./indicators";
 import { numToDecimal } from "./numbers";
@@ -112,6 +112,7 @@ export function CandleChart({
   const theme = useChartTheme();
   const rootRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -134,6 +135,37 @@ export function CandleChart({
   const [lines, setLines] = useState<IndicatorResult | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [pseudoFull, setPseudoFull] = useState(false);
+
+  // Room for the legend at the top of the candles' scale (topMargin, B116):
+  // the legend's tallest since the symbol, interval, indicators or width
+  // last changed, so that the scale does not move while the crosshair's
+  // values change the legend's wrapping; refitted whenever the legend or
+  // the plot changes size.
+  const fitKey = `${symbol}|${interval}|${shown.join(",")}`;
+  const fitKeyRef = useRef(fitKey);
+  fitKeyRef.current = fitKey;
+  const volRef = useRef(showVOL);
+  volRef.current = showVOL;
+  const fitRef = useRef({ key: "", width: 0, legend: 0, top: 0, vol: showVOL });
+  const fit = useCallback(() => {
+    const chart = chartRef.current;
+    const candle = candleRef.current;
+    const plot = plotRef.current;
+    if (!chart || !candle || !plot) return;
+    const f = fitRef.current;
+    if (f.key !== fitKeyRef.current || f.width !== plot.clientWidth) {
+      f.key = fitKeyRef.current;
+      f.width = plot.clientWidth;
+      f.legend = 0;
+    }
+    f.legend = Math.max(f.legend, legendRef.current?.offsetHeight ?? 0);
+    const top = topMargin(f.legend, plot.clientHeight - chart.timeScale().height());
+    if (top === f.top && f.vol === volRef.current) return;
+    f.top = top;
+    f.vol = volRef.current;
+    candle.priceScale().applyOptions({ scaleMargins: { top, bottom: volRef.current ? 0.24 : 0.06 } });
+    plot.dataset.legendRoom = String(Math.round(top * 1000) / 1000);
+  }, []);
 
   const toggleIndicator = (i: Indicator) => {
     const next = shown.includes(i) ? shown.filter((x) => x !== i) : [...shown, i];
@@ -174,7 +206,7 @@ export function CandleChart({
       wickDownColor: th.down,
       borderVisible: false,
     });
-    candle.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.24 } });
+    candle.priceScale().applyOptions({ scaleMargins: { top: topMargin(0, 0), bottom: 0.24 } });
     const volume = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     const line = (color: string | undefined) =>
@@ -357,14 +389,25 @@ export function CandleChart({
     maRef.current.forEach((s) => s.applyOptions({ visible: showMA }));
     emaRef.current.forEach((s) => s.applyOptions({ visible: showEMA }));
     volumeRef.current?.applyOptions({ visible: showVOL });
-    candleRef.current?.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: showVOL ? 0.24 : 0.06 } });
+    fit();
     const list = candlesRef.current;
     const d = dataRef.current;
     if ((showMA || showEMA) && d && list[0]) {
       linesRef.current = null;
       runIndicators(list, "reset", `${d.key}|${list[0].open_time}`);
     }
-  }, [showMA, showEMA, showVOL, runIndicators]);
+  }, [showMA, showEMA, showVOL, runIndicators, fit]);
+
+  // The legend and the plot change size: refit the room at the top.
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => fit());
+    if (legendRef.current) observer.observe(legendRef.current);
+    if (plotRef.current) observer.observe(plotRef.current);
+    return () => observer.disconnect();
+  }, [fit]);
+  // A new symbol, interval or set of indicators measures the legend afresh.
+  useEffect(() => fit(), [fitKey, fit]);
 
   // Fullscreen: the Fullscreen API where there is one, else a fixed overlay (iOS).
   useEffect(() => {
@@ -460,50 +503,56 @@ export function CandleChart({
         className={cn("relative min-h-0", isFull || height === "fill" ? "flex-1" : "shrink-0")}
         style={isFull || height === "fill" ? undefined : { height }}
       >
-        {cur && (
-          <div className="pointer-events-none absolute left-2 top-1.5 z-10 flex max-w-[calc(100%-80px)] flex-col gap-0.5 text-xs tabular-nums">
-            <div className="flex flex-wrap gap-x-2 text-fg-3">
-              <span className="text-fg-2">{formatTime(cur.open_time, daily ? "date" : "datetime", locale, timeZone)}</span>
-              {(
-                [
-                  ["open", cur.open],
-                  ["high", cur.high],
-                  ["low", cur.low],
-                  ["close", cur.close],
-                ] as const
-              ).map(([k, v]) => (
-                <span key={k}>
-                  {t(`ui.chart.${k}`)} <span className={num(cur.close) >= num(cur.open) ? "text-up" : "text-down"}>{formatPrice(v, priceDecimals)}</span>
-                </span>
-              ))}
-              <span>
-                {t("ui.chart.change")} <span className={change && dec.sign(change) < 0 ? "text-down" : "text-up"}>{formatPercent(change)}</span>
-              </span>
-              {showVOL && (
+        <div
+          ref={legendRef}
+          data-testid="candle-legend"
+          className="pointer-events-none absolute left-1 top-1.5 z-10 flex max-w-[calc(100%-76px)] flex-col gap-0.5 rounded-1 bg-bg-1/70 px-1 text-xs tabular-nums"
+        >
+          {cur && (
+            <>
+              <div className="flex flex-wrap gap-x-2 text-fg-3">
+                <span className="text-fg-2">{formatTime(cur.open_time, daily ? "date" : "datetime", locale, timeZone)}</span>
+                {(
+                  [
+                    ["open", cur.open],
+                    ["high", cur.high],
+                    ["low", cur.low],
+                    ["close", cur.close],
+                  ] as const
+                ).map(([k, v]) => (
+                  <span key={k}>
+                    {t(`ui.chart.${k}`)} <span className={num(cur.close) >= num(cur.open) ? "text-up" : "text-down"}>{formatPrice(v, priceDecimals)}</span>
+                  </span>
+                ))}
                 <span>
-                  {t("ui.chart.volume")} <span className="text-fg-2">{formatDecimal(cur.volume, { decimals: 2 })}</span>
+                  {t("ui.chart.change")} <span className={change && dec.sign(change) < 0 ? "text-down" : "text-up"}>{formatPercent(change)}</span>
                 </span>
-              )}
-            </div>
-            {lines && (showMA || showEMA) && (
-              <div className="flex flex-wrap gap-x-2">
-                {showMA &&
-                  maPeriods.map((p, i) => (
-                    <span key={`ma${p}`} className={LINE_CLASS[i % LINE_CLASS.length]}>
-                      MA{p} {formatPrice(numToDecimal(lines.ma[i]?.[idx] ?? NaN, priceDecimals), priceDecimals)}
-                    </span>
-                  ))}
-                {showEMA &&
-                  emaPeriods.map((p, i) => (
-                    <span key={`ema${p}`} className={LINE_CLASS[(i + 3) % LINE_CLASS.length]}>
-                      EMA{p} {formatPrice(numToDecimal(lines.ema[i]?.[idx] ?? NaN, priceDecimals), priceDecimals)}
-                    </span>
-                  ))}
+                {showVOL && (
+                  <span>
+                    {t("ui.chart.volume")} <span className="text-fg-2">{formatDecimal(cur.volume, { decimals: 2 })}</span>
+                  </span>
+                )}
               </div>
-            )}
-          </div>
-        )}
-        <div ref={plotRef} className="absolute inset-0" />
+              {lines && (showMA || showEMA) && (
+                <div className="flex flex-wrap gap-x-2">
+                  {showMA &&
+                    maPeriods.map((p, i) => (
+                      <span key={`ma${p}`} className={LINE_CLASS[i % LINE_CLASS.length]}>
+                        MA{p} {formatPrice(numToDecimal(lines.ma[i]?.[idx] ?? NaN, priceDecimals), priceDecimals)}
+                      </span>
+                    ))}
+                  {showEMA &&
+                    emaPeriods.map((p, i) => (
+                      <span key={`ema${p}`} className={LINE_CLASS[(i + 3) % LINE_CLASS.length]}>
+                        EMA{p} {formatPrice(numToDecimal(lines.ema[i]?.[idx] ?? NaN, priceDecimals), priceDecimals)}
+                      </span>
+                    ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div ref={plotRef} data-testid="candle-plot" className="absolute inset-0" />
         {loading && (
           <div className="absolute inset-0 z-10 grid place-items-center bg-bg-1/40">
             <LoaderCircle size={20} className="animate-spin text-brand" aria-label={t("common.loading")} />

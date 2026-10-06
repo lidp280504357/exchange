@@ -1,6 +1,6 @@
 import type { BookView, CandleData } from "@exchange/core";
 import { describe, expect, it } from "vitest";
-import { intervalParts, updateMode } from "./candles";
+import { intervalParts, topMargin, updateMode } from "./candles";
 import { depthGeometry } from "./DepthChart";
 import { computeIndicators, ema, sma } from "./indicators";
 import { createIndicatorClient } from "./indicatorClient";
@@ -79,5 +79,15 @@ describe("chart numbers", () => {
     expect(g?.min).toBe(96);
     expect(g?.max).toBe(104);
     expect(depthGeometry({ bids: [], asks: [], maxTotal: "0", spread: null, seq: 0 })).toBeNull();
+  });
+});
+
+describe("topMargin (B116)", () => {
+  it("leaves the legend's height and 12 px at the top of the candles, between 8 % and half the pane", () => {
+    expect(topMargin(0, 234)).toBe(0.08);
+    expect(topMargin(58, 234)).toBeCloseTo(70 / 234, 6);
+    expect(topMargin(10, 600)).toBe(0.08);
+    expect(topMargin(200, 300)).toBe(0.5);
+    expect(topMargin(58, 0)).toBe(0.08);
   });
 });
