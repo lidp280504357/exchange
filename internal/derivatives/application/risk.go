@@ -406,7 +406,7 @@ func liquidationEvent(c domain.Contract, o domain.Order, f domain.Fill, liquidat
 	case o.Kind == domain.KindADL:
 		return &derivativesv1.AdlExecuted{
 			UserId: f.UserID, Symbol: f.Symbol, PositionSide: string(f.PositionSide), TradeId: f.TradeID, Price: f.Price.String(),
-			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), SettleAsset: c.Settle(),
+			Quantity: f.Qty.String(), RealizedPnl: f.RealizedPnL.String(), SettleAsset: c.Settle(), ContractSize: c.ContractSize.String(),
 		}
 	}
 	return nil

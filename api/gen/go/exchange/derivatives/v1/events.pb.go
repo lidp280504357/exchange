@@ -1044,7 +1044,11 @@ type AdlExecuted struct {
 	Quantity     string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
 	RealizedPnl  string                 `protobuf:"bytes,7,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
 	// The asset realized_pnl is in; from batch G1.
-	SettleAsset   string `protobuf:"bytes,8,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	SettleAsset string `protobuf:"bytes,8,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	// A coin-margined contract's face value in USD, quantity being whole
+	// contracts; "0" for a linear one (as on Position and FillSettled;
+	// review FG, B133: the notices name the unit).
+	ContractSize  string `protobuf:"bytes,9,opt,name=contract_size,json=contractSize,proto3" json:"contract_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1131,6 +1135,13 @@ func (x *AdlExecuted) GetRealizedPnl() string {
 func (x *AdlExecuted) GetSettleAsset() string {
 	if x != nil {
 		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetContractSize() string {
+	if x != nil {
+		return x.ContractSize
 	}
 	return ""
 }
@@ -1232,7 +1243,7 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\x0einsurance_paid\x18\b \x01(\tR\rinsurancePaid\x12\x10\n" +
 	"\x03adl\x18\t \x01(\bR\x03adl\x12!\n" +
 	"\fsettle_asset\x18\n" +
-	" \x01(\tR\vsettleAsset\"\xf6\x01\n" +
+	" \x01(\tR\vsettleAsset\"\x9b\x02\n" +
 	"\vAdlExecuted\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
@@ -1241,7 +1252,8 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\x05price\x18\x05 \x01(\tR\x05price\x12\x1a\n" +
 	"\bquantity\x18\x06 \x01(\tR\bquantity\x12!\n" +
 	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnl\x12!\n" +
-	"\fsettle_asset\x18\b \x01(\tR\vsettleAssetB\xf4\x01\n" +
+	"\fsettle_asset\x18\b \x01(\tR\vsettleAsset\x12#\n" +
+	"\rcontract_size\x18\t \x01(\tR\fcontractSizeB\xf4\x01\n" +
 	"\x1bcom.exchange.derivatives.v1B\vEventsProtoP\x01ZJgithub.com/skill/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
 
 var (

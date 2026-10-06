@@ -322,6 +322,21 @@ func TestAnUnfillableCoinMarginedLiquidationIsDeleveraged(t *testing.T) {
 		t.Fatalf("bob's deleveraged fill %+v %v", fills[0], err)
 	}
 	r.reconcile(t, "BTC")
+	// Alice's notice names the unit: contracts of 100 USD, the PnL in BTC
+	// (review FG, B133). The events are in memory only.
+	events := r.events()
+	if events == nil {
+		return
+	}
+	var adl *derivativesv1.AdlExecuted
+	for _, e := range events {
+		if a, ok := e.(*derivativesv1.AdlExecuted); ok && a.GetUserId() == alice {
+			adl = a
+		}
+	}
+	if adl == nil || adl.GetContractSize() != "100" || adl.GetSettleAsset() != "BTC" || adl.GetQuantity() != "250" {
+		t.Fatalf("alice's AdlExecuted %v", adl)
+	}
 }
 
 // A coin-margined cross account is liquidated on its own (coin-M design

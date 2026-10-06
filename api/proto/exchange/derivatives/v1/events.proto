@@ -178,4 +178,8 @@ message AdlExecuted {
   string realized_pnl = 7;
   // The asset realized_pnl is in; from batch G1.
   string settle_asset = 8;
+  // A coin-margined contract's face value in USD, quantity being whole
+  // contracts; "0" for a linear one (as on Position and FillSettled;
+  // review FG, B133: the notices name the unit).
+  string contract_size = 9;
 }
