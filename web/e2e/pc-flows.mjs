@@ -1,5 +1,5 @@
 // The PC site's part of the user's checklist (docs/runbook/ui-checklist.md:
-// the general items 1-12 and P1-P8; docs/阶段4验收报告.md §8), run by
+// the general items 1-12 and P1-P9; docs/阶段4验收报告.md §8), run by
 // scripts/e2e/webflows.sh after the smokes:
 //
 //   APP=https://astras.vip node web/e2e/pc-flows.mjs
@@ -896,6 +896,128 @@ else await f.step("P8", P8, async () => {
     if (new URL(P.page.url()).origin !== APP) throw new Error(`a phone with site_pref=pc was sent to ${P.page.url()}`);
   } finally {
     await P.close();
+  }
+});
+
+// --- P9: margin trading (margin design 2026-10-06 §7) -------------------------------------------
+
+const P9 =
+  "margin: the market list tags isolated pairs; the terminal trades from the cross account with its gauge, what it may borrow and the transfer, borrow and repay dialogs; a borrow there shows as a debt, an order is tagged 全仓; the assets' margin page shows both kinds of account and repays everything";
+// "" when margin trading is open to the flows' account (MARGIN_TRADE: its
+// status, then margin.enabled), else why P9 cannot run.
+async function marginClosed() {
+  if (NO_FUNDS()) return NO_FUNDS();
+  const token = await signInApi(API, user);
+  const r = await api(API, "GET", "/v1/user/eligibility?feature=MARGIN_TRADE", undefined, { Authorization: `Bearer ${token}` });
+  if (r.status !== 200) return `the eligibility could not be read (${r.status})`;
+  return r.body.allowed ? "" : `margin trading is not open to the account (${r.body.reason_code})`;
+}
+
+/** marginCall writes to the margin API as the flows' account, each with its own idempotency key. */
+async function marginCall(path, body) {
+  const token = await signInApi(API, user);
+  const r = await api(API, "POST", path, body, { Authorization: `Bearer ${token}`, "Idempotency-Key": `flows-${Date.now()}-${Math.random()}` });
+  if (r.status !== 200) throw new Error(`${path} ${JSON.stringify(body)}: ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body;
+}
+
+/** marginCleared repays the cross account's debts and moves its USDT back to spot, its failure not hiding the step's own. */
+async function marginCleared() {
+  try {
+    await cancelOrders(API, user);
+    const token = await signInApi(API, user);
+    const accounts = await api(API, "GET", "/v1/margin/accounts", undefined, { Authorization: `Bearer ${token}` });
+    const usdt = accounts.body?.cross?.balances?.find((b) => b.asset === "USDT");
+    if (!usdt) return;
+    if (Number(usdt.borrowed) > 0 || Number(usdt.interest) > 0) {
+      await marginCall("/v1/margin/repay", { account: "MARGIN_CROSS", asset: "USDT", amount: "ALL" });
+    }
+    const after = await api(API, "GET", "/v1/margin/accounts", undefined, { Authorization: `Bearer ${token}` });
+    const free = after.body?.cross?.balances?.find((b) => b.asset === "USDT")?.free ?? "0";
+    if (Number(free) > 0) await marginCall("/v1/margin/transfer", { direction: "OUT", account: "MARGIN_CROSS", asset: "USDT", amount: free });
+  } catch (e) {
+    console.log(`     clearing the cross margin account: ${e.message}`);
+  }
+}
+
+const noMargin = await marginClosed();
+if (noMargin) f.skip("P9", P9, noMargin);
+else await f.step("P9", P9, async () => {
+  const pairs = await api(API, "GET", "/v1/margin/pairs");
+  if (pairs.status !== 200) throw new Error(`/v1/margin/pairs: ${pairs.status}`);
+  const btc = pairs.body.items.find((p) => p.symbol === "BTC-USDT");
+  if (!btc?.isolated) throw new Error("BTC-USDT takes no isolated margin account");
+  // 20 USDT into the cross account over the API: the smokes move funds through the dialogs.
+  await marginCall("/v1/margin/transfer", { direction: "IN", account: "MARGIN_CROSS", asset: "USDT", amount: "20" });
+  const D = await signedInTab("margin", 1280);
+  try {
+    // The market list: the pair's isolated leverage beside its name.
+    await nav(D, "/markets");
+    await D.page.waitForFunction(
+      (tag) =>
+        [...document.querySelectorAll('[title*="逐仓"]')].some((el) => el.innerText.trim() === tag && el.parentElement?.innerText.replace(/\s+/g, "").startsWith("BTC/USDT")),
+      { timeout: 20000 },
+      `${btc.leverage}x`,
+    );
+    // The terminal on the cross account: gauge, what it may borrow, the three dialogs.
+    await nav(D, "/trade/BTC-USDT");
+    const bar = '[data-testid="margin-bar"]';
+    await D.page.waitForSelector(bar, { visible: true, timeout: 20000 });
+    await D.clickButton("全仓", bar);
+    await D.page.waitForSelector(`${bar} [data-testid="margin-level"]`, { visible: true, timeout: 10000 });
+    await D.page.waitForFunction((b) => /\d/.test(document.querySelector(`${b} [data-testid="margin-borrowable"]`)?.innerText ?? ""), { timeout: 15000 }, bar);
+    for (const [link, form] of [["划转", "transfer"], ["还币", "repay"]]) {
+      await D.clickButton(link, bar);
+      await D.page.waitForSelector(`[role=dialog] form[data-testid="margin-${form}-form"]`, { visible: true, timeout: 10000 });
+      await D.page.keyboard.press("Escape");
+      await D.page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
+    }
+    // Borrow 1 USDT from the bar's dialog: the account owes it, the gauge leaves "no debt".
+    await D.clickButton("借币", bar);
+    const borrow = '[role=dialog] form[data-testid="margin-borrow-form"]';
+    await D.page.waitForSelector(borrow, { visible: true, timeout: 10000 });
+    await D.page.waitForFunction((f) => document.querySelector(f)?.innerText.includes("USDT"), { timeout: 10000 }, borrow);
+    await D.typeInto(`${borrow} input[aria-label="数量"]`, "1");
+    await D.clickButton("确认借币", "[role=dialog]");
+    await D.waitText("已借入 1 USDT");
+    await D.page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
+    const token = await signInApi(API, user);
+    const owed = await api(API, "GET", "/v1/margin/accounts", undefined, { Authorization: `Bearer ${token}` });
+    const usdt = owed.body.cross.balances.find((b) => b.asset === "USDT");
+    if (!usdt || Number(usdt.borrowed) !== 1 || owed.body.cross.margin_level === null) throw new Error(`after the borrow: ${JSON.stringify(owed.body.cross)}`);
+    // A limit buy from the cross account rests tagged 全仓, then is cancelled.
+    await limitBuy(D, { confirm: true });
+    await openOrders(D, 1);
+    await D.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="margin-tag"]')].some((el) => el.innerText.includes("全仓")), { timeout: 15000 });
+    await D.clickButton("撤单");
+    await openOrders(D, 0);
+    await D.clickButton("现货", bar);
+    await D.page.waitForSelector(`${bar} [data-testid="margin-level"]`, { hidden: true, timeout: 10000 });
+    // The assets' margin page: the cross account with its debt, the isolated
+    // section, and the debt repaid in full from the row's 还币.
+    await nav(D, "/assets/margin");
+    const cross = '[data-testid="margin-account-MARGIN_CROSS"]';
+    await D.page.waitForFunction((c) => document.querySelector(`${c} tbody`)?.innerText.includes("USDT"), { timeout: 20000 }, cross);
+    await D.waitText("逐仓杠杆");
+    await D.clickButton("还币", `${cross} tbody`);
+    const repay = '[role=dialog] form[data-testid="margin-repay-form"]';
+    await D.page.waitForSelector(repay, { visible: true, timeout: 10000 });
+    await D.clickButton("最大", "[role=dialog]");
+    await D.waitText("将全部还清");
+    await D.clickButton("确认还币", "[role=dialog]");
+    await D.waitText("已还");
+    await D.page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
+    const until = Date.now() + 15_000;
+    for (;;) {
+      const now = await api(API, "GET", "/v1/margin/accounts", undefined, { Authorization: `Bearer ${await signInApi(API, user)}` });
+      const left = now.body.cross.balances.find((b) => b.asset === "USDT");
+      if (left && Number(left.borrowed) === 0 && Number(left.interest) === 0) break;
+      if (Date.now() > until) throw new Error(`still owed after 还币 in full: ${JSON.stringify(left)}`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } finally {
+    await D.close();
+    await marginCleared();
   }
 });
 
