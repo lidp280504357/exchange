@@ -138,6 +138,23 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 - 指标：`market_reference_book_age_seconds{symbol}`（距上次变化的秒数，未同步为 -1）、`market_reference_book_resyncs_total`、`market_reference_book_stream_failures_total`；告警 `ReferenceBookStale`（不同步或 30 秒没变，持续 2 分钟）。
 - 日志：`reference book stream failed`（带交易对数，按 1 秒起、最长 1 分钟退避重连）、`reference book snapshot not loaded`、`reference books: followed symbols changed`。
 
+## 合约数据（`market.futures_data`，设计 2026-10-06 §3.3，批次 G3b）
+
+合约页的「数据」面板与合约数据总览用币安的合约统计，只展示、不参与任何计算。开关 `market.futures_data` 全局生效：打开时读取；关掉后不再请求币安，但两个接口照常返回库里已有的数据。代码在 market-data-service 里以 `futures_stats` 开头的文件（`internal/marketdata/{ports,adapters/binance,adapters/postgres,application,transport/httpapi}/futures_stats.go`、`cmd/market-data-service/futures_stats.go`）。
+
+- 哪些合约：每 10 分钟从 instrument-service 读一次合约（下架的除外，`CANCEL_ONLY` 的照样取数），对上币安在交易的永续合约：`<BASE>-USDT-PERP` 对 U 本位的 `<BASE>USDT`（`fapi`），`<BASE>-USD-PERP` 对币本位的 `<BASE>USD_PERP`（`dapi`，统计按 pair 取）。币安没有的（ASTRA 两个永续）不取，接口返回 404 `MARKET_NO_FUTURES_DATA`。币安合约列表来自 `exchangeInfo`。
+- 指标：持仓量 `open_interest`（`openInterestHist`）、全市场多空账户比 `long_short_account`、大户账户比 `top_long_short_account`、大户持仓比 `top_long_short_position`、主动买卖量 `taker_ratio`（U 本位 `takerlongshortRatio`，币本位 `takerBuySellVol`，比值由量算出、保留 4 位）、基差 `basis`，周期 5m/15m/1h/4h/1d；资金费率历史 `funding`（`fundingRate`，按结算点，不分周期）。`values` 的字段：`open_interest`/`open_interest_value`（U 本位为币与 USDT，币本位为张与币）、`long_short_ratio`/`long`/`short`、`buy_vol`/`sell_vol`/`buy_sell_ratio`、`basis`/`basis_rate`/`futures_price`/`index_price`、`funding_rate`/`mark_price`。
+- 读取：每个保证金类型的每个指标各一条循环，每次取到期最早的一个序列。时间点在周期结束约 70 秒后去取：持仓量与多空比是该时刻的快照；主动买卖量与基差的时间是周期起点，周期结束后才发布，所以晚一个周期。首次每个序列取最近 500 点（4h、1d 即满 30 天），以后从库里最新一点往后补（一页 500 个周期，空页且整页已过去就跳过）；该到的点没到，等待从 1 分钟起翻倍，最长为周期的四分之一（至多 15 分钟）。资金费率每小时过 1 分 30 秒取一次。每个合约当前的持仓量每分钟取一次（`openInterest`，只在内存里，供总览）。
+- 限频：与参考行情的请求队列分开，每个接口单独节流：`futures/data` 每 375 毫秒一次（每 5 分钟 800 次，币安标注每 IP 每接口 1000 次），`fundingRate` 每 1.5 秒（币安与 `fundingInfo` 共用每 5 分钟 500 次，标记价也会用），`openInterest` 每 100 毫秒，`exchangeInfo` 每秒；收到 429/418 按 `Retry-After` 暂停该主机的全部请求。约 105 个合约时 `fapi` 每个接口平均每 5 分钟约 115 次，UTC 0 点五个周期同时结束时约 400 次。
+- 存储：`market.futures_stats(symbol, metric, period, ts, data)`，`data` 是字符串值的 JSON；每个周期只留图表可能要的 500 点（保留 501 个周期长度，最多 30 天），资金费率留 30 天；每小时清理一次。约 105 个合约时约 120 万行。
+- 接口（G0 定稿前的草案，以 `api/openapi/market.yaml` 为准）：`GET /v1/market/{symbol}/futures-data?metric=&period=&limit=`（`period` 默认 5m、资金费率不收；`limit` 默认 30、最多 500；返回 `points: [{time, values}]`，旧在前）；`GET /v1/market/futures/overview`（全部未下架合约：标记价、指数价、当前资金费率与下次结算时间、持仓量与其美元价值、24 小时涨跌与成交额、`futures_data` 是否有币安数据）。两者都不需登录，分别缓存 30 秒与 5 秒。
+- 爆仓：订阅 `fstream` 与 `dstream` 的 `!forceOrder@arr`（全市场，币安每个合约每秒最多推一条），只留我们的合约，换算成持仓方向（卖单即多头被平）、成交量与美元价值（U 本位均价 × 数量，币本位张数 × 面值）。发到 Kafka `market.liquidations` 与网关频道 `liquidations:{symbol}` 等 G0 的事件契约。15 分钟没有消息就重连（安静的市场是正常的）。
+- 指标：`market_futures_stats_requests_total{margin,metric,result}`（`metric` 另有 `open_interest_now`）、`market_futures_stats_points_total{metric}`、`market_futures_liquidations_total{margin}`。
+- 日志：`futures statistics: read failed`（每条循环 10 分钟最多一条，带这期间的失败次数）、`listing failed`、`open interest failed`、`liquidation stream failed`、`futures statistics purged`。
+- 已知差异：币本位的 `/dapi/v1/openInterest`（总览的当前值）与 `openInterestHist`（曲线）口径不同，2026-10-06 实测 BTCUSD 同一时刻约差 4 倍；两者都按币安原样展示。
+- 配置：币本位地址 `BINANCE_COINM_REST_URL`、`BINANCE_COINM_STREAM_URL`（默认 `https://dapi.binance.com`、`wss://dstream.binance.com`），U 本位沿用 `BINANCE_FUTURES_REST_URL`、`BINANCE_FUTURES_STREAM_URL`。
+- 数据授权：同参考行情，只在测试环境用（ADR-0010）。
+
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |

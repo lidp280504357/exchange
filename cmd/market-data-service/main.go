@@ -179,6 +179,11 @@ func setup(ctx context.Context, a *app.App) error {
 		application.MarksConfig{MinSources: cfg.IndexMinSources, Weights: sourceWeights}, a.Logger(), a.Metrics())
 	marks.UseReferenceBooks(books.Levels) // HOUSE trades at the reference book's prices (ADR-0015)
 	a.Add("contract prices", app.Loop(marks.Run))
+	// The contracts' data panel (design 2026-10-06 §3.3).
+	futures, err := futuresData(a, db, listed, flagClient)
+	if err != nil {
+		return err
+	}
 	a.Add("purge", app.Loop(func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
@@ -219,5 +224,6 @@ func setup(ctx context.Context, a *app.App) error {
 		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks,
 		Platform: platform, Listed: src, Now: time.Now,
 	}).Routes(r)
+	(&httpapi.FuturesData{Stats: futures, Marks: marks, Tickers: tickers, Listed: listed}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
