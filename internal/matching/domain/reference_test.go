@@ -167,6 +167,29 @@ func TestSnapshotsKeepTheReference(t *testing.T) {
 	}
 }
 
+// HOUSE's room on a coin-margined contract is in contracts (coin-M design
+// §2.3, the publisher's rooms per settlement asset): with room for 2 left
+// a buy of 5 (a market order, IOC at its protection price) gets 2 and the
+// rest is canceled; the trade's quote is its USD value, 2 x 100.
+func TestHouseRoomCapsACoinMarginedContract(t *testing.T) {
+	b := NewBook("BTC-USD-PERP")
+	expect(t, b.Reference(Reference{
+		Bids: []RefLevel{{d("59990"), d("500")}}, Asks: []RefLevel{{d("60010"), d("500")}},
+		BuyRoom: d("800"), SellRoom: d("2"), HouseUser: "house", At: t0,
+	}), "")
+	buy := at(order("u", Buy, Limit, IOC, "60100", "5"), time.Second)
+	buy.Symbol, buy.QuoteAsset, buy.LotSize, buy.SettleAsset, buy.ContractSize = "BTC-USD-PERP", "USD", d("1"), "BTC", d("100")
+	evs := b.Place(buy)
+	expect(t, evs, "T 2@60010; "+buy.ID+" CANCELED 2/120020 IOC")
+	if tr := evs[0].Trade; !tr.Quote.Equal(d("200")) || tr.SettleAsset != "BTC" || tr.HouseSide != Sell || !b.ref.SellRoom.IsZero() {
+		t.Fatalf("trade %+v, room %s", tr, b.ref.SellRoom)
+	}
+	// None is left: the next buy fills nothing.
+	again := at(order("u", Buy, Limit, IOC, "60100", "1"), time.Second)
+	again.Symbol, again.QuoteAsset, again.LotSize, again.SettleAsset, again.ContractSize = "BTC-USD-PERP", "USD", d("1"), "BTC", d("100")
+	expect(t, b.Place(again), again.ID+" CANCELED 0/0 IOC")
+}
+
 // Updates come every 250 ms but HOUSE's holdings every second: an update
 // read from the same holdings must not give back room a fill already used,
 // or HOUSE sells more than it holds (ADR-0013).

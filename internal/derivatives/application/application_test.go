@@ -307,7 +307,13 @@ func setup(t *testing.T) *rig {
 }
 
 func (r *rig) fund(user, amount string) {
-	r.ledger.available[user] = r.ledger.available[user].Add(d(amount))
+	r.fundIn(user, "USDT", amount)
+}
+
+// fundIn credits amount of asset to user's FUTURES account.
+func (r *rig) fundIn(user, asset, amount string) {
+	a := account(user, asset)
+	r.ledger.available[a] = r.ledger.available[a].Add(d(amount))
 }
 
 func (r *rig) place(t *testing.T, user string, side domain.Side, price, qty string, reduceOnly bool) domain.Order {
@@ -353,7 +359,13 @@ func (r *rig) trade(t *testing.T, maker, taker domain.Order, price string) {
 
 func (r *rig) position(t *testing.T, user string) domain.Position {
 	t.Helper()
-	list, err := r.svc.Positions(context.Background(), user, perp.Symbol)
+	return r.positionOn(t, perp.Symbol, user)
+}
+
+// positionOn returns user's position on a contract, flat when there is none.
+func (r *rig) positionOn(t *testing.T, symbol, user string) domain.Position {
+	t.Helper()
+	list, err := r.svc.Positions(context.Background(), user, symbol)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +743,13 @@ func liquidationSetup(t *testing.T) (r *rig, alice, bob string) {
 
 func (r *rig) monitor(t *testing.T, mark string) {
 	t.Helper()
-	r.book.Set(perp.Symbol, d(mark), time.Now())
+	r.monitorOn(t, perp.Symbol, mark)
+}
+
+// monitorOn sets a contract's mark price and runs the liquidation monitor.
+func (r *rig) monitorOn(t *testing.T, symbol, mark string) {
+	t.Helper()
+	r.book.Set(symbol, d(mark), time.Now())
 	if err := r.svc.Monitor(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -740,7 +758,14 @@ func (r *rig) monitor(t *testing.T, mark string) {
 // liquidationOrder returns the user's active liquidation order.
 func (r *rig) liquidationOrder(t *testing.T, user string) (domain.Order, bool) {
 	t.Helper()
-	list, _, err := r.svc.List(context.Background(), user, perp.Symbol, "ACTIVE", "", 100)
+	return r.liquidationOrderOn(t, perp.Symbol, user)
+}
+
+// liquidationOrderOn returns the user's active liquidation order on a
+// contract.
+func (r *rig) liquidationOrderOn(t *testing.T, symbol, user string) (domain.Order, bool) {
+	t.Helper()
+	list, _, err := r.svc.List(context.Background(), user, symbol, "ACTIVE", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}

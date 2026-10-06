@@ -561,4 +561,21 @@ func TestHouseQuotesACoinMarginedContractInContracts(t *testing.T) {
 	if book == nil || book.GetBuyRoom() != "1300" || book.GetSellRoom() != "700" || len(book.GetBids()) != 1 || book.GetBids()[0].GetQuantity() != "200" {
 		t.Fatalf("the coin-margined book %v", book)
 	}
+	// The BTC account shrinks to 0.06 (3,000 USD, 30,000 at 10x): the short
+	// uses all of it. HOUSE only buys back its 300 contracts and sells none,
+	// so a user's buy finds no room (TestHouseRoomCapsACoinMarginedContract).
+	account.Equity["BTC"] = d("0.06")
+	now = now.Add(2 * time.Second)
+	p.refresh(ctx)
+	_ = p.publish(ctx, p.round())
+	_, books = rec.take(t)
+	book = nil
+	for _, b := range books {
+		if b.GetSymbol() == "BTC-USD-PERP" {
+			book = b
+		}
+	}
+	if book == nil || book.GetBuyRoom() != "300" || book.GetSellRoom() != "0" {
+		t.Fatalf("the coin-margined book without room %v", book)
+	}
 }
