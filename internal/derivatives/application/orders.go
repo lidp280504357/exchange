@@ -131,11 +131,11 @@ func (s *Service) checkOpening(ctx context.Context, r ports.Repos, c domain.Cont
 	if err := domain.CheckRiskLimit(c, o, held, active, mark); err != nil {
 		return err
 	}
-	bal, err := s.Ledger.Balance(ctx, o.UserID, c.Quote)
+	bal, err := s.Ledger.Balance(ctx, o.UserID, c.Settle())
 	if err != nil {
 		return err
 	}
-	cross, err := s.crossUnrealized(ctx, r, o.UserID)
+	cross, err := s.crossUnrealized(ctx, r, o.UserID, c.Settle())
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 	if err != nil {
 		return o, err
 	}
-	if err := s.Ledger.Freeze(ctx, "order:"+o.ID, o.UserID, c.Quote, o.Unreleased(), o.ID); err != nil {
+	if err := s.Ledger.Freeze(ctx, "order:"+o.ID, o.UserID, c.Settle(), o.Unreleased(), o.ID); err != nil {
 		e := apperr.From(err)
 		switch e.Kind {
 		case apperr.KindInvalid, apperr.KindUnprocessable, apperr.KindConflict, apperr.KindForbidden:
@@ -206,7 +206,7 @@ func (s *Service) accept(ctx context.Context, r ports.Repos, o domain.Order, c d
 		shown.Type = orderv1.OrderType_ORDER_TYPE_MARKET
 	}
 	if err := r.Emit(ctx, event.TopicDerivOrder, &orderv1.OrderAccepted{
-		Order: shown, FrozenAsset: c.Quote, FrozenAmount: o.Unreleased().String(),
+		Order: shown, FrozenAsset: c.Settle(), FrozenAmount: o.Unreleased().String(),
 	}, "symbol", o.Symbol); err != nil {
 		return err
 	}

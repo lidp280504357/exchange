@@ -38,7 +38,7 @@ func ChangeLeverage(c Contract, leverage int32, positions []Position, mark decim
 		if !mark.IsPositive() {
 			return nil, ErrMarkUnavailable
 		}
-		if n := p.Notional(mark); n.GreaterThan(limit) {
+		if n := p.Notional(c, mark); n.GreaterThan(limit) {
 			return nil, riskLimitExceeded(limit, leverage, n)
 		}
 		im := InitialMargin(p.EntryCost, leverage, c.QuoteDecimals)
@@ -74,8 +74,8 @@ func AdjustMargin(c Contract, p Position, amount, mark decimal.Decimal) (Positio
 			return Position{}, ErrMarkUnavailable
 		}
 		atEntry := InitialMargin(p.EntryCost, p.Leverage, c.QuoteDecimals)
-		atMark := InitialMargin(p.Notional(mark), p.Leverage, c.QuoteDecimals)
-		if p.Margin.LessThan(atEntry) || p.Margin.Add(p.UnrealizedPnL(mark)).LessThan(atMark) {
+		atMark := InitialMargin(p.Notional(c, mark), p.Leverage, c.QuoteDecimals)
+		if p.Margin.LessThan(atEntry) || p.Margin.Add(p.UnrealizedPnL(c, mark)).LessThan(atMark) {
 			return Position{}, ErrMarginTooLarge
 		}
 	}

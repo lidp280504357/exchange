@@ -170,8 +170,9 @@ func TestLeverageAndMarginChanges(t *testing.T) {
 
 func TestPositionFigures(t *testing.T) {
 	long := Position{Qty: d("2"), EntryCost: d("120000"), Margin: d("6000"), MarginMode: Isolated, Leverage: 20}
-	if !long.EntryPrice().Equal(d("60000")) || !long.UnrealizedPnL(d("61000")).Equal(d("2000")) || !long.BankruptcyPrice().Equal(d("57000")) {
-		t.Fatalf("long %s %s %s", long.EntryPrice(), long.UnrealizedPnL(d("61000")), long.BankruptcyPrice())
+	if !long.EntryPrice(btcPerp).Equal(d("60000")) || !long.UnrealizedPnL(btcPerp, d("61000")).Equal(d("2000")) ||
+		!long.BankruptcyPrice(btcPerp).Equal(d("57000")) {
+		t.Fatalf("long %s %s %s", long.EntryPrice(btcPerp), long.UnrealizedPnL(btcPerp, d("61000")), long.BankruptcyPrice(btcPerp))
 	}
 	// Tier 2 (1%) takes 50000 x (1% − 0.4%) = 300 off its maintenance:
 	// (120000 − 6000 − 300) / (2 x (1 − 0.01)) = 57424.24242424.
@@ -179,7 +180,7 @@ func TestPositionFigures(t *testing.T) {
 		t.Fatalf("liquidation price %s", got)
 	}
 	short := Position{Qty: d("-2"), EntryCost: d("120000"), Margin: d("6000")}
-	if !short.UnrealizedPnL(d("61000")).Equal(d("-2000")) || !short.BankruptcyPrice().Equal(d("63000")) {
+	if !short.UnrealizedPnL(btcPerp, d("61000")).Equal(d("-2000")) || !short.BankruptcyPrice(btcPerp).Equal(d("63000")) {
 		t.Fatal("short")
 	}
 	if got := Transferable(d("1000"), d("-300")); !got.Equal(d("700")) {

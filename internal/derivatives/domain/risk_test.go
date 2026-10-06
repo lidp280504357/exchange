@@ -26,18 +26,18 @@ func TestMarginStatesAndLiquidationOrders(t *testing.T) {
 		{"59090", MarginLiquidate}, // 290 <= 290.9
 	} {
 		mark := d(c.mark)
-		if got := State(long.MarginBalance(mark), long.MaintenanceMargin(btcPerp, mark)); got != c.want {
+		if got := State(long.MarginBalance(btcPerp, mark), long.MaintenanceMargin(btcPerp, mark)); got != c.want {
 			t.Errorf("at %s: %v, want %v", c.mark, got, c.want)
 		}
 	}
 	// Bankruptcy at (60000 − 1200) / 1 = 58800; the liquidation sell goes
 	// 0.5% below it.
-	o := LiquidationOrder("l1", btcPerp, long, long.BankruptcyPrice(), time.Now())
+	o := LiquidationOrder("l1", btcPerp, long, long.BankruptcyPrice(btcPerp), time.Now())
 	if o.Side != Sell || !o.Price.Equal(d("58506")) || o.TimeInForce != IOC || o.Kind != KindLiquidation || o.Reserving() || !o.ReduceOnly {
 		t.Fatalf("liquidation order %+v", o)
 	}
 	short := Position{UserID: "u2", Side: SideShort, Qty: d("-1"), EntryCost: d("60000"), Margin: d("1200"), MarginMode: Isolated}
-	if o := LiquidationOrder("l2", btcPerp, short, short.BankruptcyPrice(), time.Now()); o.Side != Buy || !o.Price.Equal(d("61506")) || o.ReduceOnly {
+	if o := LiquidationOrder("l2", btcPerp, short, short.BankruptcyPrice(btcPerp), time.Now()); o.Side != Buy || !o.Price.Equal(d("61506")) || o.ReduceOnly {
 		t.Fatalf("liquidation buy %+v", o)
 	}
 	if got := ADLPrice(btcPerp, long, d("59000")); !got.Equal(d("58800")) {
@@ -48,7 +48,7 @@ func TestMarginStatesAndLiquidationOrders(t *testing.T) {
 func TestTheADLQueue(t *testing.T) {
 	liquidated := Position{UserID: "u0", Qty: d("-2"), EntryCost: d("120000"), Margin: d("2400")}
 	mark := d("61000")
-	queue := ADLQueue(liquidated, []Position{
+	queue := ADLQueue(btcPerp, liquidated, []Position{
 		{UserID: "a", Qty: d("1"), EntryCost: d("59000"), Margin: d("5900")},  // +2000, 10x
 		{UserID: "b", Qty: d("1"), EntryCost: d("60000"), Margin: d("1200")},  // +1000, 50x
 		{UserID: "c", Qty: d("1"), EntryCost: d("62000"), Margin: d("6200")},  // at a loss
@@ -136,13 +136,13 @@ func TestTheLadderAt125x(t *testing.T) {
 		{"83660", MarginLiquidate}, // 166 <= 167.32
 	} {
 		mark := d(s.mark)
-		if got := State(long.MarginBalance(mark), long.MaintenanceMargin(c, mark)); got != s.want {
+		if got := State(long.MarginBalance(c, mark), long.MaintenanceMargin(c, mark)); got != s.want {
 			t.Errorf("at %s: %v, want %v", s.mark, got, s.want)
 		}
 	}
 	// Bankruptcy at (42000 − 336) / 0.5 = 83328, 0.4% below the entry:
 	// the liquidation sell still goes 0.5% under it.
-	if o := LiquidationOrder("l1", c, long, long.BankruptcyPrice(), time.Now()); o.Side != Sell || !o.Price.Equal(d("82911.3")) || !o.ReduceOnly {
+	if o := LiquidationOrder("l1", c, long, long.BankruptcyPrice(c), time.Now()); o.Side != Sell || !o.Price.Equal(d("82911.3")) || !o.ReduceOnly {
 		t.Fatalf("liquidation order %+v", o)
 	}
 }

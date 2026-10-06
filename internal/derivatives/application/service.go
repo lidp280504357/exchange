@@ -125,8 +125,9 @@ func (s *Service) mark(symbol string) (decimal.Decimal, error) {
 }
 
 // crossUnrealized sums the unrealized result of the user's cross
-// positions at the mark prices; a position without a fresh mark fails it.
-func (s *Service) crossUnrealized(ctx context.Context, r ports.Repos, userID string) (decimal.Decimal, error) {
+// positions settled in asset (all of them when asset is empty) at the mark
+// prices; a position without a fresh mark fails it.
+func (s *Service) crossUnrealized(ctx context.Context, r ports.Repos, userID, asset string) (decimal.Decimal, error) {
 	list, err := r.Positions().OfUser(ctx, userID, "")
 	if err != nil {
 		return decimal.Zero, err
@@ -136,39 +137,63 @@ func (s *Service) crossUnrealized(ctx context.Context, r ports.Repos, userID str
 		if p.Flat() || p.MarginMode != domain.Cross {
 			continue
 		}
+		c, err := s.Instruments.Contract(ctx, p.Symbol)
+		if err != nil {
+			return decimal.Zero, err
+		}
+		if asset != "" && c.Settle() != asset {
+			continue
+		}
 		m, err := s.mark(p.Symbol)
 		if err != nil {
 			return decimal.Zero, err
 		}
-		sum = sum.Add(p.UnrealizedPnL(m))
+		sum = sum.Add(p.UnrealizedPnL(c, m))
 	}
 	return sum, nil
 }
 
-// positionProto renders a position for events.
-func positionProto(p domain.Position) *derivativesv1.Position {
+// settledIn keeps the orders on contracts settled in asset: a FUTURES
+// account's, the asset its cross equity is in.
+func (s *Service) settledIn(ctx context.Context, orders []domain.Order, asset string) ([]domain.Order, error) {
+	var out []domain.Order
+	for _, o := range orders {
+		c, err := s.Instruments.Contract(ctx, o.Symbol)
+		if err != nil {
+			return nil, err
+		}
+		if c.Settle() == asset {
+			out = append(out, o)
+		}
+	}
+	return out, nil
+}
+
+// positionProto renders a position of contract c for events.
+func positionProto(c domain.Contract, p domain.Position) *derivativesv1.Position {
 	out := &derivativesv1.Position{
 		PositionId: p.ID, UserId: p.UserID, Symbol: p.Symbol, PositionSide: string(p.Side), Quantity: p.Qty.String(),
 		EntryCost: p.EntryCost.String(), Margin: p.Margin.String(), MarginMode: string(p.MarginMode), Leverage: p.Leverage,
 		RealizedPnl: p.RealizedPnL.String(), Funding: p.Funding.String(), Version: p.Version,
 	}
 	if !p.Flat() {
-		out.EntryPrice = p.EntryPrice().String()
+		out.EntryPrice = p.EntryPrice(c).String()
 	}
 	return out
 }
 
-// emitPosition queues the event of a position a fill changed.
-func emitPosition(ctx context.Context, r ports.Repos, c domain.PositionChange, tradeID string) error {
+// emitPosition queues the event of a position of contract c a fill
+// changed.
+func emitPosition(ctx context.Context, r ports.Repos, c domain.Contract, ch domain.PositionChange, tradeID string) error {
 	var msg proto.Message
-	pos := positionProto(c.Position)
-	switch c.Reason {
+	pos := positionProto(c, ch.Position)
+	switch ch.Reason {
 	case domain.ChangeOpen:
 		msg = &derivativesv1.PositionOpened{Position: pos, TradeId: tradeID}
 	case domain.ChangeClose:
 		msg = &derivativesv1.PositionClosed{Position: pos, TradeId: tradeID}
 	default:
-		msg = &derivativesv1.PositionChanged{Position: pos, TradeId: tradeID, Reason: c.Reason}
+		msg = &derivativesv1.PositionChanged{Position: pos, TradeId: tradeID, Reason: ch.Reason}
 	}
-	return r.Emit(ctx, event.TopicDerivPosition, msg, "user", c.Position.UserID)
+	return r.Emit(ctx, event.TopicDerivPosition, msg, "user", ch.Position.UserID)
 }

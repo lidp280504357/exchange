@@ -181,13 +181,13 @@ func optional(d decimal.Decimal) *string {
 func toPositionJSON(v application.PositionView) positionJSON {
 	p := v.Position
 	out := positionJSON{
-		PositionID: p.ID, Symbol: p.Symbol, PositionSide: string(p.Side), Quantity: p.Qty.String(), EntryPrice: p.EntryPrice().String(),
+		PositionID: p.ID, Symbol: p.Symbol, PositionSide: string(p.Side), Quantity: p.Qty.String(), EntryPrice: v.Entry.String(),
 		MarkPrice: optional(v.Mark), Margin: p.Margin.String(), MarginMode: string(p.MarginMode), Leverage: p.Leverage,
 		LiquidationPrice: optional(v.LiquidationPrice), RealizedPnL: p.RealizedPnL.String(), Funding: p.Funding.String(),
 		UpdatedAt: stamp(p.UpdatedAt),
 	}
 	if v.Mark.IsPositive() {
-		n, u, m := p.Notional(v.Mark).String(), v.UnrealizedPnL.String(), v.MaintenanceMargin.String()
+		n, u, m := v.Value.String(), v.UnrealizedPnL.String(), v.MaintenanceMargin.String()
 		out.Notional, out.UnrealizedPnL, out.MaintenanceMargin = &n, &u, &m
 	}
 	return out

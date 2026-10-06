@@ -126,19 +126,22 @@ type FillPlan struct {
 // positions on the contract by side (a missing side is flat). The fill
 // closes what it can of the position it reduces and opens the rest:
 //
-//   - The fee is the fill's quantity x price x the role's rate, rounded
-//     up. An opening order pays it out of its fee reservation for the
+//   - The fee is the fill's value (quantity x price; quantity x size /
+//     price for an inverse contract) x the role's rate, rounded up. An opening order pays it out of its fee reservation for the
 //     fill's lots; the unused reservation, and the margin reserved for a
 //     quantity that closes rather than opens, are unfrozen.
 //   - Closing takes the position's share of entry cost and margin;
 //     realized profit is proceeds − cost for a long, cost − proceeds for a
-//     short, booked against PNL_CLEARING. A cross position frees its
+//     short (the other way round for an inverse contract, whose coin value
+//     falls as the price rises), booked against PNL_CLEARING. A cross position frees its
 //     margin and settles profit, loss and the rest of the fee on the
 //     available balance (a loss beyond it falls on the insurance fund); an
 //     isolated position loses at most its margin, pays the fee out of what
 //     is left and frees the rest (a liquidation gives the rest to the
 //     insurance fund).
-//   - Opening adds the quantity at its price to the entry cost; the
+//   - Opening adds the quantity's value at its price to the entry cost:
+//     the fill's value less what its closing part took, so that its two
+//     sides book the same value however they split it (invariant 6); the
 //     order's margin reservation for it becomes the position's margin
 //     (less any fee beyond the fee reservation, as a sell may fill above
 //     its limit). A closing order's rest beyond a position that shrank
@@ -154,7 +157,8 @@ func PlanFill(c Contract, o Order, held map[PositionSide]Position, in FillInput)
 	if in.Maker {
 		rate = o.MakerFee
 	}
-	fee := ceil(q.Mul(p).Mul(rate), qd)
+	fee := ceil(c.exact(q, p).Mul(rate), qd)
+	value := c.Value(q, p) // what the fill books, on both of its sides
 
 	// Which position the fill reduces, and which one its rest opens.
 	reduces, opens := o.PositionSide, o.PositionSide
@@ -202,9 +206,10 @@ func PlanFill(c Contract, o Order, held map[PositionSide]Position, in FillInput)
 		pos := held[reduces]
 		cost := pos.share(pos.EntryCost, qClose, qd, true)
 		margin := pos.share(pos.Margin, qClose, qd, false)
-		proceeds := qClose.Mul(p)
+		proceeds := c.Value(qClose, p)
+		value = value.Sub(proceeds) // what is left for the quantity that opens
 		pnl := proceeds.Sub(cost)
-		if pos.Qty.IsNegative() {
+		if pos.Qty.IsNegative() != c.Inverse() {
 			pnl = cost.Sub(proceeds)
 		}
 		entry := EntryRealizedPnL
@@ -292,7 +297,7 @@ func PlanFill(c Contract, o Order, held map[PositionSide]Position, in FillInput)
 			if feeRest.IsPositive() {
 				plan.fees = append(plan.fees, add(Move{Type: MoveFee, Amount: feeRest}))
 			}
-			need := ceil(qOpen.Mul(p).Div(decimal.NewFromInt32(max(o.Leverage, 1))), qd)
+			need := ceil(c.exact(qOpen, p).Div(decimal.NewFromInt32(max(o.Leverage, 1))), qd)
 			plan.freeze = add(Move{Type: MoveFreeze, Amount: need, Partial: true})
 		}
 		if o.Side == Buy {
@@ -300,7 +305,7 @@ func PlanFill(c Contract, o Order, held map[PositionSide]Position, in FillInput)
 		} else {
 			pos.Qty = pos.Qty.Sub(qOpen)
 		}
-		pos.EntryCost, pos.Margin = pos.EntryCost.Add(qOpen.Mul(p)), pos.Margin.Add(margin)
+		pos.EntryCost, pos.Margin = pos.EntryCost.Add(value), pos.Margin.Add(margin)
 		changed[opens] = pos
 	}
 

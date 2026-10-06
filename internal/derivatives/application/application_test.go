@@ -367,7 +367,7 @@ func TestOpenAndCloseBetweenTwoUsers(t *testing.T) {
 	// The mark moves up: Alice's cross profit counts for nothing that can
 	// leave, Bob's loss would.
 	r.book.Set(perp.Symbol, d("61000"), time.Now())
-	if pnl, err := r.svc.CrossUnrealizedPnL(ctx, alice); err != nil || !pnl.Equal(d("100")) {
+	if pnl, err := r.svc.CrossUnrealizedPnL(ctx, alice, "USDT"); err != nil || !pnl.Equal(d("100")) {
 		t.Fatalf("cross result %s %v", pnl, err)
 	}
 	// Bob adds 50 of margin, then closes at 61000; Alice closes with a

@@ -126,7 +126,7 @@ func (s *Service) settleRound(ctx context.Context, round domain.FundingRound) er
 	// Payers first.
 	for _, pay := range []bool{true, false} {
 		for _, p := range payments {
-			amount := domain.FundingAmount(p.Qty, round.Mark, round.Rate, c.QuoteDecimals)
+			amount := domain.FundingAmount(c, p.Qty, round.Mark, round.Rate)
 			if amount.IsNegative() != pay {
 				continue
 			}
@@ -162,7 +162,7 @@ func (s *Service) pay(ctx context.Context, c domain.Contract, p domain.FundingPa
 			move := domain.FundingMove(pos, amount)
 			outcomes, err := s.Ledger.Settle(ctx, ports.SettleRequest{
 				IdemKey: fmt.Sprintf("funding:%s:%d:%s", p.Symbol, p.FundingTime.Unix(), p.PositionID),
-				UserID:  p.UserID, Asset: c.Quote,
+				UserID:  p.UserID, Asset: c.Settle(),
 				Reference: fmt.Sprintf("%s funding %s", p.Symbol, p.FundingTime.Format(time.RFC3339)),
 				Moves:     []domain.Move{move},
 			})
@@ -177,7 +177,7 @@ func (s *Service) pay(ctx context.Context, c domain.Contract, p domain.FundingPa
 					return err
 				}
 				if err := r.Emit(ctx, event.TopicDerivPosition, &derivativesv1.FundingPaid{
-					Position: positionProto(pos), FundingTime: timestamppb.New(p.FundingTime), FundingRate: p.Rate.String(),
+					Position: positionProto(c, pos), FundingTime: timestamppb.New(p.FundingTime), FundingRate: p.Rate.String(),
 					MarkPrice: p.Mark.String(), Amount: amount.String(),
 				}, "user", p.UserID); err != nil {
 					return err

@@ -56,8 +56,20 @@ func Recovered(balance, maintenance decimal.Decimal) bool {
 
 // MarginBalance of an isolated position: its margin with the unrealized
 // result at mark (§11.7).
-func (p Position) MarginBalance(mark decimal.Decimal) decimal.Decimal {
-	return p.Margin.Add(p.UnrealizedPnL(mark))
+func (p Position) MarginBalance(c Contract, mark decimal.Decimal) decimal.Decimal {
+	return p.Margin.Add(p.UnrealizedPnL(c, mark))
+}
+
+// LiquidationAnchor is the price a liquidation closes a position around:
+// an isolated position's bankruptcy price, else (cross, or an inverse
+// short with no bankruptcy price) the mark price.
+func LiquidationAnchor(c Contract, p Position, mark decimal.Decimal) decimal.Decimal {
+	if p.MarginMode == Isolated {
+		if b := p.BankruptcyPrice(c); b.IsPositive() {
+			return b
+		}
+	}
+	return mark
 }
 
 // LiquidationOrder is the liquidation engine's order for what is left of
@@ -83,13 +95,10 @@ func LiquidationOrder(id string, c Contract, p Position, anchor decimal.Decimal,
 }
 
 // ADLPrice is where an auto-deleveraging closes the position: its
-// bankruptcy price when isolated, the mark price when cross, on the tick
-// grid.
+// liquidation anchor (the bankruptcy price when isolated, the mark price
+// when cross), on the tick grid.
 func ADLPrice(c Contract, p Position, mark decimal.Decimal) decimal.Decimal {
-	price := mark
-	if p.MarginMode == Isolated {
-		price = p.BankruptcyPrice()
-	}
+	price := LiquidationAnchor(c, p, mark)
 	price = price.Div(c.TickSize).Round(0).Mul(c.TickSize)
 	if !price.IsPositive() {
 		return c.TickSize
@@ -101,30 +110,30 @@ func ADLPrice(c Contract, p Position, mark decimal.Decimal) decimal.Decimal {
 // ratio (unrealized result / entry cost) times its effective leverage
 // (notional / margin balance); the most profitable and most leveraged go
 // first.
-func ADLScore(p Position, mark decimal.Decimal) decimal.Decimal {
+func ADLScore(c Contract, p Position, mark decimal.Decimal) decimal.Decimal {
 	if p.Flat() || !p.EntryCost.IsPositive() {
 		return decimal.Zero
 	}
-	upnl := p.UnrealizedPnL(mark)
+	upnl := p.UnrealizedPnL(c, mark)
 	ratio := upnl.DivRound(p.EntryCost, 12)
 	balance := p.Margin.Add(upnl)
 	if !balance.IsPositive() {
 		balance = decimal.New(1, -8)
 	}
-	return ratio.Mul(p.Notional(mark).DivRound(balance, 12))
+	return ratio.Mul(p.Notional(c, mark).DivRound(balance, 12))
 }
 
 // ADLQueue orders the counterparties of a position to deleverage: the
 // open positions on the other side of other users that are not being
 // liquidated themselves, best score first.
-func ADLQueue(p Position, positions []Position, mark decimal.Decimal) []Position {
+func ADLQueue(c Contract, p Position, positions []Position, mark decimal.Decimal) []Position {
 	var out []Position
 	for _, cp := range positions {
 		if cp.UserID != p.UserID && !cp.Flat() && !cp.Liquidating && cp.Qty.Sign() == -p.Qty.Sign() {
 			out = append(out, cp)
 		}
 	}
-	slices.SortStableFunc(out, func(a, b Position) int { return ADLScore(b, mark).Cmp(ADLScore(a, mark)) })
+	slices.SortStableFunc(out, func(a, b Position) int { return ADLScore(c, b, mark).Cmp(ADLScore(c, a, mark)) })
 	return out
 }
 

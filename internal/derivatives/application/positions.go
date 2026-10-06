@@ -18,9 +18,13 @@ import (
 // PositionView is an open position at the mark price.
 type PositionView struct {
 	domain.Position
+	// Entry is the average entry price (Position.EntryPrice).
+	Entry decimal.Decimal
 	// Mark is the latest mark price, zero before the first; the figures
-	// below are zero without it.
+	// below are zero without it. Value is what the position is worth at it
+	// in its settlement asset.
 	Mark              decimal.Decimal
+	Value             decimal.Decimal
 	UnrealizedPnL     decimal.Decimal
 	MaintenanceMargin decimal.Decimal
 	// LiquidationPrice is the estimate of §11.7: an isolated position's
@@ -48,9 +52,10 @@ func (s *Service) Positions(ctx context.Context, userID, symbol string) ([]Posit
 		if err != nil {
 			return nil, err
 		}
-		v := PositionView{Position: p}
+		v := PositionView{Position: p, Entry: p.EntryPrice(c)}
 		if m, _ := s.Marks.Mark(p.Symbol); m.Price.IsPositive() {
-			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(m.Price), p.MaintenanceMargin(c, m.Price)
+			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(c, m.Price), p.MaintenanceMargin(c, m.Price)
+			v.Value = p.Notional(c, m.Price)
 		}
 		if p.MarginMode == domain.Isolated {
 			v.LiquidationPrice = p.LiquidationPrice(c)
@@ -77,7 +82,7 @@ func (s *Service) crossLiquidation(ctx context.Context, userID string, views []P
 	}
 	contracts := map[string]domain.Contract{}
 	marks := map[string]decimal.Decimal{}
-	var cross []domain.Position
+	cross := map[string][]domain.Position{} // by settlement asset: one cross account each
 	for _, p := range all {
 		if p.Flat() || p.MarginMode != domain.Cross {
 			continue
@@ -91,28 +96,34 @@ func (s *Service) crossLiquidation(ctx context.Context, userID string, views []P
 			return nil
 		}
 		contracts[p.Symbol], marks[p.Symbol] = c, m.Price
-		cross = append(cross, p)
+		cross[c.Settle()] = append(cross[c.Settle()], p)
 	}
 	if len(cross) == 0 {
 		return nil
 	}
-	bal, err := s.Ledger.Balance(ctx, userID, contracts[cross[0].Symbol].Quote)
+	unreleased, err := s.Store.Read().Orders().Unreleased(ctx, userID)
 	if err != nil {
 		return err
 	}
-	orders, err := s.Store.Read().Orders().Unreleased(ctx, userID)
-	if err != nil {
-		return err
-	}
-	equity, maintenance := domain.CrossEquity(bal.Available, orders, cross, contracts, marks)
-	for i, v := range views {
-		c, ok := contracts[v.Symbol]
-		if v.MarginMode != domain.Cross || !ok {
-			continue
+	for asset, positions := range cross {
+		bal, err := s.Ledger.Balance(ctx, userID, asset)
+		if err != nil {
+			return err
 		}
-		mark := marks[v.Symbol]
-		others := maintenance.Sub(v.Position.MaintenanceMargin(c, mark))
-		views[i].LiquidationPrice = domain.CrossLiquidationPrice(c, v.Position, mark, equity, others)
+		orders, err := s.settledIn(ctx, unreleased, asset)
+		if err != nil {
+			return err
+		}
+		equity, maintenance := domain.CrossEquity(bal.Available, orders, positions, contracts, marks)
+		for i, v := range views {
+			c, ok := contracts[v.Symbol]
+			if v.MarginMode != domain.Cross || !ok || c.Settle() != asset {
+				continue
+			}
+			mark := marks[v.Symbol]
+			others := maintenance.Sub(v.Position.MaintenanceMargin(c, mark))
+			views[i].LiquidationPrice = domain.CrossLiquidationPrice(c, v.Position, mark, equity, others)
+		}
 	}
 	return nil
 }
@@ -222,7 +233,7 @@ func (s *Service) changeLeverage(ctx context.Context, r ports.Repos, c domain.Co
 	}
 	for _, ch := range changes {
 		key := fmt.Sprintf("leverage:%s:%d", ch.Position.ID, ch.Position.Version)
-		if err := s.moveMargin(ctx, set.UserID, c.Quote, key, ch.Delta); err != nil {
+		if err := s.moveMargin(ctx, set.UserID, c.Settle(), key, ch.Delta); err != nil {
 			return err
 		}
 		ch.Position.UpdatedAt = s.Now()
@@ -234,7 +245,7 @@ func (s *Service) changeLeverage(ctx context.Context, r ports.Repos, c domain.Co
 			continue
 		}
 		if err := r.Emit(ctx, event.TopicDerivPosition, &derivativesv1.MarginAdjusted{
-			Position: positionProto(saved), Amount: ch.Delta.String(),
+			Position: positionProto(c, saved), Amount: ch.Delta.String(),
 		}, "user", set.UserID); err != nil {
 			return err
 		}
@@ -293,7 +304,7 @@ func (s *Service) AdjustMargin(ctx context.Context, userID, symbol string, side 
 		if err != nil {
 			return err
 		}
-		if err := s.moveMargin(ctx, userID, c.Quote, fmt.Sprintf("margin:%s:%d", pos.ID, pos.Version), amount); err != nil {
+		if err := s.moveMargin(ctx, userID, c.Settle(), fmt.Sprintf("margin:%s:%d", pos.ID, pos.Version), amount); err != nil {
 			return err
 		}
 		next.UpdatedAt = s.Now()
@@ -301,7 +312,7 @@ func (s *Service) AdjustMargin(ctx context.Context, userID, symbol string, side 
 			return err
 		}
 		return r.Emit(ctx, event.TopicDerivPosition, &derivativesv1.MarginAdjusted{
-			Position: positionProto(out), Amount: amount.String(),
+			Position: positionProto(c, out), Amount: amount.String(),
 		}, "user", userID)
 	})
 	return out, err
@@ -323,6 +334,13 @@ func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Sum
 		return domain.Summary{}, err
 	}
 	for _, p := range positions {
+		c, err := s.Instruments.Contract(ctx, p.Symbol)
+		if err != nil {
+			return domain.Summary{}, err
+		}
+		if c.Settle() != asset {
+			continue // another FUTURES account's
+		}
 		sum.PositionMargin = sum.PositionMargin.Add(p.Margin)
 		if p.Flat() {
 			continue
@@ -331,7 +349,7 @@ func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Sum
 		if !m.Price.IsPositive() {
 			continue
 		}
-		u := p.UnrealizedPnL(m.Price)
+		u := p.UnrealizedPnL(c, m.Price)
 		sum.UnrealizedPnL = sum.UnrealizedPnL.Add(u)
 		if p.MarginMode == domain.Cross {
 			sum.CrossUnrealizedPnL = sum.CrossUnrealizedPnL.Add(u)
@@ -350,8 +368,8 @@ func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Sum
 // CrossUnrealizedPnL is the unrealized result of the user's cross
 // positions at fresh mark prices, for the ledger's transfers out of
 // FUTURES; unavailable while a cross position has no fresh mark.
-func (s *Service) CrossUnrealizedPnL(ctx context.Context, userID string) (decimal.Decimal, error) {
-	return s.crossUnrealized(ctx, s.Store.Read(), userID)
+func (s *Service) CrossUnrealizedPnL(ctx context.Context, userID, asset string) (decimal.Decimal, error) {
+	return s.crossUnrealized(ctx, s.Store.Read(), userID, asset)
 }
 
 // OnDegraded puts a contract under reduce-only (risk.events
@@ -488,7 +506,7 @@ func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]Positi
 		if err != nil {
 			return nil, false, err
 		}
-		v := PositionView{Position: p}
+		v := PositionView{Position: p, Entry: p.EntryPrice(c)}
 		if at, ok := warned[p.UserID]; ok && p.MarginMode == domain.Cross && v.WarnedAt.IsZero() {
 			v.WarnedAt = at
 		}
@@ -496,7 +514,8 @@ func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]Positi
 		m, fresh := s.Marks.Mark(p.Symbol)
 		v.MarkFresh = fresh
 		if m.Price.IsPositive() {
-			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(m.Price), p.MaintenanceMargin(c, m.Price)
+			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(c, m.Price), p.MaintenanceMargin(c, m.Price)
+			v.Value = p.Notional(c, m.Price)
 			if balance := p.Margin.Add(v.UnrealizedPnL); balance.IsPositive() {
 				ratio = v.MaintenanceMargin.DivRound(balance, 8)
 			} else {

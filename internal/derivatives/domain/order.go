@@ -348,7 +348,11 @@ func NewOrder(id string, req Request, c Contract, s Settings, mark decimal.Decim
 	if o.Type == Market {
 		at = mark
 	}
-	if at.Mul(o.Qty).LessThan(c.MinNotional) && !o.Closing() {
+	notional := at.Mul(o.Qty)
+	if c.Inverse() { // in dollars: the contracts' face value
+		notional = o.Qty.Mul(c.ContractSize)
+	}
+	if notional.LessThan(c.MinNotional) && !o.Closing() {
 		return Order{}, ErrMinNotional.WithDetail("min_notional", c.MinNotional.String())
 	}
 	if !o.Closing() {
@@ -356,13 +360,20 @@ func NewOrder(id string, req Request, c Contract, s Settings, mark decimal.Decim
 		// at the fill. A sell fills at its price or above, near the mark
 		// when it crosses: it reserves at the higher of the two, or a market
 		// sell, whose protection price is the band below the mark, would
-		// hold less than the initial margin (0.76% at 125x).
+		// hold less than the initial margin (0.76% at 125x). An inverse
+		// contract's coin value grows as the price falls, so the other way
+		// round: a sell's price covers the coin at its fill, a buy reserves
+		// at the lower of its price and the mark (coin-M §2.2).
 		reserveAt := o.Price
-		if o.Side == Sell {
+		switch {
+		case c.Inverse() && o.Side == Buy:
+			reserveAt = decimal.Min(o.Price, mark)
+		case !c.Inverse() && o.Side == Sell:
 			reserveAt = decimal.Max(o.Price, mark)
 		}
-		o.MarginPerLot = ceil(reserveAt.Mul(c.LotSize).Div(decimal.NewFromInt32(o.Leverage)), c.QuoteDecimals)
-		o.FeePerLot = ceil(reserveAt.Mul(c.LotSize).Mul(c.TakerFeeRate), c.QuoteDecimals)
+		lot := c.exact(c.LotSize, reserveAt)
+		o.MarginPerLot = ceil(lot.Div(decimal.NewFromInt32(o.Leverage)), c.QuoteDecimals)
+		o.FeePerLot = ceil(lot.Mul(c.TakerFeeRate), c.QuoteDecimals)
 	} else {
 		o.FreezeState = FreezeDone // nothing to freeze
 	}

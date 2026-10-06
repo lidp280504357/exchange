@@ -7,13 +7,17 @@ import (
 	"slices"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/skill/exchange/internal/derivatives/domain"
 )
 
 // Checks of the reconciliation (§11.4 invariant 6).
 const (
 	// Per contract the long quantity equals the short quantity.
 	CheckPositionsBalanced = "POSITIONS_BALANCED"
-	// Per settlement asset, PNL_CLEARING + Σ long cost − Σ short cost = 0.
+	// Per settlement asset, PNL_CLEARING + Σ long cost − Σ short cost = 0
+	// over its linear contracts, − Σ long cost + Σ short cost over its
+	// inverse ones, whose costs move the other way (coin-M §2.2).
 	CheckPnLClearing = "PNL_CLEARING_MATCHES_POSITIONS"
 	// No settlement waits on the ledger (parked after a refusal).
 	CheckPendingSettlements = "NO_PENDING_SETTLEMENTS"
@@ -55,6 +59,14 @@ func (rc *Reconciler) Run(ctx context.Context) ([]CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	listed, err := s.Instruments.Contracts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	contracts := make(map[string]domain.Contract, len(listed))
+	for _, c := range listed {
+		contracts[c.Symbol] = c
+	}
 	symbols := make([]string, 0, len(totals))
 	for symbol := range totals {
 		symbols = append(symbols, symbol)
@@ -66,7 +78,16 @@ func (rc *Reconciler) Run(ctx context.Context) ([]CheckResult, error) {
 		if !t.NetQty.IsZero() {
 			out[0].Mismatches = append(out[0].Mismatches, Mismatch{Key: symbol, Detail: "long − short = " + t.NetQty.String()})
 		}
-		net = net.Add(t.NetCost)
+		c, ok := contracts[symbol]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("positions on %s, which instrument-service does not list", symbol)
+		case c.Settle() != rc.Asset:
+		case c.Inverse():
+			net = net.Sub(t.NetCost)
+		default:
+			net = net.Add(t.NetCost)
+		}
 	}
 	clearing, err := s.Ledger.PnLClearing(ctx, rc.Asset)
 	if err != nil {
@@ -74,7 +95,7 @@ func (rc *Reconciler) Run(ctx context.Context) ([]CheckResult, error) {
 	}
 	if sum := clearing.Add(net); !sum.IsZero() {
 		out[1].Mismatches = append(out[1].Mismatches, Mismatch{
-			Key: rc.Asset, Detail: fmt.Sprintf("PNL_CLEARING %s + long cost − short cost %s = %s", clearing, net, sum),
+			Key: rc.Asset, Detail: fmt.Sprintf("PNL_CLEARING %s + the positions' signed costs %s = %s", clearing, net, sum),
 		})
 	}
 	pending, err := r.Pending().Due(ctx, 100)

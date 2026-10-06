@@ -26,7 +26,7 @@ func (s *Server) GetUnrealizedPnL(ctx context.Context, req *derivativesv1.GetUnr
 	if _, err := uuid.Parse(req.GetUserId()); err != nil {
 		return nil, apperr.Invalid("user_id must be a UUID")
 	}
-	pnl, err := s.svc.CrossUnrealizedPnL(ctx, req.GetUserId())
+	pnl, err := s.svc.CrossUnrealizedPnL(ctx, req.GetUserId(), req.GetAsset())
 	if err != nil {
 		return nil, err
 	}

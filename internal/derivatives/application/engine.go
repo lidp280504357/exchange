@@ -57,7 +57,7 @@ func (s *Service) release(ctx context.Context, o domain.Order) error {
 		if err != nil {
 			return err
 		}
-		if err := s.Ledger.Unfreeze(ctx, "release:"+o.ID, o.UserID, c.Quote, amount, o.ID); err != nil {
+		if err := s.Ledger.Unfreeze(ctx, "release:"+o.ID, o.UserID, c.Settle(), amount, o.ID); err != nil {
 			return err
 		}
 	}
@@ -168,7 +168,7 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 			return err
 		}
 		req := ports.SettleRequest{
-			IdemKey: "fill:" + t.ID + ":" + string(side), UserID: userID, Asset: c.Quote,
+			IdemKey: "fill:" + t.ID + ":" + string(side), UserID: userID, Asset: c.Settle(),
 			Reference: fmt.Sprintf("%s trade %s", t.Symbol, t.ID), Moves: plan.Moves,
 		}
 		outcomes, parked, err := s.settle(ctx, req)
@@ -188,7 +188,7 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 				return err
 			}
 			plan.Positions[i].Position = saved
-			if err := emitPosition(ctx, r, plan.Positions[i], t.ID); err != nil {
+			if err := emitPosition(ctx, r, c, plan.Positions[i], t.ID); err != nil {
 				return err
 			}
 		}

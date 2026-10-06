@@ -57,7 +57,7 @@ func CheckRiskLimit(c Contract, o Order, held map[PositionSide]Position, active 
 		}
 	}
 	limit := c.MaxNotional(o.Leverage)
-	if notional := exposure.Add(o.Qty).Mul(mark); notional.GreaterThan(limit) {
+	if notional := c.Value(exposure.Add(o.Qty), mark); notional.GreaterThan(limit) {
 		return riskLimitExceeded(limit, o.Leverage, notional)
 	}
 	return nil

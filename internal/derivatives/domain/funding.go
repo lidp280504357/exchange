@@ -48,11 +48,20 @@ type FundingPayment struct {
 }
 
 // FundingAmount is what a position of qty pays (negative) or receives at
-// mark and rate: |qty| x mark x |rate|; longs pay shorts when the rate is
-// positive, shorts pay longs when it is negative. A payer rounds up, a
-// receiver down, so FUNDING_CLEARING keeps only the rounding.
-func FundingAmount(qty, mark, rate decimal.Decimal, decimals int32) decimal.Decimal {
+// mark and rate: its value at mark x |rate| (|qty| x mark for a linear
+// contract, |qty| x size / mark for an inverse one, in its coin); longs
+// pay shorts when the rate is positive, shorts pay longs when it is
+// negative. A payer rounds up, a receiver down, so FUNDING_CLEARING keeps
+// only the rounding.
+func FundingAmount(c Contract, qty, mark, rate decimal.Decimal) decimal.Decimal {
+	decimals := c.QuoteDecimals
 	v := qty.Abs().Mul(mark).Mul(rate.Abs())
+	if c.Inverse() {
+		if !mark.IsPositive() {
+			return decimal.Zero
+		}
+		v = qty.Abs().Mul(c.ContractSize).Mul(rate.Abs()).Div(mark)
+	}
 	if (qty.IsPositive() && rate.IsPositive()) || (qty.IsNegative() && rate.IsNegative()) {
 		return ceil(v, decimals).Neg()
 	}

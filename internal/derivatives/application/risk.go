@@ -47,7 +47,8 @@ func (s *Service) Monitor(ctx context.Context) error {
 	}
 	byContract := map[string]domain.Contract{}
 	marks := map[string]decimal.Decimal{}
-	cross := map[string][]domain.Position{}
+	type account struct{ user, asset string }
+	cross := map[account][]domain.Position{}
 	for _, c := range contracts {
 		if c.Status == "DELISTED" {
 			continue
@@ -72,7 +73,8 @@ func (s *Service) Monitor(ctx context.Context) error {
 				continue // HOUSE is the platform's own book: never liquidated (ADR-0015)
 			}
 			if p.MarginMode == domain.Cross {
-				cross[p.UserID] = append(cross[p.UserID], p)
+				a := account{user: p.UserID, asset: c.Settle()}
+				cross[a] = append(cross[a], p)
 				continue
 			}
 			if err := s.checkIsolated(ctx, c, p, m.Price); err != nil {
@@ -80,9 +82,9 @@ func (s *Service) Monitor(ctx context.Context) error {
 			}
 		}
 	}
-	for user, positions := range cross {
-		if err := s.checkCross(ctx, user, positions, byContract, marks); err != nil {
-			s.Log.WarnContext(ctx, "cross margin check failed", "user_id", user, "error", err)
+	for a, positions := range cross {
+		if err := s.checkCross(ctx, a.user, a.asset, positions, byContract, marks); err != nil {
+			s.Log.WarnContext(ctx, "cross margin check failed", "user_id", a.user, "asset", a.asset, "error", err)
 		}
 	}
 	return nil
@@ -92,10 +94,11 @@ func (s *Service) checkIsolated(ctx context.Context, c domain.Contract, p domain
 	if p.Liquidating {
 		return s.continueLiquidation(ctx, c, p, mark)
 	}
-	balance, maintenance := p.MarginBalance(mark), p.MaintenanceMargin(c, mark)
+	balance, maintenance := p.MarginBalance(c, mark), p.MaintenanceMargin(c, mark)
 	switch domain.State(balance, maintenance) {
 	case domain.MarginLiquidate:
-		return s.takeOver(ctx, []domain.Position{p}, map[string]decimal.Decimal{c.Symbol: mark}, balance, maintenance)
+		return s.takeOver(ctx, []domain.Position{p}, map[string]domain.Contract{c.Symbol: c}, map[string]decimal.Decimal{c.Symbol: mark},
+			balance, maintenance)
 	case domain.MarginWarning:
 		if p.WarnedAt.IsZero() {
 			return s.warnPosition(ctx, p, balance, maintenance)
@@ -111,7 +114,7 @@ func (s *Service) checkIsolated(ctx context.Context, c domain.Contract, p domain
 // checkCross measures a user's cross positions against the cross equity.
 // A position of a contract without a fresh mark price leaves the account
 // unmeasured this round.
-func (s *Service) checkCross(ctx context.Context, userID string, positions []domain.Position, contracts map[string]domain.Contract,
+func (s *Service) checkCross(ctx context.Context, userID, asset string, positions []domain.Position, contracts map[string]domain.Contract,
 	marks map[string]decimal.Decimal,
 ) error {
 	liquidating := false
@@ -131,12 +134,15 @@ func (s *Service) checkCross(ctx context.Context, userID string, positions []dom
 		}
 		return nil
 	}
-	asset := contracts[positions[0].Symbol].Quote
 	bal, err := s.Ledger.Balance(ctx, userID, asset)
 	if err != nil {
 		return err
 	}
-	orders, err := s.Store.Read().Orders().Unreleased(ctx, userID)
+	unreleased, err := s.Store.Read().Orders().Unreleased(ctx, userID)
+	if err != nil {
+		return err
+	}
+	orders, err := s.settledIn(ctx, unreleased, asset)
 	if err != nil {
 		return err
 	}
@@ -147,7 +153,7 @@ func (s *Service) checkCross(ctx context.Context, userID string, positions []dom
 	}
 	switch domain.State(equity, maintenance) {
 	case domain.MarginLiquidate:
-		return s.takeOver(ctx, positions, marks, equity, maintenance)
+		return s.takeOver(ctx, positions, contracts, marks, equity, maintenance)
 	case domain.MarginWarning:
 		if warned.IsZero() {
 			return s.Store.Tx(ctx, func(r ports.Repos) error {
@@ -218,7 +224,9 @@ func reload(ctx context.Context, r ports.Repos, p domain.Position) (domain.Posit
 // canceled (every order of the user in the cross margin mode for cross
 // positions, the position's own for an isolated one) and each is marked
 // liquidating, which refuses the user's orders on it.
-func (s *Service) takeOver(ctx context.Context, positions []domain.Position, marks map[string]decimal.Decimal, balance, maintenance decimal.Decimal) error {
+func (s *Service) takeOver(ctx context.Context, positions []domain.Position, contracts map[string]domain.Contract,
+	marks map[string]decimal.Decimal, balance, maintenance decimal.Decimal,
+) error {
 	userID := positions[0].UserID
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
 		if err := r.LockUser(ctx, userID); err != nil {
@@ -254,11 +262,11 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, mar
 				return err
 			}
 			started := &derivativesv1.LiquidationStarted{
-				Position: positionProto(saved), Cross: cur.MarginMode == domain.Cross, MarkPrice: marks[cur.Symbol].String(),
+				Position: positionProto(contracts[cur.Symbol], saved), Cross: cur.MarginMode == domain.Cross, MarkPrice: marks[cur.Symbol].String(),
 				MarginBalance: balance.String(), MaintenanceMargin: maintenance.String(),
 			}
 			if cur.MarginMode == domain.Isolated {
-				started.BankruptcyPrice = cur.BankruptcyPrice().String()
+				started.BankruptcyPrice = cur.BankruptcyPrice(contracts[cur.Symbol]).String()
 			}
 			if err := r.Emit(ctx, event.TopicDerivLiquidation, started, "user", userID); err != nil {
 				return err
@@ -295,11 +303,7 @@ func (s *Service) continueLiquidation(ctx context.Context, c domain.Contract, p 
 				return nil // wait for it
 			}
 		}
-		anchor := mark
-		if cur.MarginMode == domain.Isolated {
-			anchor = cur.BankruptcyPrice()
-		}
-		o := domain.LiquidationOrder(uuid.Must(uuid.NewV7()).String(), c, cur, anchor, s.Now())
+		o := domain.LiquidationOrder(uuid.Must(uuid.NewV7()).String(), c, cur, domain.LiquidationAnchor(c, cur, mark), s.Now())
 		if err := r.Orders().Insert(ctx, o); err != nil {
 			return err
 		}
@@ -336,7 +340,7 @@ func (s *Service) deleverage(ctx context.Context, c domain.Contract, p domain.Po
 	}
 	price := domain.ADLPrice(c, cur, mark)
 	left := cur.Qty.Abs()
-	for _, cp := range domain.ADLQueue(cur, open, mark) {
+	for _, cp := range domain.ADLQueue(c, cur, open, mark) {
 		if !left.IsPositive() {
 			break
 		}

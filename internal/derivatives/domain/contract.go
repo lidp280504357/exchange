@@ -2,7 +2,10 @@
 // §11.7): a user's settings per contract, orders and what they reserve,
 // positions booked at their entry cost, and what each fill does to them
 // and to the user's FUTURES account in the ledger. Amounts are decimals in
-// the settlement asset (USDT), quantities in the base asset (ADR-0008).
+// the settlement asset (ADR-0008): the quote (USDT) of a linear contract,
+// whose quantities are in the base asset; the base of an inverse
+// (coin-margined) one, whose quantities are whole contracts of a face
+// value in US dollars (coin-M design 2026-10-06 §2).
 package domain
 
 import (
@@ -48,10 +51,55 @@ type Contract struct {
 	// which are 0 for contracts).
 	QuoteDecimals int32
 	BaseDecimals  int32
+	// ContractSize is an inverse contract's face value in US dollars (BTC
+	// 100, others 10); zero for a linear contract.
+	ContractSize decimal.Decimal
 	// Followed is true when the contract's index pair follows a reference
 	// market, whose book HOUSE quotes (ADR-0015); the platform coin's
 	// perpetual is not: its users and bots trade with each other.
 	Followed bool
+}
+
+// Settle is the asset the contract is settled in, its FUTURES account's:
+// the quote of a linear contract, the base of an inverse one (coin-M
+// §2.3).
+func (c Contract) Settle() string {
+	if c.Inverse() {
+		return c.Base
+	}
+	return c.Quote
+}
+
+// Inverse reports whether the contract is coin-margined (coin-M §2.2):
+// sized in contracts of ContractSize dollars, settled in its base asset.
+func (c Contract) Inverse() bool { return c.ContractSize.IsPositive() }
+
+// Value is what qty is worth at price in the settlement asset: qty x
+// price for a linear contract; qty x size / price for an inverse one,
+// rounded half up to the settlement asset's decimals. A fill books this
+// one value on both of its sides (the cost it adds, the proceeds it
+// closes at), so PNL_CLEARING stays even with the positions' costs
+// (invariant 6); an inverse value has no exact decimal form otherwise.
+func (c Contract) Value(qty, price decimal.Decimal) decimal.Decimal {
+	if !c.Inverse() {
+		return qty.Mul(price)
+	}
+	if !price.IsPositive() {
+		return decimal.Zero
+	}
+	return qty.Mul(c.ContractSize).DivRound(price, c.QuoteDecimals)
+}
+
+// exact is Value before an inverse value's rounding: what the margin and
+// fees it reserves or charges are rounded up from.
+func (c Contract) exact(qty, price decimal.Decimal) decimal.Decimal {
+	if !c.Inverse() {
+		return qty.Mul(price)
+	}
+	if !price.IsPositive() {
+		return decimal.Zero
+	}
+	return qty.Mul(c.ContractSize).Div(price)
 }
 
 // ValidTiers checks a ladder as instrument-service does: 1 to 20 tiers,

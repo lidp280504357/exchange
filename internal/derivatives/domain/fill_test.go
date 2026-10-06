@@ -132,8 +132,8 @@ func TestClosingACrossLongRealizesItsShare(t *testing.T) {
 		!pos.RealizedPnL.Equal(d("99.9")) || !plan.Fill.ClosedQty.Equal(d("0.1")) || !plan.Fill.RealizedPnL.Equal(d("99.9")) {
 		t.Fatalf("after closing a third: %+v fill %+v", pos, plan.Fill)
 	}
-	if !pos.EntryPrice().Equal(d("60001")) {
-		t.Fatalf("entry price %s", pos.EntryPrice())
+	if !pos.EntryPrice(btcPerp).Equal(d("60001")) {
+		t.Fatalf("entry price %s", pos.EntryPrice(btcPerp))
 	}
 }
 
@@ -454,7 +454,7 @@ func TestFundingAmounts(t *testing.T) {
 		{"-0.3", "60000", "-0.0002", "-3.6"},
 		{"0.3", "60000", "0", "0"},
 	} {
-		if got := FundingAmount(d(c.qty), d(c.mark), d(c.rate), 6); got.String() != c.want {
+		if got := FundingAmount(btcPerp, d(c.qty), d(c.mark), d(c.rate)); got.String() != c.want {
 			t.Errorf("%+v: %s", c, got)
 		}
 	}

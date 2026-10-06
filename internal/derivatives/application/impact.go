@@ -121,7 +121,7 @@ func (s *Service) TierImpact(ctx context.Context, symbol string, tiers []domain.
 			out.Unmeasured++
 			continue
 		}
-		notional := p.Notional(m.Price)
+		notional := p.Notional(c, m.Price)
 		if notional.GreaterThan(next.MaxNotional(p.Leverage)) {
 			out.OverLimit++
 		}
@@ -132,7 +132,7 @@ func (s *Service) TierImpact(ctx context.Context, symbol string, tiers []domain.
 		if p.Liquidating {
 			continue
 		}
-		balance := p.MarginBalance(m.Price)
+		balance := p.MarginBalance(c, m.Price)
 		before, after := p.MaintenanceMargin(c, m.Price), p.MaintenanceMargin(next, m.Price)
 		was, will := domain.State(balance, before), domain.State(balance, after)
 		switch {
@@ -209,7 +209,7 @@ func (s *Service) crossImpact(ctx context.Context, userID string, c, next domain
 			after[p.Symbol] = next
 		}
 	}
-	bal, err := s.Ledger.Balance(ctx, userID, c.Quote)
+	bal, err := s.Ledger.Balance(ctx, userID, c.Settle())
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (s *Service) crossImpact(ctx context.Context, userID string, c, next domain
 	case stateWill == domain.MarginLiquidate && stateWas != domain.MarginLiquidate:
 		users[userID] = true
 		for _, p := range positions {
-			notional := p.Notional(marks[p.Symbol])
+			notional := p.Notional(after[p.Symbol], marks[p.Symbol])
 			out.Liquidated++
 			out.Notional = out.Notional.Add(notional)
 			out.Examples = append(out.Examples, ImpactExample{
@@ -297,11 +297,11 @@ func (s *Service) PriceImpact(ctx context.Context, symbol string, target decimal
 			continue
 		}
 		before := p.MaintenanceMargin(c, m.Price)
-		balance, after := p.MarginBalance(target), p.MaintenanceMargin(c, target)
-		if domain.State(balance, after) != domain.MarginLiquidate || domain.State(p.MarginBalance(m.Price), before) == domain.MarginLiquidate {
+		balance, after := p.MarginBalance(c, target), p.MaintenanceMargin(c, target)
+		if domain.State(balance, after) != domain.MarginLiquidate || domain.State(p.MarginBalance(c, m.Price), before) == domain.MarginLiquidate {
 			continue
 		}
-		notional := p.Notional(target)
+		notional := p.Notional(c, target)
 		out.Liquidated++
 		out.Notional = out.Notional.Add(notional)
 		out.InsuranceCost = out.InsuranceCost.Add(decimal.Max(balance.Neg(), decimal.Zero))
@@ -372,7 +372,7 @@ func (s *Service) crossPriceImpact(ctx context.Context, userID string, c domain.
 		contracts[p.Symbol], now[p.Symbol], then[p.Symbol] = pc, m.Price, m.Price
 	}
 	then[c.Symbol] = target
-	bal, err := s.Ledger.Balance(ctx, userID, c.Quote)
+	bal, err := s.Ledger.Balance(ctx, userID, c.Settle())
 	if err != nil {
 		return err
 	}
@@ -388,7 +388,7 @@ func (s *Service) crossPriceImpact(ctx context.Context, userID string, c domain.
 	users[userID] = true
 	out.InsuranceCost = out.InsuranceCost.Add(decimal.Max(equity.Neg(), decimal.Zero))
 	for _, p := range positions {
-		notional := p.Notional(then[p.Symbol])
+		notional := p.Notional(contracts[p.Symbol], then[p.Symbol])
 		out.Liquidated++
 		out.Notional = out.Notional.Add(notional)
 		out.Examples = append(out.Examples, ImpactExample{
