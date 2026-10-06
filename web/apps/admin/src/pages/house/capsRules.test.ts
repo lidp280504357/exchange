@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { direction, inRange } from "./capsRules";
+import { direction, inRange, stepOK } from "./capsRules";
 
 describe("HOUSE's caps", () => {
   it("keeps each cap within its range", () => {
@@ -18,6 +18,16 @@ describe("HOUSE's caps", () => {
     expect(inRange("safety", " 1000 ")).toBe(true);
     expect(inRange("safety", "lots")).toBe(false);
     expect(inRange("safety", "")).toBe(false);
+  });
+
+  it("moves a cap ten times at most either way", () => {
+    expect(stepOK("100", "1000")).toBe(true);
+    expect(stepOK("100", "1000.01")).toBe(false);
+    expect(stepOK("100", "10")).toBe(true);
+    expect(stepOK("100", "9.99")).toBe(false);
+    expect(stepOK("500", "0")).toBe(true);
+    expect(stepOK("0", "500000")).toBe(true);
+    expect(stepOK("100", "x")).toBe(true);
   });
 
   it("says which way a change moves a cap, a level cap of zero being none", () => {

@@ -8,7 +8,7 @@ import { Link } from "react-router";
 import { Num, TimeText } from "../../kit/format";
 import { announce, FundAction, type Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
-import { direction, HOUSE_CAPS, inRange, type CapName } from "./capsRules";
+import { direction, HOUSE_CAPS, inRange, stepOK, type CapName } from "./capsRules";
 
 // HOUSE's caps at run time (user 2026-10-07, A69; market-maker review C45):
 // what HOUSE quotes within - each cap with its unit, current and first
@@ -217,8 +217,9 @@ function RequestCaps({ caps }: { caps: Caps }) {
   const qc = useQueryClient();
   const initial = () => Object.fromEntries(HOUSE_CAPS.map((f) => [f, caps[f]])) as Record<CapName, string>;
   const [values, setValues] = useState(initial);
-  const changed = HOUSE_CAPS.filter((f) => inRange(f, values[f]) && !dec.eq(values[f].trim(), caps[f]));
-  const bad = HOUSE_CAPS.some((f) => !inRange(f, values[f]));
+  const ok = (f: CapName) => inRange(f, values[f]) && stepOK(caps[f], values[f]);
+  const changed = HOUSE_CAPS.filter((f) => ok(f) && !dec.eq(values[f].trim(), caps[f]));
+  const bad = HOUSE_CAPS.some((f) => !ok(f));
   return (
     <FundAction
       trigger={(open) => (
@@ -260,7 +261,13 @@ function RequestCaps({ caps }: { caps: Caps }) {
               value={values[f]}
               inputMode="decimal"
               unit={f === "contract_leverage" ? t("admin.house.caps.times") : "USDT"}
-              error={!inRange(f, values[f]) ? t("admin.house.caps.outOfRange", { range: t(`admin.house.caps.items.${f}.range`) }) : undefined}
+              error={
+                !inRange(f, values[f])
+                  ? t("admin.house.caps.outOfRange", { range: t(`admin.house.caps.items.${f}.range`) })
+                  : !stepOK(caps[f], values[f])
+                    ? t("admin.house.caps.step")
+                    : undefined
+              }
               onValueChange={(v) => setValues({ ...values, [f]: v })}
               aria-label={f}
             />

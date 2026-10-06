@@ -44,7 +44,25 @@ var (
 	houseCapsMax = decimal.New(1, 15)
 	// houseCapsLeverageMax is the contracts' highest leverage.
 	houseCapsLeverageMax = decimal.NewFromInt(125)
+	// houseCapsStep is how many times up or down one change may move a
+	// cap (market-maker's HOUSE_CAPS_STEP, review C47 ②).
+	houseCapsStep = decimal.NewFromInt(10)
 )
+
+// errHouseCapsStep refuses a change that moves a cap more than
+// houseCapsStep times, as market-maker would when it is approved.
+var errHouseCapsStep = apperr.New(apperr.KindInvalid, "HOUSE_CAPS_STEP",
+	"a change may move a cap at most ten times up or down: change it in steps")
+
+// checkHouseCapStep refuses moving a cap from was to d more than
+// houseCapsStep times either way; a level cap going to or from zero (no
+// cap) is not a step.
+func checkHouseCapStep(name string, was, d decimal.Decimal) error {
+	if was.IsPositive() && d.IsPositive() && (d.GreaterThan(was.Mul(houseCapsStep)) || d.Mul(houseCapsStep).LessThan(was)) {
+		return errHouseCapsStep.WithDetail("cap", name).WithDetail("from", was.String()).WithDetail("to", d.String())
+	}
+	return nil
+}
 
 // checkHouseCap refuses a cap out of its range: the level cap zero or
 // more (zero: a level is not capped), the other USDT caps above zero, all
@@ -198,7 +216,8 @@ func (s *Service) HouseCapsOf(ctx context.Context, p Principal) (HouseCapsView, 
 
 // RequestHouseCaps asks a second administrator to change HOUSE's caps:
 // those given that differ from the caps of the version read, each within
-// its range (checkHouseCap). One request waits at a time.
+// its range (checkHouseCap) and ten times its value at most either way
+// (checkHouseCapStep). One request waits at a time.
 func (s *Service) RequestHouseCaps(ctx context.Context, p Principal, in HouseCapsRequest) (domain.Approval, error) {
 	if err := p.require(domain.PermAdjustRequest); err != nil {
 		return domain.Approval{}, err
@@ -232,8 +251,13 @@ func (s *Service) RequestHouseCaps(ctx context.Context, p Principal, in HouseCap
 		if err := checkHouseCap(name, d); err != nil {
 			return domain.Approval{}, err
 		}
-		if was, err := decimal.NewFromString(cur.value(name)); err == nil && was.Equal(d) {
-			continue
+		if was, err := decimal.NewFromString(cur.value(name)); err == nil {
+			if was.Equal(d) {
+				continue
+			}
+			if err := checkHouseCapStep(name, was, d); err != nil {
+				return domain.Approval{}, err
+			}
 		}
 		asked[name], previous[name] = d.String(), cur.value(name)
 		changed = append(changed, name)

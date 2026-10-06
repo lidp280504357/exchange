@@ -148,6 +148,22 @@ func TestHouseCaps(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
+	// One change moves a cap ten times at most either way (market-maker's
+	// HOUSE_CAPS_STEP, review C47 ②), a level cap to or from no cap aside.
+	for name, c := range map[string]map[string]string{
+		"eleven times the total": {"total": "5500000000"},
+		"a tenth and a bit less": {"contract": "49999999"},
+	} {
+		if _, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: c, Version: 1, Reason: "x y z"}); code(err) != "HOUSE_CAPS_STEP" {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if err := checkHouseCapStep("level", decimal.NewFromInt(500), decimal.Zero); err != nil {
+		t.Fatalf("a level cap to no cap: %v", err)
+	}
+	if err := checkHouseCapStep("total", decimal.NewFromInt(100), decimal.NewFromInt(1000)); err != nil {
+		t.Fatalf("ten times: %v", err)
+	}
 	// The edges are in: a level not capped, 1x and 125x, 1e15.
 	for _, edge := range []map[string]string{{"level": "0"}, {"contract_leverage": "1"}, {"contract_leverage": "125"}, {"total": "1000000000000000"}} {
 		if err := checkEdge(edge); err != nil {
@@ -169,7 +185,7 @@ func TestHouseCaps(t *testing.T) {
 	if got := h.auditsOf("admin.house.caps_requested"); len(got) != 1 || !strings.HasPrefix(got[0], "house:caps smaller levels") {
 		t.Fatalf("the request audited %v", got)
 	}
-	if _, err := h.svc.RequestHouseCaps(ctx, boss, HouseCapsRequest{Caps: map[string]string{"total": "1"}, Version: 1, Reason: "another"}); code(err) != "ADMIN_HOUSE_CAPS_PENDING" ||
+	if _, err := h.svc.RequestHouseCaps(ctx, boss, HouseCapsRequest{Caps: map[string]string{"total": "100000000"}, Version: 1, Reason: "another"}); code(err) != "ADMIN_HOUSE_CAPS_PENDING" ||
 		detailOf(err) != a.ID {
 		t.Fatalf("a second request while one waits: %v", err)
 	}
@@ -219,7 +235,7 @@ func TestHouseCaps(t *testing.T) {
 	}
 
 	// The caps moved meanwhile: the request fails when approved.
-	c, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: map[string]string{"total": "1000"}, Version: 3, Reason: "a smaller total"})
+	c, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: map[string]string{"total": "100000000"}, Version: 3, Reason: "a smaller total"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +245,7 @@ func TestHouseCaps(t *testing.T) {
 		t.Fatalf("moved meanwhile %+v %v", done, err)
 	}
 	// Market-maker down: the request stays as it was; a day later it lapses.
-	d, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: map[string]string{"total": "1000"}, Version: 4, Reason: "a smaller total"})
+	d, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: map[string]string{"total": "100000000"}, Version: 4, Reason: "a smaller total"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +260,7 @@ func TestHouseCaps(t *testing.T) {
 		t.Fatalf("lapsed %+v %v", done, err)
 	}
 	// A lapsed request stands in no one's way.
-	if _, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: map[string]string{"total": "1000"}, Version: 4, Reason: "again"}); err != nil {
+	if _, err := h.svc.RequestHouseCaps(ctx, fin, HouseCapsRequest{Caps: map[string]string{"total": "100000000"}, Version: 4, Reason: "again"}); err != nil {
 		t.Fatalf("after a lapsed one: %v", err)
 	}
 }

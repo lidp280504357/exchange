@@ -624,6 +624,9 @@ else
     as FINANCE POST /admin/v1/house/caps "$(jq -nc --argjson c "$bad" --argjson v "$CAPS_V" '{caps: $c, version: $v, reason: "e2e out of range"}')"
     expect 400 COMMON_INVALID_ARGUMENT "out of its range: $bad"
   done
+  as FINANCE POST /admin/v1/house/caps "$(jq -nc --arg s "$(jq -nr --arg s "$SAFETY" '($s | tonumber) * 11 | tostring')" --argjson v "$CAPS_V" \
+    '{caps: {safety: $s}, version: $v, reason: "e2e eleven times"}')"
+  expect 400 HOUSE_CAPS_STEP "a cap moved more than ten times at once (C47 ②)"
   as FINANCE POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$CAPS_V" "e2e raises the safety margin by 1 USDT")"
   expect 202 - "FINANCE asks"
   check '.kind == "HOUSE_CAPS" and .status == "PENDING" and .mode == "TWO_PERSON" and .payload.changed == "safety"' \

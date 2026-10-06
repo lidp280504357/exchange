@@ -22,6 +22,17 @@ export function inRange(name: CapName, raw: string): boolean {
 }
 
 /**
+ * stepOK reports whether a change moves a cap at most ten times up or down
+ * (market-maker's HOUSE_CAPS_STEP); a level cap going to or from zero (no
+ * cap) is not a step, nor is a value that is not a decimal (inRange says).
+ */
+export function stepOK(before: string, after: string): boolean {
+  const a = after.trim();
+  if (!dec.isDecimal(before) || !dec.isDecimal(a) || !dec.gt(before, "0") || !dec.gt(a, "0")) return true;
+  return dec.lte(a, dec.mul(before, "10")) && dec.gte(dec.mul(a, "10"), before);
+}
+
+/**
  * direction says whether a change lowers or raises a cap - a level cap of
  * zero is no cap, above any other - or null when it stays (or a value is
  * not a decimal).

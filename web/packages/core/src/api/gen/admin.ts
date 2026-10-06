@@ -3284,7 +3284,9 @@ export interface paths {
          *     within its range (user 2026-10-07 06:0x, review C47) - level zero or
          *     more (zero: a level is not capped), symbol, total, contract and
          *     safety above zero, every USDT cap at most 1e15, contract_leverage
-         *     from 1 to 125 - become a
+         *     from 1 to 125 - and moving each at most ten times up or down (400
+         *     HOUSE_CAPS_STEP with cap, from and to, as market-maker refuses it;
+         *     a level cap going to or from 0 is not a step) - become a
          *     HOUSE_CAPS request that always waits for a second administrator,
          *     whatever the approval mode: 202 with it. 409 HOUSE_CAPS_VERSION when
          *     the caps moved since version was read (details version, the one
