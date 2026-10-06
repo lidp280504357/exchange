@@ -42,3 +42,18 @@ export function topMargin(legendPx: number, panePx: number): number {
   if (!(panePx > 0) || !(legendPx > 0)) return TOP_MIN;
   return Math.min(TOP_MAX, Math.max(TOP_MIN, (legendPx + LEGEND_SPARE) / panePx));
 }
+
+/** The legend height the chart leaves room for, with what it was measured for. */
+export type LegendRoom = { key: string; width: number; legend: number };
+
+/**
+ * legendRoom keeps the tallest legend measured since the chart's key
+ * (symbol, interval and indicators) or width last changed: the room only
+ * grows while the crosshair's values change the legend's wrapping, so the
+ * scale does not move under the pointer; a new key or width measures
+ * afresh.
+ */
+export function legendRoom(prev: LegendRoom, key: string, width: number, legend: number): LegendRoom {
+  if (prev.key !== key || prev.width !== width) return { key, width, legend };
+  return { key, width, legend: Math.max(prev.legend, legend) };
+}

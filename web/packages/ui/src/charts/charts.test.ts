@@ -1,6 +1,6 @@
 import type { BookView, CandleData } from "@exchange/core";
 import { describe, expect, it } from "vitest";
-import { intervalParts, topMargin, updateMode } from "./candles";
+import { intervalParts, legendRoom, topMargin, updateMode } from "./candles";
 import { depthGeometry } from "./DepthChart";
 import { computeIndicators, ema, sma } from "./indicators";
 import { createIndicatorClient } from "./indicatorClient";
@@ -89,5 +89,18 @@ describe("topMargin (B116)", () => {
     expect(topMargin(10, 600)).toBe(0.08);
     expect(topMargin(200, 300)).toBe(0.5);
     expect(topMargin(58, 0)).toBe(0.08);
+  });
+});
+
+describe("legendRoom (B116, B118)", () => {
+  it("keeps the tallest legend while the key and width stay, and measures afresh when either changes", () => {
+    let room = legendRoom({ key: "", width: 0, legend: 0 }, "BTC-USDT|1h|MA,VOL", 600, 34);
+    expect(room).toEqual({ key: "BTC-USDT|1h|MA,VOL", width: 600, legend: 34 });
+    room = legendRoom(room, "BTC-USDT|1h|MA,VOL", 600, 50);
+    expect(room.legend).toBe(50);
+    room = legendRoom(room, "BTC-USDT|1h|MA,VOL", 600, 34);
+    expect(room.legend).toBe(50);
+    expect(legendRoom(room, "BTC-USDT|1d|MA,VOL", 600, 34).legend).toBe(34);
+    expect(legendRoom(room, "BTC-USDT|1h|MA,VOL", 420, 34).legend).toBe(34);
   });
 });

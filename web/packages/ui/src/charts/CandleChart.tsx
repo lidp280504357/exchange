@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import { IconButton } from "../components/IconButton";
 import { cn } from "../lib/cn";
 import { useFormatContext } from "../lib/settings";
-import { intervalParts, topMargin, updateMode, type CandleDataState, type UpdateMode } from "./candles";
+import { intervalParts, legendRoom, topMargin, updateMode, type CandleDataState, type LegendRoom, type UpdateMode } from "./candles";
 import { createIndicatorClient, type IndicatorClient } from "./indicatorClient";
 import type { IndicatorResult } from "./indicators";
 import { numToDecimal } from "./numbers";
@@ -136,30 +136,26 @@ export function CandleChart({
   const [fullscreen, setFullscreen] = useState(false);
   const [pseudoFull, setPseudoFull] = useState(false);
 
-  // Room for the legend at the top of the candles' scale (topMargin, B116):
-  // the legend's tallest since the symbol, interval, indicators or width
-  // last changed, so that the scale does not move while the crosshair's
-  // values change the legend's wrapping; refitted whenever the legend or
-  // the plot changes size.
+  // Room for the legend at the top of the candles' scale (topMargin, B116),
+  // for the legend's tallest since the symbol, interval, indicators or
+  // width last changed (legendRoom); refitted whenever the legend or the
+  // plot changes size.
   const fitKey = `${symbol}|${interval}|${shown.join(",")}`;
   const fitKeyRef = useRef(fitKey);
   fitKeyRef.current = fitKey;
   const volRef = useRef(showVOL);
   volRef.current = showVOL;
-  const fitRef = useRef({ key: "", width: 0, legend: 0, top: 0, vol: showVOL });
+  const roomRef = useRef<LegendRoom>({ key: "", width: 0, legend: 0 });
+  const fitRef = useRef({ top: 0, vol: showVOL });
   const fit = useCallback(() => {
     const chart = chartRef.current;
     const candle = candleRef.current;
     const plot = plotRef.current;
     if (!chart || !candle || !plot) return;
+    const room = legendRoom(roomRef.current, fitKeyRef.current, plot.clientWidth, legendRef.current?.offsetHeight ?? 0);
+    roomRef.current = room;
+    const top = topMargin(room.legend, plot.clientHeight - chart.timeScale().height());
     const f = fitRef.current;
-    if (f.key !== fitKeyRef.current || f.width !== plot.clientWidth) {
-      f.key = fitKeyRef.current;
-      f.width = plot.clientWidth;
-      f.legend = 0;
-    }
-    f.legend = Math.max(f.legend, legendRef.current?.offsetHeight ?? 0);
-    const top = topMargin(f.legend, plot.clientHeight - chart.timeScale().height());
     if (top === f.top && f.vol === volRef.current) return;
     f.top = top;
     f.vol = volRef.current;
