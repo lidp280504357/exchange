@@ -593,13 +593,15 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
   // of §12.1's first-screen budget, review DV); what its route preload
   // adds for the address; everything by the frame that first showed
   // selector, its first screen, but the dialog's idle preload; and that
-  // preload, with when it was asked for, from the first screen. The wait
-  // after the first screen outlasts the idle preload's (core's
-  // IDLE_WITHIN, 3 s after the load event).
-  const fresh = async (path, selector) => {
+  // preload, with when it was asked for, from the first screen. A page with
+  // a dialog to preload is waited on until its chunks are all in (15 s at
+  // most; core's IDLE_WITHIN is 3 s after the load event), another for a
+  // moment.
+  const fresh = async (path, selector, dialog) => {
     await page.goto(`${base}${path}`, { waitUntil: "networkidle2", timeout: 60000 });
     await page.waitForSelector(selector, { visible: true, timeout: 30000 });
-    await sleep(3500);
+    if (dialog) await preloaded(page, 0);
+    await sleep(1000);
     return page.evaluate(
       async (sel, dialog) => {
         const shown = window.__perfShown?.[sel] ?? Infinity;
@@ -642,7 +644,7 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
   // The assets overview first, for comparison: the same shell and session.
   const overview = await fresh("/assets", '[data-testid="assets-total"]');
   const account = '[data-testid="margin-account-MARGIN_CROSS"]';
-  const load = await fresh("/assets/margin", account);
+  const load = await fresh("/assets/margin", account, true);
   if (process.env.PERF_DEBUG) {
     console.log(`     ${site} entry files (KB): ${load.entry.largest.join(", ")}`);
     console.log(`     ${site} overview's route preload (KB): ${overview.route.largest.join(", ")}`);
@@ -658,7 +660,7 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
     load.entry.kb <= budgets.js,
   );
   report(
-    `${site} margin page loaded afresh: all JavaScript by its first screen, the idle preload left out (${load.first.files} files, ${load.route.kb.toFixed(0)} KB by its route preload; the assets overview's ${overview.first.kb.toFixed(0)} KB in ${overview.first.files}, ${overview.route.kb.toFixed(0)} KB by its route preload)`,
+    `${site} margin page loaded afresh: all JavaScript by its first screen, the idle preload left out (${load.first.files} files${load.route.files ? `, ${load.route.kb.toFixed(0)} KB by its route preload` : ", no route preload for its address"}; the assets overview's ${overview.first.kb.toFixed(0)} KB in ${overview.first.files}, ${overview.route.kb.toFixed(0)} KB by its route preload)`,
     `${load.first.kb.toFixed(0)} KB`,
     "— (reported)",
     true,
