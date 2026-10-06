@@ -152,6 +152,13 @@ held() {
   call GET "/v1/derivatives/positions?symbol=$SYMBOL" "" "${!auth_var}" && jq -e '.positions | length == 1' <<<"$BODY" >/dev/null
 }
 flat() { ! held "$1"; }
+# notice WHO TYPE: the user's inbox has a notice of TYPE (the contract
+# notices of review FG, B133).
+notice() {
+  local auth_var="AUTH_$1[@]"
+  call GET /v1/notifications "" "${!auth_var}" && [[ $STATUS == 200 ]] &&
+    jq -e --arg t "$2" '[.items[] | select(.type == $t)] | length >= 1' <<<"$BODY" >/dev/null
+}
 
 echo "== three traders on $SYMBOL"
 trader A 25 50
@@ -194,25 +201,65 @@ if (($(others_on_perps) > 0)); then
 fi
 WARNABLE=$(pg "SELECT count(*) FROM ledger.accounts a WHERE a.owner_type = 'USER' AND a.account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED') AND a.asset = 'ASTRA' AND a.available + a.frozen > 0 AND EXISTS (SELECT 1 FROM ledger.accounts d WHERE d.owner_type = 'USER' AND d.owner_id = a.owner_id AND d.scope = a.scope AND d.account_type IN (a.account_type || '_DEBT', a.account_type || '_INTEREST') AND d.available <> 0)")
 echo "note: $WARNABLE margin accounts hold ASTRA with a debt; the drops may warn (and mail) them"
-held C
-# C's bankruptcy price: contracts x face value / (cost + margin), the cost
-# contracts x face / the entry price (an inverse contract's harmonic mean).
-C_BANKRUPT=$(jq -r --argjson size "$SIZE" '.positions[0] | ((.quantity | tonumber) * $size) as $qs | ($qs / (.entry_price | tonumber) + (.margin | tonumber)) as $left | $qs / $left' <<<"$BODY")
-insurance() { pg "SELECT coalesce(sum(available), 0) FROM ledger.accounts WHERE account_type = 'INSURANCE_FUND' AND asset = 'ASTRA'"; }
-
 echo "== 1. ASTRA drops 4%: A is liquidated against the bots' bids"
-FUND_BEFORE=$(insurance)
+held A
+M_A=$(jq -r '.positions[0].margin' <<<"$BODY")
+# ASTRA's insurance fund before: its row, its version (the lines after it
+# are what moved it) and the time A's settlements are counted from.
+read -r FUND_ID FUND_BEFORE FUND_V T0 <<<"$(pg "SELECT concat_ws(' ', id, trim_scale(available), version, extract(epoch FROM now())) FROM ledger.accounts WHERE owner_type = 'SYSTEM' AND account_type = 'INSURANCE_FUND' AND asset = 'ASTRA'")"
+[[ -n $FUND_ID ]] || fail "ASTRA has no insurance fund account (scripts/ops/astra.sh seed)"
 # shellcheck disable=SC2016 # expanded when the drill ends
 at_exit 'back_up'
 drop
 eventually 600 "A's position liquidated (flat)" flat A
-FILLS_A=$(pg "SELECT coalesce(sum(f.insurance), 0) || ' ' || count(*) FILTER (WHERE f.liquidation) FROM derivatives.fills f WHERE f.user_id = '$USER_A' AND f.symbol = '$SYMBOL'")
-read -r PAID LIQ_FILLS <<<"$FILLS_A"
+# The fund's side of A's liquidation, from the ledger's lines (review FI,
+# C46): an isolated position's liquidation fills pay the fund what is left
+# of their share of the margin after the loss and the fee (filled above
+# the bankruptcy price), or the fund pays the loss the margin does not
+# cover (below it). Either way the fund's net is A's margin less the
+# losses and the fees of the fills, its pay-outs are what the fills say
+# it paid, and its row moved by its lines.
+read -r LIQ_FILLS PAID IN OUT NET EXPECT OTHER FUND_AFTER FUNDED OK_PAID OK_ROW OK_NET <<<"$(pg "
+WITH mine AS (
+  SELECT l.amount FROM ledger.futures_settlements s
+  CROSS JOIN LATERAL jsonb_array_elements(s.outcomes) o
+  JOIN ledger.journal_lines l ON l.journal_id = NULLIF(o->>'journal_id', '')::uuid
+  WHERE s.user_id = '$USER_A' AND s.created_at >= to_timestamp($T0) AND l.account_id = '$FUND_ID'),
+m AS (SELECT coalesce(sum(amount) FILTER (WHERE amount > 0), 0) AS pay_in,
+  coalesce(-sum(amount) FILTER (WHERE amount < 0), 0) AS pay_out FROM mine),
+fund AS (SELECT available, version FROM ledger.accounts WHERE id = '$FUND_ID'),
+lines AS (SELECT coalesce(sum(l.amount), 0) AS moved FROM ledger.journal_lines l, fund
+  WHERE l.account_id = '$FUND_ID' AND l.account_version > $FUND_V AND l.account_version <= fund.version),
+fills AS (SELECT count(*) FILTER (WHERE liquidation) AS n, coalesce(sum(insurance), 0) AS paid,
+  coalesce(sum(greatest(-realized_pnl, 0)) FILTER (WHERE liquidation), 0) AS loss,
+  coalesce(sum(fee) FILTER (WHERE liquidation), 0) AS fee
+  FROM derivatives.fills WHERE user_id = '$USER_A' AND symbol = '$SYMBOL'),
+v AS (SELECT fills.n, fills.paid, m.pay_in, m.pay_out, m.pay_in - m.pay_out AS net,
+  '$M_A'::numeric - fills.loss - fills.fee AS expect, lines.moved - (m.pay_in - m.pay_out) AS other, fund.available,
+  (SELECT count(*) FROM derivatives.funding_payments WHERE user_id = '$USER_A' AND settled_at >= to_timestamp($T0)) AS funded,
+  '$FUND_BEFORE'::numeric + lines.moved = fund.available AS row_ok
+  FROM fills, m, lines, fund)
+SELECT concat_ws(' ', n, trim_scale(paid), trim_scale(pay_in), trim_scale(pay_out), trim_scale(net), trim_scale(expect),
+  trim_scale(other), trim_scale(available), funded, pay_out = paid, row_ok, net = expect) FROM v")"
 ((LIQ_FILLS > 0)) || fail "A's position was closed by no liquidation fill"
-FUND_AFTER=$(insurance)
-jq -en --argjson b "$FUND_BEFORE" --argjson a "$FUND_AFTER" --argjson p "$PAID" '($b - $a - $p) | fabs < 1e-8' >/dev/null ||
-  fail "ASTRA's insurance fund went from $FUND_BEFORE to $FUND_AFTER, while A's liquidation fills say it paid $PAID"
-echo "ok   $LIQ_FILLS liquidation fills; the insurance fund paid $PAID ASTRA, as its row moved ($FUND_BEFORE -> $FUND_AFTER)"
+[[ $OK_PAID == t ]] || fail "ASTRA's insurance fund paid out $OUT on A's liquidation, while its fills say $PAID"
+[[ $OK_ROW == t ]] || fail "ASTRA's insurance fund row went from $FUND_BEFORE to $FUND_AFTER, not by its lines since version $FUND_V"
+if ((FUNDED > 0)); then
+  echo "note: a funding payment of A's came in between, so its margin is not checked against the fund's net"
+else
+  [[ $OK_NET == t ]] || fail "ASTRA's insurance fund's net on A's liquidation is $NET, while A's margin $M_A less the fills' losses and fees is $EXPECT"
+fi
+echo "ok   $LIQ_FILLS liquidation fills; ASTRA's insurance fund took $IN and paid $OUT (the fills say $PAID): net $NET, A's margin $M_A less the losses and fees"
+[[ $OTHER == 0 ]] || echo "note: other settlements moved the fund meanwhile by $OTHER ASTRA ($FUND_BEFORE -> $FUND_AFTER)"
+eventually 60 "A was told: CONTRACT_LIQUIDATING" notice A CONTRACT_LIQUIDATING
+# The monitor looks once a second: the warning needs the margin seen
+# between 1.0 and 1.2 times the maintenance margin on the way down, which
+# a mark moving with the 60-second index nearly always is.
+if notice A CONTRACT_LIQUIDATION_WARNED; then
+  echo "ok   A was warned before: CONTRACT_LIQUIDATION_WARNED"
+else
+  echo "note: no CONTRACT_LIQUIDATION_WARNED for A: the mark crossed the warning band between two checks"
+fi
 held C || fail "C's position went with A's"
 
 echo "== 2. the bots leave $SYMBOL, ASTRA drops 4% more: C is deleveraged"
@@ -238,6 +285,11 @@ bare() {
   call GET "/v1/market/$SYMBOL/depth?limit=5" "" && [[ $STATUS == 200 ]] && jq -e '(.bids | length) == 0' <<<"$BODY" >/dev/null
 }
 eventually 120 "no bid left on $SYMBOL" bare
+held C || fail "C's position went"
+# C's bankruptcy price, read just before the drop (review FI, C46):
+# contracts x face value / (cost + margin), the cost contracts x face /
+# the entry price (an inverse contract's harmonic mean).
+C_BANKRUPT=$(jq -r --argjson size "$SIZE" '.positions[0] | ((.quantity | tonumber) * $size) as $qs | ($qs / (.entry_price | tonumber) + (.margin | tonumber)) as $left | $qs / $left' <<<"$BODY")
 drop
 eventually 600 "C's position closed (flat)" flat C
 ADL=$(pg "SELECT f.price || ' ' || f.fee || ' ' || f.realized_pnl FROM derivatives.fills f JOIN derivatives.orders o ON o.order_id = f.order_id WHERE f.user_id = '$USER_C' AND f.symbol = '$SYMBOL' AND o.kind = 'ADL' ORDER BY f.executed_at DESC LIMIT 1")
@@ -249,6 +301,10 @@ ATTEMPTS=$(pg "SELECT count(*) FROM derivatives.orders WHERE user_id = '$USER_C'
 echo "ok   C deleveraged at $ADL_PRICE (bankruptcy about $C_BANKRUPT), no fee, PnL $ADL_PNL ASTRA, after $ATTEMPTS liquidation orders"
 WHO=$(pg "SELECT string_agg(DISTINCT CASE WHEN o.user_id = '$USER_B' THEN 'B' WHEN o.user_id IN (SELECT user_id FROM marketsim.bots) THEN 'a bot' ELSE o.user_id::text END, ', ') FROM derivatives.orders o WHERE o.symbol = '$SYMBOL' AND o.kind = 'ADL' AND o.user_id <> '$USER_C' AND o.created_at > now() - interval '15 minutes'")
 echo "ok   against: $WHO"
+eventually 60 "C was told: CONTRACT_LIQUIDATING" notice C CONTRACT_LIQUIDATING
+if [[ $WHO == *B* ]]; then
+  eventually 60 "B was told of its deleveraging: CONTRACT_ADL" notice B CONTRACT_ADL
+fi
 
 echo "== the price, the bots and B's position back"
 back_up
