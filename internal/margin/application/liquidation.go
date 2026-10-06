@@ -215,6 +215,16 @@ func (s *Service) wait(ctx context.Context, l ports.Liquidation, note string) (p
 	return l, false, s.save(ctx, l)
 }
 
+// waitAfter is wait for a liquidation the step changed: stored once, with
+// the note, when either changed.
+func (s *Service) waitAfter(ctx context.Context, l ports.Liquidation, note string, changed bool) (ports.Liquidation, bool, error) {
+	if !changed {
+		return s.wait(ctx, l, note)
+	}
+	l.Note = note
+	return l, false, s.save(ctx, l)
+}
+
 // next moves a liquidation to its next step.
 func (s *Service) next(ctx context.Context, l ports.Liquidation, step string) (ports.Liquidation, bool, error) {
 	l.Step, l.StepAt, l.Note = step, s.Now(), ""
@@ -303,14 +313,11 @@ func (s *Service) stepTrade(ctx context.Context, l ports.Liquidation) (ports.Liq
 	if locked(holdings) {
 		return s.wait(ctx, l, "waiting for the ledger to settle the orders")
 	}
-	if traded := executed(orders, ""); !traded.Equal(l.Traded) {
-		// Kept as it grows, whatever the step waits for next (wait stores
-		// a new note only; review DJ).
-		l.Traded = traded
-		if err := s.save(ctx, l); err != nil {
-			return l, false, err
-		}
-	}
+	// What the orders executed is kept as it grows, whatever the step
+	// waits for next (review DJ), in the one write below.
+	traded := executed(orders, "")
+	grew := !traded.Equal(l.Traded)
+	l.Traded = traded
 	var plan []ports.LiquidationOrder
 	var why string
 	if side == sideSell {
@@ -320,7 +327,7 @@ func (s *Service) stepTrade(ctx context.Context, l ports.Liquidation) (ports.Liq
 	}
 	switch {
 	case err != nil:
-		return s.wait(ctx, l, "planning the orders: "+err.Error())
+		return s.waitAfter(ctx, l, "planning the orders: "+err.Error(), grew)
 	case len(plan) > 0:
 		l.Note = ""
 		err := s.Store.Tx(ctx, func(r ports.Repos) error {
@@ -333,7 +340,7 @@ func (s *Service) stepTrade(ctx context.Context, l ports.Liquidation) (ports.Liq
 		})
 		return l, err == nil, err // sent at once
 	case why != "":
-		return s.wait(ctx, l, why)
+		return s.waitAfter(ctx, l, why, grew)
 	case side == sideSell:
 		return s.next(ctx, l, StepFee)
 	}
@@ -547,12 +554,12 @@ type need struct {
 }
 
 // needs returns what the account lacks of each asset it owes and may buy
-// with the quote asset, the largest first; one without a pair that may
-// ever trade is left to the insurance fund.
-func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []domain.Holding) ([]need, error) {
+// with the quote asset, the largest first, and the quote's decimals; one
+// without a pair that may ever trade is left to the insurance fund.
+func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []domain.Holding) ([]need, int32, error) {
 	decimals, err := s.Instruments.Decimals(ctx, l.QuoteAsset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var out []need
 	for _, h := range holdings {
@@ -562,14 +569,14 @@ func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []dom
 		}
 		info, open, ok, err := s.market(ctx, l, h.Asset)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if !ok {
 			continue
 		}
 		price, err := s.priceIn(l, h.Asset)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		inQuote := func(q decimal.Decimal) decimal.Decimal { return q.Mul(price).Mul(buyBuffer).RoundCeil(decimals) }
 		smallest := least(info)
@@ -578,7 +585,7 @@ func (s *Service) needs(ctx context.Context, l ports.Liquidation, holdings []dom
 		})
 	}
 	slices.SortFunc(out, func(a, b need) int { return b.amount.Cmp(a.amount) })
-	return out, nil
+	return out, decimals, nil
 }
 
 // take is what a buy of the need spends out of left: at most the need and
@@ -601,7 +608,7 @@ var sellBuffer = decimal.RequireFromString("1.02")
 // an order's most. why says what it waits for when it plans nothing while
 // a sale is still needed and some asset may sell later.
 func (s *Service) planSells(ctx context.Context, l ports.Liquidation, holdings []domain.Holding, orders []ports.LiquidationOrder) ([]ports.LiquidationOrder, string, error) {
-	needs, err := s.needs(ctx, l, holdings)
+	needs, _, err := s.needs(ctx, l, holdings)
 	if err != nil {
 		return nil, "", err
 	}
@@ -674,7 +681,7 @@ func (s *Service) planSells(ctx context.Context, l ports.Liquidation, holdings [
 // beyond the quote's own debt (the fee is booked by then); what is left
 // too small for an order's least buys nothing. why as for planSells.
 func (s *Service) planBuys(ctx context.Context, l ports.Liquidation, holdings []domain.Holding, orders []ports.LiquidationOrder) ([]ports.LiquidationOrder, string, error) {
-	needs, err := s.needs(ctx, l, holdings)
+	needs, _, err := s.needs(ctx, l, holdings)
 	if err != nil {
 		return nil, "", err
 	}
@@ -740,13 +747,9 @@ func (s *Service) stepFee(ctx context.Context, l ports.Liquidation) (ports.Liqui
 		if err != nil {
 			return l, false, err
 		}
-		needs, err := s.needs(ctx, l, holdings)
+		needs, decimals, err := s.needs(ctx, l, holdings)
 		if err != nil {
 			return s.wait(ctx, l, "planning the buys: "+err.Error())
-		}
-		decimals, err := s.Instruments.Decimals(ctx, l.QuoteAsset)
-		if err != nil {
-			return l, false, err
 		}
 		sold := executed(orders, sideSell)
 		q := holding(holdings, l.QuoteAsset)
