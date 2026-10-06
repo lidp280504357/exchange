@@ -289,10 +289,18 @@ export function FuturesOrderForm({
           snap
         />
       ) : (
-        <div className="flex h-10 items-center justify-between rounded-2 bg-bg-2 px-3 text-sm text-fg-3">
-          <span>{t("common.price")}</span>
-          <span>{t("mTrade.marketPrice")}</span>
-        </div>
+        // A market order has no price: the field shows so, greyed and shut (review FE, B132, as Binance's).
+        <NumberInput
+          size="lg"
+          aria-label={t("common.price")}
+          prefix={<span className="text-xs text-fg-3">{t("common.price")}</span>}
+          unit={contract.quote_asset}
+          value=""
+          onValueChange={() => {}}
+          placeholder={t("mTrade.marketPrice")}
+          align="right"
+          disabled
+        />
       )}
       <NumberInput
         size="lg"

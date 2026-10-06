@@ -86,7 +86,8 @@ export function PositionCard({
       </div>
       {children}
       {(onClose || onTpSl || onAdjustMargin) && (
-        <footer className="grid grid-cols-3 gap-2">
+        // At the card's bottom: cards side by side in a grid row are as tall as the tallest, their actions on one line (review B134).
+        <footer className="mt-auto grid grid-cols-3 gap-2">
           {onAdjustMargin && (
             <Button type="button" size="sm" variant="secondary" onClick={onAdjustMargin}>
               {t("ui.position.adjustMargin")}

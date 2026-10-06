@@ -1,7 +1,7 @@
 import {
   adjustPositionMargin, assetDecimals, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, closeAtMarket, dec, enumLabel,
-  errorText, formatAmount, formatDecimal, formatPercent, formatPrice, isActive, isInverse, placeConditionalOrder, routes,
-  selectSignedIn, usdValue, useAssets, useConditionalOrders, useContractFills, useContractMath, useContractOpenOrders, useContractOrderHistory,
+  errorText, formatAmount, formatPercent, formatPrice, isActive, isInverse, placeConditionalOrder, routes,
+  selectSignedIn, useAssets, useConditionalOrders, useContractFills, useContractMath, useContractOpenOrders, useContractOrderHistory,
   useContracts, useFundingPayments, useMarkPrice, usePositions, useSession, useTicker, type ConditionalOrder, type Contract, type ContractFill,
   type ContractOrder, type ContractPosition, type ContractTerms, type FundingPayment,
 } from "@exchange/core";
@@ -278,20 +278,6 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
       onTpSl={() => setTpslOpen(true)}
       onAdjustMargin={p.margin_mode === "ISOLATED" ? () => setMarginOpen(true) : undefined}
     >
-      {math.inverse && d.contract && (
-        // What the contracts are worth in the coin and in USD, and the result in USD at the mark (design 2026-10-06 §2.6).
-        <div data-testid="position-value" className="flex flex-wrap justify-between gap-2 text-xs tabular-nums text-fg-2">
-          <span>
-            {t("pcTrade.positionValue", {
-              coin: formatAmount(math.worth(p.quantity, live.markPrice), math.amountDecimals), asset: math.settle,
-              usd: formatAmount(usdValue(p.quantity, d.contract.contract_size), 0),
-            })}
-          </span>
-          {dec.sign(live.markPrice) > 0 && (
-            <span>{t("pcTrade.pnlUsd", { value: formatDecimal(dec.mul(live.unrealizedPnl, live.markPrice), { decimals: 2, rounding: "half", sign: true }) })}</span>
-          )}
-        </div>
-      )}
       {tpsl.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs text-fg-2">
           {tpsl.map((c) => (

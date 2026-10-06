@@ -58,7 +58,7 @@ export const uiMessages = {
       },
       tape: { title: "最新成交" },
       order: {
-        marketPrice: "市场最优价",
+        marketPrice: "市价",
         maxBuy: "可买",
         maxSell: "可卖",
         estFee: "预估手续费",
@@ -188,7 +188,7 @@ export const uiMessages = {
       },
       tape: { title: "Trades" },
       order: {
-        marketPrice: "Market price",
+        marketPrice: "Market",
         maxBuy: "Max buy",
         maxSell: "Max sell",
         estFee: "Est. fee",

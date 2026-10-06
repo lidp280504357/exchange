@@ -55,7 +55,7 @@ export default {
     },
     tape: { title: "最新成交" },
     order: {
-      marketPrice: "市場最優價",
+      marketPrice: "市價",
       maxBuy: "可買",
       maxSell: "可賣",
       estFee: "預估手續費",
