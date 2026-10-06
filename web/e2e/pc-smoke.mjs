@@ -12,12 +12,12 @@
 // from the spot terminal and
 // cancelled from its open orders, a transfer to futures and its ledger
 // entry, a deposit address, the futures terminal, the candle charts'
-// legends clear of the highest candle (there and on the coin page at
-// 1024 wide), notifications, devices,
+// legends clear of the highest candle (the futures and spot terminals
+// on hourly candles, the coin page at 1024 wide), notifications, devices,
 // the language switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { legendClear, menuOnTop, ok, start } from "./lib.mjs";
+import { legendClear, menuOnTop, ok, sleep, start } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -343,13 +343,24 @@ try {
     }
     return `${where}: legend ${l.legendHeight}px, the highest candle ${l.candleTop - l.legendBottom}px below it`;
   };
-  const futuresChart = await clearOf("the futures terminal at 1440 × 900");
+  // The terminals on hourly candles, as in the user's report (a candle of
+  // the hour opens on the hour: its legend shows HH:00).
+  const hourly = async (where) => {
+    await clickButton("1小时");
+    await page.waitForFunction(() => [...document.querySelectorAll('button[aria-pressed="true"]')].some((b) => b.innerText.trim() === "1小时"), { timeout: 10000 });
+    await page.waitForFunction(() => /\d{2}:00(?!:)/.test(document.querySelector('[data-testid="candle-legend"]')?.innerText ?? ""), { timeout: 20000 });
+    await sleep(1500); // the hourly candles drawn
+    return clearOf(`${where}, hourly`);
+  };
+  const futuresChart = await hourly("the futures terminal at 1440 × 900");
+  await go("/trade/BTC-USDT");
+  const spotChart = await hourly("the spot terminal at 1440 × 900");
   // The coin page at 1024 wide, where its chart is narrowest.
   await page.setViewport({ width: 1024, height: 768 });
   await go("/coin/BTC");
   const coinChart = await clearOf("the BTC coin page at 1024 × 768");
   await page.setViewport({ width: 1440, height: 900 });
-  ok(`the candle charts start below their legends (${futuresChart}; ${coinChart})`);
+  ok(`the candle charts start below their legends (${futuresChart}; ${spotChart}; ${coinChart})`);
 
   // 8. Notifications, devices, the help centre.
   await go("/notifications");
