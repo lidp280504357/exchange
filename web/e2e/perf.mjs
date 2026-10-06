@@ -554,8 +554,11 @@ async function marginPages(page, { site, base, user, password, budgets, sheet })
   const level = `${bar} [data-testid="margin-level"]`;
   const cross = await clickTo(page, "全仓", bar, level);
   report(`${site} order form switched to the cross account: its gauge on screen`, cross < 0 ? "no 全仓 button" : ms(cross), "≤ 200 ms", cross >= 0 && cross <= 200);
+  // The dialog's chunk loads while the terminal is idle on a margin
+  // account: opened as a user would, a moment after choosing the account.
+  await sleep(2500);
   const borrow = await clickTo(page, "借币", bar, 'form[data-testid="margin-borrow-form"]');
-  report(`${site} borrow dialog first opened (a lazy chunk): its form on screen`, borrow < 0 ? "no 借币 button" : ms(borrow), "— (reported)", borrow >= 0 && borrow !== Infinity);
+  report(`${site} borrow dialog first opened, 2.5 s after the cross account was chosen: its form on screen`, borrow < 0 ? "no 借币 button" : ms(borrow), "— (reported)", borrow >= 0 && borrow !== Infinity);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector('form[data-testid="margin-borrow-form"]'), { timeout: 10000 });
   await sleep(1000);
