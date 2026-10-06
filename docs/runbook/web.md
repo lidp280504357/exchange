@@ -186,6 +186,7 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 横向滚动的轮播（公告条等）里不要放视觉隐藏的文字（`sr-only`）。它是绝对定位的，在滚出视野的那一页里不受滚动容器裁剪，手机上会把布局视口撑宽：`position: fixed` 的 tab 栏跟着变宽，只露出前几个，`html` 的 `overflow-x: clip` 挡不住。要补给读屏的文字放进链接的 `aria-label`。排查方法：看 `innerWidth` 是否大于屏宽，再逐个隐藏区块，看哪个让它恢复。
   - 手机站「我的 → 关于 Astras」显示的版本号来自构建时的 `VITE_APP_VERSION`（部署脚本传入提交号），本机为 `dev`。
   - K 线图关掉了 TradingView 角标（`attributionLogo: false`）。图表库许可要求的归属与链接由 `ChartCredit` 显示在 PC 页脚与手机帮助页底部，换图表库或删这两处之前要另找位置放。
+  - K 线的图例（日期、开高低收、涨跌、量与均线）叠在图上（半透明底），蜡烛的价格轴顶部按图例实际高度留空（`topMargin`：图例高 + 12 px 占窗格的比例，最少 8 %、最多一半；图例或图表尺寸变化时重算，交易对、周期、指标或宽度不变时只增不减，免得十字线移动时价格轴跟着跳）。手机币种页图例会折成 3–5 行，原来固定的 8 % 让最高的蜡烛压在图例下面（B116，用户报告）。两站冒烟在合约终端与币种页（手机日线、PC 1024 宽）上按画布像素检查最高的蜡烛在图例下方（`lib.mjs` 的 `legendClear`）。
   - 共享包标了 `sideEffects`，便于摇树。
 - `pnpm lint`（`web/scripts/check-tokens.mjs`）：新应用与共享包里不许出现颜色值（`tokens.css` 除外）和直接的 `toLocale*` 调用。
 - web-vitals：LCP、CLS、INP、TTFB 输出到浏览器控制台，前缀 `[vitals]`。
