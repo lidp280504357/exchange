@@ -765,8 +765,8 @@ func TestMarginOrdersNeedTheMarginEligibility(t *testing.T) {
 	}
 	// An isolated account asks with its pair.
 	elig.asked = nil
-	if _, err := svc.Place(ctx, marginBuy("i1", domain.AccountMarginIsolated, domain.SideEffectNone)); !apperr.Is(err, "USER_RISK_REVIEW") {
-		t.Fatalf("an isolated order without MARGIN_TRADE: %v", err)
+	if _, err := svc.Place(ctx, marginBuy("i1", domain.AccountMarginIsolated, domain.SideEffectNone)); !apperr.Is(err, "USER_RISK_REVIEW") || len(store.orders) != 1 {
+		t.Fatalf("an isolated order without MARGIN_TRADE: %v, %d orders (the spot one only)", err, len(store.orders))
 	}
 	if want := []string{FeatureMarginTrade + ":BTC-USDT"}; !slices.Equal(elig.asked, want) {
 		t.Fatalf("asked %v, want %v", elig.asked, want)

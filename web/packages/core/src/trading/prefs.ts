@@ -35,6 +35,9 @@ type TerminalPrefs = {
   visit: (symbol: string) => void;
 };
 
+/** What the store keeps on the device: everything but the side effect. */
+type PersistedPrefs = Omit<TerminalPrefs, "sideEffect">;
+
 export const useTerminalPrefs = create<TerminalPrefs>()(
   persist(
     (set) => ({
@@ -57,10 +60,10 @@ export const useTerminalPrefs = create<TerminalPrefs>()(
     {
       name: "exchange.terminal",
       version: 2,
-      partialize: ({ sideEffect: _, ...kept }) => kept,
+      partialize: ({ sideEffect: _, ...kept }): PersistedPrefs => kept,
       migrate: (persisted) => {
         const { sideEffect: _, ...kept } = (persisted ?? {}) as Partial<TerminalPrefs>;
-        return kept as TerminalPrefs;
+        return kept as PersistedPrefs;
       },
     },
   ),
