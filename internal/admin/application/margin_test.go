@@ -360,6 +360,10 @@ func TestMarginTerms(t *testing.T) {
 		"levels crossed"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("the warning level at the liquidation level: %v", err)
 	}
+	if _, err := h.svc.SetMarginSettings(ctx, boss, MarginTerms{Leverage: 1, WarnLevel: d("1.3"), LiquidationLevel: d("1.1"), LiquidationFee: d("0.02")}, 1,
+		"no leverage"); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a leverage under 2: %v", err)
+	}
 	req, err := h.svc.SetMarginSettings(ctx, boss, cross, 1, "warn earlier")
 	if err != nil || req.Payload["target"] != "cross" || m.crossV != 1 {
 		t.Fatalf("the cross terms' request %+v %v", req, err)
@@ -475,6 +479,18 @@ func TestMarginAccounts(t *testing.T) {
 	}
 	if got := h.auditsOf("admin.margin.liquidation_requested"); len(got) != 1 || !strings.HasPrefix(got[0], "user:"+marginUser+" cannot repay") {
 		t.Fatalf("the request audited %v", got)
+	}
+
+	// Approved once margin-service liquidates none of the user's accounts,
+	// a request fails with the reason and nothing is sent (review DL A58 ①).
+	again, err := h.svc.LiquidateMarginAccount(ctx, ops, marginUser, "MARGIN_CROSS", "cannot repay, again", "k3")
+	if err != nil {
+		t.Fatalf("another request: %v", err)
+	}
+	features[flags.KeyMarginLiquidation] = false
+	failed, err := h.svc.DecideApproval(ctx, boss, again.ID, true, "agreed, but switched off since")
+	if err != nil || failed.Status != domain.ApprovalFailed || !strings.HasPrefix(failed.Result, "ADMIN_MARGIN_LIQUIDATION_OFF") || len(m.liquidated) != 1 {
+		t.Fatalf("approved while liquidations are off %+v %v %v", failed, err, m.liquidated)
 	}
 }
 

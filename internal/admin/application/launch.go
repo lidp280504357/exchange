@@ -105,7 +105,7 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 			status = LaunchOK
 		}
 		value := map[string]any{"flag": flag, "enabled": f.Enabled}
-		if len(f.Rules) > 0 && string(f.Rules) != "{}" && string(f.Rules) != "null" {
+		if hasRules(f) {
 			value["rules"] = f.Rules
 		}
 		set(key, status, value)

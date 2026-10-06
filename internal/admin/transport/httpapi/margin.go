@@ -165,6 +165,12 @@ func (h *Handler) setMarginSettings(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("cross is the cross account's terms"))
 		return
 	}
+	for k := range fields {
+		if !slices.Contains(marginTermsFields, k) {
+			httpx.WriteError(w, r, apperr.Invalid("unknown field cross."+k))
+			return
+		}
+	}
 	for _, f := range marginTermsFields {
 		if _, ok := fields[f]; !ok {
 			httpx.WriteError(w, r, apperr.Invalid("every field of the terms is given: "+strings.Join(marginTermsFields, ", ")).WithDetail("field", f))

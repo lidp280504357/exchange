@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -231,8 +232,10 @@ const (
 	marginInterestCharges = `SELECT {day:hour} AS day, asset, sum(principal), uniqExact(hour), sum(interest),
 			uniqExact(user_id, account_type, symbol)
 		FROM margin_interest FINAL WHERE {range:hour} AND (? = '' OR asset = ?) GROUP BY day, asset`
+	// marginInterestPrices takes the pairs it reads (%s): one asset's own
+	// (symbol = ?, the trades' key) or every USDT pair.
 	marginInterestPrices = `SELECT {day:executed_at} AS day, substring(symbol, 1, length(symbol) - 5) AS base, argMax(price, executed_at)
-		FROM trades FINAL WHERE endsWith(symbol, '-USDT') AND {range:executed_at} AND (? = '' OR base = ?) GROUP BY day, symbol`
+		FROM trades FINAL WHERE {range:executed_at} AND %s GROUP BY day, symbol`
 )
 
 // MarginInterest returns the interest per bucket and asset of the period.
@@ -307,8 +310,12 @@ func (r Reports) MarginInterest(ctx context.Context, rng ports.ReportRange, asse
 	if err := closeRows(rows); err != nil {
 		return nil, err
 	}
-	query, args = ranged(marginInterestPrices, rng)
-	if rows, err = r.Conn.Query(ctx, query, append(args, asset, asset)...); err != nil {
+	pairs, pairArgs := "endsWith(symbol, '-USDT')", []any(nil)
+	if asset != "" {
+		pairs, pairArgs = "symbol = ?", []any{asset + "-USDT"}
+	}
+	query, args = ranged(fmt.Sprintf(marginInterestPrices, pairs), rng)
+	if rows, err = r.Conn.Query(ctx, query, append(args, pairArgs...)...); err != nil {
 		return nil, unavailable(err)
 	}
 	prices := map[key]decimal.Decimal{}

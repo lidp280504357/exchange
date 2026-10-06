@@ -224,11 +224,14 @@ func (t MarginAssetTerms) validate() error {
 	return nil
 }
 
-// validate holds an account's terms to the terms' rules (the leverages
-// allowed are margin-service's policy, checked when the change is made).
+// validate holds an account's terms to the terms' rules: a leverage of 2
+// to 10 (pair_terms' column; which of them margin-service allows is its
+// policy, checked when the change is made), the levels in order, the fee.
 func (t MarginTerms) validate() error {
 	one := decimal.NewFromInt(1)
 	switch {
+	case t.Leverage < 2 || t.Leverage > 10:
+		return apperr.Invalid("the leverage is 2 to 10")
 	case !t.LiquidationLevel.GreaterThan(one):
 		return apperr.Invalid("the liquidation level is above 1")
 	case !t.WarnLevel.GreaterThan(t.LiquidationLevel):
@@ -766,7 +769,8 @@ func marginAccountKey(userID, account string) (string, error) {
 type MarginAccountQuery = ports.MarginAccountQuery
 
 // normalizeAccount gives an account's frozen_reason as "" when no
-// administrator froze it (margin-service's column is NOT NULL DEFAULT ”).
+// administrator froze it (margin-service's column is NOT NULL, empty by
+// default).
 func normalizeAccount(it marginItem) {
 	if r, ok := it["frozen_reason"]; !ok || string(r) == "null" {
 		it["frozen_reason"] = json.RawMessage(`""`)

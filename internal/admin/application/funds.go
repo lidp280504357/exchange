@@ -619,9 +619,9 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 	// A fund operation needs ledger.adjust.approve, a simulated market's
 	// change sim.control, margin terms instruments.trading and a margin
 	// liquidation derivatives.write (checked once the request is read).
-	if !slices.ContainsFunc([]string{domain.PermAdjustApprove, domain.PermSimControl, domain.PermInstrumentsTrading, domain.PermDerivativesEdit},
-		func(perm string) bool { return p.require(perm) == nil }) {
-		return domain.Approval{}, p.require(domain.PermAdjustApprove)
+	deciders := []string{domain.PermAdjustApprove, domain.PermSimControl, domain.PermInstrumentsTrading, domain.PermDerivativesEdit}
+	if !slices.ContainsFunc(deciders, func(perm string) bool { return p.require(perm) == nil }) {
+		return domain.Approval{}, domain.ErrForbidden.WithDetail("permission", strings.Join(deciders, "|"))
 	}
 	if err := needReason(reason); err != nil {
 		return domain.Approval{}, err

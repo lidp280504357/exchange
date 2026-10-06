@@ -368,7 +368,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - 列表与全仓条款上有待审申请时显示「待审批」（`pending_approval_id`，点进审批页）。
 - **杠杆账户**（`/margin/accounts`）：一次查询（类型、交易对、用户交给服务端，状态页签在返回的列表上筛），按风险率从低到高、最多 500 个（`truncated` 提示还有更多）；`frozen_reason` 不是管理员冻结时为空串；每个账户带待审的手工强平（`pending_approval_id`）。详情（`GET …/accounts/{user_id}/{account}`，`account` 为 `MARGIN_CROSS` 或 `MARGIN_ISOLATED:<交易对>`）：余额与估值、借款、借还流水（`journal_key` 是账本分录的幂等键，如 `margin-interest:<资产>:<整点 Unix 秒>`）、计息、最近 20 次强平（margin-service 自己的记录，带步骤与说明；`SHORTFALL` 表示保险基金缺某个资产，负债保留到补足后的下一轮）。
   - 冻结与解冻：`POST …/freeze`、`…/unfreeze`（带理由，冻结理由最多 500 字节），立即生效，审计 `admin.margin.account_frozen`、`admin.margin.account_unfrozen`（对象 `user:<id>`，详情有账户）。冻结时 margin-service 撤销账户的全部挂单（E3；撤单失败只记日志、冻结照样生效，可再撤），冻结后不能下单、借币或划出，可以还款，利息照常计、到强平线仍会强平。已冻结或强平中 409 `MARGIN_FROZEN`；同一管理员以同样理由再冻结（应答丢失后的重试）返回账户并补记审计。不是管理员冻结的（强平中）不能解冻：409 `MARGIN_NOT_FROZEN`。
-  - 手工强平：`POST …/liquidate`（带 `Idempotency-Key`），一律等第二位有 `derivatives.write` 的管理员（202，审批 `MARGIN_LIQUIDATE`，`value_usdt` 为总负债，载荷保留申请时的状态、风险率与资产负债）。只有 margin-service 在强平时（开关 `margin.liquidation`，E3）才能申请和执行：关着时 409 `ADMIN_MARGIN_LIQUIDATION_OFF`（页面按钮置灰并说明）；没有负债 409 `ADMIN_MARGIN_NOTHING_OWED`；强平中 409 `MARGIN_FROZEN`；同一账户一次一条待审。批准后 margin-service 以申请人的名义、按审批 ID 只启动一次（`POST /internal/margin/accounts/{user}/{account}/liquidate`，请求体只有 `approval_id`，触发方式 `MANUAL`），申请结果写强平 ID；开关按账户所属用户判断（与 margin-service 的监控相同）；一天未决即过期。
+  - 手工强平：`POST …/liquidate`（带 `Idempotency-Key`），一律等第二位有 `derivatives.write` 的管理员（202，审批 `MARGIN_LIQUIDATE`，`value_usdt` 为总负债，载荷保留申请时的状态、风险率与资产负债）。只有 margin-service 在强平时（开关 `margin.liquidation`，按账户所属用户判断）才能申请和执行：申请时关着 409 `ADMIN_MARGIN_LIQUIDATION_OFF`（开关整个关着时页面按钮置灰并说明，按规则打开时以服务端对该用户的判断为准）；批准时关着，申请记为失败（结果为 `ADMIN_MARGIN_LIQUIDATION_OFF`），不发给 margin-service；没有负债 409 `ADMIN_MARGIN_NOTHING_OWED`；强平中 409 `MARGIN_FROZEN`；同一账户一次一条待审。批准后 margin-service 以申请人的名义、按审批 ID 只启动一次（`POST /internal/margin/accounts/{user}/{account}/liquidate`，请求体只有 `approval_id`，触发方式 `MANUAL`），申请结果写强平 ID；开关按账户所属用户判断（与 margin-service 的监控相同）；一天未决即过期。
 - **杠杆强平**（`/margin/liquidations`）：读模型 `margin_liquidations`（按 `liquidation_id` 合并开始与完成两条事件，`anyLast` 跳过空值），近 1/7/30/90 天，按类型、交易对、触发方式、用户筛选，游标分页。只见到完成事件的行没有开始的字段，ClickHouse 00010 之前的行没有触发方式与审批号，页面显示「—」。
 - **利息报表**（`/margin/interest`）：按天、周或月与资产：计息与已还（账本 `ledger_entries` 的全仓/逐仓利息行：计息使其减少、还款使其增加）、期末未还（加上期初以前的累计）、平均本金与小时利率、计息账户数（`margin_interest` 的逐小时计息），折合 USDT 按该资产 USDT 交易对在桶内最后一笔成交价（没有则为空，USDT 按 1）。
 - **审批页**：`MARGIN_PARAMS` 显示对象与每个改动字段的前后值，`MARGIN_LIQUIDATE` 显示用户、账户与申请时的风险率、负债；决定分别要 `instruments.trading` 与 `derivatives.write`；一天后标「已过期」。
@@ -584,7 +584,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_WELCOME_UNPRICED` | 要提高的资产没有新鲜的 USDT 价格，无法折算 |
 | `ADMIN_MARGIN_CHANGE_PENDING` | 同一资产、交易对、全仓条款或账户已有一条待审的杠杆申请（409，`details.approval_id`）；先批准、拒绝或撤回它 |
 | `ADMIN_MARGIN_NOTHING_OWED` | 手工强平：账户没有负债 |
-| `ADMIN_MARGIN_LIQUIDATION_OFF` | 手工强平：开关 `margin.liquidation` 关着，margin-service 不强平（申请与批准时都检查） |
+| `ADMIN_MARGIN_LIQUIDATION_OFF` | 手工强平：开关 `margin.liquidation` 对该账户的用户关着，margin-service 不强平。申请时为 409；批准时遇到，申请记为失败，结果写这个码 |
 | `MARGIN_PARAMS_CHANGED` | 杠杆参数的版本已变（期间有人改过），刷新后再改；批准时遇到则申请失败 |
 | `MARGIN_FROZEN` | 杠杆账户已冻结或在强平中（margin-service 返回） |
 | `MARGIN_NOT_FROZEN` | 解冻：这个杠杆账户不是管理员冻结的 |

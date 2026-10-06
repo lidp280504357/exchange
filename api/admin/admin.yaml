@@ -5461,8 +5461,9 @@ paths:
         (MANUAL, with the approval: once per approval), and the request's
         result names the liquidation. Only while margin-service liquidates
         the user's accounts (the flag margin.liquidation for the user): 409
-        ADMIN_MARGIN_LIQUIDATION_OFF otherwise, then and when the request is
-        approved. Nothing owed: 409 ADMIN_MARGIN_NOTHING_OWED; a
+        ADMIN_MARGIN_LIQUIDATION_OFF otherwise; approved while it is off, the
+        request is FAILED with that code as its result and nothing goes to
+        margin-service. Nothing owed: 409 ADMIN_MARGIN_NOTHING_OWED; a
         liquidation under way: 409 MARGIN_FROZEN; a request for the account
         waiting already: 409 ADMIN_MARGIN_CHANGE_PENDING (details
         approval_id). A request lapses a day after it was asked for.

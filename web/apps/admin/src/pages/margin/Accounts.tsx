@@ -333,8 +333,8 @@ const changed = [marginKey, ["admin", "approvals"]];
 /**
  * Actions are the account's operations: freeze (its open orders canceled)
  * or unfreeze at once, a liquidation by hand with a second administrator,
- * offered while margin-service liquidates (margin.liquidation) and the
- * account owes.
+ * offered while the account owes and margin.liquidation is on at all (its
+ * rules are the server's to apply: it answers for the account's user).
  */
 function Actions({ a }: { a: MarginAccount }) {
   const { t } = useTranslation();
