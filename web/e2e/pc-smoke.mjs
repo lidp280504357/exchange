@@ -47,6 +47,30 @@ try {
   const marginOn = await t.openMargin();
   if (marginOn) ok("margin trading is open to this user (on for everyone, or opened for it alone)");
   await shot("1-assets");
+  // A top-bar menu closes once the pointer leaves it, also after one of its
+  // items was clicked (B109: the focus the click left on the item kept it
+  // open). The assets menu: hovered open, 充值 followed, the pointer away.
+  const assetsMenu = () =>
+    page.evaluate(() => {
+      const group = [...document.querySelectorAll("header nav .group")].find((g) => g.firstElementChild?.textContent.trim() === "资产");
+      return group ? getComputedStyle(group.lastElementChild).visibility : "missing";
+    });
+  await page.hover('header nav .group > a[href="/assets"]');
+  await page.waitForFunction(
+    () => getComputedStyle([...document.querySelectorAll("header nav .group")].find((g) => g.firstElementChild?.textContent.trim() === "资产").lastElementChild).visibility === "visible",
+    { timeout: 5000 },
+  );
+  await clickButton("充值", "header nav");
+  await waitPath("/assets/deposit");
+  await page.mouse.move(10, 700);
+  await page.waitForFunction(
+    () => getComputedStyle([...document.querySelectorAll("header nav .group")].find((g) => g.firstElementChild?.textContent.trim() === "资产").lastElementChild).visibility === "hidden",
+    { timeout: 3000 },
+  ).catch(async () => {
+    throw new Error(`the assets menu stays ${await assetsMenu()} after the pointer left it`);
+  });
+  ok("a top-bar menu opens on hover and closes once the pointer leaves it, also after one of its items was followed");
+  await go("/assets");
   // The balance table's header sits right on top of its rows: a header stuck
   // 56 px under the top bar once sat 56 px down inside its own scroll
   // container instead, over the first row.
