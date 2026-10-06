@@ -76,12 +76,27 @@ func TestPlatformProfileValidate(t *testing.T) {
 func TestNormalizeAndText(t *testing.T) {
 	var p PlatformProfile
 	p.Normalize()
-	if p.Footer.Copyright == nil || len(p.Footer.Copyright) != 2 || p.Social == nil || p.Images == nil {
+	if p.Footer.Copyright == nil || len(p.Footer.Copyright) != 3 || p.Social == nil || p.Images == nil {
 		t.Fatalf("normalized %+v", p)
 	}
 	tx := Texts{LocaleZH: "中文", LocaleEN: ""}
-	if tx.Text(LocaleEN) != "中文" || tx.Text(LocaleZH) != "中文" {
+	if tx.Text(LocaleEN) != "中文" || tx.Text(LocaleZH) != "中文" || tx.Text(LocaleTW) != "中文" {
 		t.Fatalf("fallback %q", tx.Text(LocaleEN))
+	}
+	// Traditional Chinese (design 2026-10-06 繁体中文 §2.1): kept, empty
+	// until written, falling back to the Simplified.
+	tw := Texts{LocaleZH: "测试模式", LocaleTW: "測試模式", "fr": "x"}.normalized()
+	if len(tw) != 3 || tw.Text(LocaleTW) != "測試模式" || tw[LocaleEN] != "" {
+		t.Fatalf("normalized %v", tw)
+	}
+	q := defaultPlatform()
+	q.DefaultLocale = LocaleTW
+	q.Test.Text = Texts{LocaleZH: "测试模式", LocaleTW: "測試模式", LocaleEN: "Test mode"}
+	if err := q.Validate(); err != nil {
+		t.Fatalf("a Traditional default and texts: %v", err)
+	}
+	if err := (AssetProfile{Description: map[string]string{LocaleTW: "比特幣"}}).Validate(); err != nil {
+		t.Fatalf("a Traditional introduction: %v", err)
 	}
 }
 

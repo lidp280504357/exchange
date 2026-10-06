@@ -9,7 +9,10 @@
 #   - closed sign-ups refuse REGISTER codes and new accounts (403
 #     AUTH_REGISTRATION_CLOSED) and leave the other codes alone;
 #   - with no welcome credits a new account gets nothing, and the profile
-#     stops promising them.
+#     stops promising them;
+#   - Traditional Chinese (design 2026-10-06 繁体中文): the texts keep a
+#     zh-TW text and the default language may be zh-TW; the content lists
+#     answer zh-TW, the console's articles without one in Simplified.
 # The profile, the image and the credits are put back at the end, also
 # after a failure. Changes go through the services' internal endpoints,
 # as the admin console makes them.
@@ -204,6 +207,22 @@ promised() {
   call GET /v1/platform/profile "" && [[ $(jq -c .welcome_credits <<<"$BODY") == "[]" ]]
 }
 eventually 150 "the profile stops promising credits within the minute it reads the ledger" promised
+
+echo "== Traditional Chinese (design 2026-10-06 繁体中文 §2.1, §2.4)"
+check '.test_mode.text | has("zh-CN") and has("zh-TW") and has("en")' "every text carries the three languages"
+set_profile '.default_locale = "zh-TW" | .test_mode.text["zh-TW"] = "繁體測試模式"' "e2e: Traditional Chinese"
+expect 200 - "a Traditional text and default language"
+traditional() {
+  call GET /v1/platform/profile "" && jq -e '.default_locale == "zh-TW" and .test_mode.text["zh-TW"] == "繁體測試模式"' <<<"$BODY" >/dev/null
+}
+eventually 20 "the public profile has them" traditional
+set_profile '.default_locale = "zh-HK"' "e2e: an unknown language"
+expect 400 COMMON_INVALID_ARGUMENT "zh-HK is not a default language"
+for section in announcements help legal; do
+  call GET "/v1/$section?locale=zh-TW&limit=100" ""
+  expect 200 - "the $section in Traditional Chinese"
+  check 'all(.items[]; (.locale == "zh-TW" and .fallback == false) or (.locale == "zh-CN" and .fallback == true))' "each in Traditional, or in Simplified as a fallback"
+done
 
 echo "== put back"
 restore_credits

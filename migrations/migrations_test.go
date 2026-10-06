@@ -91,6 +91,15 @@ func TestNotifySchema(t *testing.T) {
 	accepts(t, db, broadcast, uuid.New(), "ALL", []string{})
 	accepts(t, db, broadcast, uuid.New(), "USERS", []string{uuid.NewString()})
 	rejects(t, db, "named users, none named", broadcast, uuid.New(), "USERS", []string{})
+	// An article's texts: Simplified, Traditional (00007, design 2026-10-06
+	// 繁体中文 §2.4) and English.
+	faq := uuid.New()
+	accepts(t, db, article, faq, "HELP", "faq", "DRAFT", nil)
+	text := `INSERT INTO article_texts (article_id, locale, title, body) VALUES ($1, $2, 't', 'b')`
+	for _, locale := range []string{"zh-CN", "zh-TW", "en"} {
+		accepts(t, db, text, faq, locale)
+	}
+	rejects(t, db, "a known locale", text, faq, "zh-HK")
 }
 
 // TestDownMigrations checks that every schema can be rolled back to empty.

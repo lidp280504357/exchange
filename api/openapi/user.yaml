@@ -51,7 +51,8 @@ paths:
               properties:
                 language:
                   type: string
-                  examples: [en, zh-CN]
+                  description: The language of mails and notices; en, zh-TW (and zh-HK, zh-Hant) for Traditional Chinese, Simplified Chinese otherwise.
+                  examples: [en, zh-CN, zh-TW]
                 timezone:
                   type: string
                   examples: [Asia/Singapore]

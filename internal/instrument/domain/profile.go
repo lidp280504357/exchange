@@ -26,7 +26,7 @@ type AssetProfile struct {
 	Code string `json:"asset_code"`
 	// DisplayName replaces the asset's name on the sites when set.
 	DisplayName string `json:"display_name"`
-	// Description is the introduction by language ("zh-CN", "en").
+	// Description is the introduction by language ("zh-CN", "zh-TW", "en").
 	Description map[string]string `json:"description"`
 	// Links are https URLs by kind ("website", "explorer", "whitepaper").
 	Links map[string]string `json:"links"`
@@ -62,13 +62,13 @@ const (
 
 // languages and linkKinds are the keys a profile's maps may use.
 var (
-	languages = map[string]bool{"zh-CN": true, "en": true}
+	languages = map[string]bool{LocaleZH: true, LocaleTW: true, LocaleEN: true}
 	linkKinds = map[string]bool{"website": true, "explorer": true, "whitepaper": true}
 )
 
 // Validate checks the profile's text: the display name (2-32 printable
-// characters, or none), the introductions (zh-CN and en, up to 1,000
-// characters) and the links (website, explorer, whitepaper: https URLs).
+// characters, or none), the introductions (zh-CN, zh-TW and en, up to
+// 1,000 characters) and the links (website, explorer, whitepaper: https URLs).
 func (p AssetProfile) Validate() error {
 	if n := utf8.RuneCountInString(p.DisplayName); p.DisplayName != "" &&
 		(n < minDisplayNameLen || n > maxDisplayNameLen || strings.TrimSpace(p.DisplayName) != p.DisplayName || !printable(p.DisplayName)) {
@@ -76,7 +76,7 @@ func (p AssetProfile) Validate() error {
 	}
 	for lang, text := range p.Description {
 		if !languages[lang] {
-			return apperr.Invalid(fmt.Sprintf("description: language %q is not zh-CN or en", lang))
+			return apperr.Invalid(fmt.Sprintf("description: language %q is not zh-CN, zh-TW or en", lang))
 		}
 		if utf8.RuneCountInString(text) > maxDescriptionLen || !utf8.ValidString(text) {
 			return apperr.Invalid(fmt.Sprintf("description %s: at most %d characters", lang, maxDescriptionLen))

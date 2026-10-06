@@ -150,8 +150,8 @@ var (
 // the current one: someone saved in between.
 var ErrPlatformChanged = apperr.New(apperr.KindConflict, "INSTRUMENT_PLATFORM_CHANGED", "the platform profile changed since it was read")
 
-// Normalize gives every text both languages and the lists their empty
-// values, as the API shows them.
+// Normalize gives every text its three languages and the lists their
+// empty values, as the API shows them.
 func (p *PlatformProfile) Normalize() {
 	for _, t := range []*Texts{&p.Footer.Copyright, &p.Footer.Compliance, &p.Test.Text, &p.Registration.ClosedText} {
 		*t = t.normalized()
@@ -164,9 +164,12 @@ func (p *PlatformProfile) Normalize() {
 	}
 }
 
-func (t Texts) normalized() Texts { return Texts{LocaleZH: t[LocaleZH], LocaleEN: t[LocaleEN]} }
+func (t Texts) normalized() Texts {
+	return Texts{LocaleZH: t[LocaleZH], LocaleTW: t[LocaleTW], LocaleEN: t[LocaleEN]}
+}
 
-// Text returns the text in locale, else the Chinese one.
+// Text returns the text in locale, else (left empty too) the Simplified
+// Chinese one.
 func (t Texts) Text(locale string) string {
 	if s := t[locale]; s != "" {
 		return s
@@ -174,9 +177,11 @@ func (t Texts) Text(locale string) string {
 	return t[LocaleZH]
 }
 
-// Content locales.
+// Content locales: Simplified Chinese, the fallback of the others;
+// Traditional Chinese (design 2026-10-06 繁体中文 §2.1); English.
 const (
 	LocaleZH = "zh-CN"
+	LocaleTW = "zh-TW"
 	LocaleEN = "en"
 )
 
@@ -233,8 +238,8 @@ func (p PlatformProfile) Validate() error {
 		}
 		seen[s.Kind] = true
 	}
-	if p.DefaultLocale != LocaleZH && p.DefaultLocale != LocaleEN {
-		return apperr.Invalid("default_locale: zh-CN or en")
+	if !languages[p.DefaultLocale] {
+		return apperr.Invalid("default_locale: zh-CN, zh-TW or en")
 	}
 	if p.Registration.Status != RegistrationOpen && p.Registration.Status != RegistrationClosed {
 		return apperr.Invalid("registration.status: OPEN or CLOSED")
@@ -252,7 +257,7 @@ func validName(field, s string, most int) error {
 func validTexts(field string, t Texts, most int, required bool) error {
 	for lang, s := range t {
 		if !languages[lang] {
-			return apperr.Invalid(fmt.Sprintf("%s: language %q is not zh-CN or en", field, lang))
+			return apperr.Invalid(fmt.Sprintf("%s: language %q is not zh-CN, zh-TW or en", field, lang))
 		}
 		if utf8.RuneCountInString(s) > most || !utf8.ValidString(s) {
 			return apperr.Invalid(fmt.Sprintf("%s %s: at most %d characters", field, lang, most))

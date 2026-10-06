@@ -32,8 +32,8 @@ var sceneNames = map[string][2]string{ // zh-CN, en
 func english(lang string) bool { return strings.HasPrefix(strings.ToLower(lang), "en") }
 
 // OTPMessage renders the one-time code for scene in the user's language
-// (zh-CN unless it starts with "en"), signed with brand (DefaultBrand
-// when empty).
+// (English when it starts with "en", Traditional Chinese for zh-TW and the
+// like, else Simplified), signed with brand (DefaultBrand when empty).
 func OTPMessage(ch Channel, to, code, scene, lang string, ttlMinutes int, brand string) Message {
 	brand = brandOr(brand)
 	names, ok := sceneNames[scene]
@@ -50,11 +50,11 @@ func OTPMessage(ch Channel, to, code, scene, lang string, ttlMinutes int, brand 
 		}
 		return m
 	}
-	m.Subject = fmt.Sprintf("【%s】验证码 %s", brand, code)
-	m.Text = fmt.Sprintf("您的%s验证码是 %s，用于%s，%d 分钟内有效。如非本人操作请忽略，切勿向任何人透露验证码。",
-		brand, code, names[0], ttlMinutes)
+	m.Subject = fmt.Sprintf(zh(lang, "【%s】验证码 %s"), brand, code)
+	m.Text = fmt.Sprintf(zh(lang, "您的%s验证码是 %s，用于%s，%d 分钟内有效。如非本人操作请忽略，切勿向任何人透露验证码。"),
+		brand, code, zh(lang, names[0]), ttlMinutes)
 	if ch == ChannelSMS {
-		m.Text = fmt.Sprintf("【%s】验证码 %s，用于%s，%d 分钟内有效，请勿泄露。", brand, code, names[0], ttlMinutes)
+		m.Text = fmt.Sprintf(zh(lang, "【%s】验证码 %s，用于%s，%d 分钟内有效，请勿泄露。"), brand, code, zh(lang, names[0]), ttlMinutes)
 	}
 	return m
 }

@@ -641,8 +641,10 @@ components:
           $ref: '#/components/schemas/DeviceId'
         language:
           type: string
-          description: Language of the message; defaults to Accept-Language, then zh-CN.
-          examples: [zh-CN, en]
+          description: >-
+            Language of the message; defaults to Accept-Language, then zh-CN. zh-TW, zh-HK and zh-Hant get Traditional
+            Chinese.
+          examples: [zh-CN, zh-TW, en]
     Challenge:
       type: object
       required: [challenge_id, expires_at, delivery]

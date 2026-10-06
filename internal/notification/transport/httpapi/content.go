@@ -43,10 +43,13 @@ func (h *Content) Routes(r chi.Router) {
 	r.Post("/internal/notification/broadcasts/{id}/resume", h.resumeBroadcast)
 }
 
-// locale is the sites' language: en, else Chinese.
+// locale is the sites' language: en, zh-TW, else Simplified Chinese.
 func locale(r *http.Request) string {
-	if strings.HasPrefix(r.URL.Query().Get("locale"), "en") {
+	switch l := r.URL.Query().Get("locale"); {
+	case strings.HasPrefix(l, "en"):
 		return domain.LocaleEN
+	case l == domain.LocaleTW:
+		return domain.LocaleTW
 	}
 	return domain.LocaleZH
 }

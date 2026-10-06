@@ -132,6 +132,7 @@ case "${1:-}" in
 profile)
   ctl instrument-service instruments profile ASTRA --display-name Astra \
     --zh "ASTRA 是 Astras 的平台币，只在本站交易，不能充值或提现；它的行情来自平台自己的市场。" \
+    --zh-tw "ASTRA 是 Astras 的平台幣，只在本站交易，不能充值或提現；它的行情來自平台自己的市場。" \
     --en "ASTRA is the Astras platform coin. It trades only here and cannot be deposited or withdrawn; its market is the platform's own." \
     --website https://astras.vip --logo - --logo-type image/svg+xml \
     --reason "ASTRA's default profile (design 2026-10-02 §5.3)" <"$ROOT/deploy/instruments/astra.svg"

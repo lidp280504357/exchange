@@ -123,4 +123,20 @@ expect 200 - "mark all read"
 call GET /v1/notifications "" "${AUTH[@]}"
 check '.unread_count == 0 and (.items | length) >= 4' "inbox read"
 
+echo "== Traditional Chinese (design 2026-10-06 繁体中文 §2.2)"
+call PATCH /v1/user/profile '{"language":"zh-TW"}' "${AUTH[@]}"
+expect 200 - "language zh-TW"
+call POST /v1/auth/login/password "{\"identifier\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"device_id\":\"$DEVICE-tw\"}" "${APP[@]}"
+expect 200 - "login from another new device"
+traditional_notice() {
+  call GET /v1/notifications "" "${AUTH[@]}"
+  [[ $STATUS == 200 ]] && jq -e 'any(.items[]; .type == "NEW_DEVICE_LOGIN" and .title == "新裝置登入提醒" and (.body | test("您的帳戶於")))' <<<"$BODY" >/dev/null
+}
+eventually 20 "the new-device notice in Traditional Chinese" traditional_notice
+traditional_mail() {
+  call GET "/v1/dev/messages?target=$(jq -rn --arg e "$EMAIL" '$e|@uri')" "" &&
+    jq -e 'any(.messages[]; (.subject | test("新裝置登入提醒")) and (.body | test("此為安全通知")))' <<<"$BODY" >/dev/null
+}
+eventually 20 "the new-device mail in Traditional Chinese" traditional_mail
+
 echo "all account checks passed"

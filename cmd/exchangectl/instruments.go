@@ -217,7 +217,8 @@ func instrumentsProfile(ctx context.Context, svc *application.Service, args []st
 	fs := flag.NewFlagSet("instruments profile", flag.ContinueOnError)
 	fs.SetOutput(out)
 	name := fs.String("display-name", "", "the name the sites show (2-32 characters; empty for the asset's name)")
-	zh := fs.String("zh", "", "the Chinese introduction")
+	zh := fs.String("zh", "", "the Simplified Chinese introduction")
+	zhTW := fs.String("zh-tw", "", "the Traditional Chinese introduction (empty: the sites show the Simplified)")
 	en := fs.String("en", "", "the English introduction")
 	website := fs.String("website", "", "https link")
 	explorer := fs.String("explorer", "", "https link")
@@ -256,9 +257,9 @@ func instrumentsProfile(ctx context.Context, svc *application.Service, args []st
 	if set["display-name"] {
 		ch.DisplayName = *name
 	}
-	for flagName, v := range map[string]*string{"zh": zh, "en": en} {
+	for flagName, v := range map[string]*string{"zh": zh, "zh-tw": zhTW, "en": en} {
 		if set[flagName] {
-			setText(ch.Description, map[string]string{"zh": "zh-CN", "en": "en"}[flagName], *v)
+			setText(ch.Description, map[string]string{"zh": "zh-CN", "zh-tw": "zh-TW", "en": "en"}[flagName], *v)
 		}
 	}
 	for flagName, v := range map[string]*string{"website": website, "explorer": explorer, "whitepaper": whitepaper} {

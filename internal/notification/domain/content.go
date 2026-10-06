@@ -60,12 +60,20 @@ func ShownIn(modes string, test bool) bool {
 	return modes == ModeFormal || modes == ModeBoth
 }
 
-// Content locales: Chinese is required, English optional (the sites fall
-// back to Chinese).
+// Content locales: Simplified Chinese is required, English and
+// Traditional Chinese (design 2026-10-06 繁体中文 §2.4) optional; the sites
+// fall back to the Simplified.
 const (
 	LocaleZH = "zh-CN"
+	LocaleTW = "zh-TW"
 	LocaleEN = "en"
 )
+
+// Locales are the content locales, the required one first.
+var Locales = []string{LocaleZH, LocaleTW, LocaleEN}
+
+// ValidLocale reports a content locale.
+func ValidLocale(l string) bool { return l == LocaleZH || l == LocaleTW || l == LocaleEN }
 
 var (
 	slugRE     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -111,8 +119,8 @@ type Article struct {
 	Texts     []ArticleText
 }
 
-// Text returns the article in locale, else in Chinese; ok is false when
-// it fell back.
+// Text returns the article in locale, else in Simplified Chinese; ok is
+// false when it fell back.
 func (a Article) Text(locale string) (ArticleText, bool) {
 	var zh ArticleText
 	for _, t := range a.Texts {
@@ -252,8 +260,8 @@ func (a Article) Validate() error {
 	seen := map[string]bool{}
 	for _, t := range a.Texts {
 		switch {
-		case t.Locale != LocaleZH && t.Locale != LocaleEN:
-			return apperr.Invalid("locale must be zh-CN or en")
+		case !ValidLocale(t.Locale):
+			return apperr.Invalid("locale must be zh-CN, zh-TW or en")
 		case seen[t.Locale]:
 			return apperr.Invalid("one text per locale")
 		case strings.TrimSpace(t.Title) == "" || utf8.RuneCountInString(t.Title) > 200:
@@ -308,7 +316,8 @@ type Broadcast struct {
 	ID       string
 	Audience string
 	UserIDs  []string
-	// Title and Body by locale (zh-CN required); each user reads theirs.
+	// Title and Body by locale (zh-CN required, zh-TW and en optional);
+	// each user reads theirs.
 	Title map[string]string
 	Body  map[string]string
 	// Link is a site path the message leads to ("" for none).
@@ -345,7 +354,7 @@ func (b Broadcast) Validate() error {
 	case b.Link != "" && !linkRE.MatchString(b.Link):
 		return apperr.Invalid("link must be a path on the sites, such as /assets")
 	}
-	for _, l := range []string{LocaleZH, LocaleEN} {
+	for _, l := range Locales {
 		title, body := strings.TrimSpace(b.Title[l]), strings.TrimSpace(b.Body[l])
 		if l == LocaleZH && (title == "" || body == "") {
 			return apperr.Invalid("the Chinese (zh-CN) title and body are required")
@@ -356,18 +365,24 @@ func (b Broadcast) Validate() error {
 	}
 	for _, texts := range []map[string]string{b.Title, b.Body} {
 		for l := range texts {
-			if l != LocaleZH && l != LocaleEN {
-				return apperr.Invalid("locale must be zh-CN or en")
+			if !ValidLocale(l) {
+				return apperr.Invalid("locale must be zh-CN, zh-TW or en")
 			}
 		}
 	}
 	return nil
 }
 
-// In returns the message in a user's language, Chinese without English.
+// In returns the message in a user's language: English or Traditional
+// Chinese when the operator wrote both its title and body in it, the
+// Simplified Chinese otherwise.
 func (b Broadcast) In(language string) (title, body string) {
-	if strings.HasPrefix(language, "en") && strings.TrimSpace(b.Title[LocaleEN]) != "" {
+	written := func(l string) bool { return strings.TrimSpace(b.Title[l]) != "" && strings.TrimSpace(b.Body[l]) != "" }
+	switch {
+	case english(language) && written(LocaleEN):
 		return b.Title[LocaleEN], b.Body[LocaleEN]
+	case traditional(language) && written(LocaleTW):
+		return b.Title[LocaleTW], b.Body[LocaleTW]
 	}
 	return b.Title[LocaleZH], b.Body[LocaleZH]
 }
