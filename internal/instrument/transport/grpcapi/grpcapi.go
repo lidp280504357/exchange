@@ -154,9 +154,10 @@ func (s *Server) GetContract(ctx context.Context, req *instrumentv1.GetContractR
 	return &instrumentv1.GetContractResponse{Contract: application.ToProtoContract(c)}, nil
 }
 
-// ListContracts returns every contract.
-func (s *Server) ListContracts(ctx context.Context, _ *instrumentv1.ListContractsRequest) (*instrumentv1.ListContractsResponse, error) {
-	list, err := s.svc.Contracts(ctx)
+// ListContracts returns the contracts of the request's margin type: the
+// linear ones unless it asks for COIN or ALL.
+func (s *Server) ListContracts(ctx context.Context, req *instrumentv1.ListContractsRequest) (*instrumentv1.ListContractsResponse, error) {
+	list, err := s.svc.ContractsOf(ctx, req.GetMarginType())
 	if err != nil {
 		return nil, err
 	}

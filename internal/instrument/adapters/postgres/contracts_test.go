@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/skill/exchange/internal/instrument/domain"
@@ -70,5 +71,64 @@ func TestContracts(t *testing.T) {
 	}
 	if n := count(t, db, `SELECT count(*) FROM outbox WHERE event_type IN ('instrument.ContractUpserted', 'instrument.ContractStatusChanged')`); n != 3 {
 		t.Fatalf("%d contract events, want 3", n)
+	}
+}
+
+func TestInverseContracts(t *testing.T) {
+	svc, db := setup(t)
+	ctx := context.Background()
+	cfg := config()
+	inverse := contract()
+	inverse.Symbol, inverse.QuoteAsset, inverse.MarginType, inverse.ContractSize = "BTC-USD-PERP", domain.CoinQuote, domain.MarginCoin, d("100")
+	inverse.LotSize, inverse.MinQuantity, inverse.MaxQuantity, inverse.MinNotional, inverse.ImpactNotional = d("1"), d("1"), d("60000"), d("100"), d("100")
+	inverse.ReferenceSymbol = "BTCUSD_PERP"
+	cfg.Contracts = []domain.Contract{contract(), inverse}
+	if _, err := svc.Apply(ctx, cfg, "cli:test", "a linear and an inverse contract"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.Contract(ctx, "BTC-USD-PERP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MarginType != domain.MarginCoin || c.SettleAsset != "BTC" || !c.ContractSize.Equal(d("100")) || c.ReferenceSymbol != "BTCUSD_PERP" ||
+		c.QuoteAsset != domain.CoinQuote || c.IndexSymbol != "BTC-USDT" {
+		t.Fatalf("inverse contract %+v", c)
+	}
+	linear, err := svc.Contract(ctx, "BTC-USDT-PERP")
+	if err != nil || linear.MarginType != domain.MarginUSDT || linear.SettleAsset != "USDT" || !linear.ContractSize.IsZero() {
+		t.Fatalf("linear contract %+v %v", linear, err)
+	}
+	// The default list keeps the clients from before on the linear contracts.
+	for filter, want := range map[string][]string{
+		"": {"BTC-USDT-PERP"}, "USDT": {"BTC-USDT-PERP"}, "COIN": {"BTC-USD-PERP"}, "ALL": {"BTC-USD-PERP", "BTC-USDT-PERP"},
+	} {
+		list, err := svc.ContractsOf(ctx, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, c := range list {
+			got = append(got, c.Symbol)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("margin_type %q: %v, want %v", filter, got, want)
+		}
+	}
+	if _, err := svc.ContractsOf(ctx, "USDC"); !apperr.Is(err, "COMMON_INVALID_ARGUMENT") {
+		t.Fatalf("an unknown margin type: %v", err)
+	}
+	// The kind never changes; the reference symbol does.
+	changed := cfg
+	changed.Contracts = []domain.Contract{contract(), inverse}
+	changed.Contracts[1].ContractSize = d("10")
+	if _, err := svc.Apply(ctx, changed, "cli:test", "another face value"); err == nil {
+		t.Fatal("a new face value was accepted")
+	}
+	changed.Contracts[1].ContractSize, changed.Contracts[1].ReferenceSymbol = d("100"), ""
+	if res, err := svc.Apply(ctx, changed, "cli:test", "no reference"); err != nil || len(res.Changed) != 1 {
+		t.Fatalf("reference symbol: %v %v", res.Changed, err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM contracts WHERE margin_type = 'COIN' AND reference_symbol = ''`); n != 1 {
+		t.Fatalf("%d inverse contracts without a reference, want 1", n)
 	}
 }

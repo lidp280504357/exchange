@@ -83,6 +83,29 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 	if usdt < 50 {
 		t.Fatalf("%d USDT pairs, want the top 50 at least", usdt)
 	}
+	// Every contract valid against its assets; a coin-margined one beside
+	// each linear one, on the same coin and tick (design 2026-10-06 §2.1).
+	ticks := map[string]map[string]decimal.Decimal{}
+	for _, c := range cfg.Contracts {
+		c = c.WithDefaults()
+		if err := c.Validate(assets[c.BaseAsset], assets[c.PriceAsset()]); err != nil {
+			t.Errorf("contract %s: %v", c.Symbol, err)
+		}
+		if ticks[c.BaseAsset] == nil {
+			ticks[c.BaseAsset] = map[string]decimal.Decimal{}
+		}
+		ticks[c.BaseAsset][c.MarginType] = c.TickSize
+		if c.BaseAsset != "ASTRA" && c.ReferenceSymbol == "" {
+			t.Errorf("contract %s follows no Binance contract", c.Symbol)
+		}
+	}
+	for base, kinds := range ticks {
+		linear, okL := kinds[domain.MarginUSDT]
+		inverse, okI := kinds[domain.MarginCoin]
+		if !okL || !okI || !linear.Equal(inverse) {
+			t.Errorf("%s: a linear and a coin-margined contract on the same tick, got %v", base, kinds)
+		}
+	}
 }
 
 var (

@@ -15,7 +15,23 @@ const (
 	ContractPerpetual = "PERPETUAL"
 )
 
-var contractRE = regexp.MustCompile(`^([A-Z0-9]{2,10})-([A-Z0-9]{2,10})-PERP$`)
+// Margin types (design 2026-10-06 §2.1): a linear contract settles in its
+// quote asset (USDT); an inverse (coin-margined) one is priced in USD and
+// settles in its base asset.
+const (
+	MarginUSDT = "USDT"
+	MarginCoin = "COIN"
+	// CoinQuote is an inverse contract's quote: prices are in USD.
+	CoinQuote = "USD"
+	// CoinPriceAsset is the asset an inverse contract's USD prices follow:
+	// its index is the base asset's USDT pair, USDT taken as dollars.
+	CoinPriceAsset = "USDT"
+)
+
+var (
+	contractRE          = regexp.MustCompile(`^([A-Z0-9]{2,10})-([A-Z0-9]{2,10})-PERP$`)
+	contractReferenceRE = regexp.MustCompile(`^[A-Z0-9_]{2,20}$`)
+)
 
 // RiskTier is one step of a contract's risk limit ladder (requirements
 // §11.7): positions up to MaxNotional may use leverage up to MaxLeverage
@@ -26,9 +42,13 @@ type RiskTier struct {
 	MMR         decimal.Decimal `json:"mmr"`
 }
 
-// Contract is a linear perpetual future settled in its quote asset
-// (requirements §5.8, §11.7), e.g. BTC-USDT-PERP. Quantities are in the
-// base asset; prices, margin, fees and PnL in the quote asset.
+// Contract is a perpetual future (requirements §5.8, §11.7). A linear one,
+// e.g. BTC-USDT-PERP, settles in its quote asset: quantities in the base
+// asset; prices, margin, fees and PnL in the quote asset. An inverse
+// (coin-margined) one, e.g. BTC-USD-PERP (design 2026-10-06 §2.1), is
+// priced in USD and settles in its base asset: quantities are whole
+// contracts of ContractSize USD; margin, fees and PnL, and the risk
+// tiers' notionals, are in the base asset.
 type Contract struct {
 	Symbol     string `json:"symbol"`
 	Type       string `json:"type"`
@@ -57,6 +77,46 @@ type Contract struct {
 	FeeTier        string          `json:"fee_tier"`
 	Status         string          `json:"status"`
 	Version        int64           `json:"version,omitempty"`
+	// MarginType is MarginUSDT or MarginCoin (empty reads as MarginUSDT).
+	MarginType string `json:"margin_type,omitempty"`
+	// SettleAsset is the asset margin, fees, funding and PnL are in: the
+	// quote asset of a linear contract, the base asset of an inverse one
+	// (empty is filled so).
+	SettleAsset string `json:"settle_asset,omitempty"`
+	// ContractSize is an inverse contract's face value in USD (100 for
+	// BTC, 10 for the others, as Binance's); 0 for a linear contract.
+	ContractSize decimal.Decimal `json:"contract_size"`
+	// ReferenceSymbol names the Binance contract the market data and the
+	// mark price (market.reference_mark) follow: BTCUSDT (USDⓈ-M) or
+	// BTCUSD_PERP (COIN-M); empty when none does.
+	ReferenceSymbol string `json:"reference_symbol,omitempty"`
+}
+
+// Inverse reports whether the contract is coin-margined.
+func (c Contract) Inverse() bool { return c.MarginType == MarginCoin }
+
+// WithDefaults fills the margin type and the settlement asset a file may
+// leave out: a linear contract settling in its quote asset.
+func (c Contract) WithDefaults() Contract {
+	if c.MarginType == "" {
+		c.MarginType = MarginUSDT
+	}
+	if c.SettleAsset == "" {
+		c.SettleAsset = c.QuoteAsset
+		if c.Inverse() {
+			c.SettleAsset = c.BaseAsset
+		}
+	}
+	return c
+}
+
+// PriceAsset is the asset whose decimals bound the contract's prices and
+// notionals in USD: its quote asset, or USDT for an inverse contract.
+func (c Contract) PriceAsset() string {
+	if c.Inverse() {
+		return CoinPriceAsset
+	}
+	return c.QuoteAsset
 }
 
 // MaxLeverage is the leverage of the first risk tier.
@@ -80,18 +140,23 @@ func (c Contract) Tier(notional decimal.Decimal) (RiskTier, bool) {
 
 var one = decimal.NewFromInt(1)
 
-// Validate checks the contract against its assets.
+// Validate checks the contract against its assets: base, and quote, the
+// asset prices are in (PriceAsset: the quote asset, or USDT for an inverse
+// contract, whose quote USD is no asset).
 func (c Contract) Validate(base, quote Asset) error {
+	c = c.WithDefaults()
 	m := contractRE.FindStringSubmatch(c.Symbol)
 	switch {
 	case m == nil:
 		return apperr.Invalid(fmt.Sprintf("contract %q: use BASE-QUOTE-PERP", c.Symbol))
 	case c.Type != ContractPerpetual:
 		return apperr.Invalid(fmt.Sprintf("contract %s: type must be %s", c.Symbol, ContractPerpetual))
-	case m[1] != c.BaseAsset || m[2] != c.QuoteAsset || base.Code != c.BaseAsset || quote.Code != c.QuoteAsset:
+	case m[1] != c.BaseAsset || m[2] != c.QuoteAsset || base.Code != c.BaseAsset || quote.Code != c.PriceAsset():
 		return apperr.Invalid(fmt.Sprintf("contract %s: the symbol must name its base and quote assets", c.Symbol))
-	case c.IndexSymbol != c.BaseAsset+"-"+c.QuoteAsset:
-		return apperr.Invalid(fmt.Sprintf("contract %s: index_symbol must be %s-%s", c.Symbol, c.BaseAsset, c.QuoteAsset))
+	case c.IndexSymbol != c.BaseAsset+"-"+quote.Code:
+		return apperr.Invalid(fmt.Sprintf("contract %s: index_symbol must be %s-%s", c.Symbol, c.BaseAsset, quote.Code))
+	case c.ReferenceSymbol != "" && !contractReferenceRE.MatchString(c.ReferenceSymbol):
+		return apperr.Invalid(fmt.Sprintf("contract %s: reference_symbol %q: use 2-20 upper-case letters, digits or _", c.Symbol, c.ReferenceSymbol))
 	case base.Hidden || quote.Hidden:
 		return apperr.Invalid(fmt.Sprintf("contract %s: a hidden test asset has no contracts (ADR-0017)", c.Symbol))
 	case !base.TradingEnabled || !quote.TradingEnabled:
@@ -124,7 +189,42 @@ func (c Contract) Validate(base, quote Asset) error {
 	case !ValidPairStatus(c.Status):
 		return apperr.Invalid(fmt.Sprintf("contract %s: unknown status %q", c.Symbol, c.Status))
 	}
+	if err := c.validateMargin(quote); err != nil {
+		return err
+	}
 	return c.validateTiers()
+}
+
+// validateMargin checks the margin type against the settlement asset and
+// the face value: a linear contract settles in its quote asset with no
+// face value; an inverse one is quoted in USD, settles in its base asset
+// and trades whole contracts of a positive face value (design 2026-10-06
+// §2.1).
+func (c Contract) validateMargin(quote Asset) error {
+	switch c.MarginType {
+	case MarginUSDT:
+		switch {
+		case c.SettleAsset != c.QuoteAsset:
+			return apperr.Invalid(fmt.Sprintf("contract %s: a linear contract settles in its quote asset %s", c.Symbol, c.QuoteAsset))
+		case !c.ContractSize.IsZero():
+			return apperr.Invalid(fmt.Sprintf("contract %s: contract_size is for coin-margined contracts; leave it 0", c.Symbol))
+		}
+	case MarginCoin:
+		switch {
+		case c.QuoteAsset != CoinQuote:
+			return apperr.Invalid(fmt.Sprintf("contract %s: a coin-margined contract is quoted in %s", c.Symbol, CoinQuote))
+		case c.SettleAsset != c.BaseAsset:
+			return apperr.Invalid(fmt.Sprintf("contract %s: a coin-margined contract settles in its base asset %s", c.Symbol, c.BaseAsset))
+		case !c.ContractSize.IsPositive() || !FitsScale(c.ContractSize, quote.Decimals):
+			return apperr.Invalid(fmt.Sprintf("contract %s: contract_size must be a positive number of USD with at most %d decimals",
+				c.Symbol, quote.Decimals))
+		case !c.LotSize.IsInteger():
+			return apperr.Invalid(fmt.Sprintf("contract %s: a coin-margined contract trades whole contracts; lot_size must be whole", c.Symbol))
+		}
+	default:
+		return apperr.Invalid(fmt.Sprintf("contract %s: margin_type must be %s or %s", c.Symbol, MarginUSDT, MarginCoin))
+	}
+	return nil
 }
 
 // validateTiers checks the ladder: notional caps rise, leverage does not,
@@ -170,5 +270,14 @@ func (c Contract) SameConfig(other Contract) bool {
 		c.LotSize.Equal(other.LotSize) && c.MinQuantity.Equal(other.MinQuantity) && c.MaxQuantity.Equal(other.MaxQuantity) &&
 		c.MinNotional.Equal(other.MinNotional) && c.PriceBand.Equal(other.PriceBand) &&
 		c.FundingIntervalHours == other.FundingIntervalHours && c.InterestRate.Equal(other.InterestRate) &&
-		c.FundingCap.Equal(other.FundingCap) && c.ImpactNotional.Equal(other.ImpactNotional) && c.FeeTier == other.FeeTier
+		c.FundingCap.Equal(other.FundingCap) && c.ImpactNotional.Equal(other.ImpactNotional) && c.FeeTier == other.FeeTier &&
+		c.MarginType == other.MarginType && c.SettleAsset == other.SettleAsset && c.ContractSize.Equal(other.ContractSize) &&
+		c.ReferenceSymbol == other.ReferenceSymbol
+}
+
+// SameKind reports whether other keeps the contract's margin type,
+// settlement asset and face value, which never change once listed: open
+// positions are kept in them.
+func (c Contract) SameKind(other Contract) bool {
+	return c.MarginType == other.MarginType && c.SettleAsset == other.SettleAsset && c.ContractSize.Equal(other.ContractSize)
 }

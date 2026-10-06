@@ -267,6 +267,10 @@ type contractJSON struct {
 	MakerFeeRate         string         `json:"maker_fee_rate"`
 	TakerFeeRate         string         `json:"taker_fee_rate"`
 	Status               string         `json:"status"`
+	MarginType           string         `json:"margin_type"`
+	SettleAsset          string         `json:"settle_asset"`
+	ContractSize         string         `json:"contract_size"`
+	ReferenceSymbol      *string        `json:"reference_symbol"`
 }
 
 func toContractJSON(c application.ContractView) contractJSON {
@@ -281,12 +285,15 @@ func toContractJSON(c application.ContractView) contractJSON {
 		MaxLeverage: c.MaxLeverage(), RiskTiers: tiers, FundingIntervalHours: c.FundingIntervalHours,
 		InterestRate: c.InterestRate.String(), FundingCap: c.FundingCap.String(), ImpactNotional: c.ImpactNotional.String(),
 		MakerFeeRate: c.MakerFeeRate.String(), TakerFeeRate: c.TakerFeeRate.String(), Status: c.Status,
+		MarginType: c.MarginType, SettleAsset: c.SettleAsset, ContractSize: c.ContractSize.String(), ReferenceSymbol: optional(c.ReferenceSymbol),
 	}
 }
 
-// contracts lists every contract but the delisted ones.
+// contracts lists the contracts of a margin type but the delisted ones:
+// ?margin_type=USDT (the default: the linear ones), COIN (the inverse
+// ones) or ALL.
 func (h *Handler) contracts(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.Contracts(r.Context())
+	list, err := h.Svc.ContractsOf(r.Context(), strings.ToUpper(r.URL.Query().Get("margin_type")))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

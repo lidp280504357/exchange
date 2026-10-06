@@ -83,3 +83,80 @@ func TestContractSameConfig(t *testing.T) {
 		t.Fatal("a changed tier is a change")
 	}
 }
+
+// inversePerp is BTC-USD-PERP, coin-margined as Binance's BTCUSD_PERP
+// (design 2026-10-06 §2.1): 100 USD a contract, settled in BTC.
+func inversePerp() Contract {
+	c := perp()
+	c.Symbol, c.QuoteAsset, c.MarginType, c.SettleAsset, c.ContractSize = "BTC-USD-PERP", CoinQuote, MarginCoin, "BTC", d("100")
+	c.LotSize, c.MinQuantity, c.MaxQuantity, c.MinNotional, c.ImpactNotional = d("1"), d("1"), d("60000"), d("100"), d("100")
+	c.ReferenceSymbol = "BTCUSD_PERP"
+	c.RiskTiers = []RiskTier{
+		{MaxNotional: d("5"), MaxLeverage: 125, MMR: d("0.004")},
+		{MaxNotional: d("10"), MaxLeverage: 100, MMR: d("0.005")},
+	}
+	return c
+}
+
+func TestContractMarginTypes(t *testing.T) {
+	linear := perp().WithDefaults()
+	if linear.MarginType != MarginUSDT || linear.SettleAsset != "USDT" || linear.Inverse() || linear.PriceAsset() != "USDT" {
+		t.Fatalf("a contract without a margin type is linear, settled in its quote asset: %+v", linear)
+	}
+	inverse := inversePerp()
+	if err := inverse.Validate(btc, usdt); err != nil {
+		t.Fatalf("valid inverse contract: %v", err)
+	}
+	if !inverse.Inverse() || inverse.PriceAsset() != "USDT" {
+		t.Fatalf("an inverse contract's prices follow USDT: %+v", inverse)
+	}
+	unsettled := inverse
+	unsettled.SettleAsset = ""
+	if got := unsettled.WithDefaults().SettleAsset; got != "BTC" {
+		t.Fatalf("an inverse contract settles in its base asset by default, got %q", got)
+	}
+	for name, change := range map[string]func(*Contract){
+		"inverse settles in quote":   func(c *Contract) { c.SettleAsset = "USDT" },
+		"inverse without face value": func(c *Contract) { c.ContractSize = d("0") },
+		"inverse quoted in USDT":     func(c *Contract) { c.Symbol, c.QuoteAsset = "BTC-USDT-PERP", "USDT" },
+		"inverse fractional lots":    func(c *Contract) { c.LotSize, c.MinQuantity = d("0.5"), d("0.5") },
+		"inverse index not USDT":     func(c *Contract) { c.IndexSymbol = "BTC-USD" },
+		"face value too fine":        func(c *Contract) { c.ContractSize = d("0.0000001") },
+		"unknown margin type":        func(c *Contract) { c.MarginType = "USDC" },
+		"reference symbol":           func(c *Contract) { c.ReferenceSymbol = "btcusd-perp" },
+	} {
+		bad := inversePerp()
+		change(&bad)
+		if err := bad.Validate(btc, usdt); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	for name, change := range map[string]func(*Contract){
+		"linear with face value":      func(c *Contract) { c.ContractSize = d("100") },
+		"linear settles in base":      func(c *Contract) { c.SettleAsset = "BTC" },
+		"linear quoted in USD":        func(c *Contract) { c.Symbol, c.QuoteAsset = "BTC-USD-PERP", CoinQuote },
+		"linear with a long referent": func(c *Contract) { c.ReferenceSymbol = strings.Repeat("A", 21) },
+	} {
+		bad := perp()
+		change(&bad)
+		if err := bad.Validate(btc, usdt); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestContractKindNeverChanges(t *testing.T) {
+	a, b := inversePerp(), inversePerp()
+	b.ReferenceSymbol, b.MaxQuantity = "", d("1000")
+	if !a.SameKind(b) || a.SameConfig(b) {
+		t.Fatal("the reference symbol and the limits change; the kind stays")
+	}
+	b.ContractSize = d("10")
+	if a.SameKind(b) {
+		t.Fatal("the face value is the contract's kind")
+	}
+	c := perp().WithDefaults()
+	if c.SameKind(a) {
+		t.Fatal("linear and inverse are different kinds")
+	}
+}

@@ -154,6 +154,24 @@ func TestInstrumentSchema(t *testing.T) {
 	accepts(t, db, history, 2, "CONSOLE")
 	accepts(t, db, history, 3, "")
 	rejects(t, db, "a known source", history, 4, "API")
+	// Contracts: linear ones settle in their quote asset; inverse ones are
+	// quoted in USD, settle in their base asset and have a face value
+	// (design 2026-10-06 §2.1).
+	accepts(t, db, `INSERT INTO fee_schedules (tier, maker_fee_rate, taker_fee_rate) VALUES ('perp', 0.0002, 0.0005)`)
+	contract := `INSERT INTO contracts (symbol, type, base_asset, quote_asset, index_symbol, tick_size, lot_size, min_quantity,
+		max_quantity, min_notional, price_band, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional,
+		fee_tier, margin_type, settle_asset, contract_size, reference_symbol)
+		VALUES ($1, 'PERPETUAL', 'BTC', $2, $3, 0.1, $4, $4, 1000, 0, 0.05, '[{"max_notional":"5","max_leverage":125,"mmr":"0.004"}]',
+		8, 0.0001, 0.0075, 100, 'perp', $5, $6, $7, $8)`
+	accepts(t, db, contract, "BTC-USDT-PERP", "USDT", "BTC-USDT", 0.001, "USDT", "USDT", 0, "BTCUSDT")
+	accepts(t, db, contract, "BTC-USD-PERP", "USD", "BTC-USDT", 1, "COIN", "BTC", 100, "BTCUSD_PERP")
+	rejects(t, db, "a linear contract settles in its quote asset", `UPDATE contracts SET settle_asset = 'BTC' WHERE symbol = 'BTC-USDT-PERP'`)
+	rejects(t, db, "a linear contract has no face value", `UPDATE contracts SET contract_size = 100 WHERE symbol = 'BTC-USDT-PERP'`)
+	rejects(t, db, "an inverse contract has a face value", `UPDATE contracts SET contract_size = 0 WHERE symbol = 'BTC-USD-PERP'`)
+	rejects(t, db, "an inverse contract settles in its base asset", `UPDATE contracts SET settle_asset = 'USDT' WHERE symbol = 'BTC-USD-PERP'`)
+	rejects(t, db, "an inverse contract's index is the USDT pair", `UPDATE contracts SET index_symbol = 'BTC-USD' WHERE symbol = 'BTC-USD-PERP'`)
+	rejects(t, db, "a known margin type", `UPDATE contracts SET margin_type = 'USDC' WHERE symbol = 'BTC-USDT-PERP'`)
+	rejects(t, db, "a reference symbol of letters, digits and _", `UPDATE contracts SET reference_symbol = 'btc-usd' WHERE symbol = 'BTC-USD-PERP'`)
 }
 
 func TestLedgerSchema(t *testing.T) {

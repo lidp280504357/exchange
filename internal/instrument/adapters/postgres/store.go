@@ -346,14 +346,15 @@ func (r pairs) Save(ctx context.Context, p domain.TradingPair) (domain.TradingPa
 type contracts repos
 
 const contractColumns = `symbol, type, base_asset, quote_asset, index_symbol, tick_size, lot_size, min_quantity, max_quantity,
-	min_notional, price_band, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional, fee_tier, status, version`
+	min_notional, price_band, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional, fee_tier, status, version,
+	margin_type, settle_asset, contract_size, reference_symbol`
 
 func scanContract(row pgx.Row) (domain.Contract, error) {
 	var c domain.Contract
 	var tiers []byte
 	err := row.Scan(&c.Symbol, &c.Type, &c.BaseAsset, &c.QuoteAsset, &c.IndexSymbol, &c.TickSize, &c.LotSize, &c.MinQuantity,
 		&c.MaxQuantity, &c.MinNotional, &c.PriceBand, &tiers, &c.FundingIntervalHours, &c.InterestRate, &c.FundingCap,
-		&c.ImpactNotional, &c.FeeTier, &c.Status, &c.Version)
+		&c.ImpactNotional, &c.FeeTier, &c.Status, &c.Version, &c.MarginType, &c.SettleAsset, &c.ContractSize, &c.ReferenceSymbol)
 	if err != nil {
 		return c, err
 	}
@@ -377,21 +378,24 @@ func (r contracts) List(ctx context.Context) ([]domain.Contract, error) {
 }
 
 func (r contracts) Save(ctx context.Context, c domain.Contract) (domain.Contract, error) {
+	c = c.WithDefaults()
 	tiers, err := json.Marshal(c.RiskTiers)
 	if err != nil {
 		return domain.Contract{}, err
 	}
+	// The margin type, the settlement asset and the face value are kept on
+	// conflict: they never change once listed (application checks it).
 	return scanContract(r.q.QueryRow(ctx, `INSERT INTO contracts (symbol, type, base_asset, quote_asset, index_symbol, tick_size,
 		lot_size, min_quantity, max_quantity, min_notional, price_band, risk_tiers, funding_interval_hours, interest_rate,
-		funding_cap, impact_notional, fee_tier, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		funding_cap, impact_notional, fee_tier, status, margin_type, settle_asset, contract_size, reference_symbol)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (symbol) DO UPDATE SET index_symbol = EXCLUDED.index_symbol, tick_size = EXCLUDED.tick_size,
 		lot_size = EXCLUDED.lot_size, min_quantity = EXCLUDED.min_quantity, max_quantity = EXCLUDED.max_quantity,
 		min_notional = EXCLUDED.min_notional, price_band = EXCLUDED.price_band, risk_tiers = EXCLUDED.risk_tiers,
 		funding_interval_hours = EXCLUDED.funding_interval_hours, interest_rate = EXCLUDED.interest_rate,
 		funding_cap = EXCLUDED.funding_cap, impact_notional = EXCLUDED.impact_notional, fee_tier = EXCLUDED.fee_tier,
-		status = EXCLUDED.status, version = contracts.version + 1, updated_at = now()
+		status = EXCLUDED.status, reference_symbol = EXCLUDED.reference_symbol, version = contracts.version + 1, updated_at = now()
 		RETURNING `+contractColumns, c.Symbol, c.Type, c.BaseAsset, c.QuoteAsset, c.IndexSymbol, c.TickSize, c.LotSize,
 		c.MinQuantity, c.MaxQuantity, c.MinNotional, c.PriceBand, tiers, c.FundingIntervalHours, c.InterestRate, c.FundingCap,
-		c.ImpactNotional, c.FeeTier, c.Status))
+		c.ImpactNotional, c.FeeTier, c.Status, c.MarginType, c.SettleAsset, c.ContractSize, c.ReferenceSymbol))
 }

@@ -26,11 +26,14 @@ func (s *Service) applyContract(ctx context.Context, r ports.Repos, c domain.Con
 	if c.Type == "" {
 		c.Type = domain.ContractPerpetual
 	}
+	c = c.WithDefaults()
 	base, err := r.Assets().Get(ctx, c.BaseAsset)
 	if err != nil {
 		return err
 	}
-	quote, err := r.Assets().Get(ctx, c.QuoteAsset)
+	// The asset prices are in: the quote asset, or USDT for a coin-margined
+	// contract, whose quote USD is no asset.
+	quote, err := r.Assets().Get(ctx, c.PriceAsset())
 	if err != nil {
 		return err
 	}
@@ -50,6 +53,9 @@ func (s *Service) applyContract(ctx context.Context, r ports.Repos, c domain.Con
 		if cur.SameConfig(c) {
 			res.Unchanged++
 			return nil
+		}
+		if !cur.SameKind(c) {
+			return apperr.Invalid(fmt.Sprintf("contract %s: margin_type, settle_asset and contract_size do not change once listed", c.Symbol))
 		}
 		c.Status = cur.Status // statuses change only through SetContractStatus
 	}
@@ -121,6 +127,41 @@ func (s *Service) contractView(ctx context.Context, r ports.Repos, c domain.Cont
 	return v, nil
 }
 
+// Margin type filters of Contracts: the linear contracts, the inverse
+// ones, or all.
+const (
+	ContractsLinear  = domain.MarginUSDT
+	ContractsInverse = domain.MarginCoin
+	ContractsAll     = "ALL"
+)
+
+// ContractsOf lists the contracts of a margin type (ContractsLinear,
+// ContractsInverse or ContractsAll; empty is ContractsLinear, what the
+// clients from before the inverse contracts know) with their fee rates.
+func (s *Service) ContractsOf(ctx context.Context, marginType string) ([]ContractView, error) {
+	switch marginType {
+	case "":
+		marginType = ContractsLinear
+	case ContractsLinear, ContractsInverse, ContractsAll:
+	default:
+		return nil, apperr.Invalid(fmt.Sprintf("margin_type %q: use %s, %s or %s", marginType, ContractsLinear, ContractsInverse, ContractsAll))
+	}
+	list, err := s.Contracts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if marginType == ContractsAll {
+		return list, nil
+	}
+	out := make([]ContractView, 0, len(list))
+	for _, c := range list {
+		if c.MarginType == marginType {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 // Contracts lists every contract with its fee rates.
 func (s *Service) Contracts(ctx context.Context) ([]ContractView, error) {
 	r := s.Store.Read()
@@ -168,6 +209,7 @@ func ToProtoContract(c ContractView) *instrumentv1.Contract {
 		MaxQuantity: c.MaxQuantity.String(), MinNotional: c.MinNotional.String(), PriceBand: c.PriceBand.String(), RiskTiers: tiers,
 		FundingIntervalHours: c.FundingIntervalHours, InterestRate: c.InterestRate.String(), FundingCap: c.FundingCap.String(),
 		ImpactNotional: c.ImpactNotional.String(), FeeTier: c.FeeTier, MakerFeeRate: c.MakerFeeRate.String(),
-		TakerFeeRate: c.TakerFeeRate.String(), Status: c.Status, Version: c.Version,
+		TakerFeeRate: c.TakerFeeRate.String(), Status: c.Status, Version: c.Version, MarginType: c.MarginType,
+		SettleAsset: c.SettleAsset, ContractSize: c.ContractSize.String(), ReferenceSymbol: c.ReferenceSymbol,
 	}
 }
