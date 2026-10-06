@@ -107,6 +107,11 @@ services:
       <<: *base-env
       # auth-service 与 user-service 互相调用，gRPC 连接按需建立，不写 depends_on 以免成环
       AUTH_GRPC_ADDR: auth-service:9181
+      # Uploaded avatars (design 2026-10-07, avatars and usernames §1.3):
+      # written here, served read-only by nginx at /uploads/avatars/.
+      AVATAR_DIR: /data/avatars
+    volumes:
+      - ./uploads/avatars:/data/avatars
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

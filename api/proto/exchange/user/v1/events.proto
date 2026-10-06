@@ -13,8 +13,22 @@ message UserStatusChanged {
   string actor = 5;
 }
 
-// ProfileUpdated lists the profile fields that changed.
+// ProfileUpdated lists the profile fields that changed (username and
+// avatar among them, design 2026-10-07).
 message ProfileUpdated {
   string user_id = 1;
   repeated string fields = 2;
+}
+
+// ProfileReset: an operator reset an account's username or avatar
+// (design 2026-10-07, avatars and usernames §1.6); the user is told in the
+// app (notices USERNAME_RESET, AVATAR_RESET).
+message ProfileReset {
+  string user_id = 1;
+  // USERNAME or AVATAR.
+  string field = 2;
+  // The new username after a USERNAME reset.
+  string username = 3;
+  string actor = 4;
+  string reason = 5;
 }

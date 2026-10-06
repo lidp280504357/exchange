@@ -216,6 +216,8 @@ sync_infra() {
   sudo mkdir -p "$INFRA/downloads/android" "$INFRA/downloads/ios" "$INFRA/app-uploads"
   sudo chown 10001:10001 "$INFRA/downloads" "$INFRA/downloads/android" "$INFRA/downloads/ios" "$INFRA/app-uploads"
   sudo chmod 755 "$INFRA/downloads" "$INFRA/downloads/android" "$INFRA/downloads/ios" && sudo chmod 700 "$INFRA/app-uploads"
+  # 用户上传的头像（设计 2026-10-07 头像与用户名 §1.3）：user-service（uid 10001）写，nginx 只读直出，所以 755
+  sudo mkdir -p "$INFRA/uploads/avatars" && sudo chown 10001:10001 "$INFRA/uploads/avatars" && sudo chmod 755 "$INFRA/uploads" "$INFRA/uploads/avatars"
   # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据），每个调用方一把：
   # sim/sim.env 的 SIM_API_SECRET 只给 market-sim（容器里的 exchangectl sim 用），sim/admin.env 的
   # SIM_ADMIN_API_SECRET 给 market-sim 与 admin-service（只有它能填批准人）。第一次部署时生成，之后不变；值不打印

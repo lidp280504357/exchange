@@ -26,6 +26,8 @@ const (
 	UserService_ListUsers_FullMethodName        = "/exchange.user.v1.UserService/ListUsers"
 	UserService_UserStats_FullMethodName        = "/exchange.user.v1.UserService/UserStats"
 	UserService_GetUserHistory_FullMethodName   = "/exchange.user.v1.UserService/GetUserHistory"
+	UserService_ResetUsername_FullMethodName    = "/exchange.user.v1.UserService/ResetUsername"
+	UserService_ResetAvatar_FullMethodName      = "/exchange.user.v1.UserService/ResetAvatar"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -52,6 +54,15 @@ type UserServiceClient interface {
 	// GetUserHistory returns an account's status changes (newest first) and
 	// the document versions it accepted, for the admin console.
 	GetUserHistory(ctx context.Context, in *GetUserHistoryRequest, opts ...grpc.CallOption) (*GetUserHistoryResponse, error)
+	// ResetUsername gives an account a new drawn username (user_ and 8
+	// lowercase letters or digits) for an operator, a moderation step
+	// (design 2026-10-07, avatars and usernames §1.6): the user is told in
+	// the app (ProfileReset), and the 7-day wait does not start.
+	ResetUsername(ctx context.Context, in *ResetUsernameRequest, opts ...grpc.CallOption) (*ResetUsernameResponse, error)
+	// ResetAvatar takes an account back to the default avatar for an
+	// operator, its files deleted; the user is told in the app when there
+	// was one.
+	ResetAvatar(ctx context.Context, in *ResetAvatarRequest, opts ...grpc.CallOption) (*ResetAvatarResponse, error)
 }
 
 type userServiceClient struct {
@@ -132,6 +143,26 @@ func (c *userServiceClient) GetUserHistory(ctx context.Context, in *GetUserHisto
 	return out, nil
 }
 
+func (c *userServiceClient) ResetUsername(ctx context.Context, in *ResetUsernameRequest, opts ...grpc.CallOption) (*ResetUsernameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetUsernameResponse)
+	err := c.cc.Invoke(ctx, UserService_ResetUsername_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResetAvatar(ctx context.Context, in *ResetAvatarRequest, opts ...grpc.CallOption) (*ResetAvatarResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetAvatarResponse)
+	err := c.cc.Invoke(ctx, UserService_ResetAvatar_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -156,6 +187,15 @@ type UserServiceServer interface {
 	// GetUserHistory returns an account's status changes (newest first) and
 	// the document versions it accepted, for the admin console.
 	GetUserHistory(context.Context, *GetUserHistoryRequest) (*GetUserHistoryResponse, error)
+	// ResetUsername gives an account a new drawn username (user_ and 8
+	// lowercase letters or digits) for an operator, a moderation step
+	// (design 2026-10-07, avatars and usernames §1.6): the user is told in
+	// the app (ProfileReset), and the 7-day wait does not start.
+	ResetUsername(context.Context, *ResetUsernameRequest) (*ResetUsernameResponse, error)
+	// ResetAvatar takes an account back to the default avatar for an
+	// operator, its files deleted; the user is told in the app when there
+	// was one.
+	ResetAvatar(context.Context, *ResetAvatarRequest) (*ResetAvatarResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -186,6 +226,12 @@ func (UnimplementedUserServiceServer) UserStats(context.Context, *UserStatsReque
 }
 func (UnimplementedUserServiceServer) GetUserHistory(context.Context, *GetUserHistoryRequest) (*GetUserHistoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserHistory not implemented")
+}
+func (UnimplementedUserServiceServer) ResetUsername(context.Context, *ResetUsernameRequest) (*ResetUsernameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetUsername not implemented")
+}
+func (UnimplementedUserServiceServer) ResetAvatar(context.Context, *ResetAvatarRequest) (*ResetAvatarResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetAvatar not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -334,6 +380,42 @@ func _UserService_GetUserHistory_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ResetUsername_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUsernameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetUsername(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetUsername_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetUsername(ctx, req.(*ResetUsernameRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ResetAvatar_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetAvatarRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetAvatar(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetAvatar_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetAvatar(ctx, req.(*ResetAvatarRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -368,6 +450,14 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserHistory",
 			Handler:    _UserService_GetUserHistory_Handler,
+		},
+		{
+			MethodName: "ResetUsername",
+			Handler:    _UserService_ResetUsername_Handler,
+		},
+		{
+			MethodName: "ResetAvatar",
+			Handler:    _UserService_ResetAvatar_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

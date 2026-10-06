@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -65,10 +66,19 @@ func TestUsersSchema(t *testing.T) {
 	rejects(t, db, "unknown status", `INSERT INTO users (id, region, status) VALUES ($1, 'CN', 'BANNED')`, uuid.New())
 	accepts(t, db, `INSERT INTO consents (user_id, document, version) VALUES ($1, 'TERMS', '2026-09-28')`, id)
 	rejects(t, db, "consents need a user", `INSERT INTO consents (user_id, document, version) VALUES ($1, 'TERMS', 'v1')`, uuid.New())
-	var status string
-	if err := db.QueryRow(context.Background(), `SELECT status FROM users WHERE id = $1`, id).Scan(&status); err != nil || status != "ACTIVE" {
-		t.Fatalf("new users start ACTIVE: %q %v", status, err)
+	var status, username string
+	if err := db.QueryRow(context.Background(), `SELECT status, username FROM users WHERE id = $1`, id).Scan(&status, &username); err != nil ||
+		status != "ACTIVE" || !regexp.MustCompile(`^user_[0-9a-f]{8}$`).MatchString(username) {
+		t.Fatalf("new users start ACTIVE with a drawn username: %q %q %v", status, username, err)
 	}
+	// Usernames (design 2026-10-07): unique whatever the case, 3 to 20
+	// letters, digits or underscores, not starting with an underscore.
+	accepts(t, db, `INSERT INTO users (id, region, username) VALUES ($1, 'CN', 'Satoshi_N')`, uuid.New())
+	rejects(t, db, "the same name in another case", `INSERT INTO users (id, region, username) VALUES ($1, 'CN', 'satoshi_n')`, uuid.New())
+	for _, bad := range []string{"ab", "_abc", "has space", "x23456789012345678901", "名字"} {
+		rejects(t, db, "username "+bad, `INSERT INTO users (id, region, username) VALUES ($1, 'CN', $2)`, uuid.New(), bad)
+	}
+	rejects(t, db, "an avatar that is not an object", `INSERT INTO users (id, region, avatar) VALUES ($1, 'CN', '"x"')`, uuid.New())
 }
 
 func TestNotifySchema(t *testing.T) {

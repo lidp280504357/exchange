@@ -997,6 +997,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{id}/username-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an account a new drawn username
+         * @description A moderation step (design 2026-10-07, avatars and usernames §1.6):
+         *     the username becomes user_ and 8 lowercase letters or digits, the
+         *     user is told in the app (USERNAME_RESET) and may pick another at
+         *     once (the 7-day wait does not start). One person, audited as
+         *     admin.users.username_reset with the old and new names. Needs
+         *     users.status.
+         */
+        post: operations["resetUsername"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/avatar-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take an account back to the default avatar
+         * @description A moderation step: the uploaded files are deleted, the user is told
+         *     in the app (AVATAR_RESET) and may upload another. Without an
+         *     uploaded avatar it changes nothing and tells no one. One person,
+         *     audited as admin.users.avatar_reset. Needs users.status.
+         */
+        post: operations["resetAvatar"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users/{id}/totp-reset": {
         parameters: {
             query?: never;
@@ -4003,6 +4051,12 @@ export interface components {
         UserSummary: {
             /** Format: uuid */
             id: string;
+            /** @description The user's username (design 2026-10-07, avatars and usernames); read-only here but for the reset. */
+            username: string;
+            /** @description The uploaded avatar (256 x 256), a path the console's site serves too; null for the default, one of the 12 built-in images chosen by the user ID as on the sites. */
+            avatar_url: string | null;
+            /** @description The same at 64 x 64. */
+            avatar_thumb_url: string | null;
             /** @enum {string} */
             status: "ACTIVE" | "RISK_REVIEW" | "FROZEN" | "CLOSED";
             region: string;
@@ -8060,6 +8114,60 @@ export interface operations {
                     "application/json": {
                         revoked: number;
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resetUsername: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The account with its new username. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resetAvatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The account with the default avatar. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"];
                 };
             };
             default: components["responses"]["Error"];

@@ -239,8 +239,11 @@ export interface components {
         Notification: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            type: "WELCOME" | "NEW_DEVICE_LOGIN" | "IDENTITY_CHANGED" | "PASSWORD_CHANGED" | "ACCOUNT_LOCKED" | "STATUS_CHANGED" | "TOTP_CHANGED" | "DEPOSIT_CREDITED" | "DEPOSIT_UNCLAIMED" | "WITHDRAWAL_REQUESTED" | "WITHDRAWAL_COMPLETED" | "WITHDRAWAL_REJECTED" | "WITHDRAWAL_CANCELED" | "WITHDRAWAL_FAILED" | "BROADCAST";
+            /**
+             * @description USERNAME_RESET and AVATAR_RESET tell a user an operator reset the username (data.username, the new one) or the avatar (design 2026-10-07, avatars and usernames §1.6).
+             * @enum {string}
+             */
+            type: "WELCOME" | "NEW_DEVICE_LOGIN" | "IDENTITY_CHANGED" | "PASSWORD_CHANGED" | "ACCOUNT_LOCKED" | "STATUS_CHANGED" | "TOTP_CHANGED" | "DEPOSIT_CREDITED" | "DEPOSIT_UNCLAIMED" | "WITHDRAWAL_REQUESTED" | "WITHDRAWAL_COMPLETED" | "WITHDRAWAL_REJECTED" | "WITHDRAWAL_CANCELED" | "WITHDRAWAL_FAILED" | "BROADCAST" | "USERNAME_RESET" | "AVATAR_RESET";
             title: string;
             /** @description Rendered in the user's language and time zone. */
             body: string;

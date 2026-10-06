@@ -136,6 +136,8 @@ services:
       - ./nginx/sites:/usr/share/nginx/sites:ro
       # 后台上传的 App 安装包（admin-service 写入，三个站点的 /downloads/，设计 2026-10-07 App 下载页）
       - ./downloads:/usr/share/nginx/files/downloads:ro
+      # 用户上传的头像（user-service 写入，nginx/snippets/uploads.conf 直出）
+      - ./uploads/avatars:/usr/share/nginx/uploads/avatars:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null --header 'Host: astras.vip' http://127.0.0.1/healthz || exit 1"]
       interval: 15s

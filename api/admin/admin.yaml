@@ -1596,6 +1596,68 @@ paths:
                     type: integer
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/username-reset:
+    post:
+      operationId: resetUsername
+      summary: Give an account a new drawn username
+      description: |
+        A moderation step (design 2026-10-07, avatars and usernames §1.6):
+        the username becomes user_ and 8 lowercase letters or digits, the
+        user is told in the app (USERNAME_RESET) and may pick another at
+        once (the 7-day wait does not start). One person, audited as
+        admin.users.username_reset with the old and new names. Needs
+        users.status.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The account with its new username.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/avatar-reset:
+    post:
+      operationId: resetAvatar
+      summary: Take an account back to the default avatar
+      description: |
+        A moderation step: the uploaded files are deleted, the user is told
+        in the app (AVATAR_RESET) and may upload another. Without an
+        uploaded avatar it changes nothing and tells no one. One person,
+        audited as admin.users.avatar_reset. Needs users.status.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The account with the default avatar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/users/{id}/totp-reset:
     post:
       operationId: resetUserTotp
@@ -6357,11 +6419,20 @@ components:
       description: Pass as cursor for the next page; null on the last.
     UserSummary:
       type: object
-      required: [id, status, region, language, kyc_level, created_at, tags]
+      required: [id, username, avatar_url, avatar_thumb_url, status, region, language, kyc_level, created_at, tags]
       properties:
         id:
           type: string
           format: uuid
+        username:
+          type: string
+          description: The user's username (design 2026-10-07, avatars and usernames); read-only here but for the reset.
+        avatar_url:
+          type: [string, 'null']
+          description: The uploaded avatar (256 x 256), a path the console's site serves too; null for the default, one of the 12 built-in images chosen by the user ID as on the sites.
+        avatar_thumb_url:
+          type: [string, 'null']
+          description: The same at 64 x 64.
         status:
           type: string
           enum: [ACTIVE, RISK_REVIEW, FROZEN, CLOSED]

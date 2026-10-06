@@ -3,9 +3,10 @@ info:
   title: Exchange user API
   version: 0.1.0
   description: |
-    Profile, account status, eligibility (requirements §5.4) and favorite
-    markets. Every endpoint needs the access token. Error codes are listed
-    in appendix C.
+    Profile, account status, eligibility (requirements §5.4), favorite
+    markets, and the username and avatar (design 2026-10-07, avatars and
+    usernames). Every endpoint needs the access token. Error codes are
+    listed in appendix C.
 servers:
   - url: https://astras.vip
 security:
@@ -62,6 +63,94 @@ paths:
       responses:
         '200':
           description: Updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/user/username:
+    put:
+      operationId: changeUsername
+      summary: Change the caller's username
+      description: |
+        3 to 20 letters, digits or underscores, not starting with an
+        underscore (USER_USERNAME_INVALID, as are a few reserved names:
+        admin, support, astras, house and the like); unique whatever the
+        case (USER_USERNAME_TAKEN, 409); once in 7 days
+        (USER_USERNAME_COOLDOWN, 409, details.next_change_at). The same
+        name in another case is a change too. FROZEN accounts may not
+        change it (USER_FROZEN). Kept in the user's security events; no
+        mail.
+      tags: [user]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              additionalProperties: false
+              properties:
+                username:
+                  type: string
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9_]{2,19}$'
+                  examples: [satoshi_n]
+      responses:
+        '200':
+          description: The profile with the new name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/user/avatar:
+    post:
+      operationId: uploadAvatar
+      summary: Upload the caller's avatar
+      description: |
+        One part, file: a PNG, JPEG or WebP image of at most 5 MB
+        (USER_AVATAR_TOO_LARGE, 413; the request at most 8 MB), each side
+        at least 64 pixels. Its content decides the format, not its name or
+        type: anything else, or an image that does not decode, is
+        USER_AVATAR_INVALID (SVG and animated images too). The middle
+        square is kept, scaled to 256 x 256 and 64 x 64 WebP without any
+        metadata (EXIF and the like); the original is not kept, and the
+        previous avatar's files are deleted. FROZEN accounts may not upload
+        (USER_FROZEN). No Idempotency-Key: a repeat stores a new file.
+      tags: [user]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              file:
+                contentType: image/png, image/jpeg, image/webp
+      responses:
+        '200':
+          description: The profile with the new avatar's URLs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: deleteAvatar
+      summary: Go back to the default avatar
+      description: The uploaded files are deleted; avatar_url and avatar_thumb_url become null. Without one it changes nothing.
+      tags: [user]
+      responses:
+        '200':
+          description: The profile with the default avatar.
           content:
             application/json:
               schema:
@@ -168,11 +257,35 @@ components:
   schemas:
     Profile:
       type: object
-      required: [user_id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at]
+      required: [user_id, username, username_changed_at, avatar_url, avatar_thumb_url, status, region, language, timezone,
+        anti_phishing_code, kyc_level, version, created_at]
       properties:
         user_id:
           type: string
           format: uuid
+        username:
+          type: string
+          description: |
+            What the sites show and call the user by (design 2026-10-07 §1):
+            user_ and 8 lowercase letters or digits at sign-up, changeable
+            once in 7 days (PUT /v1/user/username). Signing in stays with
+            the email or phone.
+          examples: [user_k3x9q2ab]
+        username_changed_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the user last changed it; null while it is the one given at sign-up (or by an operator's reset).
+        avatar_url:
+          type: [string, 'null']
+          description: |
+            The uploaded avatar, 256 x 256 WebP, a path every site serves
+            (/uploads/avatars/<user_id>/<random>.webp; a new upload gets a
+            new name). Null for the default: one of the sites' 12 built-in
+            images, chosen by the user ID.
+          examples: [/uploads/avatars/0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2e/k3x9q2ab5d7f.webp]
+        avatar_thumb_url:
+          type: [string, 'null']
+          description: The same at 64 x 64; null with avatar_url.
         status:
           type: string
           enum: [ACTIVE, RISK_REVIEW, FROZEN, CLOSED]

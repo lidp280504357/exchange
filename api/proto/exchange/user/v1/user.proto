@@ -24,6 +24,40 @@ service UserService {
   // GetUserHistory returns an account's status changes (newest first) and
   // the document versions it accepted, for the admin console.
   rpc GetUserHistory(GetUserHistoryRequest) returns (GetUserHistoryResponse);
+  // ResetUsername gives an account a new drawn username (user_ and 8
+  // lowercase letters or digits) for an operator, a moderation step
+  // (design 2026-10-07, avatars and usernames §1.6): the user is told in
+  // the app (ProfileReset), and the 7-day wait does not start.
+  rpc ResetUsername(ResetUsernameRequest) returns (ResetUsernameResponse);
+  // ResetAvatar takes an account back to the default avatar for an
+  // operator, its files deleted; the user is told in the app when there
+  // was one.
+  rpc ResetAvatar(ResetAvatarRequest) returns (ResetAvatarResponse);
+}
+
+message ResetUsernameRequest {
+  string user_id = 1;
+  // The administrator's email (audited by admin-service too).
+  string actor = 2;
+  string reason = 3;
+}
+
+message ResetUsernameResponse {
+  User user = 1;
+  // The username before.
+  string previous = 2;
+}
+
+message ResetAvatarRequest {
+  string user_id = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+message ResetAvatarResponse {
+  User user = 1;
+  // Whether there was an uploaded avatar to remove.
+  bool removed = 2;
 }
 
 message GetUserHistoryRequest {
@@ -66,6 +100,14 @@ message User {
   string anti_phishing_code = 7;
   // When the account was created.
   google.protobuf.Timestamp created_at = 8;
+  // The username (design 2026-10-07, avatars and usernames), and when the
+  // user last changed it (unset while it is the one drawn).
+  string username = 9;
+  google.protobuf.Timestamp username_changed_at = 10;
+  // The uploaded avatar's paths on the sites, 256 and 64 pixels; empty for
+  // the default.
+  string avatar_url = 11;
+  string avatar_thumb_url = 12;
 }
 
 message CreateUserRequest {
