@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MarginAccount } from "../margin/math";
-import { applyBalance, applyFill, applyMarginAccount, applyOrder, holdingsOf } from "./private";
+import type { WsStatus } from "../ws/client";
+import { applyBalance, applyFill, applyMarginAccount, applyOrder, holdingsOf, onReconnected } from "./private";
 
 const account = (over: Partial<MarginAccount>): MarginAccount => ({
   account: "MARGIN_CROSS", symbol: null, leverage: 5, status: "NORMAL", margin_level: null, warn_level: "1.3", liquidation_level: "1.1",
@@ -65,6 +66,16 @@ describe("private pushes into the cache", () => {
     expect(applyMarginAccount(joined.page, revalued, holdingsOf(eth)).held).toBe(false);
     // An isolated account without its pair is left out.
     expect(applyMarginAccount(joined.page, { ...eth, symbol: null })).toEqual({ page: joined.page, held: false, used: false });
+  });
+  it("tells a reconnection from the first connection", () => {
+    let emit: (s: WsStatus) => void = () => {};
+    const ws = { onStatus: (fn: (s: WsStatus) => void) => ((emit = fn), () => {}) };
+    let calls = 0;
+    onReconnected(ws, () => calls++);
+    for (const s of ["connecting", "open"] as const) emit(s);
+    expect(calls).toBe(0);
+    for (const s of ["reconnecting", "open", "reconnecting", "reconnecting", "open"] as const) emit(s);
+    expect(calls).toBe(2);
   });
   it("prepends a fill once", () => {
     const page = { items: [], next_cursor: null };

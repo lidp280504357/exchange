@@ -4,7 +4,7 @@ import { add } from "../format/decimal";
 import type { MarginAccount, MarginPush } from "../margin/math";
 import { useWs } from "../market/hooks";
 import { selectSignedIn, useSession } from "../session/store";
-import type { WsClient } from "../ws/client";
+import type { WsClient, WsStatus } from "../ws/client";
 import type { BalanceData, FillData, OrderData, PrivatePush } from "../ws/types";
 import { privateRoots, qk } from "./keys";
 
@@ -240,8 +240,20 @@ export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
     ws.onResync(() => {
       for (const root of privateRoots) later.add([root]);
     }),
+    // A margin account is pushed as it stands and not replayed (the events
+    // missed while away are): back from a reconnection, the accounts reload.
+    onReconnected(ws, () => later.add(qk.marginAccounts)),
   ];
   return () => offs.forEach((off) => off());
+}
+
+/** onReconnected calls fn each time the connection is open again after it was lost; returns the unsubscribe. */
+export function onReconnected(ws: Pick<WsClient, "onStatus">, fn: () => void): () => void {
+  let was: WsStatus | undefined;
+  return ws.onStatus((s) => {
+    if (s === "open" && was === "reconnecting") fn();
+    was = s;
+  });
 }
 
 /**
