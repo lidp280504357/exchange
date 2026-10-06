@@ -517,23 +517,30 @@ const places = (step) => (String(step).split(".")[1] ?? "").replace(/0+$/, "").l
 
 /**
  * budgetBuy is a limit buy of symbol 5% under last spending about budget of
- * the quote, on the pair's tick and lot grid and at least its minimum
- * notional: { price, quantity } as an order form takes them. A fixed
- * quantity would cost more than the funds a step moved once the price rose.
+ * the quote, on the pair's tick and lot grid, at least its minimum notional
+ * and within its quantity range: { price, quantity } as an order form takes
+ * them. A fixed quantity would cost more than the funds a step moved once
+ * the price rose.
  */
 export async function budgetBuy(base, symbol, last, budget) {
   const res = await api(base, "GET", `/v1/market/pairs/${symbol}`);
   if (res.status !== 200) throw new Error(`/v1/market/pairs/${symbol}: ${res.status}`);
-  const { tick_size: tick, lot_size: lot, min_notional: minNotional } = res.body;
-  const price = Math.floor((last * 0.95) / Number(tick)) * Number(tick);
-  let lots = Math.floor(budget / price / Number(lot));
-  if (lots * Number(lot) * price < Number(minNotional)) lots = Math.ceil(Number(minNotional) / price / Number(lot));
-  return { price: price.toFixed(places(tick)), quantity: (lots * Number(lot)).toFixed(places(lot)) };
+  const { tick_size: tick, lot_size: lot, min_notional: minNotional, min_quantity: minQuantity, max_quantity: maxQuantity } = res.body;
+  const [t, l] = [Number(tick), Number(lot)];
+  const price = Math.floor((last * 0.95) / t) * t;
+  if (!(price > 0)) throw new Error(`no price 5% under ${last} on ${symbol}'s tick ${tick}`);
+  let lots = Math.floor(budget / price / l);
+  if (lots * l * price < Number(minNotional)) lots = Math.ceil(Number(minNotional) / price / l);
+  lots = Math.min(Math.max(lots, Math.ceil(Number(minQuantity) / l)), Math.floor(Number(maxQuantity) / l));
+  return { price: price.toFixed(places(tick)), quantity: (lots * l).toFixed(places(lot)) };
 }
 
-/** cancelOrders cancels every active spot order of the account: a step that placed one leaves none behind. */
-export async function cancelOrders(base, who) {
-  const token = await signInApi(base, who);
+/**
+ * cancelOrders cancels every active spot order of the account: a step that
+ * placed one leaves none behind. It signs in unless given a token.
+ */
+export async function cancelOrders(base, who, token = "") {
+  token ||= await signInApi(base, who);
   const res = await api(base, "DELETE", "/v1/orders", undefined, { Authorization: `Bearer ${token}` });
   if (res.status !== 202) throw new Error(`cancel orders: ${res.status} ${JSON.stringify(res.body)}`);
   return res.body.requested;

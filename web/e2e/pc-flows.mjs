@@ -940,8 +940,8 @@ async function marginClosed() {
 /** marginCleared cancels the account's orders, repays the cross account and moves its USDT back to spot; its failure does not hide the step's own. */
 async function marginCleared() {
   try {
-    await cancelOrders(API, user);
     const m = await marginAs();
+    await cancelOrders(API, user, m.token);
     const { usdt } = await m.cross();
     if (!usdt) return;
     if (Number(usdt.borrowed) > 0 || Number(usdt.interest) > 0) await m.post("/v1/margin/repay", { account: "MARGIN_CROSS", asset: "USDT", amount: "ALL" });
@@ -953,6 +953,9 @@ async function marginCleared() {
 }
 
 const noMargin = await marginClosed();
+// The step clears the account when it ends; past its time budget the run
+// goes on without it, so the exit clears it again.
+if (!noMargin) f.atExit(marginCleared);
 if (noMargin) f.skip("P9", P9, noMargin);
 else await f.step("P9", P9, async () => {
   let D;
