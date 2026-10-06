@@ -195,6 +195,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/derivatives/contracts", h.derivativesContracts)
 			r.Post("/derivatives/contracts/{symbol}/status/preview", h.previewStatus(domain.ChangeContractStatus))
 			r.Post("/derivatives/contracts/{symbol}/status", h.setStatus(domain.ChangeContractStatus))
+			r.Post("/derivatives/coins/{coin}/status/preview", h.previewCoinStatus)
+			r.Post("/derivatives/coins/{coin}/status", h.setCoinStatus)
 			r.Post("/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 			r.Get("/derivatives/risk", h.derivativesRisk)
 			r.Get("/derivatives/liquidations", h.liquidations)

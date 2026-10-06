@@ -219,11 +219,13 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
       );
       break;
     case "insurance": {
-      // Each settlement asset of a contract in trading, its fund now (design 2026-10-06 §2.7).
+      // The contracts open by type (§3.5), then each settlement asset of one, its fund now (design 2026-10-06 §2.7).
       const balances = Object.entries((v.balances as Record<string, string> | undefined) ?? {}).sort(([a], [b]) => a.localeCompare(b));
       const short = (v.short as string[] | undefined) ?? [];
+      const open = (v.open as { USDT?: number; COIN?: number } | undefined) ?? {};
       body = (
         <>
+          <span className="text-fg-3">{t("admin.launch.contractsOpen", { usdt: open.USDT ?? 0, coin: open.COIN ?? 0 })} · </span>
           {balances.length
             ? balances.map(([asset, balance], i) => (
                 <span key={asset} className={short.includes(asset) ? "text-danger-strong" : undefined}>
@@ -231,7 +233,7 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
                   <Num value={balance} unit={asset} />
                 </span>
               ))
-            : t("admin.launch.nothing")}
+            : t("admin.launch.noOpenContracts")}
           {short.length > 0 && <span className="text-danger-strong"> · {t("admin.launch.insuranceShort", { assets: short.join(", ") })}</span>}
         </>
       );

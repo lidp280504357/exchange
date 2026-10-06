@@ -5,17 +5,20 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DangerAction } from "../kit/actions";
+import { DangerAction, errorToast } from "../kit/actions";
 import { EnumBadge } from "../kit/enums";
 import { Num } from "../kit/format";
 import { FundAction } from "../kit/funds";
 import { Card, Page } from "../kit/Page";
 import { ModeBanner } from "./funds/ModeBanner";
 import { StatusActions } from "./Instruments";
-import { useInstrumentConfig } from "./instruments/config";
+import { changesKey, ParamList } from "./instruments/changes";
+import { useInstrumentConfig, type ContractConfig } from "./instruments/config";
 
 type ContractState = AdminSchemas["ContractState"];
 type InsuranceFund = AdminSchemas["InsuranceFund"];
+type CoinPreview = AdminSchemas["CoinStatusPreview"];
+type CoinMove = CoinPreview["to"];
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -30,11 +33,12 @@ export default function Derivatives({ admin }: { admin: Admin }) {
   return (
     <Page title={t("admin.nav.derivatives")}>
       <Tabs
-        items={["contracts", "insurance"].map((k) => ({ value: k, label: t(`admin.derivatives.tabs.${k}`) }))}
+        items={["contracts", "coins", "insurance"].map((k) => ({ value: k, label: t(`admin.derivatives.tabs.${k}`) }))}
         value={tab}
         onValueChange={setTab}
       />
       {tab === "contracts" && <Contracts admin={admin} />}
+      {tab === "coins" && <Coins admin={admin} />}
       {tab === "insurance" && <Insurance admin={admin} />}
     </Page>
   );
@@ -90,6 +94,128 @@ function Contracts({ admin }: { admin: Admin }) {
   );
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   return <DataTable columns={columns} data={q.data ?? []} getRowId={(c) => c.symbol} loading={q.isPending} density="compact" />;
+}
+
+/** A coin's contracts, both margin types, delisted ones aside. */
+type Coin = { coin: string; contracts: ContractConfig[] };
+
+/** CLOSES and REOPENS are the statuses a coin's close and reopen take its contracts from (the server's coinMoves). */
+const CLOSES: string[] = ["TRADING", "HALT"];
+const REOPENS: string[] = ["CANCEL_ONLY"];
+
+/**
+ * Coins closes or reopens a coin's contracts at once (coin-margined design
+ * 2026-10-06 §3.5, A63): closing puts its USDⓈ-M and COIN-M perpetuals in
+ * CANCEL_ONLY (reduce only; HOUSE keeps quoting so that positions close),
+ * reopening puts the closed ones back in TRADING. One change for all of
+ * them, previewed and confirmed under the guard of a contract's status;
+ * delisting stays per contract.
+ */
+function Coins({ admin }: { admin: Admin }) {
+  const { t } = useTranslation();
+  const cfg = useInstrumentConfig();
+  const act = can(admin, "instruments.trading");
+  const [move, setMove] = useState<CoinPreview | null>(null);
+  const coins = useMemo<Coin[]>(() => {
+    const by = new Map<string, ContractConfig[]>();
+    for (const c of cfg.data?.contracts ?? []) {
+      if (c.status !== "DELISTED") by.set(c.base_asset, [...(by.get(c.base_asset) ?? []), c]);
+    }
+    return [...by.entries()]
+      .map(([coin, contracts]) => ({ coin, contracts: contracts.sort((a, b) => a.symbol.localeCompare(b.symbol)) }))
+      .sort((a, b) => a.coin.localeCompare(b.coin));
+  }, [cfg.data]);
+  const preview = async (coin: string, to: CoinMove) => {
+    try {
+      setMove(adminData(await adminApi.POST("/admin/v1/derivatives/coins/{coin}/status/preview", { params: { path: { coin } }, body: { to } })));
+    } catch (err) {
+      errorToast(err);
+    }
+  };
+  const columns = useMemo<ColumnDef<Coin, unknown>[]>(
+    () => [
+      { id: "coin", header: t("admin.coinm.coins.coin"), cell: ({ row }) => <span className="font-mono font-medium">{row.original.coin}</span> },
+      {
+        id: "contracts", header: t("admin.coinm.coins.contracts"),
+        cell: ({ row }) => (
+          <span className="flex flex-wrap gap-x-3 gap-y-1">
+            {row.original.contracts.map((c) => (
+              <span key={c.symbol} className="inline-flex items-center gap-1" data-testid={`coin-contract-${c.symbol}`}>
+                <span className="font-mono text-xs">{c.symbol}</span>
+                <EnumBadge group="pairStatus" code={c.status} />
+              </span>
+            ))}
+          </span>
+        ),
+      },
+      ...(act
+        ? [
+            {
+              id: "act", header: "", meta: right,
+              cell: ({ row: { original: c } }: { row: { original: Coin } }) => (
+                <span className="flex justify-end gap-1">
+                  <Button
+                    size="sm" variant="danger" disabled={!c.contracts.some((x) => CLOSES.includes(x.status))}
+                    onClick={() => void preview(c.coin, "CANCEL_ONLY")} data-testid={`close-coin-${c.coin}`}
+                  >
+                    {t("admin.coinm.coins.close")}
+                  </Button>
+                  <Button
+                    size="sm" variant="secondary" disabled={!c.contracts.some((x) => REOPENS.includes(x.status))}
+                    onClick={() => void preview(c.coin, "TRADING")} data-testid={`reopen-coin-${c.coin}`}
+                  >
+                    {t("admin.coinm.coins.reopen")}
+                  </Button>
+                </span>
+              ),
+            },
+          ]
+        : []),
+    ],
+    [t, act],
+  );
+  if (cfg.isError) return <ErrorState message={errorText(cfg.error)} onRetry={() => void cfg.refetch()} />;
+  const closing = move?.to === "CANCEL_ONLY";
+  return (
+    <Card>
+      <p className="mb-3 text-xs text-fg-3">{t("admin.coinm.coins.help")}</p>
+      <DataTable columns={columns} data={coins} getRowId={(c) => c.coin} loading={cfg.isPending} density="compact" aria-label="coins" />
+      {move && (
+        <DangerAction
+          key={`${move.coin}:${move.to}`}
+          open
+          onOpenChange={(o) => !o && setMove(null)}
+          danger={closing}
+          title={t(closing ? "admin.coinm.coins.closeTitle" : "admin.coinm.coins.reopenTitle", { coin: move.coin })}
+          description={`${t(closing ? "admin.coinm.coins.closeNote" : "admin.coinm.coins.reopenNote")}${t(
+            move.two_person ? "admin.changes.delayedTwoPerson" : "admin.changes.delayed",
+            { minutes: Math.max(1, Math.round(move.delay_seconds / 60)) },
+          )}`}
+          target={<span className="font-mono">{move.coin}</span>}
+          confirmWord={move.coin}
+          run={async (reason) =>
+            adminData(
+              await adminApi.POST("/admin/v1/derivatives/coins/{coin}/status", {
+                params: { path: { coin: move.coin } }, body: { to: move.to, reason, confirmation: move.confirmation.token },
+              }),
+            )
+          }
+          success={move.two_person ? t("admin.changes.pendingApproval") : t("admin.changes.scheduled", { minutes: Math.max(1, Math.round(move.delay_seconds / 60)) })}
+          invalidate={[["admin", "instruments"], ["admin", "derivatives"], changesKey, ["admin", "todo"]]}
+          onDone={() => setMove(null)}
+        >
+          <ParamList
+            params={move.contracts.map((m) => ({ entity: "CONTRACT", key: m.symbol, field: "status", before: m.from, after: m.to }))}
+          />
+          {move.staying.length > 0 && (
+            <p className="mt-2 text-xs text-fg-3">
+              {t("admin.coinm.coins.staying", { list: move.staying.map((m) => `${m.symbol} (${m.from})`).join(", ") })}
+            </p>
+          )}
+        </DangerAction>
+      )}
+    </Card>
+  );
 }
 
 function Lift({ symbol }: { symbol: string }) {

@@ -167,14 +167,21 @@ func TestFuturesAdjustments(t *testing.T) {
 	fin := h.login(t, "fin@example.com")
 
 	// Before a debit: what it would leave of the cross margin (C5.5 ⑧).
-	raw, err := h.svc.FuturesMargin(ctx, fin, someUser, decimal.NewFromInt(600))
-	if err != nil || !strings.Contains(string(raw), `"state_after":"LIQUIDATE"`) {
+	raw, err := h.svc.FuturesMargin(ctx, fin, someUser, "", decimal.NewFromInt(600))
+	if err != nil || !strings.Contains(string(raw), `"state_after":"LIQUIDATE"`) || !strings.Contains(string(raw), `"asset":"USDT"`) {
 		t.Fatalf("a debit that liquidates: %s %v", raw, err)
 	}
-	if _, err := h.svc.FuturesMargin(ctx, fin, someUser, decimal.NewFromInt(-1)); code(err) != apperr.CodeInvalidArgument {
+	// A coin-margined account: the FUTURES account of its coin (review ER ⑤).
+	if raw, err := h.svc.FuturesMargin(ctx, fin, someUser, " btc", decimal.NewFromInt(1)); err != nil || !strings.Contains(string(raw), `"asset":"BTC"`) {
+		t.Fatalf("a BTC debit: %s %v", raw, err)
+	}
+	if _, err := h.svc.FuturesMargin(ctx, fin, someUser, "B-T", decimal.NewFromInt(1)); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an asset that is no code: %v", err)
+	}
+	if _, err := h.svc.FuturesMargin(ctx, fin, someUser, "", decimal.NewFromInt(-1)); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("a negative debit: %v", err)
 	}
-	if _, err := h.svc.FuturesMargin(ctx, fin, "nobody", decimal.NewFromInt(1)); code(err) != apperr.CodeNotFound {
+	if _, err := h.svc.FuturesMargin(ctx, fin, "nobody", "", decimal.NewFromInt(1)); code(err) != apperr.CodeNotFound {
 		t.Fatalf("a bad user: %v", err)
 	}
 

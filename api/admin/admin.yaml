@@ -2053,6 +2053,13 @@ paths:
           description: The debit to measure (positive; 0 by default).
           schema:
             $ref: '#/components/schemas/Decimal'
+        - name: asset
+          in: query
+          description: >-
+            The FUTURES account's asset: USDT (the default) for the linear contracts, a coin for its coin-margined ones
+            (review ER ⑤).
+          schema:
+            type: string
       responses:
         '200':
           description: The cross margin.
@@ -3751,9 +3758,9 @@ paths:
       summary: Move a trading pair to another status (the per-pair emergency switch)
       description: |
         PREPARE → TRADING ⇄ HALT; TRADING or HALT → CANCEL_ONLY →
-        DELISTED (CANCEL_ONLY is the way out: it cannot return to
-        trading). Fails with INSTRUMENT_STATUS_TRANSITION_INVALID
-        otherwise. A halt takes effect at once (200); any other move needs
+        DELISTED, and CANCEL_ONLY → TRADING reopens what was closed but not
+        delisted (B122); DELISTED is final. Fails with
+        INSTRUMENT_STATUS_TRANSITION_INVALID otherwise. A halt takes effect at once (200); any other move needs
         the preview's confirmation (POST .../status/preview) and answers
         202 with the change that waits (see POST
         /admin/v1/instruments/apply). Needs instruments.trading (ADMIN).
@@ -4330,7 +4337,9 @@ paths:
         spot_result its level since HOUSE began, at the bucket's end. A
         pair without a price when one is needed is left out of every day
         (unpriced). Contracts: the realized results of HOUSE's fills less
-        their fees, and the funding it got (negative when it paid). total
+        their fees, and the funding it got (negative when it paid); a
+        coin-margined contract's, in its coin, valued at the fill's price
+        and the funding at the settlement's mark price (USD as USDT). total
         sums the three; cumulative runs over the period. Needs
         reports.read.
       tags: [reports]
@@ -4389,7 +4398,8 @@ paths:
       summary: Move a perpetual contract to another status
       description: |
         The same transitions as trading pairs (PREPARE → TRADING ⇄ HALT;
-        TRADING or HALT → CANCEL_ONLY → DELISTED) and the same guard: a
+        TRADING or HALT → CANCEL_ONLY → DELISTED; CANCEL_ONLY → TRADING
+        until delisted) and the same guard: a
         halt at once (200), any other move confirmed from its preview and
         waiting (202); instrument-service records it. Needs
         instruments.trading (ADMIN).
@@ -4449,6 +4459,85 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusPreview'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/coins/{coin}/status/preview:
+    post:
+      operationId: previewCoinContractsStatus
+      summary: What closing or reopening a coin's contracts does
+      description: |
+        A coin's contracts are its USDⓈ-M and COIN-M perpetuals that are
+        not delisted (coin-margined design 2026-10-06 §3.5, coordinator
+        2026-10-06 22:50). Closing (to CANCEL_ONLY) takes those trading or
+        halted: reduce only, HOUSE keeps quoting so that positions can
+        close (its market.house_liquidity rules are left alone until a
+        contract is delisted). Reopening (to TRADING) takes those closed;
+        a halted one is resumed on its own, and one in preparation opened
+        on its own. Lists the contracts that move and those that stay,
+        with the confirmation of the one change they make;
+        INSTRUMENT_STATUS_TRANSITION_INVALID when none can move,
+        COMMON_NOT_FOUND for a coin without contracts. Delisting stays per
+        contract. Needs instruments.trading.
+      tags: [derivatives, instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/Coin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to:
+                  type: string
+                  enum: [CANCEL_ONLY, TRADING]
+      responses:
+        '200':
+          description: The moves.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoinStatusPreview'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/coins/{coin}/status:
+    post:
+      operationId: setCoinContractsStatus
+      summary: Close or reopen a coin's contracts
+      description: |
+        Confirmed from its preview, one change of kind
+        COIN_CONTRACTS_STATUS (target coin:<coin>) for all of them: it
+        waits the change delay and, while admin.two_person_approval is on,
+        a second ADMIN's approval (202). When due its contracts move one
+        by one, each audited as admin.instruments.contract_status; none
+        moves when one of them is no longer where the preview found it
+        (the change fails: preview again), a contract found where it goes
+        is in effect already, and a move that fails is reported in the
+        change's result with those that took effect. Needs
+        instruments.trading (ADMIN).
+      tags: [derivatives, instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/Coin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoinStatusRequest'
+      responses:
+        '202':
+          description: The change confirmed, waiting.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoinStatusResult'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/derivatives/contracts/{symbol}/lift-reduce-only:
@@ -5766,6 +5855,14 @@ components:
       schema:
         type: string
         examples: [BTC-USDT]
+    Coin:
+      name: coin
+      in: path
+      required: true
+      description: A coin, the base asset of its contracts.
+      schema:
+        type: string
+        examples: [BTC]
     ChangeID:
       name: id
       in: path
@@ -5864,7 +5961,8 @@ components:
                   - type: 'null'
         contracts:
           type: array
-          description: HOUSE's open positions as derivatives-service renders a user's positions.
+          description: HOUSE's open positions as derivatives-service renders a user's positions (settle_asset, contracts and
+            value_usd as UserPosition's).
           items:
             type: object
             additionalProperties: true
@@ -6079,6 +6177,10 @@ components:
         seller_bot:
           type: boolean
           description: The seller is a simulated market's bot.
+        settle_asset:
+          type: string
+          description: A contract trade's settlement asset (a coin-margined one's quantity is whole contracts, its quote_quantity
+            the USD value); empty on a spot trade, and on a contract's from before the coin-margined contracts (USDT).
     Deposit:
       type: object
       required: [deposit_id, user_id, asset, network, kind, address, tx_hash, amount, status, unclaimed, reason, confirmations,
@@ -7264,6 +7366,74 @@ components:
           description: >-
             The orders resting on the pair or contract (the read model, seconds behind; null when it cannot be read). A halt leaves
             them on the book and their owners may cancel them.
+    CoinContractMove:
+      type: object
+      description: One of a coin's contracts as a change moves it.
+      required: [symbol, margin_type, from, to]
+      properties:
+        symbol:
+          type: string
+        margin_type:
+          type: string
+          enum: [USDT, COIN]
+        from:
+          type: string
+        to:
+          type: string
+    CoinStatusPreview:
+      type: object
+      required: [coin, to, contracts, staying, confirmation, delay_seconds, two_person]
+      properties:
+        coin:
+          type: string
+        to:
+          type: string
+          enum: [CANCEL_ONLY, TRADING]
+        contracts:
+          type: array
+          description: The contracts that move, by symbol.
+          items:
+            $ref: '#/components/schemas/CoinContractMove'
+        staying:
+          type: array
+          description: The coin's other contracts (not delisted), where they are (from and to alike).
+          items:
+            $ref: '#/components/schemas/CoinContractMove'
+        confirmation:
+          $ref: '#/components/schemas/Confirmation'
+        delay_seconds:
+          type: integer
+          description: How long the change will wait once confirmed (or approved).
+        two_person:
+          type: boolean
+          description: A second ADMIN must approve it first (admin.two_person_approval).
+    CoinStatusRequest:
+      type: object
+      required: [to, reason, confirmation]
+      properties:
+        to:
+          type: string
+          enum: [CANCEL_ONLY, TRADING]
+        reason:
+          type: string
+          minLength: 3
+        confirmation:
+          type: string
+          description: The preview's confirmation.token.
+    CoinStatusResult:
+      type: object
+      required: [coin, to, contracts, change]
+      properties:
+        coin:
+          type: string
+        to:
+          type: string
+        contracts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoinContractMove'
+        change:
+          $ref: '#/components/schemas/InstrumentChange'
     ParamChange:
       type: object
       description: A trading parameter a change moves (JSON values as stored; null for none).
@@ -7363,10 +7533,11 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [CONFIG, PAIR_STATUS, CONTRACT_STATUS]
+          enum: [CONFIG, PAIR_STATUS, CONTRACT_STATUS, COIN_CONTRACTS_STATUS]
+          description: COIN_CONTRACTS_STATUS closes or reopens a coin's contracts at once (its params list each contract's move).
         target:
           type: string
-          examples: [instruments, pair:BTC-USDT, contract:BTC-USDT-PERP]
+          examples: [instruments, pair:BTC-USDT, contract:BTC-USDT-PERP, coin:BTC]
         status:
           type: string
           enum: [PENDING_APPROVAL, SCHEDULED, APPLIED, CANCELED, REJECTED, FAILED]
@@ -7888,6 +8059,10 @@ components:
         created_at:
           type: string
           format: date-time
+        settle_asset:
+          type: string
+          description: The asset its margin and fee are in; a coin-margined contract's quantities are whole contracts. Missing
+            reads as USDT.
     UserPosition:
       type: object
       description: A contract position as derivatives-service renders it.
@@ -7920,6 +8095,19 @@ components:
         leverage:
           type: integer
         liquidation_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        settle_asset:
+          type: string
+          description: The asset its margin, results and funding are in (USDT, or the coin of a coin-margined contract); missing on
+            positions from before the coin-margined contracts, USDT.
+        contracts:
+          description: A coin-margined position's whole contracts (signed, as quantity); null on a linear one.
+          $ref: '#/components/schemas/NullableDecimal'
+        value_coin:
+          description: A coin-margined position's value in its coin at the mark price (null without one or on a linear one).
+          $ref: '#/components/schemas/NullableDecimal'
+        value_usd:
+          description: Its value in USD (a coin-margined one's contracts at their face value).
           $ref: '#/components/schemas/NullableDecimal'
     IdentityRequest:
       type: object
@@ -9050,6 +9238,19 @@ components:
         mark_fresh:
           type: boolean
           description: False while the mark price is older than the margin monitor accepts; the figures stand still until it moves.
+        settle_asset:
+          type: string
+          description: The asset its margin, results and funding are in (USDT, or the coin of a coin-margined contract); missing on
+            positions from before the coin-margined contracts, USDT.
+        contracts:
+          description: A coin-margined position's whole contracts (signed, as quantity); null on a linear one.
+          $ref: '#/components/schemas/NullableDecimal'
+        value_coin:
+          description: A coin-margined position's value in its coin at the mark price (null without one or on a linear one).
+          $ref: '#/components/schemas/NullableDecimal'
+        value_usd:
+          description: Its value in USD (a coin-margined one's contracts at their face value).
+          $ref: '#/components/schemas/NullableDecimal'
     LiquidationStep:
       type: object
       required: [event_id, kind, user_id, symbol, position_side, cross, adl, trade_id, price, quantity, realized_pnl,
@@ -9099,6 +9300,10 @@ components:
         occurred_at:
           type: string
           format: date-time
+        settle_asset:
+          type: string
+          description: The asset of its amounts, its contract's (from the listing; a coin-margined contract's quantities are whole
+            contracts); empty for a cross account's warning and while the listing cannot be read, USDT.
     InsuranceFund:
       type: object
       required: [asset, balance, pnl_clearing]
@@ -9143,6 +9348,10 @@ components:
           description: Counterparty positions auto-deleveraged.
         insurance_paid:
           $ref: '#/components/schemas/Decimal'
+        settle_asset:
+          type: string
+          description: The asset of its fees, results, funding and insurance payments, the contract's (from the listing; notional
+            is in USD either way, volume in whole contracts on a coin-margined one); empty while the listing cannot be read, USDT.
     OpenInterest:
       type: object
       required: [symbol, long, short, positions]
@@ -9155,6 +9364,10 @@ components:
           $ref: '#/components/schemas/Decimal'
         positions:
           type: integer
+        settle_asset:
+          type: string
+          description: The contract's settlement asset (long and short are whole contracts on a coin-margined one); empty while
+            the listing cannot be read, USDT.
     CustodyOverview:
       type: object
       required: [provider, configured, error, coins, checks, submitted, callbacks]

@@ -7,28 +7,41 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Num, TimeText } from "../kit/format";
 import { Card, Page } from "../kit/Page";
+import { cents, coinMargined, useQuantityUnit } from "../kit/settle";
 import { SignedChart } from "../kit/SignedChart";
+import { useInstrumentConfig } from "./instruments/config";
 
 type House = AdminSchemas["House"];
 type Asset = House["assets"][number];
 type Pair = House["pairs"][number];
-type Position = { symbol?: string; position_side?: string; quantity?: string; entry_price?: string; mark_price?: string | null; unrealized_pnl?: string | null; margin?: string; leverage?: number };
+type Position = {
+  symbol?: string; position_side?: string; quantity?: string; entry_price?: string; mark_price?: string | null; unrealized_pnl?: string | null;
+  margin?: string; leverage?: number; settle_asset?: string; value_usd?: string | null;
+};
 type ContractState = AdminSchemas["ContractState"];
 type PnLBucket = AdminSchemas["HousePnLBucket"];
 
-/** HOUSE's net position on one contract: 0 when it is flat there. */
-type NetPosition = { symbol: string; quantity: string; notional: string | null; entry: string | null; mark: string | null; upnl: string | null };
+/** HOUSE's net position on one contract: 0 when it is flat there; amounts in settle_asset, notional in USD. */
+type NetPosition = {
+  symbol: string; settle_asset: string; quantity: string; notional: string | null; entry: string | null; mark: string | null; upnl: string | null;
+};
 
-/** netPositions lists every contract with HOUSE's net position (its positions summed; one-way mode has at most one), the largest first. */
-function netPositions(contracts: readonly ContractState[], positions: readonly Position[]): NetPosition[] {
+/**
+ * netPositions lists every contract with HOUSE's net position (its positions summed; one-way mode has at most one), the
+ * largest first. A coin-margined contract's quantity is whole contracts, its notional their face value in USD.
+ */
+function netPositions(contracts: readonly ContractState[], positions: readonly Position[], settles: ReadonlyMap<string, string>): NetPosition[] {
   const rows = contracts.map((c) => {
     const own = positions.filter((p) => p.symbol === c.symbol);
     const quantity = own.reduce((sum, p) => dec.add(sum, p.quantity ?? "0"), "0");
     const mark = own[0]?.mark_price ?? c.mark_price ?? null;
+    const settle_asset = own.find((p) => p.settle_asset)?.settle_asset ?? settles.get(c.symbol) ?? "USDT";
+    const faceValue = () => own.reduce((sum, p) => dec.add(sum, dec.mul(p.value_usd ?? "0", String(dec.sign(p.quantity ?? "0")))), "0");
     return {
       symbol: c.symbol,
+      settle_asset,
       quantity,
-      notional: mark ? dec.mul(quantity, mark) : null,
+      notional: coinMargined({ settle_asset }) ? faceValue() : mark ? dec.mul(quantity, mark) : null,
       entry: own.length === 1 ? (own[0]?.entry_price ?? null) : null,
       mark,
       upnl: own.length > 0 ? own.reduce((sum, p) => dec.add(sum, p.unrealized_pnl ?? "0"), "0") : null,
@@ -60,9 +73,12 @@ export default function HousePage() {
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/derivatives/contracts")).contracts,
     refetchInterval: 30_000,
   });
+  // The settlement asset of a contract HOUSE is flat on (its positions name theirs).
+  const cfg = useInstrumentConfig();
+  const settles = useMemo(() => new Map((cfg.data?.contracts ?? []).map((c) => [c.symbol, c.settle_asset || "USDT"])), [cfg.data]);
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   const h = q.data;
-  const contracts = netPositions(contractsQ.data ?? [], (h?.contracts ?? []) as Position[]);
+  const contracts = netPositions(contractsQ.data ?? [], (h?.contracts ?? []) as Position[], settles);
   const open = contracts.filter((c) => !dec.isZero(c.quantity)).length;
   return (
     <Page title={t("admin.house.title")} help={t("admin.house.help")}>
@@ -270,6 +286,7 @@ function Pairs({ pairs, loading }: { pairs: Pair[] | undefined; loading: boolean
 /** Positions is HOUSE's net position on every contract, flat ones included (the card kept from before C6). */
 function Positions({ rows, loading }: { rows: NetPosition[]; loading: boolean }) {
   const { t } = useTranslation();
+  const qtyUnit = useQuantityUnit();
   const columns = useMemo<ColumnDef<NetPosition, unknown>[]>(
     () => [
       { accessorKey: "symbol", header: t("admin.common.symbol") },
@@ -285,13 +302,16 @@ function Positions({ rows, loading }: { rows: NetPosition[]; loading: boolean })
           );
         },
       },
-      { id: "qty", header: t("admin.house.net"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} signed /> },
+      { id: "qty", header: t("admin.house.net"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} unit={qtyUnit(row.original)} signed /> },
       { id: "notional", header: t("admin.house.notional"), meta: right, cell: ({ row }) => <Num value={row.original.notional} decimals={2} signed /> },
       { id: "entry", header: t("admin.house.entry"), meta: right, cell: ({ row }) => <Num value={row.original.entry} /> },
       { id: "mark", header: t("admin.derivatives.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark} /> },
-      { id: "upnl", header: t("admin.house.unrealized"), meta: right, cell: ({ row }) => <Num value={row.original.upnl} decimals={2} signed /> },
+      {
+        id: "upnl", header: t("admin.house.unrealized"), meta: right,
+        cell: ({ row }) => <Num value={row.original.upnl} decimals={cents(row.original)} unit={row.original.settle_asset} signed />,
+      },
     ],
-    [t],
+    [t, qtyUnit],
   );
   return (
     <DataTable

@@ -667,10 +667,11 @@ type Derivatives interface {
 	// Order returns one of a user's contract orders as the user's API
 	// renders it.
 	Order(ctx context.Context, userID, orderID string) (json.RawMessage, error)
-	// CrossMargin measures a user's cross margin account and what a
+	// CrossMargin measures a user's cross margin account in an asset (its
+	// FUTURES account of that settlement asset; empty: USDT) and what a
 	// debit of its available balance would leave (equity, maintenance,
 	// states), as JSON.
-	CrossMargin(ctx context.Context, userID string, debit decimal.Decimal) (json.RawMessage, error)
+	CrossMargin(ctx context.Context, userID, asset string, debit decimal.Decimal) (json.RawMessage, error)
 	// TierImpact measures a contract's new risk ladder (the config
 	// document's risk_tiers) against its open positions, changing nothing.
 	TierImpact(ctx context.Context, symbol string, tiers json.RawMessage) (TierImpact, error)
@@ -914,17 +915,25 @@ type DerivativesDay struct {
 	Liquidations    uint64 `json:"liquidations"`
 	ADL             uint64 `json:"adl"`
 	InsurancePaid   string `json:"insurance_paid"`
+	// SettleAsset is the contract's settlement asset (the application's,
+	// from the listing); empty while the listing cannot be read.
+	SettleAsset string `json:"settle_asset"`
 }
 
-// OpenInterest is a contract's open positions in the read model.
+// OpenInterest is a contract's open positions in the read model: base
+// asset, or whole contracts of an inverse contract.
 type OpenInterest struct {
-	Symbol    string `json:"symbol"`
-	Long      string `json:"long"`
-	Short     string `json:"short"`
-	Positions uint64 `json:"positions"`
+	Symbol      string `json:"symbol"`
+	Long        string `json:"long"`
+	Short       string `json:"short"`
+	Positions   uint64 `json:"positions"`
+	SettleAsset string `json:"settle_asset"`
 }
 
-// LiquidationStep is a row of the liquidation read model.
+// LiquidationStep is a row of the liquidation read model. Its amounts are
+// in SettleAsset, the contract's (the application's, from the listing):
+// empty for a cross account's warning, which names no contract, and while
+// the listing cannot be read.
 type LiquidationStep struct {
 	EventID           string    `json:"event_id"`
 	Kind              string    `json:"kind"`
@@ -943,6 +952,7 @@ type LiquidationStep struct {
 	MarginBalance     string    `json:"margin_balance"`
 	MaintenanceMargin string    `json:"maintenance_margin"`
 	OccurredAt        time.Time `json:"occurred_at"`
+	SettleAsset       string    `json:"settle_asset"`
 }
 
 // The buckets a report sums its figures in (design 2026-10-02 §4.6).
@@ -1256,6 +1266,10 @@ type Trade struct {
 	// BuyerBot and SellerBot mark the simulated market's bots.
 	BuyerBot  bool `json:"buyer_bot"`
 	SellerBot bool `json:"seller_bot"`
+	// SettleAsset is a contract trade's settlement asset (an inverse one's
+	// quantity is whole contracts); empty on a spot trade and on a
+	// contract's from before the coin-margined contracts (USDT).
+	SettleAsset string `json:"settle_asset"`
 }
 
 // DepositQuery selects deposits; empty fields match everything.

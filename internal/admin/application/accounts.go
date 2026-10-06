@@ -246,11 +246,12 @@ func (s *Service) CancelContractOrder(ctx context.Context, p Principal, userID, 
 	return raw, s.audit(ctx, p, "user:"+userID, "admin.derivatives.order_canceled", reason, string(details))
 }
 
-// FuturesMargin measures a user's cross margin account and what a debit of
-// its FUTURES balance would leave: a negative adjustment lowers the equity
-// at once, and the next round of the margin monitor may liquidate it, so
-// the confirmation shows it (C5.5 ⑧).
-func (s *Service) FuturesMargin(ctx context.Context, p Principal, userID string, debit decimal.Decimal) (json.RawMessage, error) {
+// FuturesMargin measures a user's cross margin account in an asset (the
+// FUTURES account of that settlement asset, USDT by default; review ER ⑤)
+// and what a debit of its balance would leave: a negative adjustment
+// lowers the equity at once, and the next round of the margin monitor may
+// liquidate it, so the confirmation shows it (C5.5 ⑧).
+func (s *Service) FuturesMargin(ctx context.Context, p Principal, userID, asset string, debit decimal.Decimal) (json.RawMessage, error) {
 	if err := p.require(domain.PermUsersRead); err != nil {
 		return nil, err
 	}
@@ -260,7 +261,11 @@ func (s *Service) FuturesMargin(ctx context.Context, p Principal, userID string,
 	if debit.IsNegative() {
 		return nil, apperr.Invalid("the debit is a positive amount")
 	}
-	return s.Derivatives.CrossMargin(ctx, userID, debit)
+	asset = strings.ToUpper(strings.TrimSpace(asset))
+	if asset != "" && !assetRE.MatchString(asset) {
+		return nil, apperr.Invalid("asset is an asset code")
+	}
+	return s.Derivatives.CrossMargin(ctx, userID, asset, debit)
 }
 
 // Positions returns a user's open contract positions.

@@ -385,9 +385,10 @@ func stampOrNil(t time.Time) any {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// pairTransitions is the pair and contract state machine (appendix B).
+// pairTransitions is the pair and contract state machine (appendix B):
+// CANCEL_ONLY reopens until delisted (B122, coin-margined design §3.5).
 var pairTransitions = map[string][]string{
-	"PREPARE": {"TRADING"}, "TRADING": {"HALT", "CANCEL_ONLY"}, "HALT": {"TRADING", "CANCEL_ONLY"}, "CANCEL_ONLY": {"DELISTED"},
+	"PREPARE": {"TRADING"}, "TRADING": {"HALT", "CANCEL_ONLY"}, "HALT": {"TRADING", "CANCEL_ONLY"}, "CANCEL_ONLY": {"TRADING", "DELISTED"},
 }
 
 const statusHalt = "HALT"
@@ -818,6 +819,8 @@ func (s *Service) applyChange(ctx context.Context, c domain.InstrumentChange) (r
 			return "", true, err
 		}
 		return done, true, nil
+	case domain.ChangeCoinContractsStatus:
+		return s.applyCoinStatus(ctx, c)
 	case domain.ChangeConfig:
 		var doc referenced
 		if err := json.Unmarshal(c.Payload, &doc); err != nil {

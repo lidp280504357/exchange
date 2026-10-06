@@ -218,6 +218,16 @@ func TestUsersAndHouseReports(t *testing.T) {
 			(generateUUIDv4(), generateUUIDv4(), '` + u1 + `', 'BTC-USDT-PERP', 'BUY', 60000, 0.1, 6000, 3, 0, now64(3))`,
 		`INSERT INTO derivatives_funding (position_id, user_id, symbol, funding_time, amount, settled_at) VALUES
 			(generateUUIDv4(), '` + house + `', 'BTC-USDT-PERP', toStartOfHour(now()), -2.5, now64(3))`,
+		// A coin-margined contract's results are in BTC, valued at the
+		// fill's price and the settlement's mark price: (0.0005 - 0.00001)
+		// x 60,000 = 29.4 and -0.0001 x 60,000 = -6; a linear contract's
+		// named USDT count as they are.
+		`INSERT INTO derivatives_fills (trade_id, order_id, user_id, symbol, settle_asset, side, price, quantity, notional, fee,
+			realized_pnl, executed_at) VALUES
+			(generateUUIDv4(), generateUUIDv4(), '` + house + `', 'BTC-USD-PERP', 'BTC', 'SELL', 60000, 10, 1000, 0.00001, 0.0005, now64(3)),
+			(generateUUIDv4(), generateUUIDv4(), '` + house + `', 'ETH-USDT-PERP', 'USDT', 'BUY', 3000, 1, 3000, 1, 10, now64(3))`,
+		`INSERT INTO derivatives_funding (position_id, user_id, symbol, settle_asset, funding_time, mark_price, amount, settled_at) VALUES
+			(generateUUIDv4(), '` + house + `', 'BTC-USD-PERP', 'BTC', toStartOfHour(now()), 60000, -0.0001, now64(3))`,
 		`INSERT INTO wallet_deposits (deposit_id, user_id, asset, amount, status, unclaimed, updated_at, version) VALUES
 			(generateUUIDv4(), '` + u2 + `', 'USDT', 10, 'CREDITED', false, now64(3), 1),
 			(generateUUIDv4(), '` + u2 + `', 'USDT', 5, 'CREDITED', false, now64(3), 1)`,
@@ -253,7 +263,7 @@ func TestUsersAndHouseReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(contracts) != 1 || contracts[0].Realized.String() != "40" || contracts[0].Funding.String() != "-2.5" {
+	if len(contracts) != 1 || contracts[0].Realized.String() != "78.4" || contracts[0].Funding.String() != "-8.5" {
 		t.Fatalf("house contracts %+v", contracts)
 	}
 	month := ports.ReportRange{From: midnight.AddDate(0, 0, -2), To: midnight, Bucket: ports.BucketMonth}

@@ -9,6 +9,7 @@ import { closeOutcome, forceClose } from "../users/money";
 import { FilterBar, useFilters } from "../../kit/filters";
 import { Num, UserCell } from "../../kit/format";
 import { Page } from "../../kit/Page";
+import { settleOf, useQuantityUnit } from "../../kit/settle";
 
 type Position = AdminSchemas["RiskPosition"];
 
@@ -43,6 +44,7 @@ export default function Positions({ admin }: { admin: Admin }) {
   const house = q.data?.house_user_id ?? null;
   const [closing, setClosing] = useState<Position | null>(null);
   const act = can(admin, "derivatives.write");
+  const qtyUnit = useQuantityUnit();
   const columns = useMemo<ColumnDef<Position, unknown>[]>(
     () => [
       {
@@ -63,7 +65,7 @@ export default function Positions({ admin }: { admin: Admin }) {
           );
         },
       },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={dec.abs(row.original.quantity)} /> },
+      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={dec.abs(row.original.quantity)} unit={qtyUnit(row.original)} /> },
       { id: "entry", header: t("admin.money.entry"), meta: right, cell: ({ row }) => <Num value={row.original.entry_price} /> },
       {
         id: "mark",
@@ -80,12 +82,12 @@ export default function Positions({ admin }: { admin: Admin }) {
             </span>
           ),
       },
-      { id: "upnl", header: t("admin.money.upnl"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} signed /> },
+      { id: "upnl", header: t("admin.money.upnl"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} unit={settleOf(row.original)} signed /> },
       {
         id: "margin", header: t("admin.money.margin"), meta: right,
         cell: ({ row }) => (
           <span className="flex flex-col items-end">
-            <Num value={row.original.margin} />
+            <Num value={row.original.margin} unit={settleOf(row.original)} />
             <span className="whitespace-nowrap text-xs text-fg-3">
               {row.original.margin_mode === "CROSS" ? t("admin.money.cross") : t("admin.money.isolated")} · {row.original.leverage}x
             </span>
@@ -111,7 +113,7 @@ export default function Positions({ admin }: { admin: Admin }) {
           ]
         : []),
     ],
-    [t, act, house],
+    [t, act, house, qtyUnit],
   );
   return (
     <Page title={t("admin.nav.positions")} help={t("admin.positions.help")}>
@@ -156,7 +158,7 @@ export default function Positions({ admin }: { admin: Admin }) {
             <span className="inline-flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs">{closing.user_id}</span>
               <span className="font-medium">{closing.symbol}</span>
-              <Num value={closing.quantity} signed />
+              <Num value={closing.quantity} unit={qtyUnit(closing)} signed />
               {closing.position_side !== "BOTH" && <span className="text-xs text-fg-3">{closing.position_side}</span>}
             </span>
           }

@@ -83,12 +83,20 @@ function TextsField({ label, value, onChange, disabled, long }: { label: string;
         value={value[lang] ?? ""}
         disabled={disabled}
         rows={2}
+        placeholder={lang === "zh-TW" ? t("admin.platform.zhTWEmpty") : undefined}
         onChange={(e) => onChange({ ...value, [lang]: e.target.value })}
         className="w-full rounded-1 border border-line-1 bg-bg-1 px-2.5 py-1.5 text-sm text-fg-1 disabled:opacity-60"
         aria-label={`${label} ${lang}`}
       />
     ) : (
-      <Input size="sm" value={value[lang] ?? ""} disabled={disabled} onValueChange={(v) => onChange({ ...value, [lang]: v })} aria-label={`${label} ${lang}`} />
+      <Input
+        size="sm"
+        value={value[lang] ?? ""}
+        disabled={disabled}
+        placeholder={lang === "zh-TW" ? t("admin.platform.zhTWEmpty") : undefined}
+        onValueChange={(v) => onChange({ ...value, [lang]: v })}
+        aria-label={`${label} ${lang}`}
+      />
     );
   return (
     <FormField label={label}>
@@ -97,8 +105,9 @@ function TextsField({ label, value, onChange, disabled, long }: { label: string;
           {t("admin.platform.zh")}
           {box("zh-CN")}
         </label>
-        <label className="flex flex-col gap-1 text-xs text-fg-3" title={t("admin.platform.zhTWHint")}>
-          {t("admin.platform.zhTW")}
+        {/* Optional, said where it is written (review EV): empty, the sites show the Simplified. */}
+        <label className="flex flex-col gap-1 text-xs text-fg-3">
+          {t("admin.platform.zhTWOptional")}
           {box("zh-TW")}
         </label>
         <label className="flex flex-col gap-1 text-xs text-fg-3">

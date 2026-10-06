@@ -20,12 +20,12 @@ import { useTodo } from "../live";
 
 type Status = PairConfig["status"];
 
-/** The status machine of pairs and contracts (appendix B). */
+/** The status machine of pairs and contracts (appendix B): CANCEL_ONLY reopens until delisted (B122). */
 export const NEXT: Record<Status, Status[]> = {
   PREPARE: ["TRADING"],
   TRADING: ["HALT", "CANCEL_ONLY"],
   HALT: ["TRADING", "CANCEL_ONLY"],
-  CANCEL_ONLY: ["DELISTED"],
+  CANCEL_ONLY: ["TRADING", "DELISTED"],
   DELISTED: [],
 };
 

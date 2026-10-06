@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
 import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
+import { coinMargined, useQuantityUnit } from "../../kit/settle";
 
 // The record lists the pages and the user drawer share: orders, trades,
 // deposits and the audit trail, each paged with its cursor.
@@ -126,14 +127,19 @@ export function useTrades(q: TradeQuery) {
 
 export function TradesTable({ list, onRowClick }: { list: CursorList<Trade>; onRowClick?: (t: Trade) => void }) {
   const { t } = useTranslation();
+  const qtyUnit = useQuantityUnit();
   const columns = useMemo<ColumnDef<Trade, unknown>[]>(
     () => [
       { id: "time", header: t("admin.common.time"), cell: ({ row }) => <TimeText value={row.original.executed_at} /> },
       { id: "id", header: t("admin.orders.tradeId"), cell: ({ row }) => <IdText value={row.original.trade_id} /> },
       { accessorKey: "symbol", header: t("admin.common.symbol") },
       { id: "price", header: t("admin.common.price"), meta: right, cell: ({ row }) => <Num value={row.original.price} /> },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} /> },
-      { id: "quote", header: t("admin.orders.quote"), meta: right, cell: ({ row }) => <Num value={row.original.quote_quantity} /> },
+      // A coin-margined contract's trade: whole contracts, and their value in USD.
+      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} unit={qtyUnit(row.original)} /> },
+      {
+        id: "quote", header: t("admin.orders.quote"), meta: right,
+        cell: ({ row }) => <Num value={row.original.quote_quantity} unit={coinMargined(row.original) ? "USD" : undefined} />,
+      },
       { id: "taker", header: t("admin.orders.taker"), cell: ({ row }) => <EnumBadge group="side" code={row.original.taker_side} /> },
       { id: "buyer", header: t("admin.orders.buyer"), cell: ({ row }) => <Party trade={row.original} side="BUY" /> },
       { id: "seller", header: t("admin.orders.seller"), cell: ({ row }) => <Party trade={row.original} side="SELL" /> },

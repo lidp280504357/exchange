@@ -311,6 +311,52 @@ as AUDITOR GET /admin/v1/instruments ""
 expect 200 - "instruments"
 check '(.pairs[] | select(.symbol == "ETH-BTC") | .status) == "TRADING" and (.assets | map(.asset_code) | index("ETH")) != null' "ETH-BTC still trades; assets are listed"
 
+echo "== a coin's contracts closed or reopened at once (A63; coin-margined design 2026-10-06 section 3.5)"
+# cancel_coin_changes cancels what this run asked of BTC's contracts and is
+# still waiting: the request below is canceled at once, this is for a run
+# stopped in between (the change waits a minute, or a second ADMIN).
+cancel_coin_changes() {
+  local id
+  as ADMIN GET "/admin/v1/instruments/changes?limit=50" ""
+  for id in $(jq -r --arg e "$EMAIL_ADMIN" '.items[]? | select(.target == "coin:BTC" and .requested_by_email == $e
+    and (.status == "SCHEDULED" or .status == "PENDING_APPROVAL")) | .id' <<<"$BODY"); do
+    as ADMIN POST "/admin/v1/instruments/changes/$id/cancel" '{"reason":"e2e cleanup"}' >/dev/null
+  done
+}
+as OPERATOR POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"CANCEL_ONLY"}'
+if [[ $STATUS == 404 && $(jq -r '.code // ""' <<<"$BODY") != COMMON_NOT_FOUND ]] || [[ $STATUS == 405 ]]; then
+  echo "skip a coin's contracts at once: this admin-service is from before A63"
+else
+  expect 403 ADMIN_FORBIDDEN "an OPERATOR closes no coin"
+  as ADMIN POST /admin/v1/derivatives/coins/btc/status/preview '{"to":"CANCEL_ONLY"}'
+  expect 200 - "ADMIN previews closing BTC"
+  check '([.contracts[].symbol] | index("BTC-USDT-PERP") != null and index("BTC-USD-PERP") != null)
+    and .coin == "BTC" and .to == "CANCEL_ONLY" and all(.contracts[]; (.from == "TRADING" or .from == "HALT") and .to == "CANCEL_ONLY")
+    and (.confirmation.token | length) > 40 and .delay_seconds == 60' \
+    "both margin types (trading or halted), one confirmation, waiting a minute"
+  BTC_CLOSE=$(jq -r .confirmation.token <<<"$BODY")
+  as ADMIN POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"TRADING"}'
+  expect 409 INSTRUMENT_STATUS_TRANSITION_INVALID "none closed to reopen"
+  as ADMIN POST /admin/v1/derivatives/coins/BTC/status/preview '{"to":"DELISTED"}'
+  expect 400 COMMON_INVALID_ARGUMENT "delisting stays per contract"
+  as ADMIN POST /admin/v1/derivatives/coins/NOPE/status/preview '{"to":"CANCEL_ONLY"}'
+  expect 404 COMMON_NOT_FOUND "a coin without contracts"
+  as ADMIN POST /admin/v1/derivatives/coins/BTC/status '{"to":"CANCEL_ONLY","reason":"e2e without the preview"}'
+  expect 409 ADMIN_CONFIRMATION_REQUIRED "not without the preview's confirmation"
+  at_exit cancel_coin_changes
+  as ADMIN POST /admin/v1/derivatives/coins/BTC/status "$(jq -nc --arg c "$BTC_CLOSE" '{to: "CANCEL_ONLY", reason: "e2e closes BTC, canceled at once", confirmation: $c}')"
+  expect 202 - "confirmed: one change for BTC's contracts"
+  check '.change.kind == "COIN_CONTRACTS_STATUS" and .change.target == "coin:BTC" and (.change.summary.params | length) == (.contracts | length)
+    and (.change.status == "SCHEDULED" or .change.status == "PENDING_APPROVAL")' "recorded with each contract's move"
+  COIN_CHANGE=$(jq -r .change.id <<<"$BODY")
+  as ADMIN POST "/admin/v1/instruments/changes/$COIN_CHANGE/cancel" '{"reason":"e2e changed its mind"}'
+  expect 200 - "ADMIN cancels it before its time"
+  check '.status == "CANCELED"' "canceled, nothing applied"
+  as AUDITOR GET /admin/v1/instruments/config ""
+  expect 200 - "the reference data"
+  check '[.contracts[] | select(.base_asset == "BTC") | .status] | length >= 2 and all(. == "TRADING" or . == "HALT")' "BTC's contracts as they were"
+fi
+
 echo "== cancel every order of the account"
 balance() {
   call GET /v1/account/balances "" "${UAUTH[@]}"
@@ -495,7 +541,8 @@ expect 200 - "positions near liquidation"
 check '.positions | type == "array"' "a list"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?days=30" ""
 expect 200 - "liquidation steps"
-check '.items | type == "array"' "a list"
+check '.items | type == "array" and all(.items[]; (.settle_asset | type) == "string" and (.symbol == "" or .settle_asset != ""))' \
+  "a list, each step of a contract with its settlement asset (review ER)"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?kind=SIDEWAYS" ""
 expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?days=7&kind=FILLED&symbol=ETH-USDT-PERP" ""
@@ -562,10 +609,11 @@ as AUDITOR GET "/admin/v1/reports/candles?symbol=ETH-BTC&interval=2h" ""
 expect 400 COMMON_INVALID_ARGUMENT "an interval the report does not offer"
 as AUDITOR GET "/admin/v1/reports/derivatives?days=30" ""
 expect 200 - "contract report"
-check '.items | type == "array" and all(.[]; (.notional | test("^[0-9.]+$")) and (.liquidations >= 0))' "per contract and day"
+check '.items | type == "array" and all(.[]; (.notional | test("^[0-9.]+$")) and (.liquidations >= 0) and (.settle_asset | type) == "string")' \
+  "per contract and day, with its settlement asset"
 as AUDITOR GET /admin/v1/reports/open-interest ""
 expect 200 - "open interest"
-check '.items | type == "array" and all(.[]; .long == .short)' "long equals short per contract"
+check '.items | type == "array" and all(.[]; .long == .short and (.settle_asset | type) == "string")' "long equals short per contract"
 TODAY=$(date -u +%Y-%m-%d)
 as AUDITOR GET "/admin/v1/reports/trading?from=$(jq -nr 'now - 40 * 86400 | strftime("%Y-%m-%d")')&to=$TODAY&bucket=month" ""
 expect 200 - "trading report between two dates, by month"
@@ -828,7 +876,8 @@ expect 200 - "and the next page"
 check "($PAGE + [.items[].order_id]) == $SIX and ($SIX | length) == 6" "the same six, none lost or repeated"
 as AUDITOR GET "/admin/v1/trades?symbol=ETH-BTC&limit=3" ""
 expect 200 - "trades"
-check '(.items | length) <= 3 and all(.items[]; .symbol == "ETH-BTC" and (.price | test("^[0-9.]+$")))' "of one symbol"
+check '(.items | length) <= 3 and all(.items[]; .symbol == "ETH-BTC" and (.price | test("^[0-9.]+$")) and .settle_asset == "")' \
+  "of one symbol; a spot trade has no settlement asset"
 as AUDITOR GET "/admin/v1/deposits?limit=5" ""
 expect 200 - "deposits"
 check '.items | type == "array" and length <= 5' "a page"
@@ -988,8 +1037,9 @@ else
   eventually 40 "the console shows the long" user_long
   as AUDITOR GET "/admin/v1/positions?user_id=$USER_ID&symbol=eth-usdt-perp" ""
   expect 200 - "every user's positions, of this user"
-  check '(.positions | length) == 1 and .positions[0].quantity == "0.1" and .positions[0].mark_price != null and (.house_user_id | type) == "string"' \
-    "the long valued at the mark price; HOUSE's account named"
+  check '(.positions | length) == 1 and .positions[0].quantity == "0.1" and .positions[0].mark_price != null and (.house_user_id | type) == "string"
+    and .positions[0].settle_asset == "USDT"' \
+    "the long valued at the mark price, in USDT; HOUSE's account named"
   HOUSE_ID=$(jq -r .house_user_id <<<"$BODY")
   as AUDITOR GET "/admin/v1/positions?user_id=$HOUSE_ID&symbol=ETH-USDT-PERP" ""
   expect 200 - "HOUSE's positions"
@@ -1003,6 +1053,12 @@ else
   expect 200 - "the user's cross margin"
   check '.asset == "USDT" and .positions == 1 and (.unmeasured or (((.equity | tonumber) - (.equity_after | tonumber) - 1 | . * .) < 1e-12 and
     (.maintenance | tonumber) > 0 and .state == "HEALTHY"))' "the long, healthy; a debit of 1 USDT leaves 1 less"
+  # A coin-margined cross account is the coin's (review ER ⑤, C39 ⑤).
+  as AUDITOR GET "/admin/v1/users/$USER_ID/futures-margin?debit=0.001&asset=btc" ""
+  expect 200 - "the user's BTC cross margin"
+  check '.asset == "BTC" and .positions == 0' "measured in the asset asked for: the long settles in USDT"
+  as AUDITOR GET "/admin/v1/users/$USER_ID/futures-margin?debit=1&asset=B-T" ""
+  expect 400 COMMON_INVALID_ARGUMENT "an asset that is no asset code"
   as AUDITOR GET "/admin/v1/users/$USER_ID/futures-margin?debit=-1" ""
   expect 400 COMMON_INVALID_ARGUMENT "a debit is positive"
   as FINANCE POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
@@ -1811,14 +1867,16 @@ check '(.items | length) == ([.items[].key] | unique | length) and ((.items | le
     or ((.items | length) == 15 and all(.items[]; .key != "margin")))
   and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
   "eighteen items, each with its state"
-check '[.items[] | select(.key == "coin_m")] | all(.value.flag == "derivatives.coin_m" and (.value.enabled | type) == "boolean"
-  and (.status == "OK" or (.value.enabled == true and (.value | has("rules") | not))))' \
+# An item whose source did not answer is UNKNOWN, its value without the
+# fields: not a failure of the item's logic (review ER ④).
+check '[.items[] | select(.key == "coin_m")] | all(.status == "UNKNOWN" or (.value.flag == "derivatives.coin_m" and (.value.enabled | type) == "boolean"
+  and (.status == "OK" or (.value.enabled == true and (.value | has("rules") | not)))))' \
   "the coin-margined contracts' item reads its switch, and fails only while it is on for everyone"
-check '[.items[] | select(.key == "insurance")] | all((.value.balances | type) == "object" and (.value.short | type) == "array"
-  and ((.status == "OK") == (.value.short | length == 0)))' \
-  "the insurance item lists each open contract's settlement asset and fails while one has no fund"
-check '[.items[] | select(.key == "margin")] | all(.value.flag == "margin.enabled" and (.value.enabled | type) == "boolean"
-  and (.status == "FAIL" or .value.global == false))' \
+check '[.items[] | select(.key == "insurance")] | all(.status == "UNKNOWN" or ((.value.balances | type) == "object" and (.value.short | type) == "array"
+  and (.value.open | has("USDT") and has("COIN")) and ((.status == "OK") == (.value.short | length == 0))))' \
+  "the insurance item lists each open contract's settlement asset, counts the open contracts by type, and fails while one has no fund"
+check '[.items[] | select(.key == "margin")] | all(.status == "UNKNOWN" or (.value.flag == "margin.enabled" and (.value.enabled | type) == "boolean"
+  and (.status == "FAIL" or .value.global == false)))' \
   "margin trading's item reads its switches, and fails while it is on for everyone"
 check '.items[] | select(.key == "house") | .value.flag == "market.house_liquidity" and (.value.backed | has("USDT"))' \
   "HOUSE's item reads its flag and its inventory of the backed assets"

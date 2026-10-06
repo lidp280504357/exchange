@@ -165,7 +165,8 @@ func (h *Handler) userPositions(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]json.RawMessage{"positions": raw})
 }
 
-// futuresMargin previews a debit of a user's FUTURES balance (?debit=).
+// futuresMargin previews a debit of a user's FUTURES balance (?debit=) in
+// an asset (?asset=, USDT by default).
 func (h *Handler) futuresMargin(w http.ResponseWriter, r *http.Request) {
 	debit := decimal.Zero
 	if v := r.URL.Query().Get("debit"); v != "" {
@@ -175,7 +176,7 @@ func (h *Handler) futuresMargin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	raw, err := h.Svc.FuturesMargin(r.Context(), principal(r), chi.URLParam(r, "id"), debit)
+	raw, err := h.Svc.FuturesMargin(r.Context(), principal(r), chi.URLParam(r, "id"), r.URL.Query().Get("asset"), debit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

@@ -10,6 +10,7 @@ import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText } from "../../kit/format";
 import type { Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
+import { settleOf, useQuantityUnit } from "../../kit/settle";
 import { AdjustForm, Outcome } from "../funds/Adjustments";
 import { OrdersTable, useOrders, type Order } from "../records/tables";
 
@@ -268,6 +269,7 @@ const ACTIVE = ["NEW", "OPEN", "PARTIALLY_FILLED"];
 export function OrdersTab({ admin, userId }: { admin: Admin; userId: string }) {
   const { t } = useTranslation();
   const act = can(admin, "orders.cancel");
+  const qtyUnit = useQuantityUnit();
   const [canceling, setCanceling] = useState<{ kind: "spot" | "contract"; id: string; label: string } | null>(null);
   const spot = useOrders({ user_id: userId });
   const contracts = useQuery({
@@ -292,8 +294,8 @@ export function OrdersTab({ admin, userId }: { admin: Admin; userId: string }) {
       },
       { id: "type", header: t("admin.orders.type"), cell: ({ row }) => <EnumText group="orderType" code={row.original.type} /> },
       { id: "price", header: t("admin.common.price"), meta: right, cell: ({ row }) => <Num value={row.original.price} /> },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} /> },
-      { id: "filled", header: t("admin.orders.filled"), meta: right, cell: ({ row }) => <Num value={row.original.filled_quantity} /> },
+      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} unit={qtyUnit(row.original)} /> },
+      { id: "filled", header: t("admin.orders.filled"), meta: right, cell: ({ row }) => <Num value={row.original.filled_quantity} unit={qtyUnit(row.original)} /> },
       {
         id: "status", header: t("admin.common.status"),
         cell: ({ row }) => (
@@ -321,7 +323,7 @@ export function OrdersTab({ admin, userId }: { admin: Admin; userId: string }) {
           ]
         : []),
     ],
-    [t, act],
+    [t, act, qtyUnit],
   );
   const spotAction = act
     ? (o: Order) =>
@@ -391,6 +393,7 @@ export function OrdersTab({ admin, userId }: { admin: Admin; userId: string }) {
 export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }) {
   const { t } = useTranslation();
   const act = can(admin, "derivatives.write");
+  const qtyUnit = useQuantityUnit();
   const [closing, setClosing] = useState<Position | null>(null);
   const positions = useQuery({
     queryKey: userKey(userId, "positions"),
@@ -412,15 +415,15 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
           );
         },
       },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={dec.abs(row.original.quantity)} /> },
+      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={dec.abs(row.original.quantity)} unit={qtyUnit(row.original)} /> },
       { id: "entry", header: t("admin.money.entry"), meta: right, cell: ({ row }) => <Num value={row.original.entry_price} /> },
       { id: "mark", header: t("admin.money.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark_price} /> },
       {
         id: "liq", header: t("admin.money.liquidation"), meta: right,
         cell: ({ row }) => (row.original.liquidation_price ? <Num value={row.original.liquidation_price} className="text-warn-strong" /> : <span className="text-fg-3">—</span>),
       },
-      { id: "upnl", header: t("admin.money.upnl"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} signed /> },
-      { id: "margin", header: t("admin.money.margin"), meta: right, cell: ({ row }) => <Num value={row.original.margin} /> },
+      { id: "upnl", header: t("admin.money.upnl"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} unit={settleOf(row.original)} signed /> },
+      { id: "margin", header: t("admin.money.margin"), meta: right, cell: ({ row }) => <Num value={row.original.margin} unit={settleOf(row.original)} /> },
       {
         id: "mode", header: t("admin.money.mode"),
         cell: ({ row }) => (
@@ -442,7 +445,7 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
           ]
         : []),
     ],
-    [t, act],
+    [t, act, qtyUnit],
   );
   return (
     <div className="flex flex-col gap-4">
@@ -467,7 +470,7 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
           target={
             <span className="inline-flex flex-wrap items-center gap-2">
               <span className="font-medium">{closing.symbol}</span>
-              <Num value={closing.quantity} signed />
+              <Num value={closing.quantity} unit={qtyUnit(closing)} signed />
               {closing.position_side !== "BOTH" && <span className="text-xs text-fg-3">{closing.position_side}</span>}
             </span>
           }

@@ -111,8 +111,11 @@ export function articleBody(d: Draft, t: (key: string) => string) {
   const zh = d.texts["zh-CN"];
   if (!zh.title.trim() || !zh.body.trim()) throw new FormError(t("admin.content.needChinese"));
   const written = (x: Text) => x.title.trim() !== "" || x.body.trim() !== "";
+  // A language half written says which (review EV): its title and body go together.
+  const half = (x: Text) => written(x) && (!x.title.trim() || !x.body.trim());
+  if (half(d.texts["zh-TW"])) throw new FormError(t("admin.content.needBothTW"));
+  if (half(d.texts.en)) throw new FormError(t("admin.content.needBoth"));
   const texts = [zh, ...[d.texts["zh-TW"], d.texts.en].filter(written)];
-  if (texts.some((x) => !x.title.trim() || !x.body.trim())) throw new FormError(t("admin.content.needBoth"));
   const order = Number(d.order);
   if (!Number.isInteger(order)) throw new FormError(t("admin.content.badOrder"));
   return { slug: d.slug, modes: d.modes, category: d.category, pinned: d.pinned, order, texts };

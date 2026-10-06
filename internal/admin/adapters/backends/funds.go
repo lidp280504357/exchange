@@ -76,10 +76,14 @@ func (d Derivatives) CancelOrder(ctx context.Context, userID, orderID string) (j
 	return d.do(ctx, http.MethodDelete, d.Base+"/v1/derivatives/orders/"+url.PathEscape(orderID), nil, map[string]string{"X-User-Id": userID})
 }
 
-// CrossMargin measures a user's cross margin account and a debit of it.
-func (d Derivatives) CrossMargin(ctx context.Context, userID string, debit decimal.Decimal) (json.RawMessage, error) {
-	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/users/"+url.PathEscape(userID)+"/cross-margin?debit="+
-		url.QueryEscape(debit.String()), nil, nil)
+// CrossMargin measures a user's cross margin account in an asset and a
+// debit of it.
+func (d Derivatives) CrossMargin(ctx context.Context, userID, asset string, debit decimal.Decimal) (json.RawMessage, error) {
+	q := url.Values{"debit": {debit.String()}}
+	if asset != "" {
+		q.Set("asset", asset)
+	}
+	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/users/"+url.PathEscape(userID)+"/cross-margin?"+q.Encode(), nil, nil)
 }
 
 // Order returns one of a user's contract orders.

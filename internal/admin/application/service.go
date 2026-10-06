@@ -754,7 +754,15 @@ func (s *Service) Liquidations(ctx context.Context, p Principal, q ports.Liquida
 		q.Limit = 100
 	}
 	q.Days = reportDays(q.Days)
-	return s.Reports.Liquidations(ctx, q)
+	steps, next, err := s.Reports.Liquidations(ctx, q)
+	if err != nil || len(steps) == 0 {
+		return steps, next, err
+	}
+	settle := s.settlements(ctx)
+	for i := range steps {
+		steps[i].SettleAsset = settle[steps[i].Symbol]
+	}
+	return steps, next, nil
 }
 
 // AuditLogs returns a page of the audit trail, newest first; limit
@@ -805,7 +813,15 @@ func (s *Service) DerivativesReport(ctx context.Context, p Principal, q ReportQu
 	if err != nil {
 		return nil, err
 	}
-	return s.Reports.Derivatives(ctx, rng)
+	days, err := s.Reports.Derivatives(ctx, rng)
+	if err != nil || len(days) == 0 {
+		return days, err
+	}
+	settle := s.settlements(ctx)
+	for i := range days {
+		days[i].SettleAsset = settle[days[i].Symbol]
+	}
+	return days, nil
 }
 
 // OpenInterest returns each contract's open positions from the read
@@ -814,7 +830,15 @@ func (s *Service) OpenInterest(ctx context.Context, p Principal) ([]ports.OpenIn
 	if err := p.require(domain.PermReportsRead); err != nil {
 		return nil, err
 	}
-	return s.Reports.OpenInterest(ctx)
+	list, err := s.Reports.OpenInterest(ctx)
+	if err != nil || len(list) == 0 {
+		return list, err
+	}
+	settle := s.settlements(ctx)
+	for i := range list {
+		list[i].SettleAsset = settle[list[i].Symbol]
+	}
+	return list, nil
 }
 
 // CandleReport returns the newest candles of a symbol (default 48, at most

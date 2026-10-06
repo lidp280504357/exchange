@@ -24,8 +24,9 @@ type docCatalog struct {
 	order []string
 	real  int
 	// down fails every call as a service down; lost moves a status but
-	// loses the answer.
+	// loses the answer; refuse refuses to move that symbol.
 	down, lost bool
+	refuse     string
 }
 
 var entityKeys = map[string]struct{ section, key string }{
@@ -112,6 +113,9 @@ func (c *docCatalog) setStatus(entity, symbol, to string) (string, error) {
 	if !ok {
 		return "", apperr.NotFound("no such item")
 	}
+	if symbol == c.refuse {
+		return "", apperr.New(apperr.KindConflict, "INSTRUMENT_STATUS_TRANSITION_INVALID", "no such move")
+	}
 	from := it["status"].(string)
 	it["status"], it["version"] = to, it["version"].(float64)+1
 	if c.lost {
@@ -157,8 +161,14 @@ const seedDoc = `{
 
 func changeRig(t *testing.T) (*harness, *docCatalog, Principal, Principal, Principal) {
 	t.Helper()
+	return changeRigOf(t, seedDoc)
+}
+
+// changeRigOf is changeRig over the reference data of doc.
+func changeRigOf(t *testing.T, doc string) (*harness, *docCatalog, Principal, Principal, Principal) {
+	t.Helper()
 	h := newHarness(t)
-	catalog := newDocCatalog(t, seedDoc)
+	catalog := newDocCatalog(t, doc)
 	h.svc.Catalog, h.svc.Reference, h.svc.Flags, h.svc.Features = catalog, &fakeReference{}, &houseFlags{}, onFlags{}
 	h.svc.ChangeDelayFloor = time.Minute // as the test server's e2e runs
 	h.admin(t, "boss@example.com", domain.RoleAdmin)

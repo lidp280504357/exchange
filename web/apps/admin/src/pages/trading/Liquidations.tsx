@@ -7,6 +7,7 @@ import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
+import { settleOf, useQuantityUnit } from "../../kit/settle";
 
 type Step = AdminSchemas["LiquidationStep"];
 
@@ -25,6 +26,7 @@ const DAYS = ["1", "7", "30", "90"];
 export default function Liquidations(_: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
+  const qtyUnit = useQuantityUnit();
   const filters = useFilters(["kind", "symbol", "user_id", "days"]);
   const f = filters.values;
   const days = DAYS.includes(f.days ?? "") ? Number(f.days) : 30;
@@ -49,12 +51,18 @@ export default function Liquidations(_: { admin: Admin }) {
         ),
       },
       { id: "price", header: t("admin.common.price"), meta: right, cell: ({ row }) => <Num value={filled(row.original, row.original.price)} /> },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={filled(row.original, row.original.quantity)} /> },
+      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={filled(row.original, row.original.quantity)} unit={qtyUnit(row.original)} /> },
       { id: "mark", header: t("admin.derivatives.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark_price} /> },
-      { id: "pnl", header: t("admin.reports.realizedPnl"), meta: right, cell: ({ row }) => <Num value={filled(row.original, row.original.realized_pnl)} signed /> },
-      { id: "ins", header: t("admin.derivatives.insurancePaid"), meta: right, cell: ({ row }) => <Num value={filled(row.original, row.original.insurance_paid)} /> },
+      {
+        id: "pnl", header: t("admin.reports.realizedPnl"), meta: right,
+        cell: ({ row }) => <Num value={filled(row.original, row.original.realized_pnl)} unit={settleOf(row.original)} signed />,
+      },
+      {
+        id: "ins", header: t("admin.derivatives.insurancePaid"), meta: right,
+        cell: ({ row }) => <Num value={filled(row.original, row.original.insurance_paid)} unit={settleOf(row.original)} />,
+      },
     ],
-    [t],
+    [t, qtyUnit],
   );
   return (
     <Page title={t("admin.nav.liquidations")} help={t("admin.liquidations.help")}>

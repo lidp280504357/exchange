@@ -14,11 +14,13 @@ import (
 // two-person approval is on it first waits for a second ADMIN. Any ADMIN
 // may cancel it until it takes effect.
 
-// The kinds of changes.
+// The kinds of changes. COIN_CONTRACTS_STATUS closes or reopens a coin's
+// contracts at once (coin-margined design 2026-10-06 §3.5).
 const (
-	ChangeConfig         = "CONFIG"
-	ChangePairStatus     = "PAIR_STATUS"
-	ChangeContractStatus = "CONTRACT_STATUS"
+	ChangeConfig              = "CONFIG"
+	ChangePairStatus          = "PAIR_STATUS"
+	ChangeContractStatus      = "CONTRACT_STATUS"
+	ChangeCoinContractsStatus = "COIN_CONTRACTS_STATUS"
 )
 
 // The statuses of a change.
@@ -49,12 +51,14 @@ var (
 // InstrumentChange is a confirmed change of trading parameters.
 type InstrumentChange struct {
 	ID string
-	// Kind is CONFIG (a config document), PAIR_STATUS or CONTRACT_STATUS.
+	// Kind is CONFIG (a config document), PAIR_STATUS, CONTRACT_STATUS or
+	// COIN_CONTRACTS_STATUS.
 	Kind string
 	// Target is what it changes: instruments, pair:<symbol>,
-	// contract:<symbol>.
+	// contract:<symbol>, coin:<coin>.
 	Target string
-	// Payload is the config document, or {"symbol","from","to"}.
+	// Payload is the config document, {"symbol","from","to"}, or a coin's
+	// {"coin","to","contracts":[{"symbol","margin_type","from","to"}]}.
 	Payload json.RawMessage
 	// Summary is what the confirmation showed: the trading parameters it
 	// moves and, for a ladder, the positions it would liquidate.

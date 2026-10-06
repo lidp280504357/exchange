@@ -203,7 +203,9 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
           void user.refetch();
         }}
       >
-        {account === "FUTURES" && direction === "debit" && amountOk && asset.trim().toUpperCase() === "USDT" && <CrossMarginNote userId={userId} debit={a} />}
+        {account === "FUTURES" && direction === "debit" && amountOk && asset.trim() !== "" && (
+          <CrossMarginNote userId={userId} debit={a} asset={asset.trim().toUpperCase()} />
+        )}
       </FundAction>
     </div>
   );
@@ -211,15 +213,16 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
 
 /**
  * CrossMarginNote says what a debit of the FUTURES balance leaves of the
- * user's cross margin: the equity drops at once, and the next round of the
- * margin monitor may liquidate the cross positions (C5.5 ⑧).
+ * user's cross margin in that asset (USDT, or a coin of its coin-margined
+ * contracts, review ER ⑤): the equity drops at once, and the next round of
+ * the margin monitor may liquidate the cross positions (C5.5 ⑧).
  */
-function CrossMarginNote({ userId, debit }: { userId: string; debit: string }) {
+function CrossMarginNote({ userId, debit, asset }: { userId: string; debit: string; asset: string }) {
   const { t } = useTranslation();
   const q = useQuery({
-    queryKey: ["admin", "user", userId, "futures-margin", debit],
+    queryKey: ["admin", "user", userId, "futures-margin", asset, debit],
     queryFn: async () =>
-      adminData(await adminApi.GET("/admin/v1/users/{id}/futures-margin", { params: { path: { id: userId }, query: { debit } } })),
+      adminData(await adminApi.GET("/admin/v1/users/{id}/futures-margin", { params: { path: { id: userId }, query: { debit, asset } } })),
     retry: false,
   });
   if (q.isPending) return <Skeleton className="h-12 w-full" />;

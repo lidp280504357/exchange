@@ -590,12 +590,15 @@ type fakeDerivatives struct {
 	looks   int
 }
 
-func (d *fakeDerivatives) CrossMargin(_ context.Context, _ string, debit decimal.Decimal) (json.RawMessage, error) {
+func (d *fakeDerivatives) CrossMargin(_ context.Context, _, asset string, debit decimal.Decimal) (json.RawMessage, error) {
 	state := "HEALTHY"
 	if debit.GreaterThan(decimal.NewFromInt(500)) {
 		state = "LIQUIDATE"
 	}
-	return json.RawMessage(`{"asset":"USDT","positions":1,"unmeasured":false,"equity":"1000","maintenance":"500","state":"HEALTHY",` +
+	if asset == "" {
+		asset = "USDT"
+	}
+	return json.RawMessage(`{"asset":"` + asset + `","positions":1,"unmeasured":false,"equity":"1000","maintenance":"500","state":"HEALTHY",` +
 		`"equity_after":"` + decimal.NewFromInt(1000).Sub(debit).String() + `","state_after":"` + state + `"}`), nil
 }
 

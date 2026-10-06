@@ -7,6 +7,7 @@ import { createContext, useContext, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Num } from "../kit/format";
 import { Card, Page } from "../kit/Page";
+import { cents, settleOf, useQuantityUnit } from "../kit/settle";
 import { SignedChart } from "../kit/SignedChart";
 
 type TradingDay = AdminSchemas["TradingDay"];
@@ -237,10 +238,14 @@ function Futures({ period }: { period: Period }) {
       { accessorKey: "symbol", header: t("admin.common.symbol") },
       { accessorKey: "fills", header: t("admin.reports.fills"), meta: right },
       { id: "notional", header: t("admin.reports.notional"), meta: right, cell: ({ row }) => <Num value={row.original.notional} decimals={2} /> },
-      { id: "fees", header: t("admin.reports.fees"), meta: right, cell: ({ row }) => <Num value={row.original.fees} decimals={2} /> },
-      { id: "pnl", header: t("admin.reports.realizedPnl"), meta: right, cell: ({ row }) => <Num value={row.original.realized_pnl} decimals={2} signed /> },
-      { id: "fp", header: t("admin.reports.fundingPaid"), meta: right, cell: ({ row }) => <Num value={row.original.funding_paid} /> },
-      { id: "fr", header: t("admin.reports.fundingReceived"), meta: right, cell: ({ row }) => <Num value={row.original.funding_received} /> },
+      // Fees, results and funding in the contract's settlement asset: USDT to the cent, a coin's in full.
+      { id: "fees", header: t("admin.reports.fees"), meta: right, cell: ({ row }) => <Num value={row.original.fees} decimals={cents(row.original)} unit={settleOf(row.original)} /> },
+      {
+        id: "pnl", header: t("admin.reports.realizedPnl"), meta: right,
+        cell: ({ row }) => <Num value={row.original.realized_pnl} decimals={cents(row.original)} unit={settleOf(row.original)} signed />,
+      },
+      { id: "fp", header: t("admin.reports.fundingPaid"), meta: right, cell: ({ row }) => <Num value={row.original.funding_paid} unit={settleOf(row.original)} /> },
+      { id: "fr", header: t("admin.reports.fundingReceived"), meta: right, cell: ({ row }) => <Num value={row.original.funding_received} unit={settleOf(row.original)} /> },
       { accessorKey: "liquidations", header: t("admin.reports.liquidations"), meta: right },
       { accessorKey: "adl", header: t("admin.reports.adl"), meta: right },
     ],
@@ -350,15 +355,16 @@ function HousePnL({ period }: { period: Period }) {
 
 function Interest() {
   const { t } = useTranslation();
+  const qtyUnit = useQuantityUnit();
   const q = useQuery({ queryKey: ["admin", "report", "oi"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/reports/open-interest")).items });
   const columns = useMemo<ColumnDef<OpenInterest, unknown>[]>(
     () => [
       { accessorKey: "symbol", header: t("admin.common.symbol") },
-      { id: "long", header: t("admin.reports.long"), meta: right, cell: ({ row }) => <Num value={row.original.long} /> },
-      { id: "short", header: t("admin.reports.short"), meta: right, cell: ({ row }) => <Num value={row.original.short} /> },
+      { id: "long", header: t("admin.reports.long"), meta: right, cell: ({ row }) => <Num value={row.original.long} unit={qtyUnit(row.original)} /> },
+      { id: "short", header: t("admin.reports.short"), meta: right, cell: ({ row }) => <Num value={row.original.short} unit={qtyUnit(row.original)} /> },
       { accessorKey: "positions", header: t("admin.reports.positions"), meta: right },
     ],
-    [t],
+    [t, qtyUnit],
   );
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   return <DataTable columns={columns} data={q.data ?? []} getRowId={(r) => r.symbol} loading={q.isPending} density="compact" />;

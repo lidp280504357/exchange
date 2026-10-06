@@ -23,8 +23,18 @@ import (
 type listedContract struct {
 	Symbol      string `json:"symbol"`
 	Status      string `json:"status"`
+	BaseAsset   string `json:"base_asset"`
 	MarginType  string `json:"margin_type"`
 	SettleAsset string `json:"settle_asset"`
+}
+
+// marginType is a contract's margin type: its own, else (a listing from
+// before G0) a linear contract's, USDT.
+func (c listedContract) marginType() string {
+	if c.MarginType != "" {
+		return c.MarginType
+	}
+	return "USDT"
 }
 
 // settlement is a contract's settlement asset: its own, else (a listing
@@ -54,6 +64,23 @@ func (s *Service) listedContracts(ctx context.Context) ([]listedContract, error)
 	return cat.Contracts, nil
 }
 
+// settlements maps every listed contract to its settlement asset, for the
+// read models' rows that do not carry it (liquidation steps, the reports;
+// review ER ①); nil while the listing cannot be read, the rows then left
+// without one (the console reads them as USDT).
+func (s *Service) settlements(ctx context.Context) map[string]string {
+	contracts, err := s.listedContracts(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "the contracts' settlement assets are unknown", "error", err)
+		return nil
+	}
+	out := make(map[string]string, len(contracts))
+	for _, c := range contracts {
+		out[c.Symbol] = c.settlement()
+	}
+	return out
+}
+
 // InsuranceFunds returns the insurance fund of every asset a contract
 // settles in, and of any other asset the fund holds: USDT first, then by
 // asset.
@@ -81,14 +108,16 @@ func (s *Service) InsuranceFunds(ctx context.Context, p Principal) ([]InsuranceF
 	if err != nil {
 		return nil, err
 	}
+	// The funds first, then their clearing rows: the ledger lists accounts
+	// in no promised order (review ER).
 	for _, b := range list {
-		switch b.AccountType {
-		case accountInsuranceFund:
+		if b.AccountType == accountInsuranceFund {
 			fund(b.Asset).Balance = b.Available
-		case accountPnLClearing:
-			if f := funds[b.Asset]; f != nil {
-				f.PnLClearing = b.Available
-			}
+		}
+	}
+	for _, b := range list {
+		if f := funds[b.Asset]; f != nil && b.AccountType == accountPnLClearing {
+			f.PnLClearing = b.Available
 		}
 	}
 	out := make([]InsuranceFund, 0, len(funds))
@@ -112,22 +141,30 @@ func (s *Service) InsuranceFunds(ctx context.Context, p Principal) ([]InsuranceF
 // launchInsurance: the insurance fund of the settlement asset of every
 // contract in trading holds something (design 2026-10-06 §2.7, coordinator
 // 20:45): a liquidation that loses more than its margin is paid from it.
+// Its value also counts the contracts open by margin type (§3.5).
 func (s *Service) launchInsurance(ctx context.Context) (string, map[string]any) {
-	value := map[string]any{}
 	if s.Catalog == nil || s.Ledger == nil {
-		return LaunchUnknown, value
+		return LaunchUnknown, map[string]any{}
 	}
 	contracts, err := s.listedContracts(ctx)
 	if err != nil {
 		s.Log.WarnContext(ctx, "launch checklist: the contracts are unknown", "error", err)
-		return LaunchUnknown, value
+		return LaunchUnknown, map[string]any{}
 	}
+	value := map[string]any{}
 	open := map[string][]string{}
+	byType := map[string]int{"USDT": 0, "COIN": 0}
 	for _, c := range contracts {
 		if c.Status == "TRADING" {
 			open[c.settlement()] = append(open[c.settlement()], c.Symbol)
+			if c.MarginType == "COIN" {
+				byType["COIN"]++
+			} else {
+				byType["USDT"]++
+			}
 		}
 	}
+	value["open"] = byType
 	list, err := s.Ledger.SystemBalances(ctx, "")
 	if err != nil {
 		s.Log.WarnContext(ctx, "launch checklist: the insurance fund is unknown", "error", err)

@@ -388,6 +388,37 @@ try {
   // 8. Futures (every user's positions, the liquidation log), HOUSE, flags.
   await go("/derivatives");
   await waitText("BTC-USDT-PERP");
+  // G5 (review ER ③): both margin types with their settlement asset; a
+  // coin's contracts closed together (the server's preview, canceled:
+  // nothing changes); the insurance fund of every settlement asset, a
+  // contribution's asset chosen (not sent).
+  await waitText("BTC-USD-PERP");
+  await waitText("结算币");
+  await clickButton("按币", "main");
+  await page.waitForSelector("[data-testid=coin-contract-BTC-USD-PERP]");
+  await page.waitForSelector("[data-testid=close-coin-BTC]:not([disabled])", { timeout: 10000 });
+  await page.click("[data-testid=close-coin-BTC]");
+  await page.waitForSelector("[role=dialog] [data-testid=trading-params]");
+  await waitText("关闭 BTC 的合约");
+  await waitText("分钟生效");
+  const closing = await page.$$eval("[role=dialog] [data-testid=trading-params] tr", (rows) => rows.map((r) => r.cells[0]?.innerText.trim()));
+  if (!closing.includes("BTC-USDT-PERP") || !closing.includes("BTC-USD-PERP")) throw new Error(`closing BTC moves ${JSON.stringify(closing)}`);
+  await t.shot("3c-close-coin");
+  await clickButton("取消", "[role=dialog]");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await clickButton("保险基金", "main");
+  await page.waitForSelector('main table[aria-label="insurance funds"] tbody tr');
+  const funds = await page.$$eval('main table[aria-label="insurance funds"] tbody tr', (rows) => rows.map((r) => r.cells[0]?.innerText.trim()));
+  if (funds[0] !== "USDT" || !funds.includes("BTC")) throw new Error(`the insurance funds are ${JSON.stringify(funds)}`);
+  await page.click('main button[role=combobox][aria-label="资产"]');
+  await page.waitForSelector("[role=option]");
+  await page.evaluate(() => [...document.querySelectorAll("[role=option]")].find((o) => o.innerText.trim() === "BTC")?.click());
+  await page.waitForFunction(() => document.querySelector('main button[role=combobox][aria-label="资产"]')?.innerText.trim() === "BTC", { timeout: 5000 });
+  await go("/instruments?tab=contracts");
+  await page.waitForSelector('main table[aria-label="contracts"]');
+  await waitText("面值");
+  await waitText("币本位");
+  ok("contracts of both margin types with their settlement asset; a coin's contracts closed together (previewed, canceled); the insurance funds by asset, BTC chosen to contribute; the instruments' contract columns");
   await go("/positions");
   await page.waitForSelector('main table[aria-label="positions"]');
   await sleep(1000);
@@ -460,9 +491,16 @@ try {
   await go("/launch");
   await page.waitForSelector("[data-testid=launch-verdict]");
   await page.waitForSelector("[data-testid=launch-admin_totp]");
+  // G5's two items (review ER ③): the contracts open by type, the coin-margined switch.
+  await page.waitForSelector("[data-testid=launch-insurance]");
+  await page.waitForSelector("[data-testid=launch-coin_m]");
+  await waitText("开放中 U 本位");
+  await waitText("derivatives.coin_m");
   await t.shot("4b-launch");
   await go("/platform");
   await waitText("注册赠送");
+  // The Traditional Chinese texts say they are optional where they are written (review EV).
+  await waitText("繁體中文（可选）");
   await page.waitForFunction(() => /平台资料|读不到/.test(document.querySelector("main")?.innerText ?? ""), { timeout: 20000 });
   ok("the launch checklist with its verdict, and the platform settings");
   // The fixed pages: the six legal pages and the home hero, each with what
@@ -525,6 +563,28 @@ try {
   await page.waitForFunction(() => getComputedStyle(document.querySelector("[role=dialog]")).transform === "none");
   await page.type("#article-title-zh-CN", "冒烟测试");
   await page.type("#article-body-zh-CN", ":::test\n只在测试模式\n:::\n\n:::formal\n只在正式模式\n:::\n\n## 小标题\n\n正文");
+  // The 繁體 tab (G7b, review EV): optional, its hint shown; half written,
+  // saving says it is the Traditional Chinese (refused before any request:
+  // nothing is saved).
+  const language = '[role=dialog] [role=radiogroup][aria-label="语言"]';
+  const pickLanguage = async (label) => {
+    await page.evaluate((sel, l) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === l)?.click(), language, label);
+    await page.waitForFunction((sel, l) => document.querySelector(`${sel} [aria-checked="true"]`)?.innerText.trim() === l, { timeout: 5000 }, language, label);
+  };
+  await pickLanguage("繁體中文");
+  await waitText("繁体可以不写");
+  await page.type("#article-title-zh-TW", "冒煙測試");
+  await page.type("#article-slug", "smoke-tw-half");
+  await page.click("[data-testid=article-save]");
+  const confirmDialog = '[role=dialog]:has(textarea[id$="-reason"])';
+  await page.waitForSelector(confirmDialog);
+  await page.type(`${confirmDialog} textarea[id$="-reason"]`, "smoke test: a Traditional Chinese title alone");
+  await page.type(`${confirmDialog} input[id$="-word"]`, "smoke-tw-half");
+  await clickButton("确认", confirmDialog);
+  await waitText("繁体的标题与正文要一起写");
+  await clickButton("取消", confirmDialog);
+  await page.waitForFunction((sel) => !document.querySelector(sel), { timeout: 5000 }, confirmDialog);
+  await pickLanguage("中文");
   // The page's mode (design 2026-10-04 §4.4): a draft is for both; picked for
   // test mode, its preview keeps the test block and drops the live one, and
   // without a summary shows the lists' one, the first paragraph shown in

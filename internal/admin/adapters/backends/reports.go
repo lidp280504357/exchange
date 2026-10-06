@@ -196,14 +196,20 @@ func quoteOf(symbol string) string {
 	return symbol[strings.LastIndex(symbol, "-")+1:]
 }
 
-// houseContracts sums HOUSE's contract results per day: its fills'
-// realized results less their fees, and its funding.
+// houseContracts sums HOUSE's contract results per day in USDT: its fills'
+// realized results less their fees, and its funding. A coin-margined
+// contract's are in its coin: valued at the fill's price, the funding at
+// the settlement's mark price (USD taken as USDT); rows from before the
+// coin-margined contracts carry no settlement asset, USDT.
 const houseContracts = `SELECT day, sum(realized), sum(funding) FROM
 	(
-		SELECT toDate(executed_at) AS day, sum(realized_pnl) - sum(fee) AS realized, toDecimal128(0, 18) AS funding
+		SELECT toDate(executed_at) AS day,
+			sum(if(settle_asset IN ('', 'USDT'), realized_pnl - fee, toDecimal128(multiplyDecimal(realized_pnl - fee, price, 18), 18))) AS realized,
+			toDecimal128(0, 18) AS funding
 		FROM derivatives_fills FINAL WHERE user_id = toUUID(?) AND {range:executed_at} GROUP BY day
 		UNION ALL
-		SELECT toDate(funding_time) AS day, toDecimal128(0, 18), sum(amount)
+		SELECT toDate(funding_time) AS day, toDecimal128(0, 18),
+			sum(if(settle_asset IN ('', 'USDT'), amount, toDecimal128(multiplyDecimal(amount, mark_price, 18), 18)))
 		FROM derivatives_funding FINAL WHERE user_id = toUUID(?) AND {range:funding_time} GROUP BY day
 	)
 	GROUP BY day ORDER BY day`
