@@ -88,21 +88,33 @@ seed)
   # HOUSE_CONTRACT_CAP (5,000,000 USD, the cap at 10x) of margin once,
   # keyed by the contract: USDT for a USDT-margined one; its coin at the
   # mark price for a coin-margined one, whose coin's insurance fund gets
-  # 100,000 USD of it once too. The four above are seeded already.
+  # 100,000 USD of it once too. The four above are seeded already. A coin
+  # amount follows the mark price: run again later it differs, and its key
+  # answers COMMON_IDEMPOTENCY_CONFLICT, which says the seed was done.
+  once() {
+    local out
+    out=$(ctl "$@" </dev/null 2>&1) && { echo "$out"; return 0; }
+    if grep -q COMMON_IDEMPOTENCY_CONFLICT <<<"$out"; then
+      echo "already seeded (its key was used): ${*: -1}"
+      return 0
+    fi
+    echo "$out" >&2
+    return 1
+  }
   contracts="$(curl -fsS "$API/v1/market/contracts?margin_type=ALL")"
   while IFS=$'\t' read -r symbol margin settle; do
     case "$symbol" in BTC-USDT-PERP | ETH-USDT-PERP | BTC-USD-PERP | ETH-USD-PERP) continue ;; esac
     if [[ $margin != COIN ]]; then
-      ctl ledger-service ledger house-margin --amount 500000 \
-        --reason "HOUSE contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1" </dev/null
+      once ledger-service ledger house-margin --amount 500000 \
+        --reason "HOUSE contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1"
       continue
     fi
     mark="$(curl -fsS "$API/v1/market/$symbol/mark-price" | jq -r '.mark_price // empty')"
     [[ -n $mark ]] || { echo "$symbol has no mark price: skipped, seed again later" >&2; continue; }
-    ctl ledger-service ledger house-margin --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 500000 / m }')" \
-      --reason "HOUSE coin-margined contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1" </dev/null
-    ctl ledger-service ledger insurance-fund --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 100000 / m }')" \
-      --reason "insurance fund of the coin-margined contracts (G1c)" --key "seed-insurance-coinm-$settle-v1" </dev/null
+    once ledger-service ledger house-margin --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 500000 / m }')" \
+      --reason "HOUSE coin-margined contract margin: 10% of the cap of $symbol (G1c)" --key "seed-house-margin-$symbol-v1"
+    once ledger-service ledger insurance-fund --asset "$settle" --amount "$(awk -v m="$mark" 'BEGIN { printf "%.4f", 100000 / m }')" \
+      --reason "insurance fund of the coin-margined contracts (G1c)" --key "seed-insurance-coinm-$settle-v1"
   done < <(jq -r '.contracts[] | select((.reference_symbol // "") != "") | [.symbol, .margin_type, .settle_asset] | @tsv' <<<"$contracts")
   ;;
 flags)
