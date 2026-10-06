@@ -211,6 +211,11 @@ sync_infra() {
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
   # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写（install -o 不认数字 uid，用 chown）
   sudo mkdir -p "$INFRA/udun-mock" && sudo chown 10001:10001 "$INFRA/udun-mock" && sudo chmod 700 "$INFRA/udun-mock"
+  # App 下载（设计 2026-10-07 App 下载页 §7 #10）：admin-service（uid 10001）写入，downloads 由 nginx 只读挂载、
+  # 对外为 /downloads/（目录 755、文件 644，nginx 的用户能读），app-uploads 放上传中的分片（nginx 不挂载）
+  sudo mkdir -p "$INFRA/downloads/android" "$INFRA/downloads/ios" "$INFRA/app-uploads"
+  sudo chown 10001:10001 "$INFRA/downloads" "$INFRA/downloads/android" "$INFRA/downloads/ios" "$INFRA/app-uploads"
+  sudo chmod 755 "$INFRA/downloads" "$INFRA/downloads/android" "$INFRA/downloads/ios" && sudo chmod 700 "$INFRA/app-uploads"
   # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据），每个调用方一把：
   # sim/sim.env 的 SIM_API_SECRET 只给 market-sim（容器里的 exchangectl sim 用），sim/admin.env 的
   # SIM_ADMIN_API_SECRET 给 market-sim 与 admin-service（只有它能填批准人）。第一次部署时生成，之后不变；值不打印

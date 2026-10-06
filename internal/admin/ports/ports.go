@@ -5,6 +5,7 @@ package ports
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -1508,6 +1509,97 @@ type Platform interface {
 	WelcomeCredits(ctx context.Context) (json.RawMessage, error)
 	// SetWelcomeCredits replaces the welcome credits as of expectedVersion.
 	SetWelcomeCredits(ctx context.Context, credits []WelcomeCredit, expectedVersion int64, actor, reason string) (json.RawMessage, error)
+}
+
+// PlatformApps reads and changes the apps to download on
+// instrument-service's internal API (design 2026-10-07, App download page
+// §7 #9); its answers are the console's (admin.yaml's PlatformAppAdmin).
+type PlatformApps interface {
+	// Apps returns both platforms, {"apps": [...]}, Android first.
+	Apps(ctx context.Context) (json.RawMessage, error)
+	// SetApp changes a platform's mode, link, notes and switch; write
+	// carries expected_version, a stale one is refused.
+	SetApp(ctx context.Context, platform string, write json.RawMessage, actor, reason string) (json.RawMessage, error)
+	// AddAppFile keeps a file stored on the disk: {"app": ..., "replaced":
+	// the configuration profile it replaced, or null}.
+	AddAppFile(ctx context.Context, platform string, f StoredAppFile, actor, reason string) (json.RawMessage, error)
+	// DeleteAppFile forgets a file: {"app": ..., "removed": the file}.
+	DeleteAppFile(ctx context.Context, platform, fileID, actor, reason string) (json.RawMessage, error)
+}
+
+// StoredAppFile is a file stored under /downloads/ as instrument-service
+// keeps it: where (StoredAs, an .ipa's Manifest), the site its manifest
+// names (Origin, https://<host>) and what the package says.
+type StoredAppFile struct {
+	FileID     string `json:"file_id"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	SHA256     string `json:"sha256"`
+	StoredAs   string `json:"stored_as"`
+	Manifest   string `json:"manifest"`
+	Origin     string `json:"origin"`
+	Package    string `json:"package"`
+	Version    string `json:"version"`
+	Build      string `json:"build"`
+	MinOS      string `json:"min_os"`
+	UploadedAt string `json:"uploaded_at"`
+	UploadedBy string `json:"uploaded_by"`
+}
+
+// AppFiles keeps the apps' files on the server's disk (design 2026-10-07
+// §7 #4): the parts of the uploads in progress, and the files nginx serves
+// under /downloads/.
+type AppFiles interface {
+	// PutPart stores part n of an upload: exactly size bytes of body,
+	// replacing the part sent before.
+	PutPart(ctx context.Context, uploadID string, n int, body io.Reader, size int64) error
+	// Store joins an upload's parts, checks them against its size and
+	// SHA-256 and as the package it claims to be (PLATFORM_APP_FILE_INVALID
+	// otherwise), and stores the file as fileID, an .ipa with the
+	// manifest.plist for its install from origin (title names an app
+	// whose package does not).
+	Store(ctx context.Context, u domain.AppUpload, fileID, origin, title string) (StoredAppFile, error)
+	// DropUpload removes an upload's parts.
+	DropUpload(uploadID string) error
+	// Remove deletes files stored under /downloads/ (their paths there);
+	// those gone already are no error.
+	Remove(paths ...string) error
+	// Stored lists the files under /downloads/ with when they were last
+	// written.
+	Stored() ([]StoredPath, error)
+	// Free is the room left on the downloads' disk, in bytes.
+	Free() (uint64, error)
+}
+
+// StoredPath is a file under /downloads/ (its path there) and when it was
+// last written.
+type StoredPath struct {
+	Path    string
+	ModTime time.Time
+}
+
+// AppUploads keeps the uploads in progress (admin 00017 app_uploads; design
+// 2026-10-07 §7 #12): what each is and which parts came.
+type AppUploads interface {
+	Create(ctx context.Context, u domain.AppUpload) error
+	// Get returns an upload; nil when unknown.
+	Get(ctx context.Context, id string) (*domain.AppUpload, error)
+	// Received adds part n to the parts an upload has and returns it; nil
+	// when unknown.
+	Received(ctx context.Context, id string, n int) (*domain.AppUpload, error)
+	// Claim holds an upload for its completion until until; false while
+	// another holds it.
+	Claim(ctx context.Context, id string, now, until time.Time) (bool, error)
+	// Release lets another completion take an upload.
+	Release(ctx context.Context, id string) error
+	// Busy reports whether a completion holds an upload at now.
+	Busy(ctx context.Context, id string, now time.Time) (bool, error)
+	Delete(ctx context.Context, id string) error
+	// Open counts the uploads not expired at now.
+	Open(ctx context.Context, now time.Time) (int, error)
+	// Expired returns the uploads expired at now.
+	Expired(ctx context.Context, now time.Time) ([]domain.AppUpload, error)
 }
 
 // WelcomeCredit is what a new account gets of an asset.

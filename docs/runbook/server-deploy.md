@@ -83,6 +83,8 @@ bash /opt/exchange/src/deploy/server-update.sh
 
 编写 `docker-compose.apps.yml` 时，每个应用服务的 `stop_grace_period` 要大于 `SHUTDOWN_TIMEOUT`（默认 10s），建议 15s；否则 Docker 会在优雅退出完成前发 SIGKILL，在途请求与清理会被打断。
 
+App 下载（设计 2026-10-07 App 下载页，H1）的文件放在 `infra/downloads/{android,ios}`（后台上传的安装包、iOS 安装清单与配置描述文件；admin-service 读写挂在 `/srv/downloads`，nginx 只读挂在 `/usr/share/nginx/files/downloads`，三个站点的 `/downloads/`）与 `infra/app-uploads`（上传中的分片，只给 admin-service，`/srv/app-uploads`）。两个目录由 `server-update.sh` 建好并交给容器用户 uid 10001（downloads 755、app-uploads 700；文件 644，nginx 的用户能读）。备份不含它们（可以重新上传）；每个平台最多保留 10 个、单个最多 500 MiB，磁盘剩余不到文件两倍加 2 GiB 时后台拒绝新上传。
+
 ## 应用服务与端口
 
 `deploy/docker/Dockerfile` 一次编译 `cmd/` 下全部服务，得到同一个镜像 `exchange-app`；`deploy/compose/docker-compose.apps.yml` 为每个服务起一个容器（`command` 选择二进制），与基础设施同在 `exchange` 网络。`server-update.sh` 把当前提交号作为 `APP_VERSION` 传入构建，服务启动日志与 `/metrics` 的 `exchange_build_info` 都带这个版本号。

@@ -134,6 +134,8 @@ services:
       - ./nginx/ssl:/etc/nginx/ssl:ro
       # 三个站点与 Storybook（web/ 的构建产物，deploy/server-update.sh 写入 nginx/sites/{pc,m,admin,storybook}）
       - ./nginx/sites:/usr/share/nginx/sites:ro
+      # 后台上传的 App 安装包（admin-service 写入，三个站点的 /downloads/，设计 2026-10-07 App 下载页）
+      - ./downloads:/usr/share/nginx/files/downloads:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null --header 'Host: astras.vip' http://127.0.0.1/healthz || exit 1"]
       interval: 15s

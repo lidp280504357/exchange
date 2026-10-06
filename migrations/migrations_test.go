@@ -195,6 +195,12 @@ func TestInstrumentSchema(t *testing.T) {
 	rejects(t, db, "a configuration profile is iOS's", `UPDATE platform_apps SET mobileconfig = '{"file_id": "z"}' WHERE platform = 'ANDROID'`)
 	rejects(t, db, "a FILE has its app", `UPDATE platform_apps SET current = NULL WHERE platform = 'ANDROID'`)
 	rejects(t, db, "the files are a list", `UPDATE platform_apps SET files = '{}' WHERE platform = 'IOS'`)
+	// Review FM ③: a link of at most 500 characters, a version from 1, the
+	// notes an object.
+	accepts(t, db, `UPDATE platform_apps SET link_url = 'https://example.com/' || repeat('a', 480) WHERE platform = 'IOS'`)
+	rejects(t, db, "a link of 501", `UPDATE platform_apps SET link_url = 'https://example.com/' || repeat('a', 481) WHERE platform = 'IOS'`)
+	rejects(t, db, "a version from 1", `UPDATE platform_apps SET version = 0 WHERE platform = 'IOS'`)
+	rejects(t, db, "the notes are an object", `UPDATE platform_apps SET notes = '["zh-CN"]' WHERE platform = 'IOS'`)
 }
 
 func TestLedgerSchema(t *testing.T) {

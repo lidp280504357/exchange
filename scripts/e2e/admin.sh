@@ -2021,6 +2021,171 @@ expect 200 - "every administrator reads the legal pages"
 as OPERATOR POST /admin/v1/articles '{"section":"LEGAL","slug":"e2e-not-fixed","category":"","pinned":false,"order":0,"texts":[{"locale":"zh-CN","title":"e2e","summary":"","body":"e2e"}],"reason":"e2e: a legal page outside the six"}'
 expect 400 COMMON_INVALID_ARGUMENT "a legal page is one of the six fixed slugs"
 
+echo "== the apps to download (design 2026-10-07, App download page, H1)"
+as AUDITOR GET /admin/v1/platform/apps ""
+if [[ $STATUS == 503 ]] || [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
+  echo "skip the apps to download: this admin-service is from before H1 ($STATUS)"
+else
+  expect 200 - "every administrator reads the apps to download"
+  check '(.apps | length) == 2 and .apps[0].platform == "ANDROID" and .apps[1].platform == "IOS"
+    and all(.apps[]; (.files | type) == "array" and .version >= 1 and (.notes | has("zh-TW")))' "Android, then iOS, each with its files and version"
+  APPS_BEFORE=$BODY
+  app_of() { jq -c --arg p "$1" '.apps[] | select(.platform == $p)' <<<"$2"; }
+  # app_write PLATFORM MODE LINK ENABLED REASON: a write on the version now.
+  app_write() {
+    as AUDITOR GET /admin/v1/platform/apps "" >/dev/null
+    jq -c --arg p "$1" --arg m "$2" --arg l "$3" --argjson e "$4" --arg r "$5" \
+      '.apps[] | select(.platform == $p) | {mode: $m, link_url: $l, notes, enabled: $e, expected_version: .version, reason: $r}' <<<"$BODY"
+  }
+  restore_apps() { # the files e2e uploaded deleted, the settings as they were
+    local p id was
+    for p in ANDROID IOS; do
+      as AUDITOR GET /admin/v1/platform/apps "" >/dev/null
+      for id in $(jq -r --arg p "$p" '.apps[] | select(.platform == $p) | .files[] | select(.name | startswith("e2e")) | .file_id' <<<"$BODY"); do
+        as ADMIN DELETE "/admin/v1/platform/apps/$p/files/$id" '{"reason":"e2e cleanup"}' >/dev/null
+      done
+      was=$(app_of "$p" "$APPS_BEFORE")
+      as ADMIN PUT "/admin/v1/platform/apps/$p" "$(app_write "$p" "$(jq -r .mode <<<"$was")" "$(jq -r .link_url <<<"$was")" \
+        "$(jq .enabled <<<"$was")" "e2e cleanup" | jq -c --argjson n "$(jq .notes <<<"$was")" '.notes = $n')" >/dev/null
+    done
+  }
+  at_exit restore_apps
+  as OPERATOR PUT /admin/v1/platform/apps/IOS "$(app_write IOS LINK https://apps.apple.com/app/id6400000000 true "e2e: an operator")"
+  expect 403 ADMIN_FORBIDDEN "only an ADMIN sets the downloads"
+
+  # A link: the App Store for iOS, shown by the sites at once (their cache
+  # is a minute).
+  as ADMIN PUT /admin/v1/platform/apps/IOS "$(app_write IOS LINK https://apps.apple.com/app/id6400000000 true "e2e: iOS on the App Store")"
+  expect 200 - "ADMIN links iOS to the App Store"
+  check '.mode == "LINK" and .enabled and .public.mode == "LINK" and .public.url == "https://apps.apple.com/app/id6400000000"
+    and .public.ios_install == "APP_STORE" and .public.size == null' "shown as a link, installed from the App Store"
+  IOS_V=$(jq .version <<<"$BODY")
+  as ADMIN PUT /admin/v1/platform/apps/IOS "$(app_write IOS LINK https://apps.apple.com/app/id1 true "e2e: stale" | jq -c --argjson v "$((IOS_V - 1))" '.expected_version = $v')"
+  expect 409 INSTRUMENT_PLATFORM_CHANGED "a stale version is refused"
+  as ADMIN PUT /admin/v1/platform/apps/IOS "$(app_write IOS LINK http://example.com/app true "e2e: http")"
+  expect 400 COMMON_INVALID_ARGUMENT "a link is https"
+  call GET /v1/platform/apps "" -D "$WORK/apps.headers"
+  expect 200 - "the sites read the apps"
+  check '.ios.mode == "LINK" and .ios.url == "https://apps.apple.com/app/id6400000000"' "iOS's link"
+  APPS_TAG=$(grep -i '^etag:' "$WORK/apps.headers" | cut -d' ' -f2- | tr -d '\r')
+  [[ $APPS_TAG =~ ^(W/)?\"[0-9]+-[0-9]+\"$ ]] || { echo "FAIL the apps' ETag: $APPS_TAG" >&2; exit 1; }
+  call GET /v1/platform/apps "" -H "If-None-Match: $APPS_TAG"
+  [[ $STATUS == 304 ]] || { echo "FAIL the apps with their ETag: $STATUS" >&2; exit 1; }
+  echo "ok   the ETag is the two versions ($APPS_TAG); 304 with it"
+
+  ANDROID_FILES=$(app_of ANDROID "$APPS_BEFORE" | jq '[.files[] | select(.name | startswith("e2e") | not)] | length')
+  IOS_FILES=$(app_of IOS "$APPS_BEFORE" | jq '[.files[] | select(.name | startswith("e2e") | not)] | length')
+  if [[ $ANDROID_FILES != 0 || $IOS_FILES != 0 ]]; then
+    echo "skip the uploads: an operator's files are kept (Android $ANDROID_FILES, iOS $IOS_FILES)"
+  else
+    FIX=$(cd "$(dirname "$0")/../.." && go run ./scripts/e2e/appfixture -out "$WORK" -version "1.0.$RUN")
+    fix() { jq -r --arg k "$1" --arg f "$2" '.[$k][$f]' <<<"$FIX"; }
+    # start_upload PLATFORM KIND NAME SIZE SHA256
+    start_upload() {
+      as ADMIN POST "/admin/v1/platform/apps/$1/uploads" "$(jq -nc --arg k "$2" --arg n "$3" --argjson s "$4" --arg h "$5" '{kind: $k, name: $n, size: $s, sha256: $h}')"
+    }
+    send_part() { # send_part PLATFORM UPLOAD FILE: its one part, as bytes
+      acall PUT "/admin/v1/platform/apps/$1/uploads/$2/parts/1" "" -b "$WORK/ADMIN.jar" "${CSRF[@]}" -H 'Content-Type: application/octet-stream' \
+        --data-binary "@$3"
+    }
+    # upload PLATFORM KIND FIXTURE NAME: started, sent and completed.
+    upload() {
+      start_upload "$1" "$2" "$4" "$(fix "$3" size)" "$(fix "$3" sha256)"
+      expect 201 - "$1 $4: the upload starts"
+      check ".parts == 1 and .part_size == 10485760 and .received == [] and .started_by == \"$EMAIL_ADMIN\"" "in one part of 10 MiB at most"
+      local up
+      up=$(jq -r .upload_id <<<"$BODY")
+      send_part "$1" "$up" "$(fix "$3" path)"
+      expect 200 - "$1 $4: its part"
+      check '.received == [1]' "received"
+      as ADMIN POST "/admin/v1/platform/apps/$1/uploads/$up/complete" '{"reason":"e2e: an upload"}'
+      expect 200 - "$1 $4: completed and checked"
+    }
+
+    # Completed with its part missing: refused, then dropped.
+    start_upload ANDROID APP e2e-missing.apk "$(fix apk size)" "$(fix apk sha256)"
+    expect 201 - "an upload starts"
+    MISSING=$(jq -r .upload_id <<<"$BODY")
+    as ADMIN POST "/admin/v1/platform/apps/ANDROID/uploads/$MISSING/complete" '{"reason":"e2e: too soon"}'
+    expect 409 PLATFORM_APP_UPLOAD_INCOMPLETE "completed with its part missing"
+    check '.details.missing == [1]' "naming the part"
+    as ADMIN DELETE "/admin/v1/platform/apps/ANDROID/uploads/$MISSING" ""
+    [[ $STATUS == 204 ]] || { echo "FAIL dropping an upload: $STATUS $BODY" >&2; exit 1; }
+    as ADMIN GET "/admin/v1/platform/apps/ANDROID/uploads/$MISSING" ""
+    expect 404 COMMON_NOT_FOUND "dropped"
+    # Not an app: refused and dropped.
+    printf 'not a zip archive, whatever its name says' >"$WORK/e2e-bad.apk"
+    start_upload ANDROID APP e2e-bad.apk "$(wc -c <"$WORK/e2e-bad.apk" | tr -d ' ')" "$(shasum -a 256 "$WORK/e2e-bad.apk" | cut -d' ' -f1)"
+    expect 201 - "an upload of something else starts"
+    BAD=$(jq -r .upload_id <<<"$BODY")
+    send_part ANDROID "$BAD" "$WORK/e2e-bad.apk"
+    expect 200 - "its part"
+    as ADMIN POST "/admin/v1/platform/apps/ANDROID/uploads/$BAD/complete" '{"reason":"e2e: not an app"}'
+    expect 422 PLATFORM_APP_FILE_INVALID "not an .apk"
+    as ADMIN GET "/admin/v1/platform/apps/ANDROID/uploads/$BAD" ""
+    expect 404 COMMON_NOT_FOUND "the upload is gone with it"
+    as ADMIN POST /admin/v1/platform/apps/ANDROID/uploads '{"kind":"MOBILECONFIG","name":"e2e.mobileconfig","size":10,"sha256":"'"$(fix apk sha256)"'"}'
+    expect 400 COMMON_INVALID_ARGUMENT "a configuration profile is iOS's"
+
+    # An .apk: Android's app, served by nginx; shown once enabled.
+    upload ANDROID APP apk e2e-astras.apk
+    check ".mode == \"FILE\" and .current.package == \"vip.astras.e2e\" and .current.version == \"1.0.$RUN\" and .current.build == \"1\"
+      and .current.min_os == \"24\" and .current.sha256 == \"$(fix apk sha256)\" and .current.manifest_url == null and (.current.url | test(\"/downloads/android/[0-9a-f-]{36}[.]apk$\"))
+      and (.enabled or .public == null)" "the current app, read from its manifest; not shown while disabled"
+    APK_URL=$(jq -r .current.url <<<"$BODY")
+    APK_ID=$(jq -r .current.file_id <<<"$BODY")
+    as ADMIN PUT /admin/v1/platform/apps/ANDROID "$(app_write ANDROID FILE "" true "e2e: shown")"
+    expect 200 - "ADMIN shows it"
+    check ".public.mode == \"FILE\" and .public.url == \"$APK_URL\" and .public.size == $(fix apk size) and .public.install_url == null and .public.ios_install == null" \
+      "the sites get the file, its size and hash"
+    curl -s -o "$WORK/dl.apk" -D "$WORK/dl.headers" -w '%{http_code}' "$APK_URL" >"$WORK/dl.status"
+    [[ $(cat "$WORK/dl.status") == 200 ]] && [[ $(shasum -a 256 "$WORK/dl.apk" | cut -d' ' -f1) == "$(fix apk sha256)" ]] &&
+      grep -qi '^content-disposition: attachment' "$WORK/dl.headers" && grep -qi '^content-type: application/vnd.android.package-archive' "$WORK/dl.headers" ||
+      { echo "FAIL downloading $APK_URL: $(cat "$WORK/dl.status")" >&2; cat "$WORK/dl.headers" >&2; exit 1; }
+    echo "ok   nginx serves the .apk as it was uploaded, as an attachment"
+    curl -s -o /dev/null -w '%{http_code}' "${APK_URL%/*}/" >"$WORK/dl.status"
+    [[ $(cat "$WORK/dl.status") == 404 ]] || { echo "FAIL the downloads' directory: $(cat "$WORK/dl.status")" >&2; exit 1; }
+    echo "ok   no listing of the downloads"
+
+    # An .ipa: installed over the air with the manifest made for it; a
+    # configuration profile beside it.
+    upload IOS APP ipa e2e-astras.ipa
+    check '.mode == "FILE" and .current.package == "vip.astras.e2e" and .current.min_os == "15.0" and (.current.manifest_url | test("/downloads/ios/[0-9a-f-]{36}[.]plist$"))
+      and .public.ios_install == "OTA" and (.public.install_url | startswith("itms-services://?action=download-manifest&url=https%3A%2F%2F"))' \
+      "iOS's app, installed over the air"
+    IPA_URL=$(jq -r .current.url <<<"$BODY")
+    curl -s -o "$WORK/dl.plist" -w '%{http_code}' "$(jq -r .current.manifest_url <<<"$BODY")" >"$WORK/dl.status"
+    [[ $(cat "$WORK/dl.status") == 200 ]] && grep -q "<string>$IPA_URL</string>" "$WORK/dl.plist" && grep -q '<string>vip.astras.e2e</string>' "$WORK/dl.plist" ||
+      { echo "FAIL the manifest: $(cat "$WORK/dl.status")" >&2; cat "$WORK/dl.plist" >&2; exit 1; }
+    echo "ok   its manifest names the .ipa and the bundle"
+    upload IOS MOBILECONFIG mobileconfig e2e-trust.mobileconfig
+    check '(.mobileconfig.url | test("[.]mobileconfig$")) and .mobileconfig.package == null and .public.mobileconfig_url == .mobileconfig.url and (.files | length) == 2' \
+      "a configuration profile beside it"
+
+    # Deleted: Android goes back to OFF; iOS to its link; the files go.
+    as ADMIN DELETE "/admin/v1/platform/apps/ANDROID/files/$APK_ID" '{"reason":"e2e: withdrawn"}'
+    expect 200 - "ADMIN deletes Android's app"
+    check '.current == null and .mode == (if .link_url == "" then "OFF" else "LINK" end) and (.files | length) == 0' \
+      "Android goes back to its link, or off"
+    remote "test ! -e downloads/android/$APK_ID.apk" || { echo "FAIL the .apk stays on the server" >&2; exit 1; }
+    echo "ok   the .apk is gone from the server"
+    as AUDITOR GET /admin/v1/platform/apps "" >/dev/null
+    for id in $(app_of IOS "$BODY" | jq -r '.files[].file_id'); do
+      as ADMIN DELETE "/admin/v1/platform/apps/IOS/files/$id" '{"reason":"e2e: withdrawn"}'
+      expect 200 - "ADMIN deletes one of iOS's files"
+    done
+    check '.current == null and .mobileconfig == null and .mode == "LINK" and .public.mode == "LINK"' "iOS is back to its link"
+    as ADMIN DELETE "/admin/v1/platform/apps/ANDROID/files/$APK_ID" '{"reason":"e2e: again"}'
+    expect 404 COMMON_NOT_FOUND "a file deleted twice"
+    apps_audited() {
+      as AUDITOR GET "/admin/v1/audit-logs?target=app:ANDROID" ""
+      [[ $STATUS == 200 ]] && jq -e '[.items[].payload.action] | (index("admin.platform.app_file_uploaded") != null and index("admin.platform.app_file_deleted") != null
+        and index("admin.platform.app_updated") != null)' <<<"$BODY" >/dev/null
+    }
+    eventually 60 "Android's settings, upload and deletion are audited" apps_audited
+  fi
+fi
+
 echo "== margin trading (design 2026-10-06 §8, E5)"
 # admin-service's margin API over margin-service's internal one (skipped
 # while an admin-service from before E5 answers 404). It changes no terms:

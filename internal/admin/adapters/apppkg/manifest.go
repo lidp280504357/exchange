@@ -3,7 +3,6 @@ package apppkg
 import (
 	"encoding/binary"
 	"strconv"
-	"unicode/utf16"
 )
 
 // An .apk's AndroidManifest.xml is compiled XML (Android's ResXMLTree):
@@ -91,10 +90,19 @@ func readManifest(b []byte) (Info, error) {
 	case info.Package == "":
 		return Info{}, invalid("AndroidManifest.xml names no package")
 	}
+	if err := checkText("AndroidManifest.xml", [][2]string{
+		{"package", info.Package}, {"versionName", info.Version}, {"versionCode", info.Build}, {"minSdkVersion", info.MinOS},
+	}); err != nil {
+		return Info{}, err
+	}
 	return info, nil
 }
 
-// stringPool reads a string pool chunk: UTF-16 or UTF-8 strings.
+// stringPool reads a string pool chunk: UTF-16 or UTF-8 strings. A pool
+// stores each string once, so its strings come to fewer bytes than it has
+// (their offsets, lengths and terminators leave room for the odd string
+// aapt indexes twice); more is offsets pointing at one string over and
+// over, a bomb.
 func stringPool(c []byte) ([]string, error) {
 	if len(c) < 28 {
 		return nil, invalid("AndroidManifest.xml: a short string pool")
@@ -103,14 +111,16 @@ func stringPool(c []byte) ([]string, error) {
 	if count > len(c)/4 || hsize+4*count > len(c) || start > len(c) {
 		return nil, invalid("AndroidManifest.xml: a string pool past its chunk")
 	}
+	isUTF8 := flags&stringPoolUTF8 != 0
 	out := make([]string, count)
+	budget := len(c)
 	for i := range count {
 		o := start + int(le.Uint32(c[hsize+4*i:]))
 		var (
-			s  string
+			s  []byte
 			ok bool
 		)
-		if flags&stringPoolUTF8 != 0 {
+		if isUTF8 {
 			s, ok = utf8At(c, o)
 		} else {
 			s, ok = utf16At(c, o)
@@ -118,23 +128,30 @@ func stringPool(c []byte) ([]string, error) {
 		if !ok {
 			return nil, invalid("AndroidManifest.xml: string %d past its pool", i)
 		}
-		out[i] = s
+		if budget -= len(s); budget < 0 {
+			return nil, invalid("AndroidManifest.xml: a string pool that reads more than it holds")
+		}
+		if isUTF8 {
+			out[i] = string(s)
+		} else {
+			out[i] = utf16String(s, le)
+		}
 	}
 	return out, nil
 }
 
-// utf8At reads a UTF-8 string of a pool: its length in UTF-16 units and
+// utf8At finds a UTF-8 string of a pool: its length in UTF-16 units and
 // its length in bytes (each one or two bytes), then the bytes.
-func utf8At(c []byte, o int) (string, bool) {
+func utf8At(c []byte, o int) ([]byte, bool) {
 	_, o, ok := poolLength8(c, o)
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	n, o, ok := poolLength8(c, o)
 	if !ok || o+n > len(c) {
-		return "", false
+		return nil, false
 	}
-	return string(c[o : o+n]), true
+	return c[o : o+n], true
 }
 
 func poolLength8(c []byte, o int) (n, next int, ok bool) {
@@ -150,29 +167,25 @@ func poolLength8(c []byte, o int) (n, next int, ok bool) {
 	return int(c[o]&0x7f)<<8 | int(c[o+1]), o + 2, true
 }
 
-// utf16At reads a UTF-16 string of a pool: its length in units (one or
+// utf16At finds a UTF-16 string of a pool: its length in units (one or
 // two uint16), then the units.
-func utf16At(c []byte, o int) (string, bool) {
+func utf16At(c []byte, o int) ([]byte, bool) {
 	if o < 0 || o+2 > len(c) {
-		return "", false
+		return nil, false
 	}
 	n := int(le.Uint16(c[o:]))
 	o += 2
 	if n&0x8000 != 0 {
 		if o+2 > len(c) {
-			return "", false
+			return nil, false
 		}
 		n = (n&0x7fff)<<16 | int(le.Uint16(c[o:]))
 		o += 2
 	}
-	if n < 0 || o+2*n > len(c) {
-		return "", false
+	if n > (len(c)-o)/2 {
+		return nil, false
 	}
-	units := make([]uint16, n)
-	for i := range units {
-		units[i] = le.Uint16(c[o+2*i:])
-	}
-	return string(utf16.Decode(units)), true
+	return c[o : o+2*n], true
 }
 
 // element reads a start element: its name and its attributes' values by

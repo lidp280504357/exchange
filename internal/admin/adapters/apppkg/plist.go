@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 )
 
 // most bounds every size and position read from a binary property list:
@@ -121,7 +120,7 @@ func binaryDict(b []byte) (map[string]string, error) {
 		numObjects > end || top >= numObjects || table > end || numObjects*offsetSize > end-table {
 		return nil, invalid("a binary property list with a bad trailer")
 	}
-	p := bplist{b: b[:end], offsetSize: offsetSize, refSize: refSize, numObjects: numObjects, table: table}
+	p := &bplist{b: b[:end], offsetSize: offsetSize, refSize: refSize, numObjects: numObjects, table: table, budget: len(b)}
 	o, ok := p.object(top)
 	if !ok || b[o]>>4 != 0xd {
 		return nil, invalid("the property list is no dictionary")
@@ -145,6 +144,9 @@ func binaryDict(b []byte) (map[string]string, error) {
 			out[key] = val
 		}
 	}
+	if p.budget < 0 {
+		return nil, invalid("a binary property list that reads more than it holds")
+	}
 	return out, nil
 }
 
@@ -154,6 +156,12 @@ type bplist struct {
 	refSize    int
 	numObjects int
 	table      int
+	// budget is what is left of the bytes the strings read may take. A
+	// list stores each string once, however often it is referenced: the
+	// top dictionary's strings come to fewer bytes than the list has,
+	// even with a value shared by a few keys; more is one string
+	// referenced over and over, a bomb.
+	budget int
 }
 
 // bounded reads a big-endian unsigned integer, ok false when it is more
@@ -170,7 +178,7 @@ func bounded(b []byte) (int, bool) {
 }
 
 // uint reads a big-endian unsigned integer of n bytes at o (at most most).
-func (p bplist) uint(o, n int) (int, bool) {
+func (p *bplist) uint(o, n int) (int, bool) {
 	if o < 0 || n < 1 || n > 8 || o+n > len(p.b) {
 		return 0, false
 	}
@@ -178,7 +186,7 @@ func (p bplist) uint(o, n int) (int, bool) {
 }
 
 // object is where object i begins.
-func (p bplist) object(i int) (int, bool) {
+func (p *bplist) object(i int) (int, bool) {
 	if i < 0 || i >= p.numObjects {
 		return 0, false
 	}
@@ -190,7 +198,7 @@ func (p bplist) object(i int) (int, bool) {
 }
 
 // ref reads the object reference at o and where that object begins.
-func (p bplist) ref(o int) (int, bool) {
+func (p *bplist) ref(o int) (int, bool) {
 	i, ok := p.uint(o, p.refSize)
 	if !ok {
 		return 0, false
@@ -200,7 +208,7 @@ func (p bplist) ref(o int) (int, bool) {
 
 // count is an object's size from its marker, and where its content
 // begins.
-func (p bplist) count(o int) (n, start int, ok bool) {
+func (p *bplist) count(o int) (n, start int, ok bool) {
 	low := int(p.b[o] & 0x0f)
 	if low != 0x0f {
 		return low, o + 1, true
@@ -217,8 +225,8 @@ func (p bplist) count(o int) (n, start int, ok bool) {
 }
 
 // scalar reads a string, an integer, a real or a boolean as text; ok false
-// for anything else.
-func (p bplist) scalar(o int) (string, bool) {
+// for anything else, and for a string past the budget.
+func (p *bplist) scalar(o int) (string, bool) {
 	marker := p.b[o]
 	switch marker >> 4 {
 	case 0x0:
@@ -246,19 +254,21 @@ func (p bplist) scalar(o int) (string, bool) {
 		}
 		return strconv.FormatUint(v, 10), true
 	case 0x5:
-		if n, start, ok := p.count(o); ok && start+n <= len(p.b) {
+		if n, start, ok := p.count(o); ok && start+n <= len(p.b) && p.charge(n) {
 			return string(p.b[start : start+n]), true
 		}
 	case 0x6:
-		if n, start, ok := p.count(o); ok && start+2*n <= len(p.b) {
-			units := make([]uint16, n)
-			for i := range units {
-				units[i] = be.Uint16(p.b[start+2*i:])
-			}
-			return string(utf16.Decode(units)), true
+		if n, start, ok := p.count(o); ok && start+2*n <= len(p.b) && p.charge(2*n) {
+			return utf16String(p.b[start:start+2*n], be), true
 		}
 	}
 	return "", false
+}
+
+// charge takes n bytes from the budget, false when fewer are left.
+func (p *bplist) charge(n int) bool {
+	p.budget -= n
+	return p.budget >= 0
 }
 
 // A signed configuration profile is a CMS (PKCS #7) SignedData whose
@@ -267,7 +277,10 @@ var oidSignedData = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
 
 type contentInfo struct {
 	ContentType asn1.ObjectIdentifier
-	Content     asn1.RawValue `asn1:"explicit,tag:0"`
+	// Content is the [0] EXPLICIT wrapping the SignedData: encoding/asn1
+	// does not unwrap an explicit tag into a RawValue, so its Bytes are
+	// the SignedData (its FullBytes the tag and all).
+	Content asn1.RawValue `asn1:"explicit,tag:0"`
 }
 
 // signedData is a SignedData's first fields: encoding/asn1 leaves the
@@ -287,7 +300,7 @@ func cmsContent(b []byte) ([]byte, error) {
 	var ci contentInfo
 	if _, err := asn1.Unmarshal(b, &ci); err == nil && ci.ContentType.Equal(oidSignedData) {
 		var sd signedData
-		if _, err := asn1.Unmarshal(ci.Content.FullBytes, &sd); err == nil && len(sd.EncapContent.Content) > 0 {
+		if _, err := asn1.Unmarshal(ci.Content.Bytes, &sd); err == nil && len(sd.EncapContent.Content) > 0 {
 			return sd.EncapContent.Content, nil
 		}
 	}

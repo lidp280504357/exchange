@@ -9,10 +9,14 @@ package apppkg
 
 import (
 	"archive/zip"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Info is what a package says of itself.
@@ -41,59 +45,97 @@ func invalid(format string, a ...any) error {
 // real one is kilobytes, a bigger one is a decompression bomb.
 const maxEntry = 4 << 20
 
-// ReadAPK reads an Android package: a zip holding a compiled
+// ReadAPK reads an Android package: a zip holding one compiled
 // AndroidManifest.xml that names its package.
 func ReadAPK(r io.ReaderAt, size int64) (Info, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return Info{}, invalid("not a zip archive")
 	}
+	var manifest *zip.File
 	for _, f := range zr.File {
-		if f.Name == "AndroidManifest.xml" {
-			data, err := entry(f)
-			if err != nil {
-				return Info{}, err
-			}
-			return readManifest(data)
+		if f.Name != "AndroidManifest.xml" {
+			continue
 		}
+		if manifest != nil {
+			return Info{}, invalid("two AndroidManifest.xml")
+		}
+		manifest = f
 	}
-	return Info{}, invalid("no AndroidManifest.xml")
+	if manifest == nil {
+		return Info{}, invalid("no AndroidManifest.xml")
+	}
+	data, err := entry(manifest)
+	if err != nil {
+		return Info{}, err
+	}
+	return readManifest(data)
 }
 
-// ReadIPA reads an iOS app: a zip holding Payload/<name>.app/Info.plist
-// (the app's own, not one of its frameworks' or extensions') that names
-// its bundle identifier.
+// ReadIPA reads an iOS app: a zip holding one app, the directory
+// Payload/<name>.app/, whose own Info.plist (not one of its frameworks' or
+// extensions') names its bundle identifier.
 func ReadIPA(r io.ReaderAt, size int64) (Info, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return Info{}, invalid("not a zip archive")
 	}
+	var (
+		app   string
+		plist *zip.File
+	)
 	for _, f := range zr.File {
-		parts := strings.Split(f.Name, "/")
-		if len(parts) != 3 || parts[0] != "Payload" || !strings.HasSuffix(parts[1], ".app") || parts[2] != "Info.plist" {
+		rest, ok := strings.CutPrefix(f.Name, "Payload/")
+		bundle, inside, dir := strings.Cut(rest, "/")
+		if !ok || !dir || !strings.HasSuffix(bundle, ".app") {
 			continue
 		}
-		data, err := entry(f)
-		if err != nil {
-			return Info{}, err
+		if bundle == ".app" {
+			return Info{}, invalid("an app with no name (Payload/.app)")
 		}
-		dict, err := plistDict(data)
-		if err != nil {
-			return Info{}, err
+		if app != "" && bundle != app {
+			return Info{}, invalid("two apps: %q and %q", "Payload/"+app, "Payload/"+bundle)
 		}
-		info := Info{
-			Package: dict["CFBundleIdentifier"], Version: dict["CFBundleShortVersionString"], Build: dict["CFBundleVersion"],
-			MinOS: dict["MinimumOSVersion"], Name: dict["CFBundleDisplayName"],
+		app = bundle
+		if inside == "Info.plist" {
+			if plist != nil {
+				return Info{}, invalid("two %q", f.Name)
+			}
+			plist = f
 		}
-		if info.Name == "" {
-			info.Name = dict["CFBundleName"]
-		}
-		if info.Package == "" {
-			return Info{}, invalid("Info.plist names no CFBundleIdentifier")
-		}
-		return info, nil
 	}
-	return Info{}, invalid("no Payload/<name>.app/Info.plist")
+	if plist == nil {
+		return Info{}, invalid("no Payload/<name>.app/Info.plist")
+	}
+	data, err := entry(plist)
+	if err != nil {
+		return Info{}, err
+	}
+	dict, err := plistDict(data)
+	if err != nil {
+		return Info{}, err
+	}
+	nameKey := "CFBundleDisplayName"
+	if dict[nameKey] == "" {
+		nameKey = "CFBundleName"
+	}
+	info := Info{
+		Package: dict["CFBundleIdentifier"], Version: dict["CFBundleShortVersionString"], Build: dict["CFBundleVersion"],
+		MinOS: dict["MinimumOSVersion"], Name: dict[nameKey],
+	}
+	if info.Package == "" {
+		return Info{}, invalid("Info.plist names no CFBundleIdentifier")
+	}
+	if err := checkText("Info.plist", [][2]string{
+		{"CFBundleIdentifier", info.Package},
+		{"CFBundleShortVersionString", info.Version},
+		{"CFBundleVersion", info.Build},
+		{"MinimumOSVersion", info.MinOS},
+		{nameKey, info.Name},
+	}); err != nil {
+		return Info{}, err
+	}
+	return info, nil
 }
 
 // CheckMobileconfig reports whether b is a configuration profile: a
@@ -135,4 +177,50 @@ func entry(f *zip.File) ([]byte, error) {
 		return nil, invalid("%s is too big", f.Name)
 	}
 	return data, nil
+}
+
+// checkText checks that each value read, named by its key, is text.
+func checkText(file string, values [][2]string) error {
+	for _, kv := range values {
+		if !text(kv[1]) {
+			return invalid("%s: %s is not text (invalid UTF-8 or UTF-16, or a control character)", file, kv[0])
+		}
+	}
+	return nil
+}
+
+// text reports whether s is valid UTF-8 without a control character or
+// U+FFFD, the replacement utf16String writes for invalid UTF-16.
+func text(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if r == utf8.RuneError || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// utf16String decodes UTF-16 in the given byte order, an unpaired
+// surrogate as U+FFFD, into one allocation: a unit is at most three bytes
+// of UTF-8.
+func utf16String(b []byte, order binary.ByteOrder) string {
+	var s strings.Builder
+	s.Grow(len(b) / 2 * 3)
+	for i := 0; i+2 <= len(b); i += 2 {
+		r := rune(order.Uint16(b[i:]))
+		if utf16.IsSurrogate(r) {
+			var low rune
+			if i+4 <= len(b) {
+				low = rune(order.Uint16(b[i+2:]))
+			}
+			if r = utf16.DecodeRune(r, low); r != utf8.RuneError {
+				i += 2
+			}
+		}
+		s.WriteRune(r)
+	}
+	return s.String()
 }

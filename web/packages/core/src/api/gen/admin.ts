@@ -2182,7 +2182,11 @@ export interface paths {
          *     platform and kind fix the extension: ANDROID APP .apk, IOS APP .ipa,
          *     IOS MOBILECONFIG .mobileconfig; at most 500 MiB (524,288,000
          *     bytes), a .mobileconfig 1 MiB. An upload not completed within 24
-         *     hours is dropped with its parts. settings.write.
+         *     hours is dropped with its parts. 409 PLATFORM_APP_UPLOADS_FULL while
+         *     three uploads are open; 409 PLATFORM_APP_FILES_FULL while the
+         *     platform keeps 10 files (a configuration profile that replaces
+         *     iOS's aside); 409 PLATFORM_APP_DISK_FULL when the server's disk has
+         *     less than twice the size and 2 GiB more. settings.write.
          */
         post: operations["startAppUpload"];
         delete?: never;
@@ -2210,7 +2214,7 @@ export interface paths {
         post?: never;
         /**
          * Drop an upload and its parts
-         * @description settings.write.
+         * @description 409 PLATFORM_APP_UPLOAD_BUSY while a completion holds it. settings.write.
          */
         delete: operations["dropAppUpload"];
         options?: never;
@@ -2235,9 +2239,10 @@ export interface paths {
          * Send one part of an upload
          * @description Exactly part_size bytes, the last part the rest (400
          *     COMMON_INVALID_ARGUMENT otherwise, or for a part number out of
-         *     range); a part sent again replaces it. nginx lets this route take
-         *     16 MB (client_max_body_size), the console's other routes less.
-         *     settings.write.
+         *     range); a part sent again replaces it; 409
+         *     PLATFORM_APP_UPLOAD_BUSY while a completion holds the upload. nginx
+         *     lets this route take 16 MB (client_max_body_size), the console's
+         *     other routes less. settings.write.
          */
         put: operations["putAppUploadPart"];
         post?: never;
@@ -2277,9 +2282,13 @@ export interface paths {
          *     replacing the one before, which is deleted. 409
          *     PLATFORM_APP_UPLOAD_INCOMPLETE while a part is missing (details
          *     missing, the part numbers); 422 PLATFORM_APP_FILE_INVALID when the
-         *     size, the SHA-256 or the package does not hold (details reason).
-         *     settings.write; audited as admin.platform.app_file_uploaded with the
-         *     platform, kind, name, size, SHA-256 and what the package says.
+         *     size, the SHA-256 or the package does not hold (details reason),
+         *     which drops the upload; 409 PLATFORM_APP_UPLOAD_BUSY while another
+         *     completion runs; 409 PLATFORM_APP_FILES_FULL while the platform
+         *     keeps 10 files. Any failure but a file refused keeps the upload
+         *     for another try. settings.write; audited as
+         *     admin.platform.app_file_uploaded with the platform, kind, name,
+         *     size, SHA-256 and what the package says.
          */
         post: operations["completeAppUpload"];
         delete?: never;
@@ -4592,7 +4601,7 @@ export interface components {
             current: components["schemas"]["AppFile"] | null;
             /** @description iOS's optional configuration profile; null for none (always null on Android). */
             mobileconfig: components["schemas"]["AppFile"] | null;
-            /** @description Every file kept on the server for the platform, newest first (the current app and configuration profile among them). */
+            /** @description Every file kept on the server for the platform, newest first (the current app and configuration profile among them); at most 10. */
             files: components["schemas"]["AppFile"][];
             /** @description What GET /v1/platform/apps answers for the platform now. */
             public: components["schemas"]["AppDownload"] | null;

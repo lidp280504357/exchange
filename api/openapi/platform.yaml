@@ -114,9 +114,10 @@ paths:
         /downloads/ on each of the sites — while it is enabled and
         complete; null otherwise (the sites leave the platform out, and
         hide the download entries while both are null). Cacheable for a
-        minute; the ETag is the sum of the two platforms' versions, which
-        every change raises (If-None-Match answers 304 while it has not
-        changed). Batch H0.
+        minute; the ETag is the two platforms' versions, Android's then
+        iOS's ("3-5"; every change raises one of them), a strong tag that
+        If-None-Match matches weakened too (W/"3-5", as Cloudflare sends it)
+        and answers 304 while it has not changed. Batch H0; built in H1.
       tags: [platform]
       security: []
       parameters:

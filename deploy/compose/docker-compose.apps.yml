@@ -381,6 +381,13 @@ services:
       # Signs its changes of HOUSE's caps on market-maker (key "admin").
       - path: house/admin.env
         required: false
+    # The apps to download (design 2026-10-07, App download page): the
+    # files nginx serves as /downloads/, and the parts of the uploads in
+    # progress (APP_DOWNLOADS_DIR, APP_UPLOADS_DIR); made by the deploy
+    # script for uid 10001.
+    volumes:
+      - ./downloads:/srv/downloads
+      - ./app-uploads:/srv/app-uploads
     environment:
       <<: *base-env
       GOMEMLIMIT: 240MiB

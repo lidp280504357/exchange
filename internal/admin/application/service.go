@@ -72,6 +72,12 @@ type Service struct {
 	MarketMaker ports.MarketMaker
 	Probe       ports.Health
 	Reconciler  ports.Reconciler
+	// Apps are the apps to download in instrument-service, AppFiles their
+	// files on the disk, AppUploads the uploads in progress (design
+	// 2026-10-07, App download page); nil leaves the downloads unavailable.
+	Apps       ports.PlatformApps
+	AppFiles   ports.AppFiles
+	AppUploads ports.AppUploads
 	// Content is notification-service's announcements, help articles and
 	// in-app messages.
 	Content ports.Content

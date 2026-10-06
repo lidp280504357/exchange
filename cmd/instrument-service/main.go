@@ -69,7 +69,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	instrumentv1.RegisterInstrumentServiceServer(srv, grpcapi.NewServer(svc))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Platform: plat}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Platform: plat, Apps: &application.Apps{Store: store, Now: time.Now}}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 

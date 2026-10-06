@@ -26,6 +26,7 @@ import (
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
 	riskv1 "github.com/skill/exchange/api/gen/go/exchange/risk/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/admin/adapters/appfiles"
 	"github.com/skill/exchange/internal/admin/adapters/backends"
 	"github.com/skill/exchange/internal/admin/adapters/postgres"
 	"github.com/skill/exchange/internal/admin/application"
@@ -92,6 +93,12 @@ type settings struct {
 	// the key "admin" (SIM_ADMIN_API_SECRET, in sim/admin.env only);
 	// without it the market is read-only here.
 	SimSecret string `koanf:"sim_admin_api_secret"`
+	// AppDownloadsDir is where the apps to download are stored, served by
+	// nginx as /downloads/ (APP_DOWNLOADS_DIR); AppUploadsDir keeps the
+	// parts of the uploads in progress (APP_UPLOADS_DIR). Design
+	// 2026-10-07, App download page §7 #4, #10.
+	AppDownloadsDir string `koanf:"app_downloads_dir"`
+	AppUploadsDir   string `koanf:"app_uploads_dir"`
 	// HouseCapsSecret signs the console's changes of HOUSE's caps with the
 	// key "admin" (HOUSE_CAPS_ADMIN_API_SECRET, in house/admin.env only;
 	// review C47); without it the caps are read-only here.
@@ -160,6 +167,7 @@ func setup(ctx context.Context, a *app.App) error {
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
 		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098", InstrumentURL: "http://localhost:8084",
 		LedgerURL: "http://localhost:8085", MarginURL: "http://localhost:8099", MarketMakerURL: "http://localhost:8091", PasswordHashConcurrency: 2,
+		AppDownloadsDir: "/srv/downloads", AppUploadsDir: "/srv/app-uploads",
 		HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -264,6 +272,9 @@ func setup(ctx context.Context, a *app.App) error {
 		Reconciler:       backends.Ledger{C: ledgerClient},
 		Content:          backends.Notification{REST: rest, Base: cfg.NotificationURL},
 		Platform:         backends.Platform{REST: rest, Instruments: cfg.InstrumentURL, Ledger: cfg.LedgerURL},
+		Apps:             backends.Platform{REST: rest, Instruments: cfg.InstrumentURL, Ledger: cfg.LedgerURL},
+		AppFiles:         appfiles.Disk{Downloads: cfg.AppDownloadsDir, Uploads: cfg.AppUploadsDir},
+		AppUploads:       postgres.NewUploads(db),
 		SimBots:          sim,
 		Sim:              sim,
 		Margin:           backends.Margin{REST: rest, Base: cfg.MarginURL},
@@ -274,6 +285,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	a.Add("instrument changes", app.Loop(func(ctx context.Context) error { return applyDueChanges(ctx, svc, 5*time.Second) }))
 	a.Add("idempotency keys", app.Loop(func(ctx context.Context) error { return purgeKeys(ctx, svc, time.Hour) }))
+	a.Add("app files", app.Loop(func(ctx context.Context) error { return sweepAppFiles(ctx, svc, 10*time.Minute) }))
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc, Limiter: ratelimit.New(rdb, "admin:rl:"), Secure: a.Config().Env != config.EnvLocal}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
@@ -308,6 +320,25 @@ func purgeKeys(ctx context.Context, svc *application.Service, every time.Duratio
 			svc.Log.WarnContext(ctx, "idempotency keys: purge failed", "error", err)
 		} else if n > 0 {
 			svc.Log.InfoContext(ctx, "idempotency keys purged", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+// sweepAppFiles drops the expired uploads of the apps to download and the
+// files no platform keeps, every interval until ctx ends.
+func sweepAppFiles(ctx context.Context, svc *application.Service, every time.Duration) error {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if uploads, files, err := svc.SweepAppFiles(ctx); err != nil && ctx.Err() == nil {
+			svc.Log.WarnContext(ctx, "app files: sweep failed", "error", err)
+		} else if uploads+files > 0 {
+			svc.Log.InfoContext(ctx, "app files swept", "uploads", uploads, "files", files)
 		}
 		select {
 		case <-ctx.Done():

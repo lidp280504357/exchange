@@ -173,6 +173,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/platform/welcome-credits", h.welcomeCredits)
 			r.Put("/platform/welcome-credits", h.setWelcomeCredits)
 			r.Get("/launch-checklist", h.launchChecklist)
+			h.appRoutes(r)
 			r.Get("/assets/{code}/profile", h.assetProfile)
 			r.Put("/assets/{code}/profile", h.updateAssetProfile)
 			r.Get("/instruments/changes", h.instrumentChanges)

@@ -29,6 +29,7 @@ type Repos interface {
 	Contracts() ContractRepo
 	Profiles() ProfileRepo
 	Platform() PlatformRepo
+	Apps() AppRepo
 	// Record appends a version to the configuration history; source says
 	// where the change came from (FILE, CONSOLE, STATUS, PROFILE).
 	Record(ctx context.Context, entity, key string, version int64, value any, actor, reason, source string) error
@@ -101,6 +102,18 @@ type PlatformRepo interface {
 	Image(ctx context.Context, kind string) (*domain.Logo, int64, error)
 	// SaveImage stores an image of a kind; nil removes it.
 	SaveImage(ctx context.Context, kind string, img *domain.Logo, info domain.PlatformImage, at time.Time) error
+}
+
+// AppRepo stores the apps to download (design 2026-10-07, App download
+// page), a row per platform.
+type AppRepo interface {
+	// List returns both platforms, Android first.
+	List(ctx context.Context) ([]domain.PlatformApp, error)
+	// GetForUpdate returns a platform with its row locked.
+	GetForUpdate(ctx context.Context, platform string) (domain.PlatformApp, error)
+	// Save writes a platform as of a.UpdatedBy and a.UpdatedAt, raising
+	// its version by one.
+	Save(ctx context.Context, a domain.PlatformApp) (domain.PlatformApp, error)
 }
 
 // Ledger reads the welcome credits ledger-service grants (design

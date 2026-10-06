@@ -52,8 +52,8 @@ func TestRegistrationGateAndPlatformRoutes(t *testing.T) {
 	}
 
 	for _, p := range []string{
-		"/v1/platform/profile", "/v1/platform/images/favicon", "/manifest.webmanifest", "/v1/legal", "/v1/legal/terms", "/v1/home",
-		"/v1/home/home-hero",
+		"/v1/platform/profile", "/v1/platform/images/favicon", "/manifest.webmanifest", "/v1/platform/apps", "/v1/legal", "/v1/legal/terms",
+		"/v1/home", "/v1/home/home-hero",
 	} {
 		if s, _ := call(http.MethodGet, p, ""); s != http.StatusNoContent {
 			t.Errorf("%s is public: %d", p, s)

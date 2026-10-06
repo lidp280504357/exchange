@@ -105,8 +105,10 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 			r.With(g.signedIn(true, RuleUser)...).Handle("/*", up.Auth)
 		})
 		// The platform's profile and its images (design 2026-10-04 §4.1),
-		// and the mobile site's manifest built from it.
+		// the mobile site's manifest built from it, and the apps to
+		// download (design 2026-10-07).
 		r.Get("/v1/platform/profile", up.Instrument.ServeHTTP)
+		r.Get("/v1/platform/apps", up.Instrument.ServeHTTP)
 		r.Get("/v1/platform/images/{kind}", up.Instrument.ServeHTTP)
 		r.Get("/manifest.webmanifest", up.Instrument.ServeHTTP)
 		// Public reference data.

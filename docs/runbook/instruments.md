@@ -87,6 +87,20 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 - 测试模式（`test_mode`，2026-10-04 用户决定由学习模式改名）：开着时站点只显示标为 TEST 或 BOTH 的内容、显示「测试模式」徽标，`banner` 为真时顶部显示横幅文案；关掉（上线）只显示 FORMAL 或 BOTH 的内容（设计 §4.4）。改名过渡期接口曾同时返回 `learning_mode`，后台改用 `test_mode`（a5a0d58）之后已去掉，`PUT` 必须带 `test_mode`。
 - 读这份资料的还有：网关读注册方式，关闭时拒绝注册（见 [gateway.md](gateway.md#路由)）；notification-service 读名称，作为邮件与短信的署名（10 分钟缓存，读不到用 `Astras`），读测试模式，决定公开接口给站点哪种模式的文章（30 秒缓存，读不到沿用上次的，启动后没读到过时按正式模式）。
 
+## App 下载（设计 2026-10-07 App 下载页，H1）
+
+两站下载页读的 Android 与 iOS 安装方式，后台「平台设置 → App 下载」改（见 [admin.md](admin.md#app-下载)）。存在 `platform_apps`（迁移 instrument 00013，每个平台一行，初始为 `OFF`、版本 1）：模式 `OFF`/`LINK`/`FILE`、外部链接（https，最多 500 字符）、启用开关、三语版本说明（各最多 1000 字）、当前安装包 `current`、iOS 的配置描述文件 `mobileconfig` 与该平台保留的全部文件 `files`（最新在前，最多 10 个）。文件本身在服务器磁盘上（admin-service 写，nginx 以 `/downloads/` 提供），这里只记它们的 ID、原名、大小、SHA-256、在 `/downloads/` 下的路径（`stored_as`，.ipa 另有清单 `manifest`）、上传时的站点 `origin` 与包里读出的版本。规则在 `internal/instrument/domain/apps.go`。
+
+- 每次改动（设置、记入文件、删除文件）版本加 1，`config_history` 记一行 `PLATFORM_APP`（键为平台，前后两份，文件按 ID）。
+- 地址：文件的 `url` 为 `https://<平台资料的域名>/downloads/<stored_as>`，域名为空时用上传时的站点；iOS 的 `install_url` 为 `itms-services://?action=download-manifest&url=<清单地址>`（清单里写死上传时的地址，改域名后要重新上传 .ipa）。
+- 公开接口（经网关）：`GET /v1/platform/apps` → `{android, ios}`，未启用、关闭、链接为空或安装包不在的平台为 `null`；缓存 60 秒，`ETag` 为 `"<Android 版本>-<iOS 版本>"`（强标签，`If-None-Match` 带 `W/` 也认），没变时 304。
+- 内部接口（后台调用，网关不转发 `/internal`）：
+  - `GET /internal/platform/apps` → `{apps: [Android, iOS]}`，即后台的 `PlatformAppAdmin`（另带每个文件的 `stored_as`、`manifest`，供 admin-service 删除文件）。
+  - `PUT /internal/platform/apps/{platform}`：`{mode, link_url, notes, enabled, expected_version, actor, reason}`；版本过期 409 `INSTRUMENT_PLATFORM_CHANGED`，`FILE` 没有安装包时 400。
+  - `POST /internal/platform/apps/{platform}/files`：`{file: {file_id, kind, name, size, sha256, stored_as, manifest, origin, package, version, build, min_os, uploaded_at, uploaded_by}, actor, reason}` → `{app, replaced}`：安装包成为当前文件、模式改为 `FILE`；配置描述文件替换旧的（`replaced` 为被替换的，文件由调用方删除）；超过 10 个 409 `PLATFORM_APP_FILES_FULL`。
+  - `DELETE /internal/platform/apps/{platform}/files/{file_id}`：`{actor, reason}` → `{app, removed}`：删的是当前安装包时有链接回到 `LINK`，否则 `OFF`；文件由调用方删除。
+- 服务内缓存 5 秒，改动时立即清掉。
+
 ## 常用命令
 
 ```bash
