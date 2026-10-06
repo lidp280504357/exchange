@@ -2,9 +2,10 @@
 # Perpetual contracts end to end (implementation plan §7.3): the contract
 # specifications (task 1), the index price, mark price and funding (task
 # 3) over REST and WebSocket, and every contract's public book: Binance
-# futures' (ADR-0015), which HOUSE offers. Every linear contract goes to
-# 125x on the same seven-tier ladder; the coin-margined ones (design
-# 2026-10-06 §2.1, listed with ?margin_type=COIN) carry Binance COIN-M's
+# futures' (ADR-0015), which HOUSE offers. BTC's and ETH's linear
+# contracts go to 125x on the same seven-tier ladder; the others listed from
+# Binance (design 2026-10-06 §3.4, G1c) carry its brackets, and the
+# coin-margined ones (§2.1, listed with ?margin_type=COIN) Binance COIN-M's
 # face values and ladders. The mark price needs the reference feed (flag
 # market.reference_feed, on in the test environment); the books need
 # market.reference_depth to allow the contracts.
@@ -19,7 +20,8 @@ echo "== specifications"
 call GET /v1/market/contracts ""
 expect 200 - "contracts"
 check '[.contracts[].symbol] | contains(["BTC-USDT-PERP","ETH-USDT-PERP"])' "seeded contracts listed"
-check 'all(.contracts[]; .max_leverage == 125 and .risk_tiers[0].max_leverage == 125)' "every contract goes to 125x"
+check 'all(.contracts[]; .max_leverage == .risk_tiers[0].max_leverage and .max_leverage >= 1 and .max_leverage <= 125)' "each contract's top leverage is its first tier's, at most 125x"
+check '[.contracts[] | select(.symbol | IN("BTC-USDT-PERP","ETH-USDT-PERP")) | .max_leverage] == [125,125]' "BTC and ETH go to 125x"
 call GET /v1/market/contracts/btc-usdt-perp ""
 expect 200 - "one contract (symbol is case-insensitive)"
 check '.index_symbol == "BTC-USDT" and .funding_interval_hours == 8' "its index and funding interval"

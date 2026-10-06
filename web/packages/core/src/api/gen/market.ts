@@ -641,7 +641,9 @@ export interface components {
             open: components["schemas"]["NullableDecimal"];
             high: components["schemas"]["NullableDecimal"];
             low: components["schemas"]["NullableDecimal"];
+            /** @description The 24 hours' volume in the market's quantity: the base asset of a pair or a linear contract, whole contracts of a coin-margined one (design 2026-10-06 §3.2). */
             volume: components["schemas"]["Decimal"];
+            /** @description The 24 hours' turnover in the quote: USDT for a pair quoted in it and a linear contract, USD (contracts x face value) for a coin-margined one. */
             quote_volume: components["schemas"]["Decimal"];
             /** Format: int64 */
             trade_count: number;
@@ -718,7 +720,9 @@ export interface components {
              */
             trade_number: number;
             price: components["schemas"]["Decimal"];
+            /** @description In the market's quantity (whole contracts on a coin-margined contract). */
             quantity: components["schemas"]["Decimal"];
+            /** @description price x quantity in the quote; on a coin-margined contract its USD value (contracts x face value). */
             quote_quantity: components["schemas"]["Decimal"];
             /** @enum {string} */
             taker_side: "BUY" | "SELL";
@@ -732,7 +736,9 @@ export interface components {
             high: components["schemas"]["Decimal"];
             low: components["schemas"]["Decimal"];
             close: components["schemas"]["Decimal"];
+            /** @description In the market's quantity (whole contracts on a coin-margined contract). */
             volume: components["schemas"]["Decimal"];
+            /** @description In the quote; USD (contracts x face value) on a coin-margined contract. */
             quote_volume: components["schemas"]["Decimal"];
             /** Format: int64 */
             trade_count: number;

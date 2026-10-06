@@ -112,6 +112,10 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 			t.Errorf("%s: a coin-margined contract without a linear one", base)
 		}
 	}
+	// Binance's lists (§3.4): most of the coins have a linear perpetual.
+	if n := len(kinds); n < 80 {
+		t.Errorf("perpetuals on %d coins, want Binance's (80 or so)", n)
+	}
 }
 
 var (
