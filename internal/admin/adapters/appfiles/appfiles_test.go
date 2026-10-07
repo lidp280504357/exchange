@@ -177,6 +177,18 @@ func TestStore(t *testing.T) {
 	if free, err := d.Free(); err != nil || free == 0 {
 		t.Fatalf("free %d %v", free, err)
 	}
+	// A manifest a crash left half written is one of the files the sweep
+	// sees (review GF, A76 ①).
+	left := filepath.Join(d.Downloads, "ios", ".0192a000-0000-7000-8000-000000000777.plist.tmp")
+	if err := os.WriteFile(left, []byte("<plist"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := d.Stored(); !slices.ContainsFunc(list, func(p ports.StoredPath) bool { return p.Path == "ios/.0192a000-0000-7000-8000-000000000777.plist.tmp" }) {
+		t.Fatalf("a manifest left over not listed: %+v", list)
+	}
+	if err := d.Remove("ios/.0192a000-0000-7000-8000-000000000777.plist.tmp"); err != nil {
+		t.Fatal(err)
+	}
 	dirs, err := d.UploadDirs()
 	if err != nil || len(dirs) != 6 || !slices.ContainsFunc(dirs, func(p ports.StoredPath) bool { return p.Path == uploadID }) {
 		t.Fatalf("the uploads' directories %+v %v", dirs, err)

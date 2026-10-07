@@ -224,11 +224,13 @@ func check(u domain.AppUpload, path string, size int64) (apppkg.Info, error) {
 
 // writeFile writes data to path aside first, then renames it into place.
 func writeFile(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	// .<name>.tmp: a leftover of a crash is one of the files the sweep
+	// lists (review GF, A76 ①), unlike a random temporary name.
+	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode) //nolint:gosec // a path of fixed parts and an ID
 	if err != nil {
 		return err
 	}
-	tmp := f.Name()
 	defer func() { _ = os.Remove(tmp) }()
 	_, err = io.Copy(f, bytes.NewReader(data))
 	if cerr := f.Close(); err == nil {

@@ -3,13 +3,14 @@ import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchan
 import { Badge, Button, ErrorState, FormField, Input, Progress, Segmented, Skeleton, Switch } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { FileUp, Trash2 } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { DangerAction, FormError } from "../../kit/actions";
 import { IdText, TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
 import { ReadOnly } from "../../kit/ReadOnly";
+import { sha256File } from "../../kit/sha256";
 import { TextsField } from "../../kit/texts";
 import { launchKey } from "./Launch";
 
@@ -224,12 +225,6 @@ function FileFacts({ app, file }: { app: App; file: AppFile }) {
   );
 }
 
-/** sha256 is a file's SHA-256 in lowercase hex. */
-async function sha256(f: Blob): Promise<string> {
-  const sum = new Uint8Array(await crypto.subtle.digest("SHA-256", await f.arrayBuffer()));
-  return Array.from(sum, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 /** putPart sends one part's bytes as they are (application/octet-stream). */
 async function putPart(platform: Platform, id: string, n: number, part: Blob) {
   const res = await fetch(`/admin/v1/platform/apps/${platform}/uploads/${id}/parts/${n}`, {
@@ -278,7 +273,8 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
   const ext = kind === "MOBILECONFIG" ? ".mobileconfig" : EXT[platform];
   const max = kind === "MOBILECONFIG" ? MAX_PROFILE : MAX_APP;
   const [chosen, setChosen] = useState<Chosen | null>(null);
-  const [hashing, setHashing] = useState(false);
+  // The share of the file hashed, null while not hashing.
+  const [hashing, setHashing] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<{ done: number; parts: number; checking: boolean } | null>(null);
   // The upload a failure (or a reload) left, resumed with the same file.
@@ -297,7 +293,9 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
       const res = await adminApi.GET("/admin/v1/platform/apps/{platform}/uploads/{upload_id}", {
         params: { path: { platform, upload_id: unfinished.id } },
       });
-      if (res.response.ok && res.data) up = res.data;
+      // Only onto the server's upload of this very file (review GF, A76 ③).
+      const same = res.data && res.data.sha256 === sum && res.data.size === file.size && res.data.kind === kind;
+      if (res.response.ok && same) up = res.data!;
     }
     up ??= adminData(
       await adminApi.POST("/admin/v1/platform/apps/{platform}/uploads", {
@@ -324,6 +322,22 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
     return out;
   };
 
+  // An unfinished upload is checked against the server when the card opens
+  // (review GF, A76 ④): gone (completed, dropped, expired), it is forgotten.
+  const checked = useRef(false);
+  useEffect(() => {
+    if (checked.current || !unfinished) return;
+    checked.current = true;
+    void adminApi
+      .GET("/admin/v1/platform/apps/{platform}/uploads/{upload_id}", { params: { path: { platform, upload_id: unfinished.id } } })
+      .then((res) => {
+        if (res.response.status === 404) {
+          keepUnfinished(platform, kind, null);
+          setUnfinishedState(null);
+        }
+      });
+  }, [platform, kind, unfinished]);
+
   const abandon = async () => {
     if (!unfinished) return;
     const res = await adminApi.DELETE("/admin/v1/platform/apps/{platform}/uploads/{upload_id}", {
@@ -349,13 +363,13 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
           setError("");
           if (!f.name.toLowerCase().endsWith(ext)) return setError(t("admin.apps.wrongType", { ext }));
           if (f.size > max) return setError(t("admin.apps.tooBig", { max: sizeText(max) }));
-          setHashing(true);
+          setHashing(0);
           try {
-            setChosen({ file: f, sha256: await sha256(f) });
+            setChosen({ file: f, sha256: await sha256File(f, setHashing) });
           } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
           } finally {
-            setHashing(false);
+            setHashing(null);
           }
         }}
       />
@@ -364,13 +378,13 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
           size="sm"
           variant="secondary"
           icon={<FileUp size={14} />}
-          disabled={hashing}
+          disabled={hashing !== null}
           onClick={() => input.current?.click()}
           data-testid={`app-upload-${platform}-${kind}`}
         >
           {label}
         </Button>
-        {hashing && <span className="text-xs text-fg-3">{t("admin.apps.hashing")}</span>}
+        {hashing !== null && <span className="text-xs text-fg-3">{t("admin.apps.hashing", { pct: Math.floor(hashing * 100) })}</span>}
         {error && <span className="text-xs text-danger-strong">{error}</span>}
       </span>
       {unfinished && !chosen && (
