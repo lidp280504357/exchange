@@ -176,6 +176,10 @@ func (r *ReferenceMap) Unfollowed(ctx context.Context, symbol string) bool {
 	return m != nil && r.pairs[symbol] && !followed
 }
 
+// Loaded reports whether the listing was read once (the followed pairs
+// are known).
+func (r *ReferenceMap) Loaded() bool { return r.cached() != nil }
+
 // FollowsPair reports whether symbol is a spot pair a reference market
 // follows, as last read: the pairs a price event may overlay (design
 // 2026-10-07, general price control).

@@ -216,14 +216,17 @@ type Followed struct {
 
 // OverlayPush is one push of an event's factor on a pair (J0 contract
 // §2.1): it holds until Until; Seq orders an event's pushes; EndsAt is
-// when the event is to be back at 1 (MarketOverlayStuck, review GD).
+// when the event is to be back at 1 (MarketOverlayStuck, review GD) and
+// StartedAt when it began (the candles of a minute begun within it,
+// review C58 ②).
 type OverlayPush struct {
-	Factor  decimal.Decimal
-	Until   time.Time
-	Risk    bool
-	EventID string
-	Seq     int64
-	EndsAt  time.Time
+	Factor    decimal.Decimal
+	Until     time.Time
+	Risk      bool
+	EventID   string
+	Seq       int64
+	EndsAt    time.Time
+	StartedAt time.Time
 }
 
 // Overlays is market-data's side of the overlays.

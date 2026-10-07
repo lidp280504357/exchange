@@ -178,7 +178,7 @@ holds() {
   if [[ $(jq -s "$2" "$1") != true ]]; then
     echo "FAIL $3; the samples:" >&2
     jq -c '{t, f: .ref.overlay_factor, src: .ref.source_price, last: .ticker.last, mark: .mark.mark_price, index: .mark.index_price,
-      ms: .mark.source, asset: .margin.cross.total_asset, q: .quoting}' "$1" >&2
+      ms: .mark.source, asset: .margin.cross.total_asset, q: .quoting, share: .share}' "$1" >&2
     exit 1
   fi
   echo "ok   $3"

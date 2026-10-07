@@ -94,6 +94,9 @@ func (o *Overlays) Push(ctx context.Context, symbol string, p ports.OverlayPush)
 	if !p.EndsAt.IsZero() {
 		push["ends_at"] = p.EndsAt.UTC().Format(time.RFC3339Nano)
 	}
+	if !p.StartedAt.IsZero() {
+		push["started_at"] = p.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
 	body, err := json.Marshal(push)
 	if err != nil {
 		return err

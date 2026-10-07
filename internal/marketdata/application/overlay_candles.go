@@ -19,9 +19,6 @@ type overlayCandles struct {
 
 	mu   sync.Mutex
 	open map[string]*touched
-	// last is each symbol's latest minute an event touched: the minute
-	// after it began within the event (review C57 ①).
-	last map[string]time.Time
 }
 
 // touched is a minute a factor other than 1 reached.
@@ -31,18 +28,20 @@ type touched struct {
 }
 
 func newOverlayCandles(o *Overlay) *overlayCandles {
-	return &overlayCandles{overlay: o, open: map[string]*touched{}, last: map[string]time.Time{}}
+	return &overlayCandles{overlay: o, open: map[string]*touched{}}
 }
 
 // factor is the overlay's factor on symbol's candles: a pair's own, a
-// perpetual's from its index pair while the overlay reaches risk.
-func (oc *overlayCandles) factor(symbol string) decimal.Decimal {
+// perpetual's from its index pair while the overlay reaches risk; and
+// when the event began.
+func (oc *overlayCandles) factor(symbol string) (decimal.Decimal, time.Time) {
 	pair := domain.IndexPairOf(symbol)
-	if pair != symbol {
-		return oc.overlay.RiskFactor(pair)
+	f := oc.overlay.RiskFactor(pair)
+	if pair == symbol {
+		f, _ = oc.overlay.Factor(symbol)
 	}
-	f, _ := oc.overlay.Factor(symbol)
-	return f
+	since, _ := oc.overlay.Since(pair)
+	return f, since
 }
 
 // apply is c (a reference 1m candle as it stands) as the platform shows
@@ -51,9 +50,11 @@ func (oc *overlayCandles) factor(symbol string) decimal.Decimal {
 // event begins in keeps the reference market's prices before it (its
 // open, high and low); a minute that began within the event has the
 // scaled prices only - the reference market's own range would show a wick
-// back to it in every such minute (review C57 ①).
+// back to it in every such minute (review C57 ①). When the event began
+// is the overlay's to tell (the event's own start, across a restart of
+// either service; review C58 ②).
 func (oc *overlayCandles) apply(c domain.Candle) (domain.Candle, bool) {
-	f := oc.factor(c.Symbol)
+	f, since := oc.factor(c.Symbol)
 	tick := oc.overlay.Tick(c.Symbol)
 	oc.mu.Lock()
 	defer oc.mu.Unlock()
@@ -67,13 +68,12 @@ func (oc *overlayCandles) apply(c domain.Candle) (domain.Candle, bool) {
 			return c, false
 		}
 		t = &touched{minute: c.OpenTime, open: c.Open, high: c.High, low: c.Low}
-		if last, had := oc.last[c.Symbol]; had && last.Add(time.Minute).Equal(c.OpenTime) {
+		if !since.IsZero() && !since.After(c.OpenTime) {
 			t.open = domain.ScalePrice(c.Open, f, tick)
 			t.high, t.low = domain.ScalePrice(c.High, f, tick), domain.ScalePrice(c.Low, f, tick)
 		}
 		oc.open[c.Symbol] = t
 	}
-	oc.last[c.Symbol] = c.OpenTime
 	p := domain.ScalePrice(c.Close, f, tick)
 	t.high, t.low, t.close = decimal.Max(t.high, p), decimal.Min(t.low, p), p
 	c.Open, c.High, c.Low, c.Close = t.open, t.high, t.low, t.close

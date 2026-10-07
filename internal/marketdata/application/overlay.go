@@ -42,14 +42,18 @@ var (
 
 // Overlay errors (J0 contract §2.1).
 var (
-	ErrNotFollowed  = apperr.New(apperr.KindConflict, "MARKET_NOT_FOLLOWED", "the pair follows no reference market: its price events are the simulated market's own")
-	ErrOverlayOff   = apperr.New(apperr.KindConflict, "MARKET_OVERLAY_OFF", "price overlays are off (market.overlay)")
-	ErrOverlayBusy  = apperr.New(apperr.KindConflict, "MARKET_OVERLAY_BUSY", "another price event overlays the pair")
+	ErrNotFollowed = apperr.New(apperr.KindConflict, "MARKET_NOT_FOLLOWED", "the pair follows no reference market: its price events are the simulated market's own")
+	ErrOverlayOff  = apperr.New(apperr.KindConflict, "MARKET_OVERLAY_OFF", "price overlays are off (market.overlay)")
+	ErrOverlayBusy = apperr.New(apperr.KindConflict, "MARKET_OVERLAY_BUSY", "another price event overlays the pair")
+	// ErrOverlayNotReady answers while the listing of the followed pairs
+	// is not read yet (a restart): push again (review C58 ①).
+	ErrOverlayNotReady = apperr.New(apperr.KindUnavailable, "MARKET_OVERLAY_NOT_READY",
+		"the followed pairs are not known yet: push again")
 	errOverlayRange = apperr.Invalid("factor must be from 0.1 to 1.9")
 )
 
 // OverlayPush is one push of a price event's factor; EndsAt is when the
-// event is to be back at 1 (zero: not told).
+// event is to be back at 1 and Since when it began (zero: not told).
 type OverlayPush struct {
 	Factor  decimal.Decimal
 	Until   time.Time
@@ -57,6 +61,7 @@ type OverlayPush struct {
 	EventID string
 	Seq     int64
 	EndsAt  time.Time
+	Since   time.Time
 }
 
 // OverlayState is a pair's overlay as kept.
@@ -69,14 +74,18 @@ type OverlayState struct {
 	Seq      int64
 	Received time.Time
 	// EndsAt is when the event is to be back at 1: as its pushes tell, or
-	// overlayLongest past its first.
+	// overlayLongest past its first. Since is when it began: as its pushes
+	// tell (a restart of market-data in the middle of it), or its first
+	// push here.
 	EndsAt time.Time
+	Since  time.Time
 }
 
 // Overlay keeps the pairs' factors.
 type Overlay struct {
 	flags    Flags
 	followed func(symbol string) bool
+	listed   func() bool // whether the followed pairs are known (nil: always)
 	ticks    func(symbol string) decimal.Decimal
 	now      func() time.Time
 
@@ -115,6 +124,12 @@ func NewOverlay(fl Flags, followed func(symbol string) bool, reg prometheus.Regi
 
 func (o *Overlay) enabled() bool { return o.flags.Enabled(flags.KeyOverlay, flags.Subject{}) }
 
+// WithListing has the pushes wait for the listing of the followed pairs
+// (listed): until it was read once they are answered ErrOverlayNotReady,
+// not ErrNotFollowed, which market-sim takes for good. Call it before
+// serving.
+func (o *Overlay) WithListing(listed func() bool) { o.listed = listed }
+
 // WithTicks has the scaled prices of a symbol on its price step (ticks:
 // the pairs' and contracts' as instrument-service has them). Call it
 // before serving.
@@ -151,6 +166,9 @@ func (o *Overlay) set(symbol string, p OverlayPush) error {
 	if !o.enabled() {
 		return ErrOverlayOff
 	}
+	if o.listed != nil && !o.listed() {
+		return ErrOverlayNotReady
+	}
 	if !o.followed(symbol) {
 		return ErrNotFollowed
 	}
@@ -183,15 +201,22 @@ func (o *Overlay) set(symbol string, p OverlayPush) error {
 		o.closed[symbol] = OverlayState{Symbol: symbol, EventID: p.EventID, Seq: p.Seq, Received: now}
 		return nil
 	}
-	ends := p.EndsAt
+	ends, since := p.EndsAt, p.Since
 	if ends.IsZero() {
 		ends = now.Add(overlayLongest)
 		if ok && !cur.EndsAt.IsZero() {
 			ends = cur.EndsAt
 		}
 	}
+	if since.IsZero() || since.After(now) {
+		since = now
+		if ok && !cur.Since.IsZero() {
+			since = cur.Since
+		}
+	}
 	s := OverlayState{
 		Symbol: symbol, Factor: p.Factor, Until: p.Until, Risk: p.Risk, EventID: p.EventID, Seq: p.Seq, Received: now, EndsAt: ends,
+		Since: since,
 	}
 	o.items[symbol] = s
 	o.showLocked(s)
@@ -248,6 +273,14 @@ func (o *Overlay) Factor(symbol string) (decimal.Decimal, bool) {
 		return one, false
 	}
 	return s.Factor, s.Risk
+}
+
+// Since is when the price event on symbol began, false without one.
+func (o *Overlay) Since(symbol string) (time.Time, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	s, ok := o.live(symbol, o.now())
+	return s.Since, ok
 }
 
 // RiskFactor is the factor on the risk data of the perpetuals indexed on

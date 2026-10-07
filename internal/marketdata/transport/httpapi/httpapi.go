@@ -185,8 +185,10 @@ func (h *Handler) setOverlay(w http.ResponseWriter, r *http.Request) {
 		Risk    *bool  `json:"risk"`
 		EventID string `json:"event_id"`
 		Seq     int64  `json:"seq"`
-		// EndsAt is when the event is to be back at 1 (optional).
-		EndsAt string `json:"ends_at"`
+		// EndsAt is when the event is to be back at 1, StartedAt when it
+		// began (both optional).
+		EndsAt    string `json:"ends_at"`
+		StartedAt string `json:"started_at"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
@@ -202,15 +204,21 @@ func (h *Handler) setOverlay(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("until must be an RFC 3339 time"))
 		return
 	}
-	var ends time.Time
+	var ends, since time.Time
 	if body.EndsAt != "" {
 		if ends, err = time.Parse(time.RFC3339Nano, body.EndsAt); err != nil {
 			httpx.WriteError(w, r, apperr.Invalid("ends_at must be an RFC 3339 time"))
 			return
 		}
 	}
+	if body.StartedAt != "" {
+		if since, err = time.Parse(time.RFC3339Nano, body.StartedAt); err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("started_at must be an RFC 3339 time"))
+			return
+		}
+	}
 	risk := body.Risk == nil || *body.Risk
-	push := application.OverlayPush{Factor: f, Until: until, Risk: risk, EventID: body.EventID, Seq: body.Seq, EndsAt: ends}
+	push := application.OverlayPush{Factor: f, Until: until, Risk: risk, EventID: body.EventID, Seq: body.Seq, EndsAt: ends, Since: since}
 	if err := h.Overlay.Set(symbol(r), push); err != nil {
 		httpx.WriteError(w, r, err)
 		return

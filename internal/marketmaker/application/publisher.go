@@ -207,8 +207,8 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 		}, []string{"symbol"}),
 		quotedShare: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_house_quoted_share",
-			Help: "HOUSE's quantity on a book's first levels over the reference market's there, both sides: below 1 with the level caps, " +
-				"about OVERLAY_QUOTE_FRACTION during a price event.",
+			Help: "HOUSE's quantity on a book over the reference market's down to its lowest bid and up to its highest ask: " +
+				"below 1 with the level caps, about OVERLAY_QUOTE_FRACTION during a price event.",
 		}, []string{"symbol"}),
 	}
 	p.showCaps(cfg.Caps, 0)
@@ -331,22 +331,34 @@ func (p *Publisher) showCaps(caps domain.Caps, version int64) {
 	p.capsVersion.Set(float64(version))
 }
 
-// quotedShare is HOUSE's quantity on the first n levels of both sides over
-// the reference market's there (0 without any): what the level caps and a
-// price event's fraction leave of the book (review C57 ④).
-func quotedShare(bids, refBids, asks, refAsks []domain.Level, n int) float64 {
-	sum := func(ls []domain.Level) decimal.Decimal {
-		total := decimal.Zero
-		for _, l := range ls[:min(n, len(ls))] {
-			total = total.Add(l.Quantity)
+// quotedShare is HOUSE's quantity on a book over the reference market's
+// on the same prices - down to HOUSE's lowest bid, up to its highest ask
+// (its grid may be coarser, its merged levels deeper) - both sides (0
+// without any): what the level caps and a price event's fraction leave of
+// the book (review C57 ④).
+func quotedShare(bids, refBids, asks, refAsks []domain.Level) float64 {
+	side := func(quoted, ref []domain.Level, buy bool) (q, r decimal.Decimal) {
+		if len(quoted) == 0 {
+			return decimal.Zero, decimal.Zero
 		}
-		return total
+		last := quoted[len(quoted)-1].Price
+		for _, l := range quoted {
+			q = q.Add(l.Quantity)
+		}
+		for _, l := range ref {
+			if buy && l.Price.LessThan(last) || !buy && l.Price.GreaterThan(last) {
+				break
+			}
+			r = r.Add(l.Quantity)
+		}
+		return q, r
 	}
-	ref := sum(refBids).Add(sum(refAsks))
-	if !ref.IsPositive() {
-		return 0
+	qb, rb := side(bids, refBids, true)
+	qa, ra := side(asks, refAsks, false)
+	if ref := rb.Add(ra); ref.IsPositive() {
+		return qb.Add(qa).Div(ref).InexactFloat64()
 	}
-	return sum(bids).Add(sum(asks)).Div(ref).InexactFloat64()
+	return 0
 }
 
 // Rooms is how much HOUSE may still buy and sell of a symbol (base asset,
@@ -554,7 +566,7 @@ func (p *Publisher) round() []outgoing {
 				bids, asks = domain.Fraction(bids, p.cfg.OverlayFraction, spec), domain.Fraction(asks, p.cfg.OverlayFraction, spec)
 			}
 			p.overlayQuoting.WithLabelValues(spec.Symbol).Set(boolGauge(b.overlay))
-			p.quotedShare.WithLabelValues(spec.Symbol).Set(quotedShare(bids, b.bids, asks, b.asks, p.cfg.Levels))
+			p.quotedShare.WithLabelValues(spec.Symbol).Set(quotedShare(bids, b.bids, asks, b.asks))
 			var buy, sell decimal.Decimal
 			if spec.Contract {
 				pos, mid := p.contracts.Positions[spec.Symbol], midOf(b)

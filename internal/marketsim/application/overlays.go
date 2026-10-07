@@ -59,17 +59,16 @@ const (
 	overlayPeakEvery  = 10 * time.Second
 	overlaySystem     = "system:market-sim"
 	overlayFlagActor  = "system:market.overlay"
-	// The pushes failing (review C57 ③): market-data puts the pair back at
-	// 1 five seconds after the last push, so overlayPushFailures in a row
-	// are a dip back to the reference price. One dip is a market-data
-	// restart: the pushes go on along the schedule once it answers (the
-	// overlay-restart drill). A second dip - pushes coming and going, the
-	// pair jumping back and forth - or overlayPushGiveUp in a row cancels
-	// the event; so does a refusal that will not pass (a pair no longer
+	// The pushes failing (reviews C57 ③, C58 ③), by time: a push holds
+	// overlayAhead, so longer than that without a successful one is a dip
+	// back to the reference price. One dip is a market-data restart: the
+	// pushes go on along the schedule once it answers (the overlay-restart
+	// drill). A second dip - pushes coming and going, the pair jumping back
+	// and forth - or overlayGiveUp without a successful push cancels the
+	// event; so does a refusal that will not pass (a pair no longer
 	// followed, a bad signature) at once.
-	overlayPushFailures = 5
-	overlayDips         = 1
-	overlayPushGiveUp   = 120
+	overlayDips   = 1
+	overlayGiveUp = 2 * time.Minute
 )
 
 // Codes of the overlays' refusals (J0 contract §3.1).
@@ -140,10 +139,11 @@ type Overlays struct {
 
 	// mu guards the map of the open events alone, never across a request:
 	// each event has its own lock for its state (overlayRun.mu; review C57
-	// ②).
+	// ②). busy counts the rounds' work on the events under way.
 	mu    sync.Mutex
 	open  map[string]*overlayRun // scheduled and running, by event ID
 	ready atomic.Bool
+	busy  sync.WaitGroup
 
 	factor *prometheus.GaugeVec
 	pushes *prometheus.CounterVec
@@ -165,8 +165,9 @@ type overlayRun struct {
 	savedPeak decimal.Decimal // its peak as stored
 	peakAt    time.Time       // when its peak was last saved
 	failing   bool            // its last push failed (logged once)
-	fails     int             // its pushes that failed in a row
-	dips      int             // its runs of overlayPushFailures failures
+	pushedAt  time.Time       // its last successful push (or its start here)
+	dipped    bool            // the failures since pushedAt made a dip
+	dips      int             // its dips back to the reference price
 }
 
 // NewOverlays returns the overlays; market nil leaves them unconfigured
@@ -208,26 +209,31 @@ func (o *Overlays) Start(ctx context.Context) error {
 	defer o.mu.Unlock()
 	for _, e := range open {
 		if e.Type == domain.EventOverlay {
-			o.open[e.ID] = newRun(e)
+			o.open[e.ID] = newRun(e, o.now())
 		}
 	}
 	o.ready.Store(true)
 	return nil
 }
 
-// Run pushes the factors every cfg.Every until ctx ends.
+// Run pushes the factors every cfg.Every until ctx ends, then waits for
+// the work under way.
 func (o *Overlays) Run(ctx context.Context) error {
 	t := time.NewTicker(o.cfg.Every)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			o.settle()
 			return nil
 		case <-t.C:
 		}
 		o.Round(ctx)
 	}
 }
+
+// settle waits until the rounds' work on the events is done.
+func (o *Overlays) settle() { o.busy.Wait() }
 
 // Has reports whether id is an open overlay event.
 func (o *Overlays) Has(id string) bool {
@@ -322,7 +328,7 @@ func (o *Overlays) Create(ctx context.Context, req OverlayRequest) ([]OverlayCre
 	}
 	o.mu.Lock()
 	for _, e := range events {
-		o.open[e.ID] = newRun(e)
+		o.open[e.ID] = newRun(e, now)
 		out = append(out, OverlayCreated{Symbol: e.Symbol, Event: e, TargetFactor: e.TargetFactor, BasePrice: e.BasePrice})
 		o.log.InfoContext(ctx, "price event created", "event", e.ID, "symbol", e.Symbol, "factor", e.TargetFactor, "by", e.CreatedBy,
 			"starts_at", e.StartsAt, "risk", e.Risk)
@@ -460,8 +466,8 @@ func (o *Overlays) openOn(symbol string) bool {
 	return false
 }
 
-func newRun(e domain.Event) *overlayRun {
-	return &overlayRun{symbol: e.Symbol, starts: e.StartsAt, e: e, savedPeak: e.PeakPrice}
+func newRun(e domain.Event, now time.Time) *overlayRun {
+	return &overlayRun{symbol: e.Symbol, starts: e.StartsAt, e: e, savedPeak: e.PeakPrice, pushedAt: now}
 }
 
 // forget takes an event out of the open ones; r.mu is held.
@@ -567,7 +573,9 @@ func (o *Overlays) audit(ctx context.Context, e domain.Event, action, actor, rea
 
 // Round starts the events due, pushes the running ones' factors and ends
 // the ones back at 1; with market.overlay off it cancels them (market-data
-// is at 1 then already).
+// is at 1 then already). Each event is worked on by itself, a round not
+// waiting for another event's requests; an event still worked on from the
+// round before (its market-data slow) skips this one (review C58 ③).
 func (o *Overlays) Round(ctx context.Context) {
 	if o.market == nil {
 		return
@@ -580,22 +588,32 @@ func (o *Overlays) Round(ctx context.Context) {
 		runs = append(runs, r)
 	}
 	o.mu.Unlock()
-	slices.SortFunc(runs, func(a, b *overlayRun) int { return a.starts.Compare(b.starts) })
 	for _, r := range runs {
-		r.mu.Lock()
-		switch {
-		case r.gone:
-		case r.e.Status == domain.EventScheduled && r.e.StartsAt.After(now):
-		case r.e.Status == domain.EventScheduled && !on:
-			o.cancel(ctx, r, now, "market.overlay is off at its start")
-		case r.e.Status == domain.EventScheduled:
-			o.start(ctx, r, now)
-		case !on:
-			o.abort(ctx, r, now, overlayFlagActor, "market.overlay was switched off")
-		default:
-			o.step(ctx, r, now)
+		if !r.mu.TryLock() {
+			continue
 		}
-		r.mu.Unlock()
+		o.busy.Add(1)
+		go func() {
+			defer o.busy.Done()
+			defer r.mu.Unlock()
+			o.work(ctx, r, now, on)
+		}()
+	}
+}
+
+// work does a round's work on one event; r.mu is held.
+func (o *Overlays) work(ctx context.Context, r *overlayRun, now time.Time, on bool) {
+	switch {
+	case r.gone:
+	case r.e.Status == domain.EventScheduled && r.e.StartsAt.After(now):
+	case r.e.Status == domain.EventScheduled && !on:
+		o.cancel(ctx, r, now, "market.overlay is off at its start")
+	case r.e.Status == domain.EventScheduled:
+		o.start(ctx, r, now)
+	case !on:
+		o.abort(ctx, r, now, overlayFlagActor, "market.overlay was switched off")
+	default:
+		o.step(ctx, r, now)
 	}
 }
 
@@ -643,7 +661,7 @@ func (o *Overlays) start(ctx context.Context, r *overlayRun, now time.Time) {
 		o.log.WarnContext(ctx, "price event: its start not saved", "event", e.ID, "error", err)
 		return
 	}
-	r.e = e
+	r.e, r.pushedAt = e, now
 	o.log.InfoContext(ctx, "price event started", "event", e.ID, "symbol", e.Symbol, "reference", ref.Source, "factor", e.TargetFactor)
 	o.step(ctx, r, now)
 }
@@ -684,7 +702,7 @@ func (o *Overlays) step(ctx context.Context, r *overlayRun, now time.Time) {
 func (o *Overlays) send(ctx context.Context, e domain.Event, f float64, now time.Time) error {
 	err := o.market.Push(ctx, e.Symbol, ports.OverlayPush{
 		Factor: decimal.NewFromFloat(f).Round(8), Until: now.Add(overlayAhead), Risk: e.Risk, EventID: e.ID, Seq: now.UnixMilli(),
-		EndsAt: e.OverlayEnds(),
+		EndsAt: e.OverlayEnds(), StartedAt: e.StartedAt,
 	})
 	if err != nil {
 		o.pushes.WithLabelValues("failed").Inc()
@@ -695,22 +713,23 @@ func (o *Overlays) send(ctx context.Context, e domain.Event, f float64, now time
 }
 
 // push sends the factor f of a running event; false when the event is
-// canceled for its failures (overlayPushFailures).
+// canceled for its failures (overlayDips, overlayGiveUp).
 func (o *Overlays) push(ctx context.Context, r *overlayRun, f float64, now time.Time) bool {
 	e := r.e
 	if err := o.send(ctx, e, f, now); err != nil {
-		r.fails++
 		code := ports.Code(err)
 		if ports.Refused(err) && code != "MARKET_OVERLAY_OFF" && code != "MARKET_OVERLAY_BUSY" {
 			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("market-data refused its factor (%s)", code))
 			return false
 		}
-		if r.fails == overlayPushFailures {
+		quiet := now.Sub(r.pushedAt)
+		if quiet > overlayAhead && !r.dipped {
+			r.dipped = true
 			r.dips++
 		}
-		if r.dips > overlayDips || r.fails >= overlayPushGiveUp {
-			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("its pushes failed %d times in a row, the pair back at the reference price %d times (%s)",
-				r.fails, r.dips, err))
+		if r.dips > overlayDips || quiet >= overlayGiveUp {
+			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("no push of its factor for %s, the pair back at the reference price %d times (%s)",
+				quiet.Round(time.Second), r.dips, err))
 			return false
 		}
 		if !r.failing {
@@ -722,7 +741,7 @@ func (o *Overlays) push(ctx context.Context, r *overlayRun, f float64, now time.
 	if r.failing {
 		o.log.InfoContext(ctx, "price event: its factor pushed again", "event", e.ID, "symbol", e.Symbol)
 	}
-	r.failing, r.fails = false, 0
+	r.failing, r.dipped, r.pushedAt = false, false, now
 	o.factor.WithLabelValues(e.Symbol).Set(f)
 	return true
 }

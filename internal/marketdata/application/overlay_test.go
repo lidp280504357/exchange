@@ -140,7 +140,9 @@ func TestACandleKeepsTheSpike(t *testing.T) {
 	if got, touched := oc.apply(c); !got.Close.Equal(d("86000")) || !got.High.Equal(d("86010")) || touched {
 		t.Fatalf("untouched %+v", got)
 	}
-	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 1}); err != nil {
+	*now = now.Add(20 * time.Second) // the event begins within the minute
+	began := *now
+	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 1, Since: began}); err != nil {
 		t.Fatal(err)
 	}
 	// The minute the event begins in keeps what came before it.
@@ -151,7 +153,7 @@ func TestACandleKeepsTheSpike(t *testing.T) {
 	// A minute that begins within the event has the scaled prices only: no
 	// wick back to the reference market's (review C57 ①).
 	*now = now.Add(time.Minute)
-	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 2}); err != nil {
+	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 2, Since: began}); err != nil {
 		t.Fatal(err)
 	}
 	next := domain.Candle{

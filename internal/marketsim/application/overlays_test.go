@@ -167,6 +167,7 @@ func (r *overlayRig) seconds(n int) {
 	for range n {
 		r.now = r.now.Add(time.Second)
 		r.o.Round(context.Background())
+		r.o.settle()
 	}
 }
 
@@ -534,11 +535,17 @@ func TestASlowPushHoldsUpOnlyItsEvent(t *testing.T) {
 	r.market.hold = map[string]chan struct{}{"BTC-USDT": release}
 	r.market.mu.Unlock()
 	r.now = r.now.Add(time.Second)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		r.o.Round(ctx) // stuck in BTC-USDT's push
-	}()
+	r.o.Round(ctx) // BTC-USDT's push hangs; the round does not wait for it
+	// The next rounds push ETH-USDT again (once its last round's work is
+	// done) and skip BTC-USDT, whose push still hangs.
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, n := r.market.last("ETH-USDT"); n >= 2 {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("ETH-USDT pushed %d times while BTC-USDT's push hung", n)
+		}
+		r.o.Round(ctx)
+	}
 	answered := make(chan error, 1)
 	go func() {
 		if !r.o.Has(btc[0].Event.ID) {
@@ -557,7 +564,7 @@ func TestASlowPushHoldsUpOnlyItsEvent(t *testing.T) {
 		t.Fatal("the lookups and another event's end waited on a slow push")
 	}
 	close(release)
-	<-done
+	r.o.settle()
 }
 
 // A push that fails is made again the next second; market-data, which
