@@ -110,6 +110,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Prices: prices.NewLastTrade(store.Read().Fills().LastTrade,
 			prices.ReferenceClient{Base: cfg.MarketURL, Client: &http.Client{Timeout: 2 * time.Second}}.Price, time.Second),
 		Features: features,
+		Products: features,
 		FeeFree:  cfg.MarketMakerUsers,
 		Log:      a.Logger(),
 		Now:      time.Now,

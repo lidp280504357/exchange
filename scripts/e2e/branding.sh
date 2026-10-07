@@ -38,18 +38,6 @@ M_BASE="${M_BASE:-https://m.astras.vip}"
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 ACTOR="e2e:branding"
 
-# internal METHOD SERVICE PORT PATH [JSON] calls a service's internal
-# endpoint (the gateway does not route /internal) from the test server and
-# sets STATUS and BODY.
-internal() {
-  local method=$1 svc=$2 port=$3 path=$4 body=${5-} data="" out
-  [[ -n "$body" ]] && data="--data-binary @-"
-  # shellcheck disable=SC2016 # expanded on the server
-  out=$(remote "ip=\$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' \$(sudo docker compose $COMPOSE_FILES ps -q $svc) | awk '{print \$1}') && curl -s -m 20 -X $method -H 'Content-Type: application/json' $data -w '\n%{http_code}' http://\$ip:$port$path" "$body")
-  STATUS=${out##*$'\n'}
-  BODY=${out%$'\n'*}
-}
-
 # profile reads the profile as the console does.
 profile() {
   internal GET instrument-service 8084 /internal/platform/profile

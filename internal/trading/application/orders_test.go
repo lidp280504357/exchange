@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,8 +16,10 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/trading/domain"
 	"github.com/skill/exchange/internal/trading/ports"
@@ -119,6 +122,17 @@ func (r memOrders) Active(_ context.Context, userID, symbol string) ([]domain.Or
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (r memOrders) ActiveUsers(context.Context) ([]string, error) {
+	var out []string
+	for _, o := range r.s.orders {
+		if o.Status.Active() && !slices.Contains(out, o.UserID) {
+			out = append(out, o.UserID)
+		}
+	}
+	sort.Strings(out)
 	return out, nil
 }
 
@@ -941,5 +955,133 @@ func TestCancelAccountCancelsOnlyThatAccount(t *testing.T) {
 		if _, err := svc.CancelAccount(ctx, user, bad.account, bad.symbol); !apperr.Is(err, apperr.CodeInvalidArgument) {
 			t.Fatalf("%s %q: %v", bad.account, bad.symbol, err)
 		}
+	}
+}
+
+// lines is the product lines' flags with the named ones closed; from the
+// check numbered closing on (counting from 1) spot is closed too, as if an
+// operator closed it while an order was on its way in.
+type lines struct {
+	closed          map[string]bool
+	closing, checks int
+	refreshes       int
+}
+
+func (l *lines) Closed(key string) bool {
+	l.checks++
+	return l.closed[key] || (key == flags.KeyProductSpot && l.closing > 0 && l.checks >= l.closing)
+}
+
+func (l *lines) Refresh(context.Context) error {
+	l.refreshes++
+	return nil
+}
+
+// The product switches (design 2026-10-07): with spot trading closed new
+// orders on SPOT accounts are refused and nothing is stored, while orders
+// on margin accounts follow margin.enabled and cancels go on; CancelOpen
+// cancels the SPOT accounts' orders, each audited, once the line is
+// closed.
+func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
+	svc, store, _, _ := newService()
+	ctx := context.Background()
+	svc.Margin = &fakeMargin{}
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	products := &lines{closed: map[string]bool{}}
+	svc.Products = products
+	users := []string{"0199b0a0-0000-7000-8000-0000000000c1", "0199b0a0-0000-7000-8000-0000000000c2"}
+	place := func(user, id string, account domain.AccountType) (domain.Order, error) {
+		r := marginBuy(id, account, domain.SideEffectNone)
+		r.UserID = user
+		return svc.Place(ctx, r)
+	}
+	var spot []domain.Order
+	for _, u := range users {
+		for _, id := range []string{"a", "b"} {
+			o, err := place(u, id, domain.AccountSpot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spot = append(spot, o)
+		}
+	}
+	margin, err := place(users[0], "m", domain.AccountMarginCross)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One already being canceled is not asked again.
+	if _, err := svc.Cancel(ctx, users[1], spot[3].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CancelOpen(ctx, "ops@example.com", "closing spot"); !apperr.Is(err, apperr.CodeConflict) {
+		t.Fatalf("cancel-open while the line is open: %v", err)
+	}
+
+	products.closed[flags.KeyProductSpot] = true
+	stored := len(store.orders)
+	_, err = place(users[0], "c", domain.AccountSpot)
+	if e := apperr.From(err); e.Code != flags.CodeProductClosed || e.Details["product"] != "spot" || len(store.orders) != stored {
+		t.Fatalf("an order while closed: %v %v, %d orders", err, e.Details, len(store.orders))
+	}
+	if _, err := place(users[0], "m2", domain.AccountMarginCross); err != nil {
+		t.Fatalf("a margin order while spot is closed: %v", err)
+	}
+	if _, err := svc.CancelOpen(ctx, "", "closing spot"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no actor: %v", err)
+	}
+	audits := 0
+	for _, e := range store.events {
+		if e.topic == event.TopicAudit {
+			audits++
+		}
+	}
+	canceled, err := svc.CancelOpen(ctx, "ops@example.com", "closing spot")
+	if err != nil || len(canceled) != 3 || products.refreshes != 2 { // one each time past the arguments
+		t.Fatalf("cancel-open: %+v %v, %d refreshes", canceled, err, products.refreshes)
+	}
+	for i, o := range spot {
+		got, _ := store.Read().Orders().Get(ctx, o.ID)
+		if !got.CancelRequested {
+			t.Fatalf("spot order %d not canceled", i)
+		}
+		if i < 3 && !slices.ContainsFunc(canceled, func(c CanceledOrder) bool {
+			return c.OrderID == o.ID && c.UserID == o.UserID && c.Symbol == "BTC-USDT"
+		}) {
+			t.Fatalf("spot order %d missing from %+v", i, canceled)
+		}
+	}
+	if got, _ := store.Read().Orders().Get(ctx, margin.ID); got.CancelRequested {
+		t.Fatal("the margin order was canceled")
+	}
+	var actions []*auditv1.AdminActionPerformed
+	for _, e := range store.events {
+		if a, ok := e.msg.(*auditv1.AdminActionPerformed); ok && e.topic == event.TopicAudit {
+			actions = append(actions, a)
+		}
+	}
+	if len(actions)-audits != 3 {
+		t.Fatalf("%d audit events, want 3 more than %d", len(actions), audits)
+	}
+	for _, a := range actions[audits:] {
+		if a.GetAction() != "admin.orders.canceled" || a.GetActor() != "ops@example.com" || a.GetReason() != "closing spot" ||
+			!slices.Contains(users, strings.TrimPrefix(a.GetTarget(), "user:")) || !strings.Contains(a.GetDetails(), `"product":"spot"`) {
+			t.Fatalf("audit %+v", a)
+		}
+	}
+	// Cancels go on while the line is closed.
+	if n, err := svc.CancelAll(ctx, users[0], ""); err != nil || n != 2 {
+		t.Fatalf("cancel all: %d %v", n, err)
+	}
+}
+
+// An order checked just before the line closed is checked again under the
+// user's lock and not stored (CancelOpen's second pass takes the ones
+// stored before that).
+func TestAnOrderOnItsWayInWhenSpotClosesIsRefused(t *testing.T) {
+	svc, store, _, _ := newService()
+	svc.Products = &lines{closed: map[string]bool{}, closing: 2}
+	_, err := svc.Place(context.Background(), buy("c1"))
+	if !apperr.Is(err, flags.CodeProductClosed) || len(store.orders) != 0 || len(store.events) != 0 {
+		t.Fatalf("%v, %d orders, %d events", err, len(store.orders), len(store.events))
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/event"
@@ -47,6 +49,9 @@ type Service struct {
 	// Features decides whether orders of a pair trade only with HOUSE
 	// (ADR-0015); nil means users always trade with each other.
 	Features ports.Features
+	// Products closes spot trading as a product line (design 2026-10-07,
+	// product switches: product.spot); nil keeps it open.
+	Products ports.Products
 	// FeeFree are the accounts whose orders pay no fees: the simulated
 	// market's bots (ASTRA design §4).
 	FeeFree []string
@@ -77,6 +82,9 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		} else if !errors.Is(err, domain.ErrOrderNotFound) {
 			return domain.Order{}, err
 		}
+	}
+	if s.spotClosed(req) {
+		return domain.Order{}, flags.ErrProductClosed(flags.KeyProductSpot)
 	}
 	pair, err := s.Instruments.Pair(ctx, req.Symbol)
 	if err != nil {
@@ -123,6 +131,12 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 			return nil
 		} else if !errors.Is(err, domain.ErrOrderNotFound) {
 			return err
+		}
+		// And the line again, just before the order is stored: an order
+		// checked before CancelOpen reread the flag is stored by its second
+		// pass.
+		if s.spotClosed(req) {
+			return flags.ErrProductClosed(flags.KeyProductSpot)
 		}
 		onSymbol, total, err := r.Orders().CountActive(ctx, o.UserID, o.Symbol)
 		if err != nil {
@@ -270,6 +284,99 @@ func (s *Service) CancelAccount(ctx context.Context, userID string, account doma
 		return nil
 	})
 	return n, err
+}
+
+// spotClosed reports an order on the SPOT account while an operator has
+// spot trading closed. Orders on margin accounts follow margin trading's
+// own switch, margin.enabled (design 2026-10-07, product switches §1 #7).
+func (s *Service) spotClosed(req domain.Request) bool {
+	return !req.Defaults().AccountType.Margin() && s.Products != nil && s.Products.Closed(flags.KeyProductSpot)
+}
+
+// CanceledOrder is an order CancelOpen asked the engine to cancel.
+type CanceledOrder struct {
+	OrderID, UserID, Symbol string
+}
+
+// sweepGap is how long CancelOpen waits before its second pass: long
+// enough for an order that passed Place's last check just before the flag
+// was reread to be stored.
+const sweepGap = time.Second
+
+// CancelOpen asks the engine to cancel every active order on a SPOT
+// account once an operator closed spot trading (design 2026-10-07, product
+// switches; the console calls it after closing product.spot), auditing
+// each as admin.orders.canceled by actor with reason in the transaction
+// that marks it. It rereads the flag first and refuses while the line is
+// open; a second pass after sweepGap takes the orders that were on their
+// way in when it closed. Orders on margin accounts stay (margin trading
+// has its own switch), and orders already being canceled are not asked
+// again. It returns the orders it asked for.
+func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]CanceledOrder, error) {
+	if actor == "" || reason == "" {
+		return nil, apperr.Invalid("actor and reason are required")
+	}
+	if s.Products == nil {
+		return nil, errSpotOpen
+	}
+	if err := s.Products.Refresh(ctx); err != nil {
+		return nil, fmt.Errorf("reread the product lines: %w", err)
+	}
+	if !s.Products.Closed(flags.KeyProductSpot) {
+		return nil, errSpotOpen
+	}
+	out, err := s.sweep(ctx, actor, reason, nil)
+	if err != nil {
+		return out, err
+	}
+	select {
+	case <-ctx.Done():
+		return out, ctx.Err()
+	case <-time.After(sweepGap):
+	}
+	return s.sweep(ctx, actor, reason, out)
+}
+
+var errSpotOpen = apperr.New(apperr.KindConflict, apperr.CodeConflict, "spot trading is open; close it first")
+
+// sweep is one pass of CancelOpen, one transaction per user, appending
+// what it asked for to out.
+func (s *Service) sweep(ctx context.Context, actor, reason string, out []CanceledOrder) ([]CanceledOrder, error) {
+	users, err := s.Store.Read().Orders().ActiveUsers(ctx)
+	if err != nil {
+		return out, err
+	}
+	for _, u := range users {
+		var mine []CanceledOrder
+		err := s.Store.Tx(ctx, func(r ports.Repos) error {
+			mine = mine[:0]
+			active, err := r.Orders().Active(ctx, u, "")
+			if err != nil {
+				return err
+			}
+			for _, o := range active {
+				if o.AccountType.Margin() || o.CancelRequested {
+					continue
+				}
+				if _, err := s.requestCancel(ctx, r, o); err != nil {
+					return err
+				}
+				details, _ := json.Marshal(map[string]string{"order_id": o.ID, "symbol": o.Symbol, "product": flags.ProductNames[flags.KeyProductSpot]})
+				if err := r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+					Target: "user:" + o.UserID, Action: "admin.orders.canceled", Actor: actor, Reason: reason, Details: string(details),
+				}, "actor", actor); err != nil {
+					return err
+				}
+				mine = append(mine, CanceledOrder{OrderID: o.ID, UserID: o.UserID, Symbol: o.Symbol})
+			}
+			return nil
+		})
+		if err != nil {
+			return out, err
+		}
+		out = append(out, mine...)
+	}
+	return out, nil
 }
 
 // repeat answers a request whose client_order_id names an existing order.

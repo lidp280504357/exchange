@@ -47,6 +47,8 @@ type OrderRepo interface {
 	// Active locks and returns the user's active orders, of one symbol when
 	// symbol is set.
 	Active(ctx context.Context, userID, symbol string) ([]domain.Order, error)
+	// ActiveUsers returns the users with active orders.
+	ActiveUsers(ctx context.Context) ([]string, error)
 	// List returns a page of the user's orders, newest first.
 	List(ctx context.Context, userID string, f ListFilter) ([]domain.Order, error)
 	// PendingFreeze returns orders created before cutoff whose freeze was
@@ -117,6 +119,15 @@ type Instruments interface {
 // Features answers feature-flag checks.
 type Features interface {
 	Enabled(key string, s flags.Subject) bool
+}
+
+// Products tells whether an operator closed a product line (flags.Client;
+// design 2026-10-07, product switches).
+type Products interface {
+	Closed(key string) bool
+	// Refresh rereads the flags, so a check right after an operator's
+	// change sees it.
+	Refresh(ctx context.Context) error
 }
 
 // Eligibility asks user-service whether a user may use a feature.

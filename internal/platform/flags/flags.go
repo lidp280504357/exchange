@@ -125,7 +125,7 @@ const CodeProductClosed = "PRODUCT_CLOSED"
 // ErrProductClosed refuses an order (or a transfer in) on the product line
 // of key, naming it in the details (product: spot, usdt_m or coin_m).
 func ErrProductClosed(key string) error {
-	return apperr.New(apperr.KindForbidden, CodeProductClosed, "this product is closed: orders other than reduce-only closes are not taken").
+	return apperr.New(apperr.KindForbidden, CodeProductClosed, "this product is closed: it takes no new orders (cancels and reduce-only closes go on) and no transfers in").
 		WithDetail("product", ProductNames[key])
 }
 

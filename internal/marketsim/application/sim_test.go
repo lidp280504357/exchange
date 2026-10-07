@@ -448,7 +448,12 @@ func (m *memStore) SaveState(_ context.Context, st domain.State) error {
 	return nil
 }
 
-type flagSet struct{ on, events, perp, overlay bool }
+type flagSet struct {
+	on, events, perp, overlay bool
+	closed                    map[string]bool // the product lines closed
+}
+
+func (f *flagSet) Closed(key string) bool { return f.closed[key] }
 
 func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
 	switch key {
@@ -1103,6 +1108,49 @@ func TestTheBotsMakeThePerpetual(t *testing.T) {
 	r.rounds(1)
 	if fd.cancelAll["m1"] != 1 || len(fd.orders("m1")) != 0 || len(r.trading.orders("m1")) == 0 {
 		t.Fatalf("perpetual off: %v, spot %d orders", fd.cancelAll, len(r.trading.orders("m1")))
+	}
+}
+
+// The product switches (design 2026-10-07): a contract line closed stops
+// the bots on its perpetual only; spot trading closed holds the whole
+// market, as sim.enabled off does (the perpetuals' index is the pair's);
+// reopened, they quote again.
+func TestClosedProductLinesStopTheirBots(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 86_400*400*2
+	r, fd := coinRig(t, p)
+	r.flags.closed = map[string]bool{}
+	open := func() (spot, linear, coin int) {
+		fd.mu.Lock()
+		defer fd.mu.Unlock()
+		return len(r.trading.orders("m1")), len(fd.open["m1"]), len(fd.open["m1|ASTRA-USD-PERP"])
+	}
+	r.rounds(4 * 20)
+	if spot, linear, coin := open(); spot == 0 || linear == 0 || coin == 0 {
+		t.Fatalf("quotes: %d spot, %d linear, %d coin-margined", spot, linear, coin)
+	}
+	r.flags.closed[flags.KeyProductCoinM] = true
+	r.rounds(1)
+	if spot, linear, coin := open(); spot == 0 || linear == 0 || coin != 0 {
+		t.Fatalf("coin_m closed: %d spot, %d linear, %d coin-margined", spot, linear, coin)
+	}
+	r.flags.closed = map[string]bool{flags.KeyProductUSDTM: true}
+	r.rounds(4 * 20)
+	if spot, linear, coin := open(); spot == 0 || linear != 0 || coin == 0 {
+		t.Fatalf("usdt_m closed: %d spot, %d linear, %d coin-margined", spot, linear, coin)
+	}
+	r.flags.closed = map[string]bool{flags.KeyProductSpot: true}
+	r.rounds(1)
+	if spot, linear, coin := open(); spot != 0 || linear != 0 || coin != 0 || r.trading.cancelAl["m1"] != 1 {
+		t.Fatalf("spot closed: %d spot, %d linear, %d coin-margined, cancel all %v", spot, linear, coin, r.trading.cancelAl)
+	}
+	if st := r.sim.Status(); st.Running {
+		t.Fatalf("status while spot is closed: %+v", st)
+	}
+	r.flags.closed = nil
+	r.rounds(4 * 20)
+	if spot, linear, coin := open(); spot == 0 || linear == 0 || coin == 0 {
+		t.Fatalf("reopened: %d spot, %d linear, %d coin-margined", spot, linear, coin)
 	}
 }
 

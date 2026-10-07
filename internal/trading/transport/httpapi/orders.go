@@ -37,6 +37,7 @@ func (h *Handler) Routes(r chi.Router) {
 		})
 		r.Post("/internal/orders/liquidations", h.liquidate)
 		r.Post("/internal/orders/cancel", h.cancelAccount)
+		r.Post("/internal/products/spot/cancel-open", h.cancelOpen)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(func(next http.Handler) http.Handler {
@@ -170,6 +171,35 @@ func (h *Handler) cancelAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]int{"requested": n})
+}
+
+// cancelOpen cancels the SPOT accounts' active orders once spot trading
+// is closed (design 2026-10-07, product switches; admin-service calls it
+// after closing product.spot).
+func (h *Handler) cancelOpen(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	canceled, err := h.Svc.CancelOpen(r.Context(), body.Actor, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type orderRef struct {
+		OrderID string `json:"order_id"`
+		UserID  string `json:"user_id"`
+		Symbol  string `json:"symbol"`
+	}
+	orders := make([]orderRef, 0, len(canceled))
+	for _, o := range canceled {
+		orders = append(orders, orderRef{OrderID: o.OrderID, UserID: o.UserID, Symbol: o.Symbol})
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"canceled": len(orders), "orders": orders})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

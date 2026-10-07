@@ -339,8 +339,10 @@ func (s *Sim) Run(ctx context.Context) error {
 }
 
 // Round advances the model one step and lets the bots act. With
-// sim.enabled off, or the pair not trading, the bots' orders are canceled
-// once and nothing else happens.
+// sim.enabled off, the pair not trading or spot trading closed as a
+// product line (design 2026-10-07, product switches: the perpetuals' index
+// is the pair's), the bots' orders are canceled once and nothing else
+// happens.
 func (s *Sim) Round(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -359,7 +361,7 @@ func (s *Sim) Round(ctx context.Context) {
 	s.refreshPair(ctx, now)
 	s.noteBeat(now, s.model.State.P) // whether the bots trade or not
 	enabled := s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol})
-	if !enabled || !s.pair.Trading {
+	if !enabled || !s.pair.Trading || s.flags.Closed(flags.KeyProductSpot) {
 		if s.running {
 			s.stop(ctx)
 		}

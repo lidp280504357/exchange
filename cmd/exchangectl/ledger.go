@@ -86,6 +86,12 @@ func (f staticFlags) Enabled(key string, s flags.Subject) bool {
 	return ok && fl.Allows(s)
 }
 
+// Closed reports a product line stored and closed, as flags.Client does.
+func (f staticFlags) Closed(key string) bool {
+	fl, ok := f[key]
+	return ok && !fl.Enabled
+}
+
 func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer) error {
 	for _, db := range []*pg.DB{dbs.ledger, dbs.config, dbs.instrument} {
 		if err := migrate.UpPlatform(ctx, db, quiet); err != nil {

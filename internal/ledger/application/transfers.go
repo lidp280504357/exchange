@@ -15,6 +15,7 @@ import (
 	"github.com/skill/exchange/internal/ledger/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // TransferInput is a transfer between a user's SPOT and FUTURES accounts.
@@ -51,6 +52,9 @@ func (s *Service) Transfer(ctx context.Context, in TransferInput) (domain.Transf
 		return domain.Transfer{}, err
 	} else if prior != nil {
 		return replayTransfer(*prior, in)
+	}
+	if line := futuresLine(in.Asset); in.To == domain.AccountFutures && s.Flags.Closed(line) {
+		return domain.Transfer{}, flags.ErrProductClosed(line)
 	}
 	allowed, reason, err := s.Eligibility.Check(ctx, in.UserID, "TRANSFER")
 	if err != nil {
@@ -113,6 +117,17 @@ func (s *Service) Transfer(ctx context.Context, in TransferInput) (domain.Transf
 		return t, withTransfer(outcome, t)
 	}
 	return t, nil
+}
+
+// futuresLine is the product line a FUTURES balance of asset serves
+// (design 2026-10-07, product switches): USDT's the USDT-margined
+// contracts', any other asset's (BTC, ETH, ASTRA) the coin-margined ones'.
+// While it is closed nothing moves in; what is there may move out.
+func futuresLine(asset string) string {
+	if asset == "USDT" {
+		return flags.KeyProductUSDTM
+	}
+	return flags.KeyProductCoinM
 }
 
 func replayTransfer(prior domain.Transfer, in TransferInput) (domain.Transfer, error) {

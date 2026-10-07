@@ -220,6 +220,23 @@ func (r orders) Active(ctx context.Context, userID, symbol string) ([]domain.Ord
 		AND status = ANY($3) ORDER BY id FOR UPDATE`, userID, symbol, activeStatuses)
 }
 
+func (r orders) ActiveUsers(ctx context.Context) ([]string, error) {
+	rows, err := r.q.Query(ctx, `SELECT DISTINCT user_id::text FROM orders WHERE status = ANY($1)`, activeStatuses)
+	if err != nil {
+		return nil, fmt.Errorf("users with active orders: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, fmt.Errorf("users with active orders: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 func (r orders) List(ctx context.Context, userID string, f ports.ListFilter) ([]domain.Order, error) {
 	statuses := make([]string, len(f.Statuses))
 	for i, s := range f.Statuses {

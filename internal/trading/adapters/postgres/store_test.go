@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -196,6 +197,15 @@ func TestActiveOrdersAndPages(t *testing.T) {
 	onSymbol, total, err := store.Read().Orders().CountActive(ctx, user, "BTC-USDT")
 	if err != nil || onSymbol != 3 || total != 4 {
 		t.Fatalf("counts: %d %d %v", onSymbol, total, err)
+	}
+	done := order(t, uuid.NewString(), limitBuy(), at)
+	done.Status, done.FreezeState = domain.StatusFilled, domain.FreezeDone
+	if err := store.Read().Orders().Insert(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	users, err := store.Read().Orders().ActiveUsers(ctx)
+	if err != nil || !slices.Contains(users, user) || slices.Contains(users, done.UserID) {
+		t.Fatalf("users with active orders: %v %v", users, err)
 	}
 	var active []domain.Order
 	err = store.Tx(ctx, func(r ports.Repos) error {

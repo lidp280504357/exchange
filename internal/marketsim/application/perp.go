@@ -146,7 +146,7 @@ func (s *Sim) perp(ctx context.Context, k *perpetual, now time.Time, p float64, 
 			s.failed("contract", k.symbol)
 		}
 	}
-	if !s.flags.Enabled(flags.KeySimPerp, flags.Subject{Symbol: k.symbol}) || !k.pair.Trading {
+	if !s.flags.Enabled(flags.KeySimPerp, flags.Subject{Symbol: k.symbol}) || !k.pair.Trading || s.flags.Closed(lineOf(k.pair)) {
 		if k.running {
 			s.stopPerp(ctx, k)
 		}
@@ -189,6 +189,16 @@ func (s *Sim) perp(ctx context.Context, k *perpetual, now time.Time, p float64, 
 	if s.takePerp(ctx, k, now, center, dt) == 0 && s.quietPerp(k, now) {
 		s.takeQuietPerp(ctx, k, now, center)
 	}
+}
+
+// lineOf is the product line of a perpetual (design 2026-10-07, product
+// switches): the coin-margined contracts' or the USDT-margined ones'. Its
+// bots stop while an operator has it closed.
+func lineOf(contract domain.Pair) string {
+	if contract.Inverse() {
+		return flags.KeyProductCoinM
+	}
+	return flags.KeyProductUSDTM
 }
 
 // quietPerp reports whether the perpetual did not trade for perpQuietTake

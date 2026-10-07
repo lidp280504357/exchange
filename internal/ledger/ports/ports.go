@@ -156,6 +156,9 @@ type Futures interface {
 // Flags answers feature-flag checks.
 type Flags interface {
 	Enabled(key string, s flags.Subject) bool
+	// Closed reports a product line an operator closed (design
+	// 2026-10-07, product switches).
+	Closed(key string) bool
 }
 
 // ReconciliationRuns reads the recorded runs of the invariant checks.

@@ -42,6 +42,15 @@ type allFlags bool
 
 func (f allFlags) Enabled(string, flags.Subject) bool { return bool(f) }
 
+func (allFlags) Closed(string) bool { return false }
+
+// lines are every flag on but the named product lines closed.
+type lines map[string]bool
+
+func (lines) Enabled(string, flags.Subject) bool { return true }
+
+func (l lines) Closed(key string) bool { return l[key] }
+
 func setup(t *testing.T) (*application.Service, *postgres.Store, *pg.DB) {
 	t.Helper()
 	db := testenv.Postgres(t)
@@ -224,6 +233,57 @@ func TestTransfers(t *testing.T) {
 		From: domain.AccountFutures, To: domain.AccountSpot,
 	}); !apperr.Is(err, apperr.CodeNotFound) {
 		t.Fatalf("unknown asset: %v", err)
+	}
+}
+
+// TestTransfersIntoAClosedProductLine: while an operator has a product
+// line closed (design 2026-10-07, product switches) nothing moves into its
+// FUTURES balances (USDT's for the USDT-margined contracts, the coins' for
+// the coin-margined ones) and nothing is stored; what is there moves out,
+// and a transfer made before it closed replays as it was.
+func TestTransfersIntoAClosedProductLine(t *testing.T) {
+	base, _, db := setup(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	if err := base.OnUserRegistered(ctx, uuid.NewString(), user, "SG"); err != nil {
+		t.Fatal(err)
+	}
+	svc := setupWith(t, base, eligibility{})
+	transfer := func(key, asset, amount, from, to string) error {
+		_, err := svc.Transfer(ctx, application.TransferInput{UserID: user, IdemKey: key, Asset: asset, Amount: d(amount), From: from, To: to})
+		return err
+	}
+	closed := func(err error, product string) bool {
+		e := apperr.From(err)
+		return e.Code == flags.CodeProductClosed && e.Details["product"] == product
+	}
+	for _, c := range []struct{ key, asset, amount string }{{"usdt-in", "USDT", "100"}, {"btc-in", "BTC", "0.01"}} {
+		if err := transfer(c.key, c.asset, c.amount, domain.AccountSpot, domain.AccountFutures); err != nil {
+			t.Fatalf("%s while open: %v", c.key, err)
+		}
+	}
+	svc.Flags = lines{flags.KeyProductUSDTM: true}
+	if err := transfer("usdt-in-2", "USDT", "100", domain.AccountSpot, domain.AccountFutures); !closed(err, "usdt_m") {
+		t.Fatalf("USDT in while usdt_m is closed: %v", err)
+	}
+	if err := transfer("usdt-out", "USDT", "40", domain.AccountFutures, domain.AccountSpot); err != nil {
+		t.Fatalf("USDT out while usdt_m is closed: %v", err)
+	}
+	if err := transfer("btc-in-2", "BTC", "0.01", domain.AccountSpot, domain.AccountFutures); err != nil {
+		t.Fatalf("BTC in while only usdt_m is closed: %v", err)
+	}
+	svc.Flags = lines{flags.KeyProductCoinM: true}
+	if err := transfer("btc-in-3", "BTC", "0.01", domain.AccountSpot, domain.AccountFutures); !closed(err, "coin_m") {
+		t.Fatalf("BTC in while coin_m is closed: %v", err)
+	}
+	if err := transfer("btc-in", "BTC", "0.01", domain.AccountSpot, domain.AccountFutures); err != nil {
+		t.Fatalf("a replay of a transfer made while open: %v", err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM transfers WHERE user_id = $1`, user); n != 4 {
+		t.Fatalf("transfers kept: %d", n)
+	}
+	if av, _ := usdt(t, svc, user, domain.AccountFutures); !av.Equal(d("60")) {
+		t.Fatalf("USDT in FUTURES: %s", av)
 	}
 }
 

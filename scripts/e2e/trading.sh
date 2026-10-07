@@ -7,13 +7,18 @@
 # quotes Binance's ETHBTC: prices come from that book, the orders resting
 # 10% away from it (inside ETH-BTC's price band of 100% around the
 # reference price). Needs ETH-BTC in TRADING and SOL-BTC not (the test data
-# keeps it PREPARE).
+# keeps it PREPARE). Last, spot trading is closed as a product line for a
+# moment (design 2026-10-07, product switches): new orders are refused with
+# PRODUCT_CLOSED, the console's cancel-open takes the resting orders (every
+# user's, as when an operator closes it), and opened again orders are taken.
 #
 #   scripts/e2e/trading.sh
 set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
+# shellcheck source=lib/remote.sh
+source "$(dirname "$0")/lib/remote.sh"
 
 echo "== pairs"
 call GET /v1/market/pairs/ETH-BTC ""
@@ -132,5 +137,55 @@ eventually 40 "the engine cancels both" both CANCELED
 check '.cancel_reason == "USER" and .filled_quantity == "0"' "canceled by the user, nothing filled"
 refunded() { [[ $(balance BTC) == "0.1 0" && $(balance ETH) == "2 0" ]]; }
 eventually 40 "the frozen funds came back" refunded
+
+echo "== spot trading closed as a product line, then open again"
+exchangectl flags show product.spot >"$WORK/spot-flag" 2>/dev/null || true
+jq -e '.enabled' "$WORK/spot-flag" >/dev/null 2>&1 ||
+  { echo "FAIL product.spot is not on: an operator closed spot trading ($(cat "$WORK/spot-flag"))" >&2; exit 1; }
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.1\"}"
+expect 202 - "a buy that rests"
+RESTING=$(jq -r .order_id <<<"$BODY")
+eventually 40 "the engine opens it" status_is "$RESTING" OPEN
+SPOT_CLOSED=""
+spot_back() {
+  [[ -n $SPOT_CLOSED ]] || return 0
+  if exchangectl flags set product.spot --on --reason "e2e trading.sh: spot trading open again" >/dev/null; then
+    SPOT_CLOSED=""
+    return 0
+  fi
+  echo "FAIL product.spot not opened again; by hand: exchangectl flags set product.spot --on --reason ..." >&2
+  EXIT_FAILED=1
+}
+at_exit spot_back
+SPOT_CLOSED=1
+exchangectl flags set product.spot --off --reason "e2e trading.sh: spot trading closed for a moment" >/dev/null
+spot_is() { call GET /v1/platform/products "" && [[ $STATUS == 200 && $(jq -r .spot.enabled <<<"$BODY") == "$1" ]]; }
+eventually 30 "GET /v1/platform/products shows spot closed" spot_is false
+check '.spot.closed_at != null' "with the time it closed"
+# Below the minimum notional: refused by the line while it is closed, by
+# its own checks once open, never stored.
+TINY="{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.001\"}"
+refused() { order "$TINY"; [[ $STATUS == 403 ]]; }
+eventually 30 "spot-trading-service refuses new orders" refused
+expect 403 PRODUCT_CLOSED "an order while spot is closed"
+check '.details.product == "spot"' "the details name the line"
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.1\"}"
+expect 403 PRODUCT_CLOSED "a funded order too"
+internal POST spot-trading-service 8088 /internal/products/spot/cancel-open \
+  '{"actor":"e2e:trading.sh","reason":"e2e: spot trading closed for a moment"}'
+[[ $STATUS == 202 ]] || { echo "FAIL cancel-open: $STATUS $BODY" >&2; exit 1; }
+jq -e --arg o "$RESTING" '[.orders[].order_id] | index($o) != null and (.canceled == (.orders | length))' <<<"$BODY" >/dev/null ||
+  { echo "FAIL cancel-open did not take $RESTING: $BODY" >&2; exit 1; }
+echo "ok   cancel-open asked to cancel $(jq -r .canceled <<<"$BODY") resting spot orders, this one among them"
+eventually 40 "the engine cancels it" status_is "$RESTING" CANCELED
+eventually 40 "its frozen funds came back" refunded
+audited() { (( $(ch "SELECT count() FROM audit_logs WHERE actor_id = 'e2e:trading.sh' AND position(payload, '$RESTING') > 0 AND position(payload, 'admin.orders.canceled') > 0") == 1 )); }
+eventually 60 "the cancel is audited (admin.orders.canceled)" audited
+exchangectl flags set product.spot --on --reason "e2e trading.sh: spot trading open again" >/dev/null
+SPOT_CLOSED=""
+eventually 30 "GET /v1/platform/products shows spot open" spot_is true
+taken() { order "$TINY"; [[ $STATUS == 422 ]]; }
+eventually 30 "orders get past the line again" taken
+expect 422 ORDER_MIN_NOTIONAL "the order's own checks again"
 
 echo "all trading checks passed"
