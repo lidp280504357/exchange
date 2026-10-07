@@ -236,12 +236,22 @@ try {
   if (fetchLog.length !== before) throw new Error(`three sections opened after the idle time fetched scripts: ${fetchLog.slice(before).join(", ")}`);
   ok(`the pages are fetched ahead while the browser is idle (every section's by ${fetchLog.find((l) => l.includes(" Settings-"))?.split(" ")[0]}): three sections never opened fetch no script`);
 
-  // 3. Users: the list; a row opens the user's page with its tabs.
+  // 3. Users: the list (each with its username and avatar, I3); a row opens
+  // the user's page with its tabs.
   await go("/users");
   await rows(3);
+  await page.waitForSelector("main tbody [data-testid=user-identity]");
   await pressRow("main tbody tr", (timeout) => page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }));
   const userId = await page.evaluate(() => location.pathname.split("/").pop());
   await waitText("UID");
+  await page.waitForSelector("[data-testid=user-username]");
+  // The username's reset (I3): its dialog opened and closed, nothing reset.
+  await page.click("[data-testid=user-reset-username]");
+  const resetDialog = '[role=dialog]:has(textarea[id$="-reason"])';
+  await page.waitForSelector(resetDialog);
+  await waitText("改为随机的 user_");
+  await clickButton("取消", resetDialog);
+  await page.waitForFunction((sel) => !document.querySelector(sel), { timeout: 5000 }, resetDialog);
   await waitText("最近登录");
   await waitText("已同意的文件");
   await clickButton("安全", "main");
@@ -260,7 +270,7 @@ try {
   for (const tab of ["成交", "提现", "风控", "备注与标签", "审计"]) await clickButton(tab, "main");
   await waitText("UID");
   await t.shot("2-user");
-  ok(`users: the list, a user's page (${userId.slice(0, 8)}…) with its tabs (profile, security, risk …)`);
+  ok(`users: the list with usernames and avatars, a user's page (${userId.slice(0, 8)}…) with its tabs (profile, security, risk …) and the username's reset dialog`);
 
   // 3b. The identity requests (the queue waiting for a decision).
   await go("/identity-requests");

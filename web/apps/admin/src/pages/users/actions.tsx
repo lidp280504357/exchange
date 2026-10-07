@@ -1,9 +1,10 @@
-import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
+import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Button, Select } from "@exchange/ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { useEnum } from "../../kit/enums";
+import { ProfileResets } from "./identity";
 
 const STATUSES = ["ACTIVE", "RISK_REVIEW", "FROZEN", "CLOSED"] as const;
 const REASONS = ["SUSPICIOUS_LOGIN", "FRAUD_SUSPECTED", "COMPLIANCE_REVIEW", "USER_REQUEST", "REVIEW_CLEARED"];
@@ -84,11 +85,12 @@ export function CancelOrdersAction({ userId }: { userId: string }) {
 }
 
 /** UserActions are what the administrator's role may do to an account from its page. */
-export function UserActions({ admin, userId, status }: { admin: Admin; userId: string; status: string }) {
+export function UserActions({ admin, user }: { admin: Admin; user: AdminSchemas["UserSummary"] }) {
   return (
     <div className="flex flex-col gap-3">
-      {can(admin, "users.status") && <StatusAction key={status} userId={userId} status={status} />}
-      {can(admin, "orders.cancel") && <CancelOrdersAction userId={userId} />}
+      {can(admin, "users.status") && <StatusAction key={user.status} userId={user.id} status={user.status} />}
+      {can(admin, "orders.cancel") && <CancelOrdersAction userId={user.id} />}
+      {can(admin, "users.status") && <ProfileResets user={user} />}
     </div>
   );
 }

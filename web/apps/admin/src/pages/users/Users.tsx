@@ -12,6 +12,7 @@ import { IdText, TimeText, useOpenUser } from "../../kit/format";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { clean } from "../records/tables";
+import { UserIdentity } from "./identity";
 import { TagChips } from "./NotesTags";
 
 type UserSummary = AdminSchemas["UserSummary"];
@@ -30,6 +31,7 @@ export default function Users() {
   );
   const columns = useMemo<ColumnDef<UserSummary, unknown>[]>(
     () => [
+      { id: "user", header: t("admin.users.username"), cell: ({ row }) => <UserIdentity user={row.original} /> },
       { id: "id", header: t("admin.users.id"), cell: ({ row }) => <IdText value={row.original.id} chars={13} /> },
       { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="userStatus" code={row.original.status} /> },
       { accessorKey: "region", header: t("admin.users.region") },

@@ -64,7 +64,7 @@ export default function UserPage({ admin }: { admin: Admin }) {
           <Card className="stagger">{u ? <Summary admin={admin} user={u} /> : <Skeleton className="h-48 w-full" />}</Card>
           {u && (can(admin, "users.status") || can(admin, "orders.cancel")) && (
             <Card title={t("admin.user.actions")} className="stagger" style={stagger(1)}>
-              <UserActions admin={admin} userId={u.id} status={u.status} />
+              <UserActions admin={admin} user={u} />
             </Card>
           )}
         </aside>
@@ -109,8 +109,11 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <Avatar name={user.id.replace(/-/g, "").slice(-2)} size={48} />
+        <Avatar name={user.username || user.id.replace(/-/g, "").slice(-2)} src={user.avatar_url ?? undefined} size={48} />
         <div className="min-w-0">
+          <div className="truncate font-mono text-sm font-medium text-fg-1" data-testid="user-username">
+            {user.username || "—"}
+          </div>
           <div className="text-xs text-fg-3">{t("admin.user.uid")}</div>
           <IdText value={user.id} chars={13} className="text-sm" />
         </div>
