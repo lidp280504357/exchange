@@ -45,7 +45,8 @@
 //     carry them (the contract backend's part of G1c, instruments
 //     runbook); a listed contract keeps its whole entry (operators may
 //     have changed it in the console) but its funding interval, interest
-//     and cap, which follow Binance's fundingInfo as above: a contract
+//     and cap, which follow Binance's fundingInfo as above while it lists
+//     the contract (one it no longer lists keeps them): a contract
 //     takes Binance's funding rate only for periods that end when
 //     Binance's do (market-data runbook; Binance moved 23 of the coins'
 //     USDⓈ-M perpetuals to 4 hours). The console's changes still win at
@@ -403,7 +404,10 @@ func main() {
 		return defaultFunding
 	}
 
-	// A listed contract's funding follows Binance's (the rules above).
+	// A listed contract's funding follows Binance's (the rules above),
+	// while Binance lists it: one its fundingInfo does not (gone from
+	// Binance, or a snapshot from before funding was read) keeps what the
+	// file has, not the default (review B142).
 	contracts := slices.Clone(doc.Contracts)
 	refreshed := 0
 	for _, c := range contracts {
@@ -411,7 +415,13 @@ func main() {
 		if ref == "" {
 			continue
 		}
-		f := fundingOf(ref)
+		f, ok := funding[ref]
+		if !ok {
+			if len(in.LinearFunding)+len(in.InverseFunding) > 0 {
+				log.Printf("%-18s Binance's fundingInfo has no %s: its funding kept", c["symbol"], ref)
+			}
+			continue
+		}
 		hours, interest, limit := float64(f.Hours), f.interest().String(), f.Cap.String()
 		if c["funding_interval_hours"] == hours && c["interest_rate"] == interest && c["funding_cap"] == limit {
 			continue
