@@ -1263,3 +1263,64 @@ func TestPlaceTellsTheAnchorWhetherThePairFollowsAReference(t *testing.T) {
 		t.Fatalf("followed: %v", prices.followed)
 	}
 }
+
+// failActive is a store whose transactions cannot read one user's active
+// orders (a lock that times out, say).
+type failActive struct {
+	*memStore
+	user string
+}
+
+func (s failActive) Tx(ctx context.Context, fn func(ports.Repos) error) error {
+	return s.memStore.Tx(ctx, func(r ports.Repos) error { return fn(failRepos{r, s.user}) })
+}
+
+type failRepos struct {
+	ports.Repos
+	user string
+}
+
+func (r failRepos) Orders() ports.OrderRepo { return failOrders{r.Repos.Orders(), r.user} }
+
+type failOrders struct {
+	ports.OrderRepo
+	user string
+}
+
+func (o failOrders) Active(ctx context.Context, user, symbol string) ([]domain.Order, error) {
+	if user == o.user {
+		return nil, errors.New("lock timeout")
+	}
+	return o.OrderRepo.Active(ctx, user, symbol)
+}
+
+// A user whose orders cannot be canceled leaves the others to go on; the
+// call then fails with 503, saying how many it canceled and for how many
+// users it could not, and a retry takes what is left (review C60, as
+// derivatives-service).
+func TestCancelOpenGoesOnPastAUserItCannotCancelFor(t *testing.T) {
+	svc, store, _, _ := newService()
+	ctx := context.Background()
+	products := &lines{closed: map[string]bool{}}
+	svc.Products = products
+	users := []string{"0199b0a0-0000-7000-8000-0000000000d1", "0199b0a0-0000-7000-8000-0000000000d2"}
+	for _, u := range users {
+		r := buy("o")
+		r.UserID = u
+		if _, err := svc.Place(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	products.closed[flags.KeyProductSpot] = true
+	svc.Store = failActive{store, users[0]}
+	canceled, err := svc.CancelOpen(ctx, "ops@example.com", "closing spot")
+	if e := apperr.From(err); e.Kind != apperr.KindUnavailable || e.Details["canceled"] != 1 || e.Details["failed_users"] != 1 ||
+		len(canceled) != 1 || canceled[0].UserID != users[1] {
+		t.Fatalf("cancel-open past a failing user: %+v %v %v", canceled, err, e.Details)
+	}
+	svc.Store = store
+	canceled, err = svc.CancelOpen(ctx, "ops@example.com", "closing spot")
+	if err != nil || len(canceled) != 1 || canceled[0].UserID != users[0] {
+		t.Fatalf("the retry: %+v %v", canceled, err)
+	}
+}

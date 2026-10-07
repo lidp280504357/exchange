@@ -385,10 +385,13 @@ type CanceledOrder struct {
 // sweepGap is how long CancelOpen waits before its second pass: long
 // enough for an order that passed Place's last check just before the flag
 // was reread to be stored. sweepLead is how far before the line closed
-// SweepClosed looks.
+// SweepClosed looks: an order taken as it closed (by a check on a copy of
+// the flag at most flags.RefreshInterval stale) was stored after that; the
+// flag's time is the database's clock and the order's this service's, the
+// rest is room for the two to differ (as derivatives-service, review C60).
 const (
 	sweepGap  = time.Second
-	sweepLead = 10 * time.Second
+	sweepLead = 30 * time.Second
 )
 
 // SweepActor is who SweepClosed's cancels are audited as.
@@ -418,10 +421,9 @@ func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]Cance
 	if !s.Products.Closed(flags.KeyProductSpot) {
 		return nil, errSpotOpen
 	}
-	out, err := s.sweep(ctx, actor, reason, time.Time{}, nil)
-	if err != nil {
-		return out, err
-	}
+	// The second pass goes over every user again, those the first could
+	// not cancel for among them: its outcome is the call's.
+	out, _ := s.sweep(ctx, actor, reason, time.Time{}, nil)
 	select {
 	case <-ctx.Done():
 		return out, ctx.Err()
@@ -481,12 +483,17 @@ func (s *Service) SpotLine(ctx context.Context) (closed bool, openOrders, borrow
 // sweep cancels the active orders stored at or after since that the
 // closed line does not take, but the market-making accounts' and
 // margin-service's liquidations, one transaction per user, appending what
-// it asked for to out.
+// it asked for to out. A user whose cancels fail (a lock that times out,
+// say) leaves the others to go on; the sweep then fails with 503
+// COMMON_UNAVAILABLE, details canceled and failed_users, and a retry takes
+// what is left (as derivatives-service, review C60).
 func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Time, out []CanceledOrder) ([]CanceledOrder, error) {
 	users, err := s.Store.Read().Orders().ActiveUsers(ctx, since)
 	if err != nil {
 		return out, err
 	}
+	failed := 0
+	var first error
 	for _, u := range users {
 		if slices.Contains(s.FeeFree, u) {
 			continue
@@ -518,9 +525,17 @@ func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Ti
 			return nil
 		})
 		if err != nil {
-			return out, err
+			s.Log.WarnContext(ctx, "a user's orders not canceled as spot trading is closed", "user_id", u, "error", err)
+			failed++
+			if first == nil {
+				first = err
+			}
+			continue
 		}
 		out = append(out, mine...)
+	}
+	if first != nil {
+		return out, apperr.Unavailable(first).WithDetail("canceled", len(out)).WithDetail("failed_users", failed)
 	}
 	return out, nil
 }

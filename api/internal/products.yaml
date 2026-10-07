@@ -16,8 +16,9 @@ info:
     Closing a line is the flag's change (product.spot, product.usdt_m,
     product.coin_m); cancel-open then cancels what the closed line no
     longer takes, and every 5 seconds while it stays closed each service
-    also cancels such orders stored from 10 seconds before it closed on
-    (audited as system:spot-trading-service or system:derivatives-service).
+    also cancels such orders stored from 30 seconds before it closed on
+    (audited as system:spot-trading-service or system:derivatives-service;
+    the flag's time is the database's clock, an order's the service's).
     HOUSE and the market-making accounts (MARKET_MAKER_USER_IDS: the
     simulated market's bots) keep quoting a closed line and are neither
     refused, canceled nor counted: every trade is against them, so positions
@@ -77,8 +78,10 @@ paths:
         spot the margin repayments (side_effect AUTO_REPAY bringing an asset
         the account owes), which a closed spot line takes. spot sweeps a
         second time a second later (orders on their way in as the line
-        closed). Run again, it cancels what is left. The answer lists the
-        orders it asked to cancel.
+        closed). A user whose cancels fail leaves the others to go on; the
+        call then fails with COMMON_UNAVAILABLE (503, details canceled and
+        failed_users, counts), and run again it cancels what is left. The
+        answer lists the orders it asked to cancel.
       tags: [products]
       requestBody:
         required: true
