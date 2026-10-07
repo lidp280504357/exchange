@@ -70,3 +70,19 @@ func TestTheOverlayAPI(t *testing.T) {
 		t.Fatalf("after the clear: %v", out)
 	}
 }
+
+// The reference price tells market-sim whether a price event may overlay
+// the pair (a reference market follows it), with the factor on it.
+func TestTheReferenceTellsWhetherAPairIsFollowed(t *testing.T) {
+	overlay := application.NewOverlay(overlayOn{}, func(s string) bool { return s == "BTC-USDT" }, prometheus.NewRegistry())
+	h := &httpapi.Handler{Overlay: overlay, Signed: &svcsign.Verifier{Keys: map[string][]byte{"sim": simSecret}}, Now: time.Now}
+	r := chi.NewRouter()
+	h.Routes(r)
+	if code, out := send(t, r, false, http.MethodGet, "/internal/market/btc-usdt/reference", ""); code != http.StatusOK ||
+		out["followed"] != true || out["overlay_factor"] != "1" || out["source_price"] != nil {
+		t.Fatalf("followed: %d %v", code, out)
+	}
+	if _, out := send(t, r, false, http.MethodGet, "/internal/market/ASTRA-USDT/reference", ""); out["followed"] != false {
+		t.Fatalf("not followed: %v", out)
+	}
+}

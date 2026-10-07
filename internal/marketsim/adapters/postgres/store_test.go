@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -181,4 +182,50 @@ func TestBotsSettingsAndState(t *testing.T) {
 			t.Fatalf("another event %+v", x)
 		}
 	}
+
+	// Price events on followed pairs (design 2026-10-07): their pair,
+	// factor, ramps and course; one open a pair, saved with an audit
+	// record each.
+	overlay := domain.Event{
+		ID: uuid.NewString(), Type: domain.EventOverlay, Symbol: "BTC-USDT", TargetFactor: 1.16, RampUp: 15 * time.Second,
+		RampDown: 5 * time.Second, Risk: true, Price: decimal.RequireFromString("116000"), StartsAt: at.Add(3 * time.Hour),
+		Status: domain.EventRunning, StartedAt: at.Add(3 * time.Hour), BasePrice: decimal.RequireFromString("100000"), CreatedBy: "ops",
+		Reason: "a spike", CreatedAt: at,
+	}
+	other := overlay
+	other.ID, other.Symbol = uuid.NewString(), "ETH-USDT"
+	audits := []ports.Audit{{Action: "a", Target: "t"}, {Action: "a", Target: "t"}}
+	if err := store.SaveEventsEach(ctx, []domain.Event{overlay, other}, audits); err != nil {
+		t.Fatal(err)
+	}
+	again := overlay
+	again.ID = uuid.NewString()
+	if err := store.SaveEventsEach(ctx, []domain.Event{again}, audits[:1]); !errors.Is(err, ports.ErrOverlayOpen) {
+		t.Fatalf("a second open overlay on the pair: %v", err)
+	}
+	overlay.Status, overlay.EndedAt, overlay.Result = domain.EventDone, at.Add(3*time.Hour+20*time.Second), ""
+	overlay.PeakPrice, overlay.EndReferencePrice = decimal.RequireFromString("116010.5"), decimal.RequireFromString("100020")
+	overlay.EndPlatformPrice = decimal.RequireFromString("100020")
+	if err := store.SaveEvent(ctx, overlay, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveEvent(ctx, again, nil); err != nil {
+		t.Fatalf("the pair is free once it is done: %v", err)
+	}
+	all, err = store.Events(ctx, false, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range all {
+		if x.ID != overlay.ID {
+			continue
+		}
+		if x.Symbol != "BTC-USDT" || x.TargetFactor != 1.16 || x.RampUp != 15*time.Second || x.RampDown != 5*time.Second || !x.Risk ||
+			x.BasePrice.String() != "100000" || x.PeakPrice.String() != "116010.5" || x.EndReferencePrice.String() != "100020" ||
+			x.EndPlatformPrice.String() != "100020" || !x.Price.Equal(overlay.Price) {
+			t.Fatalf("the overlay %+v", x)
+		}
+		return
+	}
+	t.Fatalf("the overlay not listed: %+v", all)
 }

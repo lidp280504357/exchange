@@ -79,6 +79,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 ## 估值
 
 - 每种资产按其 USDT 交易对的最新价（market-data-service 的 ticker；跟随币安的交易对是币安 ticker）。轮询失败超过 10 秒或 ticker 超过 1 分钟没更新，价格记为不新鲜，但仍按最近一次已知价计（协调会话 2026-10-06 01:15 定）。
+- 价格事件（通用价格控制 2026-10-07，见 [market-sim.md](market-sim.md)「任意交易对的价格事件」）期间 ticker 是叠加后的价：默认（`risk`）杠杆估值随之，与真实暴涨暴跌一样会预警、强平；勾选「不连带」（`risk` 为 false）的事件按币安原价估值（审查 GD ①）——每次轮询另读 market-data 的 `GET /internal/market/overlay`，对这些交易对改读 `GET /internal/market/{symbol}/reference?for=risk` 的价。读不到 `overlay` 列表时按 ticker 原样计；某个交易对的风险价读不到时沿用上一次的价（1 分钟后记为不新鲜），从来没有价的就不计价（估值不完整、不强平），都记日志 `ticker poll failed`。
 - 从来没有价格的资产：持有的不计入资产、欠的不计入负债，账户估值不完整，借币、划出、杠杆下单返回 `MARGIN_PRICE_UNAVAILABLE`，也不强平。
 - 风险率 = 资产（乘折扣）÷ 负债，8 位小数；无负债时为 `null`（前端显示 999）。
 

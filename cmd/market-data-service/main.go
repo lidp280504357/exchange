@@ -203,6 +203,7 @@ func setup(ctx context.Context, a *app.App) error {
 	feed.WithOverlay(overlay)
 	a.Add("reference feed", app.Loop(feed.Run))
 	refKlines := application.NewReferenceCandles(src, flagClient, refs, a.Logger())
+	refKlines.WithOverlaid(store, src.Name()) // a price event's minutes stay in the charts
 	feed.Observe(refKlines.Observe)
 	tickers := application.NewTickers(svc, feed, refs, flagClient, listed)
 	tickers.UseBooks(books.Levels) // a futures ticker has no best bid and ask

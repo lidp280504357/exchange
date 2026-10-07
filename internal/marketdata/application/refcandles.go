@@ -41,6 +41,9 @@ type ReferenceCandles struct {
 	refs    *ReferenceMap
 	log     *slog.Logger
 	now     func() time.Time
+	// overlaid reads the minutes a price event touched (WithOverlaid; nil:
+	// none).
+	overlaid func(ctx context.Context, symbol string, from, to time.Time) ([]domain.Candle, error)
 
 	mu      sync.Mutex
 	open    map[string]map[domain.Interval]*openCandle // by followed pair
@@ -194,6 +197,14 @@ type cachedCandles struct {
 	until   time.Time
 }
 
+// WithOverlaid lays the minutes a price event touched, as store keeps them
+// for source, over the history (review GD ③). Call it before serving.
+func (rc *ReferenceCandles) WithOverlaid(store ports.Store, source string) {
+	rc.overlaid = func(ctx context.Context, symbol string, from, to time.Time) ([]domain.Candle, error) {
+		return store.Read().References().Overlaid(ctx, source, symbol, from, to)
+	}
+}
+
 // NewReferenceCandles serves the reference markets refs maps from
 // history.
 func NewReferenceCandles(history ports.ReferenceHistory, fl Flags, refs *ReferenceMap, log *slog.Logger) *ReferenceCandles {
@@ -249,6 +260,13 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol string, ref port
 			if !now.Before(v.until) {
 				delete(rc.cache, k)
 			}
+		}
+		if rc.overlaid != nil && len(got) > 0 {
+			touched, err := rc.overlaid(ctx, ref.Symbol, got[0].OpenTime, i.Next(got[len(got)-1].OpenTime))
+			if err != nil {
+				return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "reference candles are unavailable")
+			}
+			got = domain.MergeOverlaid(slices.Clone(got), i, touched)
 		}
 		rc.cache[key] = cachedCandles{candles: got, until: now.Add(ttl)}
 		rc.mu.Unlock()

@@ -64,6 +64,73 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 - 事件移动价格时（以及之后一分钟）、报价沿价格带走价时（下一节），事件执行者每 1–2 秒比较最近成交价与报价中心，差距超过半个价差就按方向下市价单（差得越远单子越大，最多 20 档），让成交价跟上；插针期间每 0.4–0.6 秒一次。
 - 建事件、提前结束、改设置都写审计（`audit.events`：`market.sim.event_created`（含 `direction`、`then`、`spikes`）、`market.sim.event_canceled`、`market.sim.event_ended`（含 `result`）、`market.sim.target_done`、`market.sim.params_changed`，带参数与当时的目标价）。
 
+## 任意交易对的价格事件（通用价格控制 2026-10-07，J2）
+
+设计见 [设计-通用价格控制-2026-10-07.md](../设计-通用价格控制-2026-10-07.md)，契约见 [J0 契约](../设计-通用价格控制-J0契约-2026-10-07.md)。同一个入口（`POST /internal/sim/events`，`type` 为 `OVERLAY`）可以操作任意交易对，按交易对分别建事件：
+
+- **跟随参考市场（币安）的交易对**：建 `OVERLAY` 事件。market-data 把该交易对在平台上的参考数据（盘口、成交、ticker、K 线、内网参考价；`risk` 时还有永续的指数与标记价）乘以乘数 f(t)，见 [market-data.md](market-data.md)「价格叠加」。f 在 `ramp_up_seconds` 内从 1 线性升到目标乘数 F，保持 `hold_seconds`，再在 `ramp_down_seconds` 内线性回到 1。乘的是币安的实时价，回到 1 就与币安一致，不留偏差。HOUSE 照叠加后的盘口报价、每档只报 25%（[market-maker.md](market-maker.md)），用户真的能以叠加后的价格成交，差价由 HOUSE 承担。
+- **平台币的交易对**（market-sim 自己的 `SIM_SYMBOL`，ASTRA-USDT）：建现有的 `JUMP`。幅度 = 目标价 ÷ 模型目标价 − 1（或 `target_pct` ÷ 100），时长 = `ramp_up_seconds`；守卫与 `sim.events` 照旧。它没有参考市场可回，`hold_seconds`、`ramp_down_seconds`、`risk` 不适用。J0 稿写的是 `TARGET`，但阈值目标窗口至少 60 秒、按守卫速度缓慢引导，与"多少秒内到达"不符，实现改为 `JUMP`（J0 契约 §0）。
+- 其它交易对：400 `SIM_NOT_OVERLAYABLE`。
+
+请求：
+
+```json
+{"type": "OVERLAY", "symbols": ["BTC-USDT"], "target_pct": 16, "ramp_up_seconds": 15, "hold_seconds": 0,
+ "ramp_down_seconds": 5, "risk": true, "starts_at": "2026-10-07T04:00:00Z", "actor": "...", "approved_by": "", "reason": "..."}
+```
+
+规则：
+
+- **形式**：1–10 个交易对；`target_price`（只能一个交易对）与 `target_pct`（百分比，16 即 +16%）二选一；`ramp_up_seconds ≥ 1`、`hold_seconds ≥ 0`、`ramp_down_seconds ≥ 3`，三者合计不超过 `OVERLAY_MAX_SECONDS`（默认 600，也是硬上限）；`risk` 默认 true（连带合约与杠杆，用户 10-07 03:0x 决定）；`starts_at` 可省，最多 24 小时后。不合格的 400 `COMMON_INVALID_ARGUMENT`。
+- **目标乘数 F**：创建时按当时的币安价算定（`target_pct`：1 + pct/100；`target_price`：目标价 ÷ 币安价），之后不变。预约的事件到时按 F 走，不按绝对价格走。F 必须在 0.1–1.9（±90%）之内，否则 400 `SIM_OVERLAY_TOO_FAR`。
+- **每个交易对同时一个**未结束的 `OVERLAY`，否则 409 `SIM_OVERLAY_RUNNING`；库里有唯一索引兜底。
+- **守卫按交易对计**：一个运营单独一次最多 |F − 1| = 30%，同一交易对任意一小时（按生效时间）合计最多 50%。超过要第二人批准（`approved_by`，只有 admin 键能带），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move`、`details.symbol`）。不占平台币自己的预算。
+- **HOUSE 损失上限**：创建时读 market-maker 的 `GET /internal/house/rooms/{symbol}` 估算 HOUSE 的最坏损失；预约超过 5 秒的在开始时再算一次，超了就取消。
+  - 算法：F > 1 按 HOUSE 还能买的数量、F < 1 按还能卖的数量，乘单位价值，再乘 F − 1 或 1 − F；币本位合约（`inverse`）用 1 − 1/F 与 1/F − 1。`risk` 时加上该交易对的永续（X-USDT-PERP、X-USD-PERP；HOUSE 不报价的不算）。
+  - 超过 `OVERLAY_MAX_LOSS_USDT`（默认 200,000）：409 `SIM_OVERLAY_LOSS_CAP`，`details.estimate_usdt`、`details.cap_usdt` 给出估算与上限。读不到 HOUSE 在该交易对的额度（它没在报价）也 409，原因在 `details.reason`。
+  - 测试服 10-07 的额度（BTC 约 84,100）：BTC-USDT 现货 HOUSE 还能买约 13.7 BTC，+16% 估算约 18 万 USDT，不连带时过得了 200,000 的上限。连带永续（BTC-USDT-PERP 约 66 BTC、BTC-USD-PERP 约 5 万张）约 177 万，所以设计 §5 的 e2e 例子（+16%，默认连带）会被拒，端到端按拒绝里的估算缩小幅度（见下）。上限与是否按减量打折待协调会话定（J0 契约 §8 第 3 点）。
+- **开关与配置**：`market.overlay` 关时 403 `SIM_OVERLAY_OFF`；market-sim 没有 `OVERLAY_API_SECRET` 时 503 `SIM_OVERLAY_UNCONFIGURED`。
+- **全部或全无**：一个请求里的事件全部建成或全部不建。平台币的 `JUMP` 先建；跟随交易对的事件写库失败时，把那个 `JUMP` 结束。
+
+答复 201：`{"items": [{"symbol", "event_id", "type", "status", "factor_target", "base_price", "event"}]}`。立即开始的 `status` 为 `RUNNING`；`base_price` 是开始时的币安价，平台币为模型目标价。
+
+运行（只在持租约的实例上）：
+
+- 每秒按事件自己的时间表算 f，签名推给 market-data：`PUT /internal/market/overlay/{symbol}`，键 `sim`（`OVERLAY_API_SECRET`），`until` 为现在 + 4 秒，`seq` 为毫秒时间，`ends_at` 为按日程回到 1 的时刻（提前结束时是 3 秒的回落结束时；market-data 的 `MarketOverlayStuck` 据此判断）。推送失败就下一秒重推；market-data 5 秒收不到就回到 1（告警 `MarketSimOverlayPushFailing`）。
+- **回到 1**：最后推一次 "1"，market-data 当即结束叠加；永续标记价等币安标记价连续 5 秒新鲜后回到原来源。记下这时的币安价与平台价（`end_reference_price`、`end_platform_price`），状态 `DONE`，审计 `market.sim.event_done`。
+- **峰值**：每秒读平台的显示价，记事件方向上的极值（`peak_price`）。峰值还在变时每 10 秒存一次库，停止变化时立即存。
+- **提前结束**（`POST /internal/sim/events/{id}/end`，即后台的「立即恢复」）：
+  - 排队的事件：`CANCELED`。
+  - 进行中的事件：从当前乘数 3 秒线性回到 1（日程上的乘数更接近 1 时按日程），`result` 为 `CANCELED`，`ended_by` 为操作人；3 秒后 `DONE`。这 3 秒里该交易对仍算有事件。
+- **关开关** `market.overlay`：market-data 立即回到 1；market-sim 下一秒把进行中的记为 `DONE`/`CANCELED`（`ended_by` 为 `system:market.overlay`），已到时间的排队事件取消。
+- **重启**：启动时载入未结束的 `OVERLAY`。进行中的按开始时刻续推，不从头开始；排队的到时开始，晚于计划 1 分钟以上的（market-sim 停机）取消。
+
+列表 `GET /internal/sim/events` 里的 `OVERLAY` 项另有 `symbol`、`target_factor`、`ramp_up_seconds`、`ramp_down_seconds`、`risk`、`factor_now`、`progress`（0–1）、`base_price`、`peak_price`、`end_reference_price`、`end_platform_price`；`price` 是创建时算出的目标价。平台币自己的事件没有这些字段。
+
+**杠杆**：margin-service 的估值来自 ticker（叠加后）。`risk` 为 false 的事件改读 market-data 的风险价（`/internal/market/{symbol}/reference?for=risk`，币安原价），见 [margin.md](margin.md)。**平台币**的驱动价（BTC、ETH）用 market-data 给的币安原价（`source_price`），BTC 上的事件不带动 ASTRA（审查 GD ④）。
+
+运维：
+
+```bash
+scripts/ops/price-event.sh on                                   # market.overlay
+scripts/ops/price-event.sh start BTC-USDT --pct 1 --up 15 --down 5 "演示"
+scripts/ops/price-event.sh start BTC-USDT ETH-USDT --pct -2 --up 10 --hold 30 --down 5 --no-risk "演示"
+scripts/ops/price-event.sh list            # 未结束的；--all：最近 50 条
+scripts/ops/price-event.sh overlays        # market-data 当前的乘数
+scripts/ops/price-event.sh stop <事件 ID>  # 立即恢复
+scripts/ops/price-event.sh off             # 全部回到 1
+```
+
+它经 market-sim 容器里的 `exchangectl sim call` 调（`ops` 键，只能做单人份额以内的事）；`OPS_ACTOR` 指定操作人。
+
+端到端 `scripts/e2e/price-event.sh`：
+
+- 带 `risk` 的事件：BTC-USDT +16%（超过损失上限时取上限以内最大的幅度）。期间平台的参考价、ticker、盘口都是币安价乘以乘数，HOUSE 减量报价；BTC-USDT-PERP 的指数与标记价跟随（标记价 `PLATFORM`），持有 BTC 的杠杆账户估值也跟随。结束后事件 `DONE`，ticker 与币安偏差小于 0.05%，突刺留在 1m K 线里，永续标记价回到原来源。
+- 再跑一次不连带的：只有现货变，永续标记价与杠杆估值不动。
+- 运行期间打开 `market.overlay`、结束后放回原样；持运维锁。
+
+演练 `scripts/fault/overlay-restart.sh`：事件保持期间先停 market-sim，5 秒左右回到 1；再启动它，按日程续推。然后重启 market-data，乘数由下一次推送恢复。最后立即恢复，3 秒内回到 1，事件 `DONE`/`CANCELED`。
+
 ## 价格带不锁死市场（设计 §4）
 
 ASTRA-USDT 的价格带是 ±10%，锚点是交易服务看到的最近成交（[trading.md](trading.md)）。目标价离锚点超过带宽时，围绕目标价的报价会被逐档拒绝（`ORDER_PRICE_OUT_OF_BAND`），簿空、没有成交、锚点不再移动——市场被锁死。用户 2026-10-02 决定用三层避免：
@@ -118,7 +185,7 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 
 `p0`、`w_btc`、`w_eth`、`beta`、`theta`、`sigma`、`mu`、`max_minute_move`、`floor`、`ceiling`、`levels`、`spread`、`level_ticks`、`level_size`、`requote_ticks`、`daily_volume`、`order_size`、`trend_minutes`、`trend_strength`、`orders_per_second`、`cancels_per_second`、`bot_usdt`、`perp_daily_volume`、`perp_bot_cap`、`perp_margin`；含义与默认值见 `internal/marketsim/domain/params.go`，`Validate` 给出范围。其中几条是硬上限，不论谁签名、有没有批准（审查 M4）：`floor` 不低于 0.0001、`ceiling` 不高于 1,000,000，`max_minute_move` 至多 5%/分，`orders_per_second`、`cancels_per_second` 各至多 100，`daily_volume`、`perp_daily_volume` 至多每天 1 亿 USDT，`order_size`、`level_size` 至多 50,000，`bot_usdt`、`perp_bot_cap`、`perp_margin` 至多 1000 万；超出答 400。库里存的设置启动时也按硬上限夹取（超出的按上限跑、日志记下改了哪些，库里那行不改）；夹取后仍不合法（例如 `floor` 不低于 `ceiling` 这类上限管不到的）则拒绝启动：compose 会一直重启它，管理接口在不就绪的实例上答 503，只能直接改库——`UPDATE marketsim.settings SET params = jsonb_set(params, '{字段}', '值'), version = version + 1`，改完重启 market-sim（569a958 审查）。
 
-环境变量（compose 的 market-sim 段）：`TRADING_SERVICE_URL`、`LEDGER_SERVICE_URL`、`MARKET_DATA_SERVICE_URL`、`INSTRUMENT_SERVICE_URL`、`INSTRUMENT_GRPC_ADDR`、`DERIVATIVES_SERVICE_URL`；`SIM_SYMBOL`（默认 ASTRA-USDT）、`SIM_QUOTE`（默认 USDT）、`SIM_PERP_SYMBOLS`（逗号分隔，默认 `ASTRA-USDT-PERP,ASTRA-USD-PERP`，空为不做永续；G2 起取代只能写一个的 `SIM_PERP_SYMBOL`）、`SIM_SEED`（默认 0，取时钟）。
+环境变量（compose 的 market-sim 段）：`TRADING_SERVICE_URL`、`LEDGER_SERVICE_URL`、`MARKET_DATA_SERVICE_URL`、`INSTRUMENT_SERVICE_URL`、`INSTRUMENT_GRPC_ADDR`、`DERIVATIVES_SERVICE_URL`；`SIM_SYMBOL`（默认 ASTRA-USDT）、`SIM_QUOTE`（默认 USDT）、`SIM_PERP_SYMBOLS`（逗号分隔，默认 `ASTRA-USDT-PERP,ASTRA-USD-PERP`，空为不做永续；G2 起取代只能写一个的 `SIM_PERP_SYMBOL`）、`SIM_SEED`（默认 0，取时钟）。任意交易对的价格事件（J2）：`OVERLAY_API_SECRET`（`market/overlay.env`，与 market-data 同一把，部署脚本首次生成；没有则这类事件答 503）、`MARKET_MAKER_URL`（读 HOUSE 的额度）、`OVERLAY_MAX_LOSS_USDT`（默认 200000）、`OVERLAY_MAX_SECONDS`（默认 600，4–600）。
 
 ## 管理接口（内网，`market-sim:8098`，网关不转发）
 
@@ -128,10 +195,10 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 | PUT | `/internal/sim/params` | `{"params": {...全部字段...}, "actor": "操作人", "approved_by": "批准人（需要时）"}` → `{"version": n}`；不合法 400，超过单人份额 403 `SIM_PARAMS_NEED_APPROVAL` |
 | POST | `/internal/sim/bots` | `{"user_id", "role": "MAKER|TAKER|TREND|EXECUTOR", "label"}` → 204；同一用户再登记无变化，标签被别的用户占用返回 409；下一轮开始交易 |
 | GET | `/internal/sim/events` | 进行中与排队的事件；`?all=1&limit=50` 取最近的全部状态。每条：`id`、`type`、`size`、`price`、`mu`、`factor`、`duration_seconds`、`hold_seconds`、`starts_at`、`status`（`SCHEDULED`、`RUNNING`、`DONE`、`CANCELED`）、`created_by`、`approved_by`、`reason`、`created_at`、`started_at`、`ended_at`、`from_price`、`ended_by`；A6 起另有 `direction`、`then`、`result`（`""`/`HIT`/`MISSED`/`CANCELED`）、`crossed_at`、`ends_at`、`closing_at`、`hold_until`（只有目标有）、`parent_id`、`width_seconds`（插针） |
-| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省，最多 24 小时后）, "direction", "then", "width_seconds", "spikes": [{"at", "size", "width_seconds"}], "actor", "approved_by", "reason"}` → 201 事件（目标带 `spikes`：建好的子项；旧式短目标返回转成的 `JUMP`）；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人份额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法或超过硬上限 400，目标窗口太短 400 `SIM_TARGET_INFEASIBLE`（`details.min_duration_seconds`），插针超过价格带深度 400 `SIM_SPIKE_BEYOND_BAND`（`details.max`），与目标冲突 409 `SIM_TARGET_RUNNING`、`SIM_SPIKE_IN_CLOSING`，插针过多 409 `SIM_SPIKES_PER_HOUR` |
+| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省，最多 24 小时后）, "direction", "then", "width_seconds", "spikes": [{"at", "size", "width_seconds"}], "actor", "approved_by", "reason"}` → 201 事件（目标带 `spikes`：建好的子项；旧式短目标返回转成的 `JUMP`；`type` 为 `OVERLAY` 的请求与答复见上文「任意交易对的价格事件」）；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人份额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法或超过硬上限 400，目标窗口太短 400 `SIM_TARGET_INFEASIBLE`（`details.min_duration_seconds`），插针超过价格带深度 400 `SIM_SPIKE_BEYOND_BAND`（`details.max`），与目标冲突 409 `SIM_TARGET_RUNNING`、`SIM_SPIKE_IN_CLOSING`，插针过多 409 `SIM_SPIKES_PER_HOUR` |
 | GET | `/internal/sim/events/{id}/plan` | 目标的计划：`event_id`、`direction`、`level`、`from_price`、`starts_at`、`closing_at`、`ends_at`、`hold_until`、`status`、`points`（每分钟一个 `{at, plan, low, high}`：只按引导的平均路径与噪声加市场因子两倍标准差的包络）、`spikes`、`now`（进行中时 `{at, target, plan, low, high, deviation（ln(目标价/计划价)）, at_risk, crossed_at, result}`，否则 null）；不是目标或最近 200 条里没有 404 |
 | GET | `/internal/sim/target-preview` | `?direction=&price=&duration_seconds=&starts_at=`：按当前目标价预览 `{direction, feasible, min_duration_seconds, move, needs_approval, points}`（后台表单用，不签名） |
-| POST | `/internal/sim/events/{id}/end` | `{"actor", "reason"}` → 200 事件：排队的取消，进行中的就地结束（`HALT` 恢复交易：只动仍是 `HALT` 的交易对与永续，恢复到一半失败时再结束一次会接着做完）；已结束的 409 |
+| POST | `/internal/sim/events/{id}/end` | `{"actor", "reason"}` → 200 事件：排队的取消，进行中的就地结束（`HALT` 恢复交易：只动仍是 `HALT` 的交易对与永续，恢复到一半失败时再结束一次会接着做完；`OVERLAY` 3 秒回到 1，见上文）；已结束的 409 |
 | GET | `/internal/sim/history` | `?minutes=`（默认与最长一天）：每 10 秒一个点 `{at, target_price, last_price}`（也存在 `marketsim.samples`，保留一天，重启后接着画） |
 | GET | `/internal/sim/stream` | 同样的点每秒一个，server-sent events（`data: {...}`）；A6 起每条另有 `target`：没有进行中的目标时 null，否则 `{event_id, plan, low, high, deviation, at_risk, result, crossed_at, ends_at}` |
 
@@ -180,9 +247,9 @@ scripts/ops/astra.sh perp-on     # sim.perp
 
 ## 指标与告警
 
-`market_sim_target_price`、`market_sim_last_price`、`market_sim_running`、`market_sim_references_fresh`、`market_sim_walking`、`market_sim_inventory{asset}`、`market_sim_orders_total{role,result,symbol}`（placed、unfunded、out_of_band、failed；永续的角色带 `PERP_` 前缀）、`market_sim_cancels_total{role,symbol}`、`market_sim_guards_total{guard}`、`market_sim_throttled_total{kind}`、`market_sim_errors_total{op,symbol}`（含 `perp_last_trade`：读不到永续最近成交）、`market_sim_band_deadlocks_total`、`market_sim_quiet_takes_total`（现货冷清时的吃单）、`market_sim_perp_quiet_takes_total{symbol}`（永续 45 秒无成交时的最小量吃单）、`market_sim_target_at_risk`（进行中的目标按守卫速度也到不了时为 1）、`market_sim_targets_total{result}`（结束的目标：`HIT`、`MISSED`、`CANCELED`）。
+`market_sim_target_price`、`market_sim_last_price`、`market_sim_running`、`market_sim_references_fresh`、`market_sim_walking`、`market_sim_inventory{asset}`、`market_sim_orders_total{role,result,symbol}`（placed、unfunded、out_of_band、failed；永续的角色带 `PERP_` 前缀）、`market_sim_cancels_total{role,symbol}`、`market_sim_guards_total{guard}`、`market_sim_throttled_total{kind}`、`market_sim_errors_total{op,symbol}`（含 `perp_last_trade`：读不到永续最近成交）、`market_sim_band_deadlocks_total`、`market_sim_quiet_takes_total`（现货冷清时的吃单）、`market_sim_perp_quiet_takes_total{symbol}`（永续 45 秒无成交时的最小量吃单）、`market_sim_target_at_risk`（进行中的目标按守卫速度也到不了时为 1）、`market_sim_targets_total{result}`（结束的目标：`HIT`、`MISSED`、`CANCELED`）；任意交易对的价格事件：`market_sim_overlay_factor{symbol}`（推送的乘数，事件结束即删除）、`market_sim_overlay_pushes_total{result}`（`ok`、`failed`）、`market_sim_overlay_save_failures_total`。
 
-告警：`MarketSimFailing`（10 分钟失败超过 100 次）、`MarketSimReferencesStale`（运行中 5 分钟没有新鲜的 BTC/ETH 参考价）、`MarketSimBandDeadlock`（15 分钟内看门狗动过手：查 `GET /internal/sim` 的 `anchor_price`、`band_distance`、机器人的 `error` 与 `retry_at`，以及日志 `the market was locked`）、`MarketSimTargetAtRisk`（目标 1 分钟都处在来不及的状态：延长——取消后另建——或取消）、`MarketSimTargetMissed`（15 分钟内有目标 `MISSED`）。
+告警：`MarketSimFailing`（10 分钟失败超过 100 次）、`MarketSimReferencesStale`（运行中 5 分钟没有新鲜的 BTC/ETH 参考价）、`MarketSimBandDeadlock`（15 分钟内看门狗动过手：查 `GET /internal/sim` 的 `anchor_price`、`band_distance`、机器人的 `error` 与 `retry_at`，以及日志 `the market was locked`）、`MarketSimTargetAtRisk`（目标 1 分钟都处在来不及的状态：延长——取消后另建——或取消）、`MarketSimTargetMissed`（15 分钟内有目标 `MISSED`）、`MarketSimOverlayPushFailing`（2 分钟内推送乘数失败超过 10 次：交易对已回到币安价而事件还在跑，查 market-data 是否在、`OVERLAY_API_SECRET` 两边是否一致）；market-data 一侧的 `MarketOverlayStuck` 见 [market-data.md](market-data.md)。
 
 ## 还没做（后续批次）
 

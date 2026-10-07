@@ -15,11 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 	"github.com/skill/exchange/internal/marketsim/adapters/api"
 	"github.com/skill/exchange/internal/marketsim/adapters/instruments"
 	"github.com/skill/exchange/internal/marketsim/adapters/postgres"
 	"github.com/skill/exchange/internal/marketsim/application"
+	"github.com/skill/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/marketsim/ports"
 	"github.com/skill/exchange/internal/marketsim/transport/httpapi"
 	"github.com/skill/exchange/internal/platform/app"
 	"github.com/skill/exchange/internal/platform/bootstrap"
@@ -58,6 +62,16 @@ type settings struct {
 	// console's service's, the only caller that may name an approver.
 	APISecret      string `koanf:"sim_api_secret"`
 	AdminAPISecret string `koanf:"sim_admin_api_secret"`
+	// The price events on followed pairs (design 2026-10-07, general price
+	// control): pushed to market-data signed with key "sim"
+	// (OVERLAY_API_SECRET, market/overlay.env on the server; empty: no
+	// such events), HOUSE's rooms read from market-maker
+	// (MARKET_MAKER_URL), its worst loss on an event at most
+	// OVERLAY_MAX_LOSS_USDT, an event OVERLAY_MAX_SECONDS long at most.
+	OverlayAPISecret  string `koanf:"overlay_api_secret"`
+	MarketMakerURL    string `koanf:"market_maker_url"`
+	OverlayMaxLoss    string `koanf:"overlay_max_loss_usdt"`
+	OverlayMaxSeconds int    `koanf:"overlay_max_seconds"`
 }
 
 func (s *settings) Validate() error {
@@ -70,6 +84,17 @@ func (s *settings) Validate() error {
 	}
 	if err := svcsign.CheckSecret(s.AdminAPISecret); err != nil {
 		errs = append(errs, fmt.Errorf("SIM_ADMIN_API_SECRET: %w", err))
+	}
+	if s.OverlayAPISecret != "" {
+		if err := svcsign.CheckSecret(s.OverlayAPISecret); err != nil {
+			errs = append(errs, fmt.Errorf("OVERLAY_API_SECRET: %w", err))
+		}
+	}
+	if d, err := decimal.NewFromString(s.OverlayMaxLoss); err != nil || !d.IsPositive() {
+		errs = append(errs, errors.New("OVERLAY_MAX_LOSS_USDT is a positive amount of USDT"))
+	}
+	if total := time.Duration(s.OverlayMaxSeconds) * time.Second; total < time.Second+domain.OverlayMinRampDown || total > domain.OverlayMaxTotal {
+		errs = append(errs, errors.New("OVERLAY_MAX_SECONDS is from 4 to 600"))
 	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
@@ -84,6 +109,7 @@ func setup(ctx context.Context, a *app.App) error {
 		TradingURL: "http://localhost:8088", LedgerURL: "http://localhost:8085", MarketURL: "http://localhost:8090",
 		InstrumentURL: "http://localhost:8084", InstrumentAddr: "localhost:9184",
 		Perps: "ASTRA-USDT-PERP,ASTRA-USD-PERP", DerivativesURL: "http://localhost:8095",
+		MarketMakerURL: "http://localhost:8091", OverlayMaxLoss: "200000", OverlayMaxSeconds: int(domain.OverlayMaxTotal.Seconds()),
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -115,15 +141,28 @@ func setup(ctx context.Context, a *app.App) error {
 			perps = append(perps, symbol)
 		}
 	}
+	store := postgres.NewStore(db, events)
 	sim := application.New(application.Config{Symbol: cfg.Symbol, Quote: cfg.Quote, Perps: perps, Tick: 250 * time.Millisecond, Seed: cfg.Seed},
-		client, client, instruments.Client{API: instrumentv1.NewInstrumentServiceClient(instrumentConn)}, postgres.NewStore(db, events),
+		client, client, instruments.Client{API: instrumentv1.NewInstrumentServiceClient(instrumentConn)}, store,
 		flagClient, a.Logger(), a.Metrics())
 	sim.Derivatives = client
+	market := &api.Overlays{
+		MarketURL: cfg.MarketURL, MarketMakerURL: cfg.MarketMakerURL, HTTP: &http.Client{Timeout: 2 * time.Second},
+		Signer: svcsign.Client{KeyID: api.OverlayKeyID, Secret: []byte(cfg.OverlayAPISecret)},
+	}
+	var pushes ports.Overlays = market
+	if cfg.OverlayAPISecret == "" {
+		a.Logger().Warn("OVERLAY_API_SECRET is not set: no price events on followed pairs")
+		pushes = nil
+	}
+	overlays := application.NewOverlays(application.OverlayConfig{
+		MaxLoss: decimal.RequireFromString(cfg.OverlayMaxLoss), MaxTotal: time.Duration(cfg.OverlayMaxSeconds) * time.Second, Every: time.Second,
+	}, pushes, market, store, flagClient, sim, a.Logger(), a.Metrics())
 	r := a.NewRouter()
 	signed := &svcsign.Verifier{Keys: map[string][]byte{
 		httpapi.KeyOps: []byte(cfg.APISecret), httpapi.KeyAdmin: []byte(cfg.AdminAPISecret),
 	}}
-	(&httpapi.Handler{Sim: sim, Signed: signed}).Routes(r)
+	(&httpapi.Handler{Sim: sim, Overlays: overlays, Signed: signed}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {
 		return err
 	}
@@ -139,6 +178,10 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := sim.Start(ctx); err != nil {
 		return err
 	}
+	if err := overlays.Start(ctx); err != nil {
+		return err
+	}
 	a.Add("simulated market", app.Loop(sim.Run))
+	a.Add("price events on followed pairs", app.Loop(overlays.Run))
 	return nil
 }

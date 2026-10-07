@@ -13,11 +13,13 @@
 //	GET /internal/house/caps          the caps in force and their version
 //	PUT /internal/house/caps          a change {"level": "...", ..., "version", "actor", "approver", "approval_id", "reason"}
 //	GET /internal/house/caps/changes  the latest changes, newest first (?limit=)
+//	GET /internal/house/rooms/{symbol} what HOUSE may still buy and sell there (market-sim's price events)
 package httpapi
 
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -43,10 +45,12 @@ const (
 var ErrApprovalNeedsAdmin = apperr.New(apperr.KindForbidden, "HOUSE_CAPS_APPROVAL_NEEDS_ADMIN",
 	"only the admin console's service names an approver: it signed both operators in")
 
-// Handler serves the caps; Signed checks the changes' signatures.
+// Handler serves the caps; Signed checks the changes' signatures. Rooms
+// gives HOUSE's rooms by symbol (nil: not served).
 type Handler struct {
 	Caps   *application.Caps
 	Signed *svcsign.Verifier
+	Rooms  func(symbol string) (application.Rooms, bool)
 }
 
 // Routes registers the handlers on r.
@@ -54,6 +58,23 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/internal/house/caps", h.get)
 	r.With(h.Signed.Changes).Put("/internal/house/caps", h.put)
 	r.Get("/internal/house/caps/changes", h.changes)
+	if h.Rooms != nil {
+		r.Get("/internal/house/rooms/{symbol}", h.rooms)
+	}
+}
+
+// rooms answers what HOUSE may still buy and sell of a symbol as last
+// published (J0 contract §4.2); 404 while it does not quote it.
+func (h *Handler) rooms(w http.ResponseWriter, r *http.Request) {
+	ro, ok := h.Rooms(strings.ToUpper(chi.URLParam(r, "symbol")))
+	if !ok {
+		httpx.WriteError(w, r, apperr.NotFound("HOUSE does not quote the symbol"))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"symbol": ro.Symbol, "buy": ro.Buy.String(), "sell": ro.Sell.String(), "mid": ro.Mid.String(), "unit_value": ro.UnitValue.String(),
+		"inverse": ro.Inverse, "updated_at": ro.At.UTC().Format(time.RFC3339Nano),
+	})
 }
 
 // capsJSON are the caps as the API gives them.

@@ -26,6 +26,10 @@ const (
 	EventPause      EventType = "PAUSE"
 	EventHalt       EventType = "HALT"
 	EventReanchor   EventType = "REANCHOR"
+	// EventOverlay is a price event on a pair a reference market follows
+	// (design 2026-10-07, general price control): market-data multiplies
+	// the pair's reference data by its factor (Overlay).
+	EventOverlay EventType = "OVERLAY"
 )
 
 // A threshold target's direction (the price at or above the level by the
@@ -130,6 +134,19 @@ type Event struct {
 	// A target's crossing of its level and how it ended.
 	CrossedAt time.Time
 	Result    string
+	// An OVERLAY's pair, its target factor (the target over the reference
+	// price when it was made), its ramps up and down (Hold between them),
+	// whether it reaches the pair's perpetuals and the leverage (Risk),
+	// and its course: the reference price it started at, the platform's
+	// peak, the reference and platform prices when it ended.
+	Symbol            string
+	TargetFactor      float64
+	RampUp, RampDown  time.Duration
+	Risk              bool
+	BasePrice         decimal.Decimal
+	PeakPrice         decimal.Decimal
+	EndReferencePrice decimal.Decimal
+	EndPlatformPrice  decimal.Decimal
 	// Breather is the UTC minute (Unix seconds / 60) a running target
 	// breathes in: against its way (Guide), after three minutes its way.
 	// Kept in memory only.
@@ -247,8 +264,27 @@ func (e Event) Validate() error {
 			fail("a volatility factor is above 0 and at most 20")
 		}
 	case EventPause, EventHalt, EventReanchor:
+	case EventOverlay:
+		if e.Symbol == "" {
+			fail("an overlay names its pair")
+		}
+		if !(e.TargetFactor >= OverlayMinFactor && e.TargetFactor <= OverlayMaxFactor) || e.TargetFactor == 1 {
+			fail("an overlay's target is within ±90%% of the reference price, not at it")
+		}
+		if e.RampUp < time.Second || e.RampDown < OverlayMinRampDown {
+			fail("an overlay ramps up in a second at least and back down in 3 seconds at least")
+		}
+		if e.OverlayTotal() > OverlayMaxTotal {
+			fail("an overlay runs 600 seconds at most")
+		}
+		if e.Duration != 0 {
+			fail("an overlay has ramps and a hold, no duration")
+		}
 	default:
-		fail("type must be JUMP, TARGET, SPIKE, TREND, VOLATILITY, PAUSE, HALT or REANCHOR")
+		fail("type must be JUMP, TARGET, SPIKE, TREND, VOLATILITY, PAUSE, HALT, REANCHOR or OVERLAY")
+	}
+	if e.Type != EventOverlay && (e.Symbol != "" || e.TargetFactor != 0 || e.RampUp != 0 || e.RampDown != 0) {
+		fail("only an overlay has a pair, a target factor and ramps")
 	}
 	if e.Type != EventTarget && (e.Direction != "" || e.Then != "") {
 		fail("only a target has a direction and a then")
@@ -272,9 +308,10 @@ func (e Event) Moves() bool {
 // a spike's size (a share); the way to a target's level from where it
 // started (from p, the target now, before it starts), a logarithm (§6.2,
 // 2026-10-04); a trend's drift over its time; a volatility factor's extra
-// one-sigma move over its time (sigma being the model's volatility a day).
-// A trend or a volatility counts a day at most, and a day when it has no
-// end. The other events move nothing.
+// one-sigma move over its time (sigma being the model's volatility a day);
+// an overlay's way to its target factor (a share, on its own pair's
+// budget). A trend or a volatility counts a day at most, and a day when
+// it has no end. The other events move nothing.
 func (e Event) Move(p, sigma float64) float64 {
 	days := 1.0
 	if e.Duration > 0 {
@@ -295,6 +332,8 @@ func (e Event) Move(p, sigma float64) float64 {
 		return math.Expm1(e.Mu * days)
 	case EventVolatility:
 		return sigma * math.Abs(e.Factor-1) * math.Sqrt(days)
+	case EventOverlay:
+		return e.TargetFactor - 1
 	}
 	return 0
 }

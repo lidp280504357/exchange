@@ -110,6 +110,8 @@ type Publisher struct {
 	// out (OnHouseFill): the engine's copy has the levels used up, so
 	// they go out again on the next round, changed or not.
 	taken map[string]bool
+	// rooms are the symbols' rooms as last published (RoomsOf).
+	rooms map[string]Rooms
 
 	inventory *prometheus.GaugeVec
 	exposure  *prometheus.GaugeVec
@@ -152,7 +154,7 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 ) *Publisher {
 	p := &Publisher{
 		cfg: cfg, specs: specs, house: house, flags: fl, pub: pub, events: events, log: log, now: time.Now,
-		books: map[string]*refBook{}, contracts: noContracts(), sent: map[string]sent{}, taken: map[string]bool{},
+		books: map[string]*refBook{}, contracts: noContracts(), sent: map[string]sent{}, taken: map[string]bool{}, rooms: map[string]Rooms{},
 		inventory: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_house_inventory", Help: "HOUSE's spot holding of an asset (MARKET_MAKER available; below zero for an internal asset it sold).",
 		}, []string{"asset", "backed"}),
@@ -321,6 +323,30 @@ func (p *Publisher) showCaps(caps domain.Caps, version int64) {
 		p.capGauge.WithLabelValues(name).Set(v.InexactFloat64())
 	}
 	p.capsVersion.Set(float64(version))
+}
+
+// Rooms is how much HOUSE may still buy and sell of a symbol (base asset,
+// or contracts) as last published, the reference book's mid, what one
+// unit is worth in USDT there and whether the unit is an inverse
+// contract's (a coin-margined one, a fixed face in its coin): market-sim's
+// estimate of a price event's worst loss (design 2026-10-07, general
+// price control, J0 contract §4.2).
+type Rooms struct {
+	Symbol    string
+	Buy, Sell decimal.Decimal
+	Mid       decimal.Decimal
+	UnitValue decimal.Decimal
+	Inverse   bool
+	At        time.Time
+}
+
+// RoomsOf returns symbol's rooms as last published; false while HOUSE
+// does not quote it.
+func (p *Publisher) RoomsOf(symbol string) (Rooms, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, ok := p.rooms[symbol]
+	return r, ok
 }
 
 // OnHouseFill takes a trade HOUSE made on symbol (trade.events,
@@ -523,6 +549,12 @@ func (p *Publisher) round() []outgoing {
 			msg.SourceTime, msg.HoldingsAt = timestamppb.New(b.taken), timestamppb.New(p.houseAt)
 			p.room.WithLabelValues(spec.Symbol, "buy").Set(buy.InexactFloat64())
 			p.room.WithLabelValues(spec.Symbol, "sell").Set(sell.InexactFloat64())
+			mid := midOf(b)
+			p.rooms[spec.Symbol] = Rooms{
+				Symbol: spec.Symbol, Buy: buy, Sell: sell, Mid: mid, UnitValue: spec.UnitValue(mid), Inverse: spec.ContractSize.IsPositive(), At: now,
+			}
+		} else {
+			delete(p.rooms, spec.Symbol)
 		}
 		empty := len(msg.GetBids())+len(msg.GetAsks()) == 0
 		key := contentKey(msg)

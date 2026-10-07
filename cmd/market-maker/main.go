@@ -190,7 +190,7 @@ func setup(ctx context.Context, a *app.App) error {
 		usable.WithLabelValues(k.id).Set(1)
 	}
 	r := a.NewRouter()
-	(&httpapi.Handler{Caps: caps, Signed: signed}).Routes(r)
+	(&httpapi.Handler{Caps: caps, Signed: signed, Rooms: pub.RoomsOf}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {
 		return err
 	}

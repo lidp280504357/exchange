@@ -140,18 +140,14 @@ func scaled(st *bookState, n int, f decimal.Decimal) (bids, asks []domain.Level)
 	return domain.ScaleLevels(bids, f, true), domain.ScaleLevels(asks, f, false)
 }
 
-// scaledTrades is trades with their prices times f (and the quote amounts
-// with them).
-func scaledTrades(trades []domain.Trade, f decimal.Decimal) []domain.Trade {
-	if f.Equal(one) {
-		return trades
-	}
-	out := make([]domain.Trade, len(trades))
-	for i, t := range trades {
+// scaledTrade is t with its price times f (and its quote amount with it):
+// a trade carries the factor of when it came (review GD ⑤), kept so in
+// the recent trades and published so.
+func scaledTrade(t domain.Trade, f decimal.Decimal) domain.Trade {
+	if !f.Equal(one) {
 		t.Price, t.Quote = domain.ScalePrice(t.Price, f), domain.ScalePrice(t.Quote, f)
-		out[i] = t
 	}
-	return out
+	return t
 }
 
 // overlayField is f as the depth messages carry it: empty for 1.
@@ -533,6 +529,7 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 			b.mu.Lock()
 			*live = b.now()
 			if st, ok := b.books[t.Symbol]; ok {
+				t = scaledTrade(t, b.shownFactor(st))
 				st.recent = append(st.recent, t)
 				if len(st.recent) > bookRecent {
 					st.recent = slices.Delete(st.recent, 0, len(st.recent)-bookRecent)
@@ -705,7 +702,7 @@ func (b *Books) Trades(symbol string, limit int) ([]domain.Trade, bool) {
 	for i := len(st.recent) - 1; i >= 0 && len(out) < limit; i-- {
 		out = append(out, st.recent[i])
 	}
-	return scaledTrades(out, b.shownFactor(st)), true
+	return out, true
 }
 
 // Push publishes, every bookPush until ctx ends (an app.Loop body), the
@@ -782,7 +779,7 @@ func (b *Books) collect() []outMsg {
 			}
 		}
 		if len(st.pending) > 0 {
-			out = append(out, outMsg{event.TopicMarketTrades, symbol, "trades", "reference", tradesPrinted(symbol, scaledTrades(st.pending, f), true)})
+			out = append(out, outMsg{event.TopicMarketTrades, symbol, "trades", "reference", tradesPrinted(symbol, st.pending, true)})
 			st.pending = nil
 		}
 	}

@@ -29,9 +29,9 @@ const (
 	overlayStale = 5 * time.Second
 	// overlayMaxAhead is how far past the push its until may reach.
 	overlayMaxAhead = 15 * time.Second
-	// MarkBackAfter is how long after a risk overlay ends its perpetuals'
-	// mark stays computed (PLATFORM) before their own source returns.
-	MarkBackAfter = 30 * time.Second
+	// overlayLongest is how long an event runs at most: its end when its
+	// pushes do not tell (MarketOverlayStuck).
+	overlayLongest = 10 * time.Minute
 )
 
 var (
@@ -48,13 +48,15 @@ var (
 	errOverlayRange = apperr.Invalid("factor must be from 0.1 to 1.9")
 )
 
-// OverlayPush is one push of a price event's factor.
+// OverlayPush is one push of a price event's factor; EndsAt is when the
+// event is to be back at 1 (zero: not told).
 type OverlayPush struct {
 	Factor  decimal.Decimal
 	Until   time.Time
 	Risk    bool
 	EventID string
 	Seq     int64
+	EndsAt  time.Time
 }
 
 // OverlayState is a pair's overlay as kept.
@@ -66,6 +68,9 @@ type OverlayState struct {
 	EventID  string
 	Seq      int64
 	Received time.Time
+	// EndsAt is when the event is to be back at 1: as its pushes tell, or
+	// overlayLongest past its first.
+	EndsAt time.Time
 }
 
 // Overlay keeps the pairs' factors.
@@ -76,13 +81,14 @@ type Overlay struct {
 
 	mu    sync.Mutex
 	items map[string]OverlayState
-	// riskEnded is when each pair's last risk overlay ended (its
-	// perpetuals' marks stay computed MarkBackAfter more).
-	riskEnded map[string]time.Time
+	// closed is each pair's last event ended by a push back to 1, and
+	// that push's seq: its older pushes are stale.
+	closed map[string]OverlayState
 	// peaks are the overlays' extremes by symbol (Ticker).
 	peaks map[string][]peak
 
 	factor *prometheus.GaugeVec
+	endsAt *prometheus.GaugeVec
 	pushes *prometheus.CounterVec
 }
 
@@ -90,16 +96,19 @@ type Overlay struct {
 // register its metrics with reg.
 func NewOverlay(fl Flags, followed func(symbol string) bool, reg prometheus.Registerer) *Overlay {
 	o := &Overlay{
-		flags: fl, followed: followed, now: time.Now, items: map[string]OverlayState{}, riskEnded: map[string]time.Time{},
+		flags: fl, followed: followed, now: time.Now, items: map[string]OverlayState{}, closed: map[string]OverlayState{},
 		peaks: map[string][]peak{},
 		factor: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_overlay_factor", Help: "The price event's factor on a followed pair's reference data (only while it is not 1).",
+		}, []string{"symbol"}),
+		endsAt: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_overlay_ends_at_seconds", Help: "When the price event on a pair is to be back at 1 (Unix seconds; only while it is not 1).",
 		}, []string{"symbol"}),
 		pushes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_overlay_pushes_total", Help: "Overlay pushes from market-sim by result: ok, stale (an older seq) or refused.",
 		}, []string{"result"}),
 	}
-	reg.MustRegister(o.factor, o.pushes)
+	reg.MustRegister(o.factor, o.endsAt, o.pushes)
 	return o
 }
 
@@ -142,6 +151,9 @@ func (o *Overlay) set(symbol string, p OverlayPush) error {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if c, ok := o.closed[symbol]; ok && c.EventID == p.EventID && p.Seq <= c.Seq {
+		return errStalePush
+	}
 	cur, ok := o.live(symbol, now)
 	if ok && cur.EventID != p.EventID {
 		return ErrOverlayBusy
@@ -149,12 +161,31 @@ func (o *Overlay) set(symbol string, p OverlayPush) error {
 	if ok && p.Seq <= cur.Seq {
 		return errStalePush
 	}
-	o.items[symbol] = OverlayState{
-		Symbol: symbol, Factor: p.Factor, Until: p.Until, Risk: p.Risk, EventID: p.EventID, Seq: p.Seq, Received: now,
+	if p.Factor.Equal(one) {
+		// The event is back at 1: it ends now, not when the push would
+		// lapse.
+		o.endLocked(symbol)
+		o.closed[symbol] = OverlayState{Symbol: symbol, EventID: p.EventID, Seq: p.Seq, Received: now}
+		return nil
 	}
-	o.showLocked(symbol, p.Factor)
+	ends := p.EndsAt
+	if ends.IsZero() {
+		ends = now.Add(overlayLongest)
+		if ok && !cur.EndsAt.IsZero() {
+			ends = cur.EndsAt
+		}
+	}
+	s := OverlayState{
+		Symbol: symbol, Factor: p.Factor, Until: p.Until, Risk: p.Risk, EventID: p.EventID, Seq: p.Seq, Received: now, EndsAt: ends,
+	}
+	o.items[symbol] = s
+	o.showLocked(s)
 	return nil
 }
+
+// Follows reports whether a reference market follows symbol: whether a
+// price event may overlay it.
+func (o *Overlay) Follows(symbol string) bool { return o.followed(strings.ToUpper(symbol)) }
 
 // Clear takes symbol back to 1 at once.
 func (o *Overlay) Clear(symbol string) {
@@ -179,23 +210,17 @@ func (o *Overlay) live(symbol string, now time.Time) (OverlayState, bool) {
 }
 
 func (o *Overlay) endLocked(symbol string) {
-	s, ok := o.items[symbol]
-	if !ok {
+	if _, ok := o.items[symbol]; !ok {
 		return
 	}
 	delete(o.items, symbol)
-	if s.Risk {
-		o.riskEnded[symbol] = o.now()
-	}
 	o.factor.DeleteLabelValues(symbol)
+	o.endsAt.DeleteLabelValues(symbol)
 }
 
-func (o *Overlay) showLocked(symbol string, f decimal.Decimal) {
-	if f.Equal(one) {
-		o.factor.DeleteLabelValues(symbol)
-		return
-	}
-	o.factor.WithLabelValues(symbol).Set(f.InexactFloat64())
+func (o *Overlay) showLocked(s OverlayState) {
+	o.factor.WithLabelValues(s.Symbol).Set(s.Factor.InexactFloat64())
+	o.endsAt.WithLabelValues(s.Symbol).Set(float64(s.EndsAt.Unix()))
 }
 
 // Factor is the factor on symbol's display and trading data now (1
@@ -220,17 +245,15 @@ func (o *Overlay) RiskFactor(pair string) decimal.Decimal {
 	return f
 }
 
-// MarkComputed reports whether the perpetuals indexed on pair keep a
-// computed mark: during a risk overlay and MarkBackAfter past its end.
+// MarkComputed reports whether the perpetuals indexed on pair have their
+// mark computed: during a risk overlay. After it they follow their own
+// source again as after the source's loss (Marks: its live mark for
+// referenceRecover first; review GD, J0 contract §8 question 2).
 func (o *Overlay) MarkComputed(pair string) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	now := o.now()
-	if s, ok := o.live(pair, now); ok && s.Risk {
-		return true
-	}
-	ended, ok := o.riskEnded[pair]
-	return ok && now.Sub(ended) < MarkBackAfter
+	s, ok := o.live(pair, o.now())
+	return ok && s.Risk
 }
 
 // peak is the highest and lowest last price an overlay showed of a

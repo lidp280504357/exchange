@@ -448,7 +448,7 @@ func (m *memStore) SaveState(_ context.Context, st domain.State) error {
 	return nil
 }
 
-type flagSet struct{ on, events, perp bool }
+type flagSet struct{ on, events, perp, overlay bool }
 
 func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
 	switch key {
@@ -458,6 +458,8 @@ func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
 		return f.events
 	case flags.KeySimPerp:
 		return f.perp
+	case flags.KeyOverlay:
+		return f.overlay
 	}
 	return false
 }

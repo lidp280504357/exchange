@@ -138,17 +138,31 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// reference answers a pair's reference price: the price the platform
+// trades and shows (a price event's factor on it, design 2026-10-07), the
+// reference market's own (source_price) and the factor, whether a
+// reference market follows the pair (a price event may overlay it).
+// ?for=risk asks for the price risk is valued at (the leverage): a price
+// event's only when it reaches risk (review GD ①).
 func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
 	s := symbol(r)
-	out := map[string]any{"symbol": s, "source": nil, "price": nil, "updated_at": nil, "fresh": false}
+	forRisk := r.URL.Query().Get("for") == "risk"
+	out := map[string]any{
+		"symbol": s, "source": nil, "price": nil, "source_price": nil, "overlay_factor": "1", "updated_at": nil, "fresh": false,
+		"followed": h.Overlay != nil && h.Overlay.Follows(s),
+	}
 	if h.Ref != nil {
 		if ref, fresh := h.Ref.Latest(s); !ref.At.IsZero() {
-			price := ref.Price
-			if h.Overlay != nil { // a price event moves the trading anchor too
-				f, _ := h.Overlay.Factor(s)
-				price = domain.ScalePrice(price, f)
+			price, f := ref.Price, decimal.NewFromInt(1)
+			switch {
+			case h.Overlay != nil && forRisk:
+				f = h.Overlay.RiskFactor(s)
+			case h.Overlay != nil: // a price event moves the trading anchor too
+				f, _ = h.Overlay.Factor(s)
 			}
+			price = domain.ScalePrice(price, f)
 			out["source"], out["price"], out["fresh"] = ref.Source, price.String(), fresh
+			out["source_price"], out["overlay_factor"] = ref.Price.String(), f.String()
 			out["updated_at"] = ref.At.UTC().Format(time.RFC3339Nano)
 		}
 	}
@@ -171,6 +185,8 @@ func (h *Handler) setOverlay(w http.ResponseWriter, r *http.Request) {
 		Risk    *bool  `json:"risk"`
 		EventID string `json:"event_id"`
 		Seq     int64  `json:"seq"`
+		// EndsAt is when the event is to be back at 1 (optional).
+		EndsAt string `json:"ends_at"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
@@ -186,8 +202,16 @@ func (h *Handler) setOverlay(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("until must be an RFC 3339 time"))
 		return
 	}
+	var ends time.Time
+	if body.EndsAt != "" {
+		if ends, err = time.Parse(time.RFC3339Nano, body.EndsAt); err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("ends_at must be an RFC 3339 time"))
+			return
+		}
+	}
 	risk := body.Risk == nil || *body.Risk
-	if err := h.Overlay.Set(symbol(r), application.OverlayPush{Factor: f, Until: until, Risk: risk, EventID: body.EventID, Seq: body.Seq}); err != nil {
+	push := application.OverlayPush{Factor: f, Until: until, Risk: risk, EventID: body.EventID, Seq: body.Seq, EndsAt: ends}
+	if err := h.Overlay.Set(symbol(r), push); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -207,6 +231,7 @@ func (h *Handler) overlays(w http.ResponseWriter, _ *http.Request) {
 		items = append(items, map[string]any{
 			"symbol": s.Symbol, "factor": s.Factor.String(), "until": s.Until.UTC().Format(time.RFC3339Nano), "risk": s.Risk,
 			"event_id": s.EventID, "seq": s.Seq, "updated_at": s.Received.UTC().Format(time.RFC3339Nano),
+			"ends_at": s.EndsAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})

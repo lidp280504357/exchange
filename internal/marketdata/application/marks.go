@@ -233,6 +233,11 @@ type contractMarks struct {
 	// refBackSince is when the reference market's mark came back fresh
 	// while the source was degraded (referenceRecover).
 	refBackSince time.Time
+	// overlaid is set while a price event that reaches risk has the mark
+	// computed, and until the reference market's mark is followed again
+	// after it: as after the source's loss, once it streamed for
+	// referenceRecover (review GD).
+	overlaid bool
 
 	pushedRate   decimal.Decimal
 	pushedSource string
@@ -421,8 +426,9 @@ func (m *Marks) prices(symbol string) []domain.SourcePrice {
 
 // WithOverlay has the contract prices follow the price events that reach
 // risk (design 2026-10-07, general price control): the index from the
-// scaled pair, the mark computed (PLATFORM) meanwhile and MarkBackAfter
-// past their end. Call it before Run.
+// scaled pair, the mark computed (PLATFORM) meanwhile and until the
+// reference market's mark has streamed referenceRecover after their end.
+// Call it before Run.
 func (m *Marks) WithOverlay(o *Overlay) { m.overlay = o }
 
 func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Time, indexes map[string]bool) []Update {
@@ -593,10 +599,12 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 	if m.overlay != nil && m.overlay.MarkComputed(st.spec.IndexSymbol) {
 		// The reference market's mark knows nothing of the price event.
 		m.markSource(ctx, st, false, "")
+		st.overlaid, st.refBackSince = true, time.Time{}
 		return domain.ReferenceMark{}, false
 	}
 	if !m.follows(symbol) {
 		m.markSource(ctx, st, false, "")
+		st.overlaid = false
 		return domain.ReferenceMark{}, false
 	}
 	if !fresh {
@@ -614,10 +622,11 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 		}
 		return domain.ReferenceMark{}, false
 	}
-	// Back after the source degraded: the self-computed prices go on until
-	// the market has streamed its mark for referenceRecover, each tick's at
-	// most referenceLive old (none of its own at hand: follow at once).
-	if st.latest.SourceDegraded && st.latest.Computed.IsPositive() {
+	// Back after the source degraded or a price event: the self-computed
+	// prices go on until the market has streamed its mark for
+	// referenceRecover, each tick's at most referenceLive old (none of its
+	// own at hand: follow at once).
+	if (st.latest.SourceDegraded || st.overlaid) && st.latest.Computed.IsPositive() {
 		if now.Sub(received) > referenceLive {
 			st.refBackSince = time.Time{}
 			return domain.ReferenceMark{}, false
@@ -629,7 +638,7 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 			return domain.ReferenceMark{}, false
 		}
 	}
-	st.refBackSince = time.Time{}
+	st.refBackSince, st.overlaid = time.Time{}, false
 	m.markSource(ctx, st, false, "")
 	if ref.HasRate {
 		if ref.NextFunding.Equal(st.period) {

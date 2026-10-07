@@ -496,7 +496,11 @@ services:
   # per caller, made by the deploy script on its first run: sim/sim.env
   # (SIM_API_SECRET, exchangectl in this container) and sim/admin.env
   # (SIM_ADMIN_API_SECRET, admin-service too: the only caller that names
-  # an approver).
+  # an approver). It also runs the price events on the pairs a reference
+  # market follows (design 2026-10-07, general price control): it pushes
+  # their factors to market-data each second (market/overlay.env) and caps
+  # HOUSE's worst loss on one (OVERLAY_MAX_LOSS_USDT, 200,000 by default)
+  # from HOUSE's rooms in market-maker.
   market-sim:
     <<: *app
     command: ["/app/market-sim"]
@@ -518,6 +522,7 @@ services:
       INSTRUMENT_SERVICE_URL: http://instrument-service:8084
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
+      MARKET_MAKER_URL: http://market-maker:8091
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

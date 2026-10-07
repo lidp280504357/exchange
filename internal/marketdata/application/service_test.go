@@ -27,6 +27,7 @@ type memStore struct {
 	candles    map[string]domain.Candle
 	trades     []domain.Trade
 	references map[string]domain.Candle
+	overlaid   map[string]bool
 	funding    map[string]ports.FundingPeriod
 	halts      map[string]ports.Halt
 	simHalts   map[string]ports.Halt
@@ -41,7 +42,7 @@ type memStore struct {
 func newMemStore() *memStore {
 	return &memStore{
 		symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{},
-		funding: map[string]ports.FundingPeriod{}, halts: map[string]ports.Halt{}, simHalts: map[string]ports.Halt{},
+		overlaid: map[string]bool{}, funding: map[string]ports.FundingPeriod{}, halts: map[string]ports.Halt{}, simHalts: map[string]ports.Halt{},
 		heartbeats: map[string]time.Time{},
 	}
 }
@@ -207,9 +208,34 @@ func (r memReferences) Upsert(_ context.Context, source string, list []domain.Ca
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	for _, c := range list {
-		r.s.references[source+"|"+candleKey(c)] = c
+		if k := source + "|" + candleKey(c); !r.s.overlaid[k] {
+			r.s.references[k] = c
+		}
 	}
 	return nil
+}
+
+func (r memReferences) UpsertOverlaid(_ context.Context, source string, list []domain.Candle) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for _, c := range list {
+		k := source + "|" + candleKey(c)
+		r.s.references[k], r.s.overlaid[k] = c, true
+	}
+	return nil
+}
+
+func (r memReferences) Overlaid(_ context.Context, source, symbol string, from, to time.Time) ([]domain.Candle, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out []domain.Candle
+	for k, c := range r.s.references {
+		if r.s.overlaid[k] && strings.HasPrefix(k, source+"|") && c.Symbol == symbol && !c.OpenTime.Before(from) && c.OpenTime.Before(to) {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Candle) int { return a.OpenTime.Compare(b.OpenTime) })
+	return out, nil
 }
 
 func (r memReferences) Latest(_ context.Context, source, symbol string) (*domain.Candle, error) {

@@ -43,8 +43,9 @@ func (oc *overlayCandles) factor(symbol string) decimal.Decimal {
 }
 
 // apply is c (a reference 1m candle as it stands) as the platform shows
-// it.
-func (oc *overlayCandles) apply(c domain.Candle) domain.Candle {
+// it, and whether a price event touched its minute (then stored as such:
+// the charts lay it over the reference market's candles).
+func (oc *overlayCandles) apply(c domain.Candle) (domain.Candle, bool) {
 	f := oc.factor(c.Symbol)
 	oc.mu.Lock()
 	defer oc.mu.Unlock()
@@ -55,7 +56,7 @@ func (oc *overlayCandles) apply(c domain.Candle) domain.Candle {
 	}
 	if !ok {
 		if f.Equal(one) {
-			return c
+			return c, false
 		}
 		// The minute's prices before the event, or (an event that was
 		// already on) the whole minute's, scaled by the factor now.
@@ -69,5 +70,5 @@ func (oc *overlayCandles) apply(c domain.Candle) domain.Candle {
 	p := domain.ScalePrice(c.Close, f)
 	t.high, t.low, t.close = decimal.Max(t.high, p), decimal.Min(t.low, p), p
 	c.Open, c.High, c.Low, c.Close = t.open, t.high, t.low, t.close
-	return c
+	return c, true
 }

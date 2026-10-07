@@ -453,11 +453,16 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 			f.heard(market, at)
 			f.setPrice(c.Symbol, c.Close, at, market, started) // the reference price stays the market's
 			f.updates.WithLabelValues(c.Symbol).Inc()
+			touched := false
 			if f.overlay != nil { // the candle shown and stored carries a price event
-				c = f.overlay.apply(c)
+				c, touched = f.overlay.apply(c)
 			}
 			f.notify(c)
-			if err := f.store.Read().References().Upsert(ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
+			repo, upsert := f.store.Read().References(), ports.ReferenceRepo.Upsert
+			if touched {
+				upsert = ports.ReferenceRepo.UpsertOverlaid
+			}
+			if err := upsert(repo, ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
 				f.log.WarnContext(ctx, "reference candle not stored", "symbol", c.Symbol, "error", err)
 			}
 		},

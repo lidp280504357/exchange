@@ -566,6 +566,14 @@ func TestHouseQuotesLessDuringAPriceEvent(t *testing.T) {
 	if len(books) != 1 || books[0].GetBids()[0].GetQuantity() != "0.025" || books[0].GetAsks()[0].GetQuantity() != "0.025" {
 		t.Fatalf("during the event: %v", books)
 	}
+	// The rooms as published, for market-sim's loss estimate (J0 §4.2).
+	if ro, ok := p.RoomsOf("BTC-USDT"); !ok || ro.Buy.String() != books[0].GetBuyRoom() || ro.Sell.String() != books[0].GetSellRoom() ||
+		!ro.Mid.Equal(d("55000.5")) || !ro.UnitValue.Equal(d("55000.5")) {
+		t.Fatalf("rooms %+v", ro)
+	}
+	if _, ok := p.RoomsOf("SOL-USDT"); ok {
+		t.Fatal("rooms of a symbol HOUSE does not quote")
+	}
 	p.OnUpdate(&marketv1.DepthUpdate{Symbol: "BTC-USDT", Sequence: 11, PrevSequence: 10, Reference: true})
 	_ = p.publish(ctx, p.round())
 	if _, books = rec.take(t); len(books) != 1 || books[0].GetBids()[0].GetQuantity() != "0.1" {

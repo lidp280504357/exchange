@@ -162,15 +162,16 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 价格事件（market-sim 的 `OVERLAY` 事件，J2）把一个跟随币安的现货交易对在平台上的价格整体乘一个随时间变化的乘数 f(t)：先升到目标、保持、再回到 1，回到 1 即与币安实时价一致（契约见 [J0 契约](../设计-通用价格控制-J0契约-2026-10-07.md)）。
 
-- **接收**：market-sim 每秒 `PUT /internal/market/overlay/{symbol}` `{"factor", "until", "risk", "event_id", "seq"}`，`svcsign` 键 `sim`（`OVERLAY_API_SECRET`，服务器 `market/overlay.env`，缺了启动时告警、推送一律 401）；乘数 0.1–1.9，`until` 在 15 秒内；同一事件 `seq` 变小的丢弃（计 `stale`），另一个事件正在叠加 409 `MARKET_OVERLAY_BUSY`，不跟随币安的交易对 409 `MARKET_NOT_FOLLOWED`，开关关着 409 `MARKET_OVERLAY_OFF`。过了 `until` 或 5 秒没收到推送、开关关掉、或 `DELETE` 同一路径，立刻回到 1；不存库，服务重启即回 1。`GET /internal/market/overlay` 列出乘数不是 1 的交易对。
+- **接收**：market-sim 每秒 `PUT /internal/market/overlay/{symbol}` `{"factor", "until", "risk", "event_id", "seq", "ends_at"}`，`svcsign` 键 `sim`（`OVERLAY_API_SECRET`，服务器 `market/overlay.env`，缺了启动时告警、推送一律 401）；乘数 0.1–1.9，`until` 在 15 秒内；`ends_at`（可省）是事件按日程回到 1 的时刻，省了按这个事件第一次推送后 10 分钟计；同一事件 `seq` 变小的丢弃（计 `stale`），另一个事件正在叠加 409 `MARKET_OVERLAY_BUSY`，不跟随币安的交易对 409 `MARKET_NOT_FOLLOWED`，开关关着 409 `MARKET_OVERLAY_OFF`。过了 `until` 或 5 秒没收到推送、开关关掉、或 `DELETE` 同一路径，立刻回到 1；不存库，服务重启即回 1。事件的最后一次推送是 `"1"`（J2）：当即结束叠加，这个事件此后 `seq` 不更大的推送都当作过期丢弃，交易对随即可以接下一个事件。`GET /internal/market/overlay` 列出乘数不是 1 的交易对（含 `ends_at`）。
+- **内网参考价** `GET /internal/market/{symbol}/reference` 另有 `followed`（币安跟随这个交易对：可以叠加）、`source_price`（币安原价）与 `overlay_factor`（这个价用的乘数，`"1"` 即没有）；`price` 是平台在用的价（乘过的）。`?for=risk` 要的是风险估值用的价：事件 `risk` 时乘过，不连带（`risk` 为 false）时是币安原价——杠杆的估值读它（审查 GD ①，见 [margin.md](margin.md)）。market-sim 建事件时读它判断交易对与开始价，模拟市场的 BTC/ETH 驱动价用 `source_price`（审查 GD ④：平台币跟着真的 BTC 走，不跟着突刺走）。
 - **作用**（乘数不是 1 的交易对）：
   - 参考盘口（公开的 `market.depth` 与 `/v1/market/{symbol}/depth`，HOUSE 照它报价）：每档价格 × f，按原价的小数位买价向下、卖价向上取整，落在同一价的合并，数量不变；乘数变了就发快照（不发每档都变的增量），消息带 `overlay_factor`；
-  - 参考成交（`market.trades` 与 REST 最近成交）价格 × f；
+  - 参考成交（`market.trades` 与 REST 最近成交）：每笔在到达时按当时的 f 换算，之后不变——事件前后的成交保持各自的价（审查 GD ⑤）；
   - ticker：最新价（与现货的买一卖一）× f、涨跌按币安的开盘价重算，事件中出现过的最高与最低价留在 24 小时高低里一天；
-  - 1 分钟 K 线：事件碰到的那一分钟按叠加后的收盘价（约每秒一次）走开高低收，存库也是这样，突刺留在 K 线里；没碰到的分钟原样；
+  - K 线：事件碰到的那一分钟按叠加后的收盘价（约每秒一次）走开高低收（开盘价按第一次碰到时的 f），存进 `reference_candles` 并标 `overlay`。这样的分钟不会被币安的数据覆盖、不随 7 天清理删除；图表从币安读历史后把它们叠上去——1 分钟 K 线用它的开高低收，更长周期的高低取二者的极值、开盘与收盘在它是第一或最后一分钟时取它的（成交量仍是币安的；审查 GD ③）。所以收盘后的 K 线与 sparkline 里突刺都还在。没碰到的分钟原样；
   - 内网参考价 `GET /internal/market/{symbol}/reference`（交易服务的价格带与市价保护价锚点）× f；
-  - `risk`（默认开）：以该交易对为指数的永续，指数价的币安源 × f，标记价在叠加期间与结束后 30 秒内改为自算（`PLATFORM`，即使 `market.reference_mark` 开着），永续自己的参考盘口、成交与 ticker 也 × f；`risk` 关时永续一概是币安原价。
-- 指标 `market_overlay_factor{symbol}`（只在不是 1 时有）、`market_overlay_pushes_total{result}`（`ok`、`stale`、`refused`）；告警 `MarketOverlayStuck`（同一交易对乘数不是 1 超过 11 分钟，事件最长 10 分钟）。急停：`DELETE /internal/market/overlay/{symbol}`（签名）或关开关 `market.overlay`。
+  - `risk`（默认开）：以该交易对为指数的永续，指数价的币安源 × f，标记价在叠加期间改为自算（`PLATFORM`，即使 `market.reference_mark` 开着），结束后按 C40 的回切规则——币安标记价连续 5 秒新鲜才回到 `BINANCE`（审查 GD，契约 §8 第 2 点）；永续自己的参考盘口、成交与 ticker 也 × f。`risk` 关时永续一概是币安原价。
+- 指标 `market_overlay_factor{symbol}`、`market_overlay_ends_at_seconds{symbol}`（都只在不是 1 时有）、`market_overlay_pushes_total{result}`（`ok`、`stale`、`refused`）；告警 `MarketOverlayStuck`：事件按日程回到 1 的时刻（`ends_at`）过了一分钟乘数还不是 1——同一交易对接连几个事件不会误报（审查 GD）。急停：`DELETE /internal/market/overlay/{symbol}`（签名）或关开关 `market.overlay`。
 - HOUSE 在盘口带 `overlay_factor` 时每档只报 `OVERLAY_QUOTE_FRACTION`（默认 0.25），见 [market-maker.md](market-maker.md)。
 
 ## 合约数据（`market.futures_data`，设计 2026-10-06 §3.3，批次 G3b）

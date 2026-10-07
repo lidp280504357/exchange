@@ -282,6 +282,8 @@ func (s *Sim) budget(ctx context.Context, at time.Time) (budget, error) {
 	if err != nil {
 		return budget{}, err
 	}
+	// The overlays spend their own pairs' budgets (Overlays).
+	events = slices.DeleteFunc(events, func(e domain.Event) bool { return e.Type == domain.EventOverlay })
 	changes, err := s.store.ParamChanges(ctx, at.Add(-time.Hour), at.Add(time.Hour))
 	if err != nil {
 		return budget{}, err

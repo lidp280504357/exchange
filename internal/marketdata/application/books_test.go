@@ -225,6 +225,16 @@ func TestAPriceEventMovesTheShownBook(t *testing.T) {
 	if back := msgs[0].msg.(*marketv1.DepthSnapshot); back.GetOverlayFactor() != "" || back.GetBids()[0].GetPrice() != "100" {
 		t.Fatalf("back at 1: %v", back)
 	}
+	// A trade keeps the factor of when it came (review GD ⑤): the one
+	// during the event stays at 111, the next is the reference market's.
+	src.trades <- domain.Trade{Symbol: "BTC-USDT", ID: "u", Number: 9, Price: d("100.5"), Quantity: d("0.1"), Quote: d("10.05"), TakerSide: "SELL", At: time.Now()}
+	waitFor(t, "the next trade", func() bool {
+		trades, _ := b.Trades("BTC-USDT", 2)
+		return len(trades) == 2
+	})
+	if trades, _ := b.Trades("BTC-USDT", 2); !trades[0].Price.Equal(d("100.5")) || !trades[1].Price.Equal(d("111")) {
+		t.Fatalf("recent trades %+v", trades)
+	}
 }
 
 func TestTheEnginesBookIsRelayedWhereTheReferenceIsNotShown(t *testing.T) {

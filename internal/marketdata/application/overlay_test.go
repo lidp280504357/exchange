@@ -31,8 +31,8 @@ func newOverlayRig() (*Overlay, *overlayFlags, *time.Time) {
 
 // A price event's factor holds while its pushes come, one event a pair,
 // back to 1 past its until, 5 seconds without a push, a clear or the flag
-// going off (J0 contract §2.1); the perpetuals' mark stays computed 30
-// seconds past a risk overlay.
+// going off (J0 contract §2.1); the perpetuals' mark is computed while a
+// risk overlay lasts.
 func TestOverlayFactors(t *testing.T) {
 	o, fl, now := newOverlayRig()
 	push := func(symbol, f, event string, seq int64, risk bool) error {
@@ -75,12 +75,8 @@ func TestOverlayFactors(t *testing.T) {
 	if f, _ := o.Factor("BTC-USDT"); !f.Equal(one) {
 		t.Fatalf("stale push still at %s", f)
 	}
-	if !o.MarkComputed("BTC-USDT") {
-		t.Fatal("the mark went back at once")
-	}
-	*now = now.Add(MarkBackAfter)
-	if o.MarkComputed("BTC-USDT") {
-		t.Fatal("the mark still computed 30 s later")
+	if o.MarkComputed("BTC-USDT") { // the marks' own return rule from here
+		t.Fatal("the mark computed past the overlay")
 	}
 
 	// Without risk the perpetuals see nothing.
@@ -141,22 +137,64 @@ func TestACandleKeepsTheSpike(t *testing.T) {
 	oc := newOverlayCandles(o)
 	minute := now.Truncate(time.Minute)
 	c := domain.Candle{Symbol: "BTC-USDT", OpenTime: minute, Open: d("86000"), High: d("86010"), Low: d("85990"), Close: d("86000")}
-	if got := oc.apply(c); !got.Close.Equal(d("86000")) || !got.High.Equal(d("86010")) {
+	if got, touched := oc.apply(c); !got.Close.Equal(d("86000")) || !got.High.Equal(d("86010")) || touched {
 		t.Fatalf("untouched %+v", got)
 	}
 	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if got := oc.apply(c); !got.Close.Equal(d("94600")) || !got.High.Equal(d("94611")) || !got.Low.Equal(d("85990")) {
+	if got, touched := oc.apply(c); !got.Close.Equal(d("94600")) || !got.High.Equal(d("94611")) || !got.Low.Equal(d("85990")) || !touched {
 		t.Fatalf("touched %+v", got)
 	}
 	o.Clear("BTC-USDT")
 	c.Close = d("86005")
-	if got := oc.apply(c); !got.Close.Equal(d("86005")) || !got.High.Equal(d("94611")) {
+	if got, touched := oc.apply(c); !got.Close.Equal(d("86005")) || !got.High.Equal(d("94611")) || !touched {
 		t.Fatalf("back at 1 within the minute %+v", got)
 	}
 	c.OpenTime, c.Open, c.High, c.Low, c.Close = minute.Add(time.Minute), d("86005"), d("86006"), d("86004"), d("86005")
-	if got := oc.apply(c); !got.High.Equal(d("86006")) {
+	if got, touched := oc.apply(c); !got.High.Equal(d("86006")) || touched {
 		t.Fatalf("the next minute %+v", got)
+	}
+}
+
+// market-sim's last push of an event is 1: the overlay ends then (not
+// when the push would lapse), the event's older pushes are stale, and the
+// pair is free for the next event at once. A push tells when its event is
+// to be back at 1 (MarketOverlayStuck); one that does not, at most ten
+// minutes past its first.
+func TestAPushBackToOneEndsTheEvent(t *testing.T) {
+	o, _, now := newOverlayRig()
+	start := *now
+	push := func(f, event string, seq int64, ends time.Time) error {
+		return o.Set("BTC-USDT", OverlayPush{Factor: d(f), Until: now.Add(4 * time.Second), Risk: true, EventID: event, Seq: seq, EndsAt: ends})
+	}
+	if err := push("1.1", "e1", 1, start.Add(20*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if list := o.List(); len(list) != 1 || !list[0].EndsAt.Equal(start.Add(20*time.Second)) {
+		t.Fatalf("list %+v", list)
+	}
+	*now = now.Add(time.Second)
+	if err := push("1", "e1", 2, start.Add(20*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := o.Factor("BTC-USDT"); !f.Equal(one) || len(o.List()) != 0 || o.MarkComputed("BTC-USDT") {
+		t.Fatalf("after the last push: %s, %d listed", f, len(o.List()))
+	}
+	if err := push("1.1", "e1", 1, time.Time{}); err != nil { // late: dropped
+		t.Fatal(err)
+	}
+	if f, _ := o.Factor("BTC-USDT"); !f.Equal(one) {
+		t.Fatalf("a late push of the ended event: %s", f)
+	}
+	if err := push("0.9", "e2", 1, time.Time{}); err != nil {
+		t.Fatalf("the next event: %v", err)
+	}
+	*now = now.Add(time.Second)
+	if err := push("0.95", "e2", 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if list := o.List(); len(list) != 1 || !list[0].EndsAt.Equal(start.Add(time.Second+10*time.Minute)) {
+		t.Fatalf("an event that does not tell its end: %+v", list)
 	}
 }

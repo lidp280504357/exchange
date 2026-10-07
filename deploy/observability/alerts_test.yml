@@ -541,8 +541,13 @@ tests:
     input_series:
       - series: 'market_overlay_factor{job="market-data-service", instance="a", symbol="BTC-USDT"}'
         values: '1.16x14'
+      - series: 'market_overlay_ends_at_seconds{job="market-data-service", instance="a", symbol="BTC-USDT"}'
+        values: '600x14'
+      # Events one after the other on ETH-USDT: each tells its own end.
       - series: 'market_overlay_factor{job="market-data-service", instance="a", symbol="ETH-USDT"}'
-        values: '0.9x5'
+        values: '0.9x14'
+      - series: 'market_overlay_ends_at_seconds{job="market-data-service", instance="a", symbol="ETH-USDT"}'
+        values: '300x4 600x5 900x5'
     alert_rule_test:
       - eval_time: 10m
         alertname: MarketOverlayStuck
@@ -552,8 +557,24 @@ tests:
         exp_alerts:
           - exp_labels: {severity: critical, job: market-data-service, symbol: BTC-USDT}
             exp_annotations:
-              summary: "BTC-USDT has carried a price event's factor of 1.16 for 11 minutes: end the event, or clear it on market-data (DELETE /internal/market/overlay/BTC-USDT)"
+              summary: "BTC-USDT still carries a price event's factor of 1.16 a minute past the event's end: end the event, or clear it on market-data (DELETE /internal/market/overlay/BTC-USDT)"
               runbook: docs/runbook/market-data.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_sim_overlay_pushes_total{job="market-sim", instance="a", result="failed"}'
+        values: '0 0 3 6 30 60'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MarketSimOverlayPushFailing
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MarketSimOverlayPushFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-sim}
+            exp_annotations:
+              summary: "60 pushes of the price events' factors failed in 2 minutes: the pairs are back at the reference price while the events run"
+              runbook: docs/runbook/market-sim.md
 
   - interval: 1m
     input_series:

@@ -280,16 +280,29 @@ groups:
           summary: "market-maker has no usable {{ $labels.key }} key for HOUSE's caps: changes signed with it are refused (house/caps.env, house/admin.env)"
           runbook: docs/runbook/market-maker.md
 
-      # A price event's factor on a pair for longer than any event lasts
-      # (10 minutes): market-sim kept pushing it (design 2026-10-07,
-      # general price control).
+      # A price event's factor on a pair a minute past the event's own end
+      # (its pushes tell it; ten minutes past the first when they do not):
+      # market-sim kept pushing it (design 2026-10-07, general price
+      # control; review GD: events one after the other on a pair do not
+      # add up).
       - alert: MarketOverlayStuck
-        expr: max by (job, symbol) (market_overlay_factor) > 0
-        for: 11m
+        expr: |
+          (max by (job, symbol) (market_overlay_factor) > 0)
+            and on (job, symbol) (time() - max by (job, symbol) (market_overlay_ends_at_seconds) > 60)
         labels: {severity: critical}
         annotations:
-          summary: "{{ $labels.symbol }} has carried a price event's factor of {{ $value }} for 11 minutes: end the event, or clear it on market-data (DELETE /internal/market/overlay/{{ $labels.symbol }})"
+          summary: "{{ $labels.symbol }} still carries a price event's factor of {{ $value }} a minute past the event's end: end the event, or clear it on market-data (DELETE /internal/market/overlay/{{ $labels.symbol }})"
           runbook: docs/runbook/market-data.md
+
+      # market-sim cannot push a running price event's factor: market-data
+      # put the pair back at 1 five seconds after the last push, so the
+      # event no longer does what the operators set (J2).
+      - alert: MarketSimOverlayPushFailing
+        expr: sum by (job) (increase(market_sim_overlay_pushes_total{result="failed"}[2m])) > 10
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} pushes of the price events' factors failed in 2 minutes: the pairs are back at the reference price while the events run"
+          runbook: docs/runbook/market-sim.md
 
       - alert: MarketSimFailing
         expr: sum by (job) (increase(market_sim_errors_total[10m])) > 100

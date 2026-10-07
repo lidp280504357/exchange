@@ -12,8 +12,8 @@
 //	PUT  /internal/sim/params            new settings {"params": {...}, "actor": "...", "approved_by": "..."}
 //	POST /internal/sim/bots              a bot {"user_id", "role", "label"}
 //	GET  /internal/sim/events            the open events (?all=1: the latest, &limit=)
-//	POST /internal/sim/events            a price event (design §6.2; a TARGET with its "spikes")
-//	POST /internal/sim/events/{id}/end   ends an event early {"actor", "reason"}
+//	POST /internal/sim/events            a price event (design §6.2; a TARGET with its "spikes"; an OVERLAY on followed pairs)
+//	POST /internal/sim/events/{id}/end   ends an event early {"actor", "reason"} (an OVERLAY: back to 1 in 3 seconds)
 //	GET  /internal/sim/events/{id}/plan  a threshold target's plan and where the price is against it
 //	GET  /internal/sim/target-preview    a threshold target's plan before it is made (?direction=&price=&duration_seconds=&starts_at=)
 //	GET  /internal/sim/history           the target and last price every 10 s (?minutes=, a day at most)
@@ -64,10 +64,12 @@ func approver(r *http.Request, name string) (string, error) {
 }
 
 // Handler serves the management API; Signed checks the changes'
-// signatures.
+// signatures. Overlays runs the price events on followed pairs (design
+// 2026-10-07, general price control); nil: none.
 type Handler struct {
-	Sim    *application.Sim
-	Signed *svcsign.Verifier
+	Sim      *application.Sim
+	Overlays *application.Overlays
+	Signed   *svcsign.Verifier
 }
 
 // ready answers 503 SIM_NOT_READY until the simulation is loaded (a
@@ -173,6 +175,45 @@ type EventJSON struct {
 	ParentID  *string     `json:"parent_id"`
 	WidthS    int         `json:"width_seconds"`
 	Spikes    []EventJSON `json:"spikes,omitempty"`
+	// An OVERLAY's (design 2026-10-07, general price control; J0 contract
+	// §3.4): its pair, its target factor (over the reference price when
+	// it was made), its ramps (hold_seconds between them), whether it
+	// reaches the perpetuals and the leverage, its factor and progress (0
+	// to 1) now, the reference price it started from, the platform's peak,
+	// the reference and the platform's prices when it ended.
+	Symbol            string   `json:"symbol,omitempty"`
+	TargetFactor      *float64 `json:"target_factor,omitempty"`
+	RampUpS           int      `json:"ramp_up_seconds,omitempty"`
+	RampDownS         int      `json:"ramp_down_seconds,omitempty"`
+	Risk              *bool    `json:"risk,omitempty"`
+	FactorNow         *float64 `json:"factor_now,omitempty"`
+	Progress          *float64 `json:"progress,omitempty"`
+	BasePrice         *string  `json:"base_price,omitempty"`
+	PeakPrice         *string  `json:"peak_price,omitempty"`
+	EndReferencePrice *string  `json:"end_reference_price,omitempty"`
+	EndPlatformPrice  *string  `json:"end_platform_price,omitempty"`
+}
+
+// overlayJSON fills an OVERLAY's fields as of now.
+func overlayJSON(j *EventJSON, e domain.Event, now time.Time) {
+	f, progress := 1.0, e.OverlayProgress(now)
+	if e.Status == domain.EventRunning {
+		f, _ = e.OverlayAt(now)
+	}
+	f, progress = math.Round(f*1e8)/1e8, math.Round(progress*1e4)/1e4
+	target, risk := e.TargetFactor, e.Risk
+	j.Symbol, j.TargetFactor, j.RampUpS, j.RampDownS, j.Risk = e.Symbol, &target, int(e.RampUp.Seconds()), int(e.RampDown.Seconds()), &risk
+	j.FactorNow, j.Progress = &f, &progress
+	j.BasePrice, j.PeakPrice = priceOrNil(e.BasePrice), priceOrNil(e.PeakPrice)
+	j.EndReferencePrice, j.EndPlatformPrice = priceOrNil(e.EndReferencePrice), priceOrNil(e.EndPlatformPrice)
+}
+
+func priceOrNil(d decimal.Decimal) *string {
+	if !d.IsPositive() {
+		return nil
+	}
+	v := d.String()
+	return &v
 }
 
 func eventJSON(e domain.Event) EventJSON {
@@ -196,6 +237,9 @@ func eventJSON(e domain.Event) EventJSON {
 	if e.FromP.IsPositive() {
 		v := e.FromP.Round(8).String()
 		j.FromPrice = &v
+	}
+	if e.Type == domain.EventOverlay {
+		overlayJSON(&j, e, time.Now())
 	}
 	return j
 }
@@ -360,6 +404,17 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		// An OVERLAY's (J0 contract §3.1): its pairs, its target (a price,
+		// or a share of the reference price in percent), its ramps (and
+		// hold_seconds), whether it reaches the perpetuals and the
+		// leverage (default true).
+		Symbols     []string `json:"symbols"`
+		TargetPrice string   `json:"target_price"`
+		TargetPct   *float64 `json:"target_pct"`
+		RampUpS     int      `json:"ramp_up_seconds"`
+		RampDownS   int      `json:"ramp_down_seconds"`
+		Risk        *bool    `json:"risk"`
+
 		Type      string  `json:"type"`
 		Size      float64 `json:"size"`
 		Price     string  `json:"price"`
@@ -386,6 +441,35 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := approver(r, body.ApprovedBy); err != nil {
 		httpx.WriteError(w, r, err)
+		return
+	}
+	if domain.EventType(strings.ToUpper(body.Type)) == domain.EventOverlay {
+		req := application.OverlayRequest{
+			Symbols: body.Symbols, TargetPct: body.TargetPct, RampUp: time.Duration(body.RampUpS) * time.Second,
+			Hold: time.Duration(body.HoldS) * time.Second, RampDown: time.Duration(body.RampDownS) * time.Second,
+			Risk: body.Risk == nil || *body.Risk, Actor: body.Actor, ApprovedBy: body.ApprovedBy, Reason: body.Reason,
+		}
+		if body.TargetPrice != "" {
+			p, err := decimal.NewFromString(body.TargetPrice)
+			if err != nil {
+				httpx.WriteError(w, r, apperr.Invalid("target_price is a decimal"))
+				return
+			}
+			req.TargetPrice = p
+		}
+		if body.StartsAt != "" {
+			t, err := time.Parse(time.RFC3339, body.StartsAt)
+			if err != nil {
+				httpx.WriteError(w, r, apperr.Invalid("starts_at is an RFC 3339 time"))
+				return
+			}
+			req.StartsAt = t
+		}
+		h.createOverlay(w, r, req)
+		return
+	}
+	if len(body.Symbols) > 0 || body.TargetPrice != "" || body.TargetPct != nil || body.RampUpS != 0 || body.RampDownS != 0 || body.Risk != nil {
+		httpx.WriteError(w, r, apperr.Invalid("symbols, a target and ramps are an OVERLAY's"))
 		return
 	}
 	e := domain.Event{
@@ -533,6 +617,28 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// createOverlay makes an OVERLAY request's events (J0 contract §3.1): an
+// item a pair, its event and the price it starts from.
+func (h *Handler) createOverlay(w http.ResponseWriter, r *http.Request, req application.OverlayRequest) {
+	if h.Overlays == nil {
+		httpx.WriteError(w, r, application.ErrOverlayUnconfigured)
+		return
+	}
+	made, err := h.Overlays.Create(r.Context(), req)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(made))
+	for _, m := range made {
+		items = append(items, map[string]any{
+			"symbol": m.Symbol, "event_id": m.Event.ID, "type": m.Event.Type, "status": m.Event.Status,
+			"factor_target": math.Round(m.TargetFactor*1e8) / 1e8, "base_price": priceOrNil(m.BasePrice), "event": eventJSON(m.Event),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"items": items})
+}
+
 func (h *Handler) endEvent(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Actor  string `json:"actor"`
@@ -542,7 +648,12 @@ func (h *Handler) endEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	out, err := h.Sim.EndEvent(r.Context(), chi.URLParam(r, "id"), body.Actor, body.Reason)
+	id := chi.URLParam(r, "id")
+	end := h.Sim.EndEvent
+	if h.Overlays != nil && h.Overlays.Has(id) {
+		end = h.Overlays.End
+	}
+	out, err := end(r.Context(), id, body.Actor, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

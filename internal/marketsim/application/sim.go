@@ -228,6 +228,9 @@ func (s *Sim) Start(ctx context.Context) error {
 		return err
 	}
 	for i := range open {
+		if open[i].Type == domain.EventOverlay { // another pair's (Overlays)
+			continue
+		}
 		open[i].Infer(st.P) // a target made before A6
 		s.events = append(s.events, &open[i])
 	}
@@ -247,6 +250,19 @@ var ErrNotReady = apperr.New(apperr.KindUnavailable, "SIM_NOT_READY", "this mark
 
 // Ready reports whether Start loaded the simulation.
 func (s *Sim) Ready() bool { return s.ready.Load() }
+
+// Symbol is the simulated market's pair.
+func (s *Sim) Symbol() string { return s.cfg.Symbol }
+
+// TargetPrice is the model's target now (0 before Start).
+func (s *Sim) TargetPrice() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.model == nil {
+		return 0
+	}
+	return s.model.State.P
+}
 
 // apply takes new settings: the model's and the throttle's.
 func (s *Sim) apply(p domain.Params, version int64) {

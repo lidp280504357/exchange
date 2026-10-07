@@ -275,14 +275,20 @@ func (c *Client) Balances(ctx context.Context, user string) (map[string]decimal.
 	return out, nil
 }
 
-// Reference reads the internal reference price and whether it is fresh.
+// Reference reads the internal reference price and whether it is fresh:
+// the reference market's own (source_price), not a price event's on the
+// platform (review GD ④: the platform coin follows the real BTC and ETH).
 func (c *Client) Reference(ctx context.Context, symbol string) (decimal.Decimal, bool, error) {
 	var body struct {
-		Price *string `json:"price"`
-		Fresh bool    `json:"fresh"`
+		Price       *string `json:"price"`
+		SourcePrice *string `json:"source_price"`
+		Fresh       bool    `json:"fresh"`
 	}
 	if err := c.do(ctx, http.MethodGet, c.MarketURL+"/internal/market/"+url.PathEscape(symbol)+"/reference", "", nil, &body); err != nil {
 		return decimal.Zero, false, fmt.Errorf("reference %s: %w", symbol, err)
+	}
+	if body.SourcePrice != nil {
+		body.Price = body.SourcePrice
 	}
 	if body.Price == nil {
 		return decimal.Zero, false, nil

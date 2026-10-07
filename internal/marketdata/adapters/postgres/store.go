@@ -282,13 +282,49 @@ func (r references) Upsert(ctx context.Context, source string, list []domain.Can
 		batch.Queue(`INSERT INTO reference_candles (source, symbol, open_time, open, high, low, close, volume, quote_volume, trade_count)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			ON CONFLICT (source, symbol, open_time) DO UPDATE SET open = $4, high = $5, low = $6, close = $7, volume = $8,
-				quote_volume = $9, trade_count = $10, updated_at = now()`,
+				quote_volume = $9, trade_count = $10, updated_at = now()
+			WHERE NOT reference_candles.overlay`,
 			source, c.Symbol, c.OpenTime, c.Open, c.High, c.Low, c.Close, c.Volume, c.QuoteVolume, c.Trades)
 	}
 	if err := r.q.SendBatch(ctx, batch).Close(); err != nil {
 		return fmt.Errorf("upsert reference candles: %w", err)
 	}
 	return nil
+}
+
+func (r references) UpsertOverlaid(ctx context.Context, source string, list []domain.Candle) error {
+	batch := &pgx.Batch{}
+	for _, c := range list {
+		batch.Queue(`INSERT INTO reference_candles (source, symbol, open_time, open, high, low, close, volume, quote_volume, trade_count,
+				overlay)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+			ON CONFLICT (source, symbol, open_time) DO UPDATE SET open = $4, high = $5, low = $6, close = $7, volume = $8,
+				quote_volume = $9, trade_count = $10, overlay = true, updated_at = now()`,
+			source, c.Symbol, c.OpenTime, c.Open, c.High, c.Low, c.Close, c.Volume, c.QuoteVolume, c.Trades)
+	}
+	if err := r.q.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("upsert overlaid reference candles: %w", err)
+	}
+	return nil
+}
+
+func (r references) Overlaid(ctx context.Context, source, symbol string, from, to time.Time) ([]domain.Candle, error) {
+	rows, err := r.q.Query(ctx, `SELECT symbol, open_time, open, high, low, close, volume, quote_volume, trade_count
+		FROM reference_candles WHERE overlay AND symbol = $2 AND source = $1 AND open_time >= $3 AND open_time < $4
+		ORDER BY open_time`, source, symbol, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("overlaid reference candles: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Candle, error) {
+		var c domain.Candle
+		err := row.Scan(&c.Symbol, &c.OpenTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.QuoteVolume, &c.Trades)
+		c.Interval, c.OpenTime = domain.Minute1, c.OpenTime.UTC()
+		return c, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("overlaid reference candles: %w", err)
+	}
+	return out, nil
 }
 
 func (r references) Latest(ctx context.Context, source, symbol string) (*domain.Candle, error) {
@@ -307,7 +343,7 @@ func (r references) Latest(ctx context.Context, source, symbol string) (*domain.
 }
 
 func (r references) Purge(ctx context.Context, before time.Time) (int64, error) {
-	tag, err := r.q.Exec(ctx, `DELETE FROM reference_candles WHERE open_time < $1`, before)
+	tag, err := r.q.Exec(ctx, `DELETE FROM reference_candles WHERE open_time < $1 AND NOT overlay`, before)
 	if err != nil {
 		return 0, fmt.Errorf("purge reference candles: %w", err)
 	}

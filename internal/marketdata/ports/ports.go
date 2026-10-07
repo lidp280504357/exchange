@@ -80,8 +80,17 @@ type TradeRepo interface {
 // ReferenceRepo keeps the 1m candles of external reference sources
 // (§11.9), apart from the platform's own.
 type ReferenceRepo interface {
-	// Upsert writes candles of source, replacing stored ones.
+	// Upsert writes candles of source, replacing stored ones but those a
+	// price event touched.
 	Upsert(ctx context.Context, source string, candles []domain.Candle) error
+	// UpsertOverlaid writes candles of source a price event touched
+	// (design 2026-10-07, general price control): Upsert does not replace
+	// them, Purge keeps them, and the charts lay them over the reference
+	// market's (review GD ③).
+	UpsertOverlaid(ctx context.Context, source string, candles []domain.Candle) error
+	// Overlaid returns the candles of symbol from source a price event
+	// touched, opening from from to before to, oldest first.
+	Overlaid(ctx context.Context, source, symbol string, from, to time.Time) ([]domain.Candle, error)
 	// Latest returns the latest stored candle of symbol from source, or nil.
 	Latest(ctx context.Context, source, symbol string) (*domain.Candle, error)
 	// Purge deletes candles opening before t.

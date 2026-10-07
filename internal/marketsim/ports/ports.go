@@ -171,6 +171,10 @@ type Store interface {
 	// spikes), all or none.
 	SaveEvent(ctx context.Context, e domain.Event, audit *Audit) error
 	SaveEvents(ctx context.Context, es []domain.Event, audit *Audit) error
+	// SaveEventsEach stores events in one transaction with an audit
+	// record each (the overlays one request makes). A second open
+	// overlay on a pair is ErrOverlayOpen.
+	SaveEventsEach(ctx context.Context, es []domain.Event, audits []Audit) error
 	// SaveSample keeps a sample of the target and the last price;
 	// Samples returns the ones since t, oldest first; PruneSamples drops
 	// the ones before t.
@@ -181,6 +185,59 @@ type Store interface {
 	State(ctx context.Context) (domain.State, bool, error)
 	// SaveState stores the model's state.
 	SaveState(ctx context.Context, st domain.State) error
+}
+
+// ErrOverlayOpen is a new overlay on a pair that has one scheduled or
+// running.
+var ErrOverlayOpen = errors.New("an overlay event is open on the pair")
+
+// Followed is a pair's reference price as market-data has it (design
+// 2026-10-07, general price control): whether a reference market follows
+// the pair (an overlay can move it), the reference market's own price,
+// the price shown with the overlay's factor on it, the factor, and
+// whether the price is fresh.
+type Followed struct {
+	Followed bool
+	Source   decimal.Decimal
+	Shown    decimal.Decimal
+	Factor   decimal.Decimal
+	Fresh    bool
+}
+
+// OverlayPush is one push of an event's factor on a pair (J0 contract
+// §2.1): it holds until Until; Seq orders an event's pushes; EndsAt is
+// when the event is to be back at 1 (MarketOverlayStuck, review GD).
+type OverlayPush struct {
+	Factor  decimal.Decimal
+	Until   time.Time
+	Risk    bool
+	EventID string
+	Seq     int64
+	EndsAt  time.Time
+}
+
+// Overlays is market-data's side of the overlays.
+type Overlays interface {
+	// Followed reads a pair's reference price.
+	Followed(ctx context.Context, symbol string) (Followed, error)
+	// Push sets a pair's factor; Clear takes it back to 1 at once.
+	Push(ctx context.Context, symbol string, p OverlayPush) error
+	Clear(ctx context.Context, symbol string) error
+}
+
+// Rooms is how much HOUSE may still buy and sell of a pair or a contract
+// (its base asset, or contracts), what one unit is worth in USDT, and
+// whether the unit is an inverse contract's (a fixed face in its coin).
+type Rooms struct {
+	Buy, Sell decimal.Decimal
+	UnitValue decimal.Decimal
+	Inverse   bool
+}
+
+// House reads HOUSE's rooms (market-maker): false while HOUSE does not
+// quote the symbol.
+type House interface {
+	Rooms(ctx context.Context, symbol string) (Rooms, bool, error)
 }
 
 // Flags answers feature-flag checks.

@@ -43,6 +43,36 @@ func ScalePrice(p, f decimal.Decimal) decimal.Decimal {
 	return p.Mul(f).Round(places(p))
 }
 
+// MergeOverlaid lays the 1m candles a price event touched over candles of
+// interval i (oldest first, as the reference market has them; review GD
+// ③): a touched minute widens its candle's high and low, and gives it its
+// open when it is the candle's first minute and its close when its last.
+// The volumes stay the reference market's.
+func MergeOverlaid(candles []Candle, i Interval, touched []Candle) []Candle {
+	if len(touched) == 0 {
+		return candles
+	}
+	k := 0
+	for n := range candles {
+		c := &candles[n]
+		end := i.Next(c.OpenTime)
+		for k < len(touched) && touched[k].OpenTime.Before(c.OpenTime) {
+			k++
+		}
+		for j := k; j < len(touched) && touched[j].OpenTime.Before(end); j++ {
+			m := touched[j]
+			c.High, c.Low = decimal.Max(c.High, m.High), decimal.Min(c.Low, m.Low)
+			if m.OpenTime.Equal(c.OpenTime) {
+				c.Open = m.Open
+			}
+			if Minute1.Next(m.OpenTime).Equal(end) {
+				c.Close = m.Close
+			}
+		}
+	}
+	return candles
+}
+
 // ScaleLevels is one side of a book (best first) with its prices times f
 // at their precision, rounded away from the other side (bids down, asks
 // up: never better than the scaled reference market), the levels that

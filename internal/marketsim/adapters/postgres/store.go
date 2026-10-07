@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/skill/exchange/internal/marketsim/domain"
@@ -156,19 +157,26 @@ func (s *Store) ParamChanges(ctx context.Context, from, to time.Time) ([]ports.P
 }
 
 const eventColumns = `id::text, type, size, price, mu, factor, duration_s, hold_s, starts_at, status, created_by, approved_by, reason,
-	created_at, started_at, ended_at, from_log_e, from_p, ended_by, direction, then_mode, width_s, parent_id::text, crossed_at, result`
+	created_at, started_at, ended_at, from_log_e, from_p, ended_by, direction, then_mode, width_s, parent_id::text, crossed_at, result,
+	symbol, target_factor, ramp_up_s, ramp_down_s, risk, base_price, peak_price, end_reference_price, end_platform_price`
+
+// overlayOpenIndex is the unique index that keeps one open overlay a pair.
+const overlayOpenIndex = "events_overlay_open_idx"
 
 func scanEvent(row pgx.Row) (domain.Event, error) {
 	var e domain.Event
 	var typ string
-	var duration, hold, width int
+	var duration, hold, width, up, down int
 	var started, ended, crossed *time.Time
 	var parent *string
+	var base, peak, endRef, endPlatform decimal.NullDecimal
 	err := row.Scan(&e.ID, &typ, &e.Size, &e.Price, &e.Mu, &e.Factor, &duration, &hold, &e.StartsAt, &e.Status, &e.CreatedBy,
 		&e.ApprovedBy, &e.Reason, &e.CreatedAt, &started, &ended, &e.FromLogE, &e.FromP, &e.EndedBy, &e.Direction, &e.Then, &width,
-		&parent, &crossed, &e.Result)
+		&parent, &crossed, &e.Result, &e.Symbol, &e.TargetFactor, &up, &down, &e.Risk, &base, &peak, &endRef, &endPlatform)
 	e.Type = domain.EventType(typ)
 	e.Duration, e.Hold, e.Width = time.Duration(duration)*time.Second, time.Duration(hold)*time.Second, time.Duration(width)*time.Second
+	e.RampUp, e.RampDown = time.Duration(up)*time.Second, time.Duration(down)*time.Second
+	e.BasePrice, e.PeakPrice, e.EndReferencePrice, e.EndPlatformPrice = base.Decimal, peak.Decimal, endRef.Decimal, endPlatform.Decimal
 	if started != nil {
 		e.StartedAt = *started
 	}
@@ -221,6 +229,46 @@ func (s *Store) SaveEvent(ctx context.Context, e domain.Event, audit *ports.Audi
 // SaveEvents stores new events or their new courses in one transaction
 // (a target and its spikes), with one audit record.
 func (s *Store) SaveEvents(ctx context.Context, es []domain.Event, audit *ports.Audit) error {
+	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
+		for _, e := range es {
+			if err := saveEvent(ctx, tx, e); err != nil {
+				return err
+			}
+		}
+		return s.audit(ctx, tx, audit)
+	})
+	if err != nil {
+		return fmt.Errorf("save events: %w", err)
+	}
+	return nil
+}
+
+// SaveEventsEach stores events in one transaction with an audit record
+// each.
+func (s *Store) SaveEventsEach(ctx context.Context, es []domain.Event, audits []ports.Audit) error {
+	if len(audits) != len(es) {
+		return errors.New("save events: an audit record each")
+	}
+	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
+		for i, e := range es {
+			if err := saveEvent(ctx, tx, e); err != nil {
+				return err
+			}
+			if err := s.audit(ctx, tx, &audits[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("save events: %w", err)
+	}
+	return nil
+}
+
+// saveEvent inserts an event or updates its course; a second open
+// overlay on a pair is ports.ErrOverlayOpen.
+func saveEvent(ctx context.Context, tx pgx.Tx, e domain.Event) error {
 	stamp := func(t time.Time) *time.Time {
 		if t.IsZero() {
 			return nil
@@ -233,24 +281,27 @@ func (s *Store) SaveEvents(ctx context.Context, es []domain.Event, audit *ports.
 		}
 		return &v
 	}
-	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
-		for _, e := range es {
-			_, err := tx.Exec(ctx, `INSERT INTO events (`+strings.NewReplacer("id::text", "id", "parent_id::text", "parent_id").Replace(eventColumns)+`)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-				ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
-					from_log_e = EXCLUDED.from_log_e, from_p = EXCLUDED.from_p, ended_by = EXCLUDED.ended_by,
-					direction = EXCLUDED.direction, then_mode = EXCLUDED.then_mode, crossed_at = EXCLUDED.crossed_at, result = EXCLUDED.result`,
-				e.ID, string(e.Type), e.Size, e.Price, e.Mu, e.Factor, int(e.Duration.Seconds()), int(e.Hold.Seconds()), e.StartsAt, e.Status,
-				e.CreatedBy, e.ApprovedBy, e.Reason, e.CreatedAt, stamp(e.StartedAt), stamp(e.EndedAt), e.FromLogE, e.FromP, e.EndedBy,
-				e.Direction, e.Then, int(e.Width.Seconds()), text(e.ParentID), stamp(e.CrossedAt), e.Result)
-			if err != nil {
-				return fmt.Errorf("event %s: %w", e.ID, err)
-			}
-		}
-		return s.audit(ctx, tx, audit)
-	})
+	price := func(d decimal.Decimal) decimal.NullDecimal {
+		return decimal.NullDecimal{Decimal: d, Valid: d.IsPositive()}
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO events (`+strings.NewReplacer("id::text", "id", "parent_id::text", "parent_id").Replace(eventColumns)+`)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+			$26, $27, $28, $29, $30, $31, $32, $33, $34)
+		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
+			from_log_e = EXCLUDED.from_log_e, from_p = EXCLUDED.from_p, ended_by = EXCLUDED.ended_by,
+			direction = EXCLUDED.direction, then_mode = EXCLUDED.then_mode, crossed_at = EXCLUDED.crossed_at, result = EXCLUDED.result,
+			base_price = EXCLUDED.base_price, peak_price = EXCLUDED.peak_price, end_reference_price = EXCLUDED.end_reference_price,
+			end_platform_price = EXCLUDED.end_platform_price`,
+		e.ID, string(e.Type), e.Size, e.Price, e.Mu, e.Factor, int(e.Duration.Seconds()), int(e.Hold.Seconds()), e.StartsAt, e.Status,
+		e.CreatedBy, e.ApprovedBy, e.Reason, e.CreatedAt, stamp(e.StartedAt), stamp(e.EndedAt), e.FromLogE, e.FromP, e.EndedBy,
+		e.Direction, e.Then, int(e.Width.Seconds()), text(e.ParentID), stamp(e.CrossedAt), e.Result,
+		e.Symbol, e.TargetFactor, int(e.RampUp.Seconds()), int(e.RampDown.Seconds()), e.Risk, price(e.BasePrice), price(e.PeakPrice),
+		price(e.EndReferencePrice), price(e.EndPlatformPrice))
+	if c, ok := pg.UniqueViolation(err); ok && c == overlayOpenIndex {
+		return fmt.Errorf("event %s on %s: %w", e.ID, e.Symbol, ports.ErrOverlayOpen)
+	}
 	if err != nil {
-		return fmt.Errorf("save events: %w", err)
+		return fmt.Errorf("event %s: %w", e.ID, err)
 	}
 	return nil
 }
