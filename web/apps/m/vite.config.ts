@@ -31,6 +31,8 @@ export default defineConfig({
     proxy: {
       "/v1/ws": { target: api.replace(/^http/, "ws"), ws: true, changeOrigin: true },
       "/v1": { target: api, changeOrigin: true },
+      // Uploaded avatars, served by nginx on the sites (design 2026-10-07, avatars and usernames).
+      "/uploads": { target: api, changeOrigin: true },
     },
   },
   // Built files go to /static/: /assets/* are the assets pages' routes (/assets/deposit, …),

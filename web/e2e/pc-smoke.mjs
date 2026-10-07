@@ -17,10 +17,11 @@
 // on hourly candles, the coin page at 1024 wide), the futures data (the
 // terminal's 数据 tab, the futures category's columns, /futures/data),
 // notifications, devices,
-// the language switch and sign-out. Script errors fail the run; every API
+// the profile (the drawn username, a rename, an avatar uploaded and
+// removed), the language switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { legendClear, menuOnTop, ok, sleep, start } from "./lib.mjs";
+import { choosePicture, legendClear, menuOnTop, ok, sleep, start } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -109,8 +110,8 @@ try {
 
   // 2. Sign out from the account menu, sign back in with the password.
   await go("/");
-  await page.waitForSelector('header a[href="/account/security"]', { visible: true });
-  await page.hover('header a[href="/account/security"]');
+  await page.waitForSelector('header a[href="/account/profile"]', { visible: true });
+  await page.hover('header a[href="/account/profile"]');
   await clickButton("退出登录");
   await waitText("注册", 10000);
   await go("/login?next=%2Fmarkets");
@@ -517,6 +518,49 @@ try {
   await waitText("注册与登录");
   ok("notifications, devices (current one marked) and the help centre render");
 
+  // 8b. The profile (design 2026-10-07, avatars and usernames, batch I2):
+  // the username drawn at sign-up heads the page and the account menu, the
+  // avatar is the built-in one of the user's ID. A new name shows at once
+  // and starts the 7 days (the change button off). A picture made in the
+  // page (900 × 600) is shrunk to its middle square and uploaded: the page
+  // and the top bar switch to the server's WebP (256 px, the top bar the
+  // 64 px one); "use default" brings the built-in one back everywhere.
+  await go("/account/profile");
+  await page.waitForSelector('[data-testid="profile-username"]', { visible: true, timeout: 20000 });
+  const drawn = await page.$eval('[data-testid="profile-username"]', (e) => e.textContent);
+  if (!/^user_[a-z0-9]{8}$/.test(drawn ?? "")) throw new Error(`the username drawn at sign-up is ${drawn}`);
+  await page.waitForSelector('header svg[data-avatar-default]', { visible: true });
+  await page.waitForSelector('[data-testid="profile-avatar"] svg[data-avatar-default]', { visible: true });
+  await page.hover('header a[href="/account/profile"]');
+  await page.waitForFunction(
+    (name) => [...document.querySelectorAll('header [data-testid="my-username"]')].some((e) => e.checkVisibility() && e.textContent === name),
+    { timeout: 10000 },
+    drawn,
+  );
+  await page.mouse.move(720, 700);
+  const renamed = `web_${String(run).slice(-8)}`;
+  await clickButton("修改");
+  await page.waitForSelector('[role="dialog"] input[name="username"]', { visible: true });
+  await page.click('[role="dialog"] input[name="username"]', { clickCount: 3 });
+  await page.keyboard.type(renamed);
+  await clickButton("保存", '[role="dialog"]');
+  await page.waitForFunction((name) => document.querySelector('[data-testid="profile-username"]')?.textContent === name, { timeout: 15000 }, renamed);
+  await waitText("后可再次修改");
+  if (!(await page.evaluate(() => [...document.querySelectorAll("main button")].find((b) => b.innerText.trim() === "修改")?.disabled))) {
+    throw new Error("the username may change again at once");
+  }
+  await choosePicture(page, '[data-testid="avatar-input"]');
+  await page.waitForSelector('[data-testid="profile-avatar"] img[src*="/uploads/avatars/"]', { timeout: 30000 });
+  await page.waitForSelector('header img[src$="_64.webp"]', { timeout: 15000 });
+  const uploaded = await page.$eval('[data-testid="profile-avatar"] img', (img) => ({ src: img.getAttribute("src"), side: img.naturalWidth }));
+  if (!uploaded.src?.endsWith(".webp") || uploaded.side !== 256) throw new Error(`the uploaded avatar: ${JSON.stringify(uploaded)}`);
+  await shot("8b-profile");
+  await clickButton("恢复默认");
+  await clickButton("恢复默认", '[role="dialog"]');
+  await page.waitForSelector('[data-testid="profile-avatar"] svg[data-avatar-default]', { visible: true, timeout: 15000 });
+  await page.waitForSelector('header svg[data-avatar-default]', { visible: true });
+  ok(`the profile: ${drawn} drawn at sign-up and the built-in avatar; renamed to ${renamed} (7 days to wait); a picture uploaded (${uploaded.side} px WebP, the top bar's 64 px) and back to the default`);
+
   // 9. Settings: English switches the site's language at once; so does
   // Traditional Chinese (design 2026-10-06 繁体中文), shown on the key pages
   // in the Traditional fonts (screenshots to check the widths), and back.
@@ -541,8 +585,8 @@ try {
 
   // 10. Sign out.
   await go("/");
-  await page.waitForSelector('header a[href="/account/security"]', { visible: true });
-  await page.hover('header a[href="/account/security"]');
+  await page.waitForSelector('header a[href="/account/profile"]', { visible: true });
+  await page.hover('header a[href="/account/profile"]');
   await clickButton("退出登录");
   await waitText("注册", 10000);
   ok("sign out ends the session");

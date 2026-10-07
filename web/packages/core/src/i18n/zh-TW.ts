@@ -8,7 +8,7 @@ export const zhTW = {
   nav: {
     home: "首頁", markets: "行情", spot: "現貨交易", futures: "合約", assets: "資產", overview: "資產總覽", deposit: "充值",
     withdraw: "提現", transfer: "劃轉", history: "資金流水", announcements: "公告", help: "幫助中心", search: "搜尋幣種",
-    notifications: "通知", account: "帳戶", security: "安全", settings: "設定", sessions: "裝置與登入", logout: "登出",
+    notifications: "通知", account: "帳戶", profile: "個人資料", security: "安全", settings: "設定", sessions: "裝置與登入", logout: "登出",
     login: "登入", register: "註冊", language: "語言", me: "我的", trade: "交易", margin: "槓桿帳戶",
   },
   footer: {
@@ -23,7 +23,7 @@ export const zhTW = {
     offline: "網路不可用，恢復後自動重連", reconnecting: "正在重新連線…", syncing: "同步中", feedStale: "行情連線中斷，數據可能不是最新",
     comingSoon: "該頁面正在建設中", favorite: "自選", unfavorite: "取消自選", price: "價格", amount: "數量", total: "金額",
     time: "時間", status: "狀態", action: "操作", buy: "買入", sell: "賣出", max: "最大", available: "可用", fee: "手續費",
-    hide: "隱藏", show: "顯示", filter: "篩選", reset: "重設", apply: "應用", ok: "好的",
+    hide: "隱藏", show: "顯示", filter: "篩選", reset: "重設", apply: "應用", ok: "好的", uid: "UID",
   },
   market: {
     pair: "交易對", last: "最新價", change: "24h 漲跌", high: "24h 最高", low: "24h 最低", volume: "24h 成交量",
@@ -70,6 +70,9 @@ export const zhTW = {
     AUTH_IDENTITY_TAKEN: "該電子郵件或手機號碼已被使用", AUTH_IDENTITY_KIND_BOUND: "已綁定同類身份，請使用換綁",
     NOTIFY_PROVIDER_UNAVAILABLE: "驗證碼傳送服務暫時不可用，請稍後再試", AUTH_STEP_UP_REQUIRED: "需要先完成安全驗證", AUTH_SESSION_REVOKED: "登入已失效，請重新登入",
     AUTH_LOGIN_CHALLENGE_INVALID: "登入驗證已失效，請重新登入", USER_CLOSED: "帳戶已註銷", USER_FROZEN: "帳戶已凍結，只能查看",
+    USER_USERNAME_INVALID: "使用者名稱需 3–20 個字母、數字或下劃線，不能以下劃線開頭，也不能用保留名稱", USER_USERNAME_TAKEN: "該使用者名稱已被使用",
+    USER_USERNAME_COOLDOWN: "使用者名稱 7 天內只能修改一次", USER_AVATAR_INVALID: "無法識別這張圖片，請換一張 PNG、JPEG 或 WebP 圖片",
+    USER_AVATAR_TOO_LARGE: "圖片太大，請換一張不超過 5 MB 的圖片",
     USER_RISK_REVIEW: "帳戶風控審核中，暫不可用", USER_NOT_ELIGIBLE: "該功能暫未開放", USER_REGION_NOT_ALLOWED: "所在地區暫不支援該功能",
     LEDGER_INSUFFICIENT_BALANCE: "可用餘額不足", LEDGER_AMOUNT_PRECISION: "數量的小數位超出資產精度", COMMON_RATE_LIMITED: "請求太頻繁，請稍後再試",
     COMMON_IDEMPOTENCY_CONFLICT: "重複提交，請重新整理後重試", COMMON_INVALID_ARGUMENT: "輸入有誤", COMMON_UNAVAILABLE: "服務暫時不可用，請稍後重試",

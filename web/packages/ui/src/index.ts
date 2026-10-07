@@ -40,6 +40,7 @@ export * from "./components/Toast";
 export * from "./components/Progress";
 export * from "./components/Stepper";
 export * from "./components/Avatar";
+export * from "./components/DefaultAvatar";
 export * from "./components/CoinIcon";
 
 // Data display.

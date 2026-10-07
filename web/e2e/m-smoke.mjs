@@ -14,10 +14,11 @@
 // orders, a transfer to futures and its ledger entry, a deposit address,
 // the futures terminal, the candle charts' legends clear of the highest
 // candle (there and on the coin page), the futures data (the terminal's
-// 数据 tab, the futures category, /futures/data), notifications, devices, help, the language switch
+// 数据 tab, the futures category, /futures/data), notifications, devices, help, the profile
+// (the drawn username, a rename, an avatar uploaded and removed), the language switch
 // and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
-import { legendClear, ok, sleep, start } from "./lib.mjs";
+import { choosePicture, legendClear, ok, sleep, start } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.astras.vip" : APP);
@@ -354,6 +355,47 @@ try {
   await go("/help");
   await waitText("注册与登录");
   ok("notifications, devices (current one marked) and the help centre render");
+
+  // 8b. The profile (design 2026-10-07, avatars and usernames, batch I2):
+  // "me" calls the user by the username drawn at sign-up, with the
+  // built-in avatar of its ID; settings lead to the profile page, where a
+  // new name (its sheet) shows at once and starts the 7 days. A picture
+  // made in the page (600 × 900 JPEG) is shrunk to its middle square and
+  // uploaded, and "me" shows the server's WebP; "use default" (after its
+  // sheet) brings the built-in one back.
+  await go("/me");
+  await page.waitForSelector('[data-testid="me-identity"] [data-testid="my-username"]', { visible: true, timeout: 20000 });
+  const drawn = await page.$eval('[data-testid="me-identity"] [data-testid="my-username"]', (e) => e.textContent);
+  if (!/^user_[a-z0-9]{8}$/.test(drawn ?? "")) throw new Error(`the username drawn at sign-up is ${drawn}`);
+  await page.waitForSelector('[data-testid="me-identity"] svg[data-avatar-default]', { visible: true });
+  await go("/account/settings");
+  await page.waitForSelector('[data-testid="settings-profile"]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid="settings-profile"]');
+  await waitPath("/account/profile");
+  await page.waitForSelector('[data-testid="profile-username"]', { visible: true, timeout: 20000 });
+  const renamed = `phone_${String(run).slice(-8)}`;
+  await page.click('[data-testid="profile-username-row"]');
+  await sheetOpen();
+  await page.click('[role="dialog"] input[name="username"]', { clickCount: 3 });
+  await page.keyboard.type(renamed);
+  await clickButton("保存", "[role=dialog]");
+  await page.waitForFunction((name) => document.querySelector('[data-testid="profile-username"]')?.textContent === name, { timeout: 15000 }, renamed);
+  await waitText("后可再次修改");
+  if (!(await page.$eval('[data-testid="profile-username-row"]', (b) => b.disabled))) throw new Error("the username may change again at once");
+  await choosePicture(page, '[data-testid="avatar-input"]', { width: 600, height: 900, type: "image/jpeg" });
+  await page.waitForSelector('[data-testid="profile-avatar"] img[src*="/uploads/avatars/"]', { timeout: 30000 });
+  await go("/me");
+  await page.waitForSelector('[data-testid="me-identity"] img[src*="/uploads/avatars/"]', { timeout: 20000 });
+  const mine = await page.$eval('[data-testid="me-identity"] [data-testid="my-username"]', (e) => e.textContent);
+  if (mine !== renamed) throw new Error(`"me" calls the user ${mine}, not ${renamed}`);
+  await shot("8b-me");
+  await go("/account/profile");
+  await page.waitForSelector('[data-testid="profile-avatar"] img[src*="/uploads/avatars/"]', { timeout: 20000 });
+  await clickButton("恢复默认");
+  await sheetOpen();
+  await clickButton("恢复默认", "[role=dialog]");
+  await page.waitForSelector('[data-testid="profile-avatar"] svg[data-avatar-default]', { visible: true, timeout: 15000 });
+  ok(`the profile: ${drawn} drawn at sign-up and the built-in avatar on "me"; renamed to ${renamed} (7 days to wait); a picture uploaded, shown on "me", and back to the default`);
 
   // 9. Settings: English switches the site's language at once (the page
   // and its header); so does Traditional Chinese (design 2026-10-06

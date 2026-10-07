@@ -6,13 +6,15 @@ import { useMarginAssets } from "@exchange/core/margin/hooks";
 import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
+import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Bell, Bitcoin, ChartCandlestick, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark,
-  ScrollText, UserRound, Wallet,
+  ScrollText, Wallet,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
+import { UserLine } from "../features/profile/UserLine";
 import { Logo } from "./Logo";
 import { SearchPalette } from "./SearchPalette";
 
@@ -106,7 +108,10 @@ export function TopNav() {
           {signedIn ? (
             <>
               <NotificationBell />
-              <Menu label={<UserRound size={18} />} to={routes.security} align="right">
+              {/* The account menu opens on the user's avatar, headed by the username and UID (design 2026-10-07, avatars and usernames §1 #5). */}
+              <Menu label={<MyAvatar size={24} />} to={routes.profile} align="right">
+                <UserLine className="mb-1 flex min-w-60 items-center gap-3 border-b border-line-1 px-4 pb-3 pt-2" />
+                <MenuLink to={routes.profile}>{t("nav.profile")}</MenuLink>
                 <MenuLink to={routes.security}>{t("nav.security")}</MenuLink>
                 <MenuLink to={routes.sessions}>{t("nav.sessions")}</MenuLink>
                 <MenuLink to={routes.settings}>{t("nav.settings")}</MenuLink>

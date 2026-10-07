@@ -1,12 +1,14 @@
-import { routes, selectSignedIn, selectUserId, useSession } from "@exchange/core";
+import { routes, selectSignedIn, useSession } from "@exchange/core";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, CopyButton, cn } from "@exchange/ui";
 import { Bell, MonitorSmartphone, ShieldCheck, SlidersHorizontal, UserRound, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
+import { UserLine } from "../../../features/profile/UserLine";
 
 const NAV: { to: string; icon: LucideIcon; label: string; auth: boolean }[] = [
+  { to: routes.profile, icon: UserRound, label: "nav.profile", auth: true },
   { to: routes.security, icon: ShieldCheck, label: "nav.security", auth: true },
   { to: routes.sessions, icon: MonitorSmartphone, label: "nav.sessions", auth: true },
   { to: routes.notifications, icon: Bell, label: "nav.notifications", auth: true },
@@ -14,37 +16,24 @@ const NAV: { to: string; icon: LucideIcon; label: string; auth: boolean }[] = [
 ];
 
 /** shortId keeps the ends of an ID: "0192e4c8…7e8f". */
-export function shortId(id: string): string {
-  return id.length > 14 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
-}
+export { shortUid as shortId } from "../../../features/profile/UserLine";
 
 /**
- * AccountLayout frames the account pages: a side menu (security,
- * devices, notifications with the unread count, settings) with the
- * user's UID, and the page's title, subtitle and actions.
+ * AccountLayout frames the account pages: a side menu (profile, security,
+ * devices, notifications with the unread count, settings) under the
+ * user's avatar, username and UID, and the page's title, subtitle and
+ * actions.
  */
 export function AccountLayout({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }) {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
-  const userId = useSession(selectUserId);
   const unread = useUnreadNotifications();
   return (
     <div className="mx-auto max-w-[1440px] px-6 py-8">
       <div className="grid grid-cols-[216px_minmax(0,1fr)] items-start gap-6">
         <aside className="sticky top-20 flex flex-col gap-3 rounded-3 border border-line-1 bg-bg-1 p-3">
           {signedIn ? (
-            <div className="flex items-center gap-3 rounded-2 bg-bg-2 p-3">
-              <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
-                <UserRound size={18} />
-              </span>
-              <div className="min-w-0">
-                <div className="text-xs text-fg-3">{t("pcAccount.uid")}</div>
-                <div className="flex items-center gap-1 text-sm font-medium text-fg-1">
-                  <span className="truncate tabular-nums">{shortId(userId)}</span>
-                  <CopyButton value={userId} size={12} />
-                </div>
-              </div>
-            </div>
+            <UserLine className="flex items-center gap-3 rounded-2 bg-bg-2 p-3" after={(uid) => <CopyButton value={uid} size={12} />} />
           ) : (
             <div className="flex flex-col gap-2 rounded-2 bg-bg-2 p-3 text-xs leading-relaxed text-fg-3">
               {t("pcAccount.signInToManage")}

@@ -6,7 +6,7 @@ export const en = {
   nav: {
     home: "Home", markets: "Markets", spot: "Spot", futures: "Futures", assets: "Assets", overview: "Overview", deposit: "Deposit",
     withdraw: "Withdraw", transfer: "Transfer", history: "History", announcements: "Announcements", help: "Help center",
-    search: "Search coins", notifications: "Notifications", account: "Account", security: "Security", settings: "Settings",
+    search: "Search coins", notifications: "Notifications", account: "Account", profile: "Profile", security: "Security", settings: "Settings",
     sessions: "Devices", logout: "Sign out", login: "Sign in", register: "Sign up", language: "Language", me: "Me", trade: "Trade",
     margin: "Margin",
   },
@@ -24,7 +24,7 @@ export const en = {
     feedStale: "Market data is interrupted and may be out of date", comingSoon: "This page is being built", favorite: "Favorite",
     unfavorite: "Remove favorite", price: "Price", amount: "Amount", total: "Total", time: "Time", status: "Status", action: "Action",
     buy: "Buy", sell: "Sell", max: "Max", available: "Available", fee: "Fee", hide: "Hide", show: "Show", filter: "Filter",
-    reset: "Reset", apply: "Apply", ok: "OK",
+    reset: "Reset", apply: "Apply", ok: "OK", uid: "UID",
   },
   market: {
     pair: "Pair", last: "Last price", change: "24h change", high: "24h high", low: "24h low", volume: "24h volume",
@@ -71,6 +71,9 @@ export const en = {
     AUTH_IDENTITY_TAKEN: "That email or phone is taken", AUTH_IDENTITY_KIND_BOUND: "One of that kind is bound already: change it instead",
     NOTIFY_PROVIDER_UNAVAILABLE: "Codes cannot be sent right now, please try again later", AUTH_STEP_UP_REQUIRED: "Complete the security check first", AUTH_SESSION_REVOKED: "Signed out, please sign in again",
     AUTH_LOGIN_CHALLENGE_INVALID: "The sign-in check expired, sign in again", USER_CLOSED: "The account is closed", USER_FROZEN: "The account is frozen and read-only",
+    USER_USERNAME_INVALID: "A username has 3 to 20 letters, digits or underscores, does not start with an underscore and is not reserved",
+    USER_USERNAME_TAKEN: "That username is taken", USER_USERNAME_COOLDOWN: "A username may change once in 7 days",
+    USER_AVATAR_INVALID: "That picture cannot be read: choose a PNG, JPEG or WebP image", USER_AVATAR_TOO_LARGE: "The picture is too large: choose one of 5 MB at most",
     USER_RISK_REVIEW: "The account is under review", USER_NOT_ELIGIBLE: "Not available yet", USER_REGION_NOT_ALLOWED: "Not available in your region",
     LEDGER_INSUFFICIENT_BALANCE: "Insufficient available balance", LEDGER_AMOUNT_PRECISION: "Too many decimals for this asset", COMMON_RATE_LIMITED: "Too many requests, slow down",
     COMMON_IDEMPOTENCY_CONFLICT: "Duplicate submission, reload and retry", COMMON_INVALID_ARGUMENT: "Invalid input", COMMON_UNAVAILABLE: "Temporarily unavailable, try again",

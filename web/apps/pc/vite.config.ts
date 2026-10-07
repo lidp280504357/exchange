@@ -34,6 +34,8 @@ export default defineConfig({
     proxy: {
       "/v1/ws": { target: api.replace(/^http/, "ws"), ws: true, changeOrigin: true },
       "/v1": { target: api, changeOrigin: true },
+      // Uploaded avatars, served by nginx on the sites (design 2026-10-07, avatars and usernames).
+      "/uploads": { target: api, changeOrigin: true },
     },
   },
   // Pages load lazily (one chunk each, charts and tables with the pages

@@ -2,12 +2,13 @@ import { enumLabel, errorText, routes, selectUserId, useSession, useTotpStatus }
 import { useTestMode } from "@exchange/core/platform/index";
 import { useProfile } from "@exchange/core/user/profile";
 import { securitySummary, useBoundIdentities, type SecurityLevel } from "@exchange/core/user/security";
-import { Avatar, Badge, Skeleton, copyText, listItem, toast, type BadgeTone } from "@exchange/ui";
+import { Badge, Skeleton, copyText, listItem, toast, type BadgeTone } from "@exchange/ui";
+import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
 import { ChevronRight, Copy, RotateCcw, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { primaryIdentity, shortId, totpState } from "../parts/logic";
+import { shortId, totpState } from "../parts/logic";
 
 const levelTone: Record<SecurityLevel, BadgeTone> = { low: "danger", medium: "warn", high: "success" };
 
@@ -17,10 +18,12 @@ function statusTone(status: string): BadgeTone {
 }
 
 /**
- * IdentityCard (design §7.3 ②): the avatar in a turning brand ring, the
- * masked identity, the UID to copy, and tags for the account status, the
- * security level and the simulated funds, on a grid that fades out from a
- * corner with two slowly drifting lights. "Edit profile" opens settings.
+ * IdentityCard (design §7.3 ②): the avatar (uploaded, or the built-in one
+ * of the user ID) in a turning brand ring, the username, the UID to copy,
+ * and tags for the account status, the security level and the simulated
+ * funds, on a grid that fades out from a corner with two slowly drifting
+ * lights. "Edit profile" opens the profile page (design 2026-10-07,
+ * avatars and usernames §1 #5).
  */
 export function IdentityCard() {
   const { t } = useTranslation();
@@ -29,7 +32,6 @@ export function IdentityCard() {
   const profile = useProfile();
   const totp = useTotpStatus();
   const testMode = useTestMode().enabled;
-  const identity = primaryIdentity(ids.data);
   const status = profile.data?.status;
   const level =
     ids.data && profile.data && totp.data
@@ -71,22 +73,24 @@ export function IdentityCard() {
             className="absolute inset-0 animate-[spin_8s_linear_infinite] rounded-full bg-[conic-gradient(from_0deg,var(--brand),transparent_35%,var(--brand)_65%,transparent_90%,var(--brand))] will-change-transform"
           />
           <span className="relative grid size-[58px] place-items-center rounded-full bg-bg-1">
-            <Avatar name={identity ?? userId} size={52} />
+            <MyAvatar size={52} />
           </span>
         </span>
         <div className="min-w-0 flex-1 pt-1.5">
           <div className="flex min-h-7 min-w-0 items-center gap-1">
-            {ids.isPending ? (
+            {profile.isPending ? (
               <Skeleton className="h-5 w-40 max-w-full" />
             ) : (
-              <span className="min-w-0 truncate text-md font-semibold text-fg-1">{identity ?? t("mAccount.me.user")}</span>
+              <span className="min-w-0 truncate text-md font-semibold text-fg-1" data-testid="my-username">
+                {profile.data?.username ?? t("mAccount.me.user")}
+              </span>
             )}
-            {ids.isError && (
-              // The identity could not be read: the fallback name shows, with a way to try again.
+            {profile.isError && (
+              // The profile could not be read: the fallback name shows, with a way to try again.
               <button
                 type="button"
-                aria-label={`${t("common.retry")}: ${errorText(ids.error)}`}
-                onClick={() => void ids.refetch()}
+                aria-label={`${t("common.retry")}: ${errorText(profile.error)}`}
+                onClick={() => void profile.refetch()}
                 className="-my-2 grid size-tap shrink-0 place-items-center text-danger"
               >
                 <RotateCcw size={16} />
@@ -105,7 +109,7 @@ export function IdentityCard() {
           </button>
         </div>
         <Link
-          to={routes.settings}
+          to={routes.profile}
           className="-mr-2 -mt-1.5 flex h-tap shrink-0 items-center gap-0.5 px-2 text-xs text-fg-3 transition-colors active:text-fg-1"
         >
           {t("mAccount.me.editProfile")}

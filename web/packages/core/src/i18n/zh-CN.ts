@@ -6,7 +6,7 @@ export const zhCN = {
   nav: {
     home: "首页", markets: "行情", spot: "现货交易", futures: "合约", assets: "资产", overview: "资产总览", deposit: "充值",
     withdraw: "提现", transfer: "划转", history: "资金流水", announcements: "公告", help: "帮助中心", search: "搜索币种",
-    notifications: "通知", account: "账户", security: "安全", settings: "设置", sessions: "设备与登录", logout: "退出登录",
+    notifications: "通知", account: "账户", profile: "个人资料", security: "安全", settings: "设置", sessions: "设备与登录", logout: "退出登录",
     login: "登录", register: "注册", language: "语言", me: "我的", trade: "交易", margin: "杠杆账户",
   },
   footer: {
@@ -21,7 +21,7 @@ export const zhCN = {
     offline: "网络不可用，恢复后自动重连", reconnecting: "正在重新连接…", syncing: "同步中", feedStale: "行情连接中断，数据可能不是最新",
     comingSoon: "该页面正在建设中", favorite: "自选", unfavorite: "取消自选", price: "价格", amount: "数量", total: "金额",
     time: "时间", status: "状态", action: "操作", buy: "买入", sell: "卖出", max: "最大", available: "可用", fee: "手续费",
-    hide: "隐藏", show: "显示", filter: "筛选", reset: "重置", apply: "应用", ok: "好的",
+    hide: "隐藏", show: "显示", filter: "筛选", reset: "重置", apply: "应用", ok: "好的", uid: "UID",
   },
   market: {
     pair: "交易对", last: "最新价", change: "24h 涨跌", high: "24h 最高", low: "24h 最低", volume: "24h 成交量",
@@ -68,6 +68,9 @@ export const zhCN = {
     AUTH_IDENTITY_TAKEN: "该邮箱或手机号已被使用", AUTH_IDENTITY_KIND_BOUND: "已绑定同类身份，请使用换绑",
     NOTIFY_PROVIDER_UNAVAILABLE: "验证码发送服务暂时不可用，请稍后再试", AUTH_STEP_UP_REQUIRED: "需要先完成安全验证", AUTH_SESSION_REVOKED: "登录已失效，请重新登录",
     AUTH_LOGIN_CHALLENGE_INVALID: "登录验证已失效，请重新登录", USER_CLOSED: "账户已注销", USER_FROZEN: "账户已冻结，只能查看",
+    USER_USERNAME_INVALID: "用户名需 3–20 个字母、数字或下划线，不能以下划线开头，也不能用保留名称", USER_USERNAME_TAKEN: "该用户名已被使用",
+    USER_USERNAME_COOLDOWN: "用户名 7 天内只能修改一次", USER_AVATAR_INVALID: "无法识别这张图片，请换一张 PNG、JPEG 或 WebP 图片",
+    USER_AVATAR_TOO_LARGE: "图片太大，请换一张不超过 5 MB 的图片",
     USER_RISK_REVIEW: "账户风控审核中，暂不可用", USER_NOT_ELIGIBLE: "该功能暂未开放", USER_REGION_NOT_ALLOWED: "所在地区暂不支持该功能",
     LEDGER_INSUFFICIENT_BALANCE: "可用余额不足", LEDGER_AMOUNT_PRECISION: "数量的小数位超出资产精度", COMMON_RATE_LIMITED: "请求太频繁，请稍后再试",
     COMMON_IDEMPOTENCY_CONFLICT: "重复提交，请刷新后重试", COMMON_INVALID_ARGUMENT: "输入有误", COMMON_UNAVAILABLE: "服务暂时不可用，请稍后重试",

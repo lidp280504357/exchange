@@ -1,11 +1,18 @@
-import { Avatar as RAvatar } from "radix-ui";
+import { useState } from "react";
 import { cn } from "../lib/cn";
 import { identityClass } from "../lib/identity";
+import { DefaultAvatar } from "./DefaultAvatar";
 
 export type AvatarProps = {
   /** A name, nickname or email: the initials and the colour come from it. */
   name?: string;
   src?: string;
+  /**
+   * A user ID: without a picture, or when it fails to load, the user's
+   * built-in avatar (one of twelve, chosen by the ID) stands in for the
+   * initials (design 2026-10-07, avatars and usernames §1 #4).
+   */
+  seed?: string;
   /** Diameter in px (default 32). */
   size?: number;
   className?: string;
@@ -25,22 +32,38 @@ export function initialsOf(name: string | undefined): string {
   return (first + second).toUpperCase();
 }
 
-/** Avatar shows a user's picture, or initials on a colour stable per name. */
-export function Avatar({ name, src, size = 32, className }: AvatarProps) {
+/**
+ * Avatar shows a user's picture (a quiet circle while it loads); without
+ * one, or once it failed to load, the built-in avatar of the `seed`, or
+ * initials on a colour stable per name. A plain image and a fallback: it
+ * sits in the PC top bar, so it carries no primitive library.
+ */
+export function Avatar({ name, src, seed, size = 32, className }: AvatarProps) {
+  const [failed, setFailed] = useState<string>();
+  const picture = src && src !== failed ? src : undefined;
   return (
-    <RAvatar.Root
-      className={cn("relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full align-middle", className)}
+    <span
+      className={cn(
+        "relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full align-middle",
+        picture && "bg-bg-3",
+        className,
+      )}
       style={{ width: size, height: size }}
     >
-      {src && <RAvatar.Image src={src} alt={name ?? ""} className="size-full object-cover" />}
-      <RAvatar.Fallback
-        delayMs={src ? 250 : undefined}
-        aria-label={name}
-        className={cn("flex size-full items-center justify-center font-semibold leading-none text-white", identityClass(name ?? "?"))}
-        style={{ fontSize: Math.max(10, Math.round(size * 0.4)) }}
-      >
-        {initialsOf(name)}
-      </RAvatar.Fallback>
-    </RAvatar.Root>
+      {picture ? (
+        <img src={picture} alt={name ?? ""} draggable={false} onError={() => setFailed(picture)} className="size-full object-cover" />
+      ) : seed ? (
+        <DefaultAvatar seed={seed} label={name} />
+      ) : (
+        <span
+          role={name ? "img" : undefined}
+          aria-label={name}
+          className={cn("flex size-full items-center justify-center font-semibold leading-none text-white", identityClass(name ?? "?"))}
+          style={{ fontSize: Math.max(10, Math.round(size * 0.4)) }}
+        >
+          {initialsOf(name)}
+        </span>
+      )}
+    </span>
   );
 }

@@ -1,19 +1,23 @@
-import { LOCALE_NAMES, LOCALES, routes, setLocale, useSettings, type Locale, type UpDown } from "@exchange/core";
+import { LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, useSession, useSettings, type Locale, type UpDown } from "@exchange/core";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
-import { RadioGroup, Segmented, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
+import { useProfile } from "@exchange/core/user/profile";
+import { RadioGroup, Segmented, Skeleton, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
+import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
 import { ChevronRight, Clock } from "lucide-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { usePageHeader } from "../../layout/header";
 import { PickerSheet } from "../auth/parts/PickerSheet";
 import { Group, Section } from "./parts/rows";
 import { previewTones, type Tone } from "./parts/updown";
 
 /**
- * Settings (design §7.2 我的 → 设置): language, time zone (a searchable
- * list in a sheet), rise and fall colours with a live preview, order
- * confirmation and small balances. Kept on this device (settings/store),
- * so visitors may use it too.
+ * Settings (design §7.2 我的 → 设置): signed in, the avatar and username
+ * leading to the profile (design 2026-10-07, avatars and usernames §1 #5);
+ * then language, time zone (a searchable list in a sheet), rise and fall
+ * colours with a live preview, order confirmation and small balances. Kept
+ * on this device (settings/store), so visitors may use it too.
  */
 export default function Settings() {
   const { t } = useTranslation();
@@ -22,10 +26,16 @@ export default function Settings() {
   const confirmOrders = useSettings((s) => s.confirmOrders);
   const hideSmall = useSettings((s) => s.hideSmallBalances);
   const set = useSettings((s) => s.set);
+  const signedIn = useSession(selectSignedIn);
   usePageHeader({ title: t("mAccount.settings.title"), back: routes.me }, [t]);
 
   return (
     <div className="flex flex-col gap-5 px-4 py-3">
+      {signedIn && (
+        <Group index={0}>
+          <ProfileRow />
+        </Group>
+      )}
       <Section title={t("mAccount.settings.display")}>
         <Group index={0}>
           <div className="flex flex-col gap-3 p-4">
@@ -80,6 +90,26 @@ export default function Settings() {
 
       <p className="px-1 text-xs text-fg-3">{t("mAccount.settings.localNote")}</p>
     </div>
+  );
+}
+
+// ProfileRow is the user's avatar and username, a way to the profile page.
+function ProfileRow() {
+  const { t } = useTranslation();
+  const profile = useProfile();
+  return (
+    <Link to={routes.profile} data-testid="settings-profile" className="group flex min-h-16 items-center gap-3 px-4 py-3 transition-colors active:bg-bg-2">
+      <MyAvatar size={40} />
+      <span className="min-w-0 flex-1">
+        {profile.data ? (
+          <span className="block truncate text-base font-medium text-fg-1">{profile.data.username}</span>
+        ) : (
+          <Skeleton className="h-5 w-32" />
+        )}
+        <span className="mt-0.5 block text-xs text-fg-3">{t("nav.profile")}</span>
+      </span>
+      <ChevronRight size={18} aria-hidden className="shrink-0 text-fg-3 transition-transform duration-[var(--t-fast)] group-active:translate-x-0.5" />
+    </Link>
   );
 }
 

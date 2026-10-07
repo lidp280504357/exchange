@@ -281,6 +281,42 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
 }
 
 /**
+ * choosePicture puts a picture made in the page (width × height, a
+ * gradient under a white disc) into the file input at selector, as if the
+ * user had picked it: what the profile pages shrink and upload (design
+ * 2026-10-07, avatars and usernames).
+ */
+export async function choosePicture(page, selector, { width = 900, height = 600, type = "image/png" } = {}) {
+  await page.evaluate(
+    async (sel, w, h, kind) => {
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const g = c.getContext("2d");
+      const grad = g.createLinearGradient(0, 0, w, h);
+      grad.addColorStop(0, "#f0b90b");
+      grad.addColorStop(1, "#2563eb");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, w, h);
+      g.fillStyle = "#ffffff";
+      g.beginPath();
+      g.arc(w / 2, h / 2, Math.min(w, h) / 4, 0, Math.PI * 2);
+      g.fill();
+      const blob = await new Promise((resolve) => c.toBlob(resolve, kind, 0.9));
+      const input = document.querySelector(sel);
+      const files = new DataTransfer();
+      files.items.add(new File([blob], kind === "image/jpeg" ? "picture.jpg" : "picture.png", { type: kind }));
+      input.files = files.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+    selector,
+    width,
+    height,
+    type,
+  );
+}
+
+/**
  * menuOnTop scrolls the PC site's page halfway down, requires the table's
  * header to be stuck right under the top bar (else there is nothing to
  * cover the menu and the check would prove nothing: a short page, review

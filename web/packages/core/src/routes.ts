@@ -17,6 +17,8 @@ export const routes = {
   history: "/assets/history",
   /** The margin accounts (margin design 2026-10-06 §7). */
   margin: "/assets/margin",
+  /** The username and the avatar (design 2026-10-07, avatars and usernames). */
+  profile: "/account/profile",
   security: "/account/security",
   settings: "/account/settings",
   sessions: "/account/sessions",

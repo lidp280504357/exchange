@@ -26,6 +26,16 @@ export function updateProfile(patch: ProfilePatch, stepUpToken?: string): Promis
   return unwrap(userApi.PATCH("/v1/user/profile", { body: patch, params: { header: stepUpToken ? stepUpHeaders(stepUpToken) : {} } }));
 }
 
+/**
+ * avatarOf is the uploaded avatar to show at a size (design 2026-10-07,
+ * avatars and usernames): the 64 px picture up to 32 px, the 256 px one
+ * above; undefined for the built-in avatar.
+ */
+export function avatarOf(p: Pick<Profile, "avatar_url" | "avatar_thumb_url"> | undefined, size: number): string | undefined {
+  if (!p?.avatar_url) return undefined;
+  return (size <= 32 ? p.avatar_thumb_url : null) ?? p.avatar_url;
+}
+
 /** keepProfile puts an updated profile in the cache. */
 export function keepProfile(qc: QueryClient, p: Profile): void {
   qc.setQueryData(qk.profile, p);
