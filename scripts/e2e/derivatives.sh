@@ -127,10 +127,10 @@ eventually 40 "it rests (OPEN)" order_is "$BID" OPEN "${BUYER[@]}"
 call POST /v1/derivatives/conditional-orders "$TP_BODY" "${BUYER[@]}"
 expect 201 - "a take-profit of 0.05 at $HIGH"
 TP=$(jq -r .conditional_id <<<"$BODY")
-# derivatives-service's sweep takes what came in from 10 s before a line
-# closed (an order in flight as it closed); older ones are the console's
-# call to cancel, which is what this checks.
-sleep 11
+# derivatives-service's sweep takes what came in from 30 s before a line
+# closed (an order in flight as it closed, with room for the clocks);
+# older ones are the console's call to cancel, which is what this checks.
+sleep 31
 product_close usdt_m
 check "([.orders[] | select(.order_id == \"$BID\" and .type == \"ORDER\")] | length) == 1 and ([.orders[] | select(.order_id == \"$TP\" and .type == \"CONDITIONAL\")] | length) == 1 and .canceled == (.orders | length)" \
   "closing it canceled the bid and the take-profit ($(jq -r .canceled <<<"$BODY") orders of the line)"

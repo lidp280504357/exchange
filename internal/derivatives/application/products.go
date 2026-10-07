@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -75,8 +76,10 @@ const sweepActor = "system:derivatives-service"
 
 // sweepFrom is how long before a line closed SweepClosed looks: an order
 // taken as it closed (by a call that read the flag before the change, at
-// most flags.RefreshInterval stale) was created after that.
-const sweepFrom = 10 * time.Second
+// most flags.RefreshInterval stale) was created after that. The flag's
+// time is the database's clock, the order's this service's: the rest is
+// room for the two to differ (review C60 ②).
+const sweepFrom = 30 * time.Second
 
 // CancelProduct cancels what a closed product line holds open as the
 // console closes it: the users' orders on its contracts (the liquidation
@@ -113,6 +116,7 @@ func (s *Service) SweepClosed(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	n := 0
+	var errs []error
 	for _, key := range []string{flags.KeyProductUSDTM, flags.KeyProductCoinM} {
 		f, stored := s.Features.Get(key)
 		if !stored || f.Enabled {
@@ -120,11 +124,9 @@ func (s *Service) SweepClosed(ctx context.Context) (int, error) {
 		}
 		done, err := s.cancelOn(ctx, key, sweepActor, "the product line is closed", f.UpdatedAt.Add(-sweepFrom), true)
 		n += len(done)
-		if err != nil {
-			return n, err
-		}
+		errs = append(errs, err)
 	}
-	return n, nil
+	return n, errors.Join(errs...)
 }
 
 // productSymbols returns the contracts of a product line, whatever their
@@ -157,7 +159,13 @@ func canceled(o domain.Order) bool {
 // cancelOn cancels the users' orders on the product line's contracts
 // created from since (only the opening ones with openingOnly) and their
 // take-profits and stop-losses created from since: one user at a time
-// under their lock, each cancel audited.
+// under their lock, each cancel audited. A user whose cancels fail leaves
+// the others to go on (review C60 ①); the call then fails with what it did
+// (503 with canceled and failed_users), and a retry takes what is left.
+//
+// The orders come from the orders_active partial index read whole (its
+// first column is the user), the take-profits and stop-losses from
+// conditional_orders_active: active rows only, and only on a closed line.
 func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since time.Time, openingOnly bool) ([]ProductOrder, error) {
 	symbols, err := s.productSymbols(ctx, key)
 	if err != nil || len(symbols) == 0 {
@@ -175,9 +183,11 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 		return nil, err
 	}
 	var users []string
+	seen := map[string]bool{}
 	conds := map[string][]domain.Conditional{}
 	add := func(user string) {
-		if !s.marketMaker(user) && !slices.Contains(users, user) {
+		if !seen[user] && !s.marketMaker(user) {
+			seen[user] = true
 			users = append(users, user)
 		}
 	}
@@ -193,6 +203,8 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 		}
 	}
 	var out []ProductOrder
+	var failed []string
+	var first error
 	for _, user := range users {
 		var mine []ProductOrder
 		err := s.Store.Tx(ctx, func(r ports.Repos) error {
@@ -235,12 +247,21 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 			return nil
 		})
 		if err != nil {
-			return out, err
+			s.Log.WarnContext(ctx, "a user's orders on a closed product line not canceled", "product", flags.ProductNames[key],
+				"user_id", user, "error", err)
+			failed = append(failed, user)
+			if first == nil {
+				first = err
+			}
+			continue
 		}
 		out = append(out, mine...)
 	}
 	if len(out) > 0 {
 		s.Log.InfoContext(ctx, "orders of a closed product line canceled", "product", flags.ProductNames[key], "orders", len(out), "actor", actor)
+	}
+	if first != nil {
+		return out, apperr.Unavailable(first).WithDetail("canceled", len(out)).WithDetail("failed_users", len(failed))
 	}
 	return out, nil
 }

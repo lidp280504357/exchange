@@ -12,6 +12,7 @@ import (
 	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/skill/exchange/internal/derivatives/application"
 	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/derivatives/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/flags"
 )
@@ -198,6 +199,112 @@ func TestAClosedProductLineTakesOnlyCloses(t *testing.T) {
 		t.Fatalf("an opening order on the coin-margined line: %v", err)
 	}
 	r.place(t, alice, domain.Buy, "59000", "0.1", false)
+}
+
+// A closed line takes the closes that are not reduce-only orders too
+// (review C60): a hedge-mode sell of the long side (while a sell opening
+// the short side is PRODUCT_CLOSED), a take-profit's order as it triggers
+// and the console's close; the sweep leaves them all.
+func TestAClosedLineTakesEveryKindOfClose(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	fl := &productFlags{closed: map[string]bool{}, at: map[string]time.Time{}}
+	r.svc.Features = fl
+	alice, bob, carol := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, u := range []string{alice, bob, carol} {
+		r.fund(u, "10000")
+	}
+	hedge := domain.Hedge
+	if _, err := r.svc.UpdateSettings(ctx, alice, perp.Symbol, application.SettingsChange{PositionMode: &hedge}); err != nil {
+		t.Fatal(err)
+	}
+	order := func(user string, side domain.Side, ps domain.PositionSide, price, qty string) (domain.Order, error) {
+		return r.svc.Place(ctx, domain.Request{
+			UserID: user, Symbol: perp.Symbol, Side: side, PositionSide: ps, Type: domain.Limit, Price: d(price), Qty: d(qty),
+		})
+	}
+	long, err := order(alice, domain.Buy, domain.SideLong, "60000", "0.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.trade(t, long, r.place(t, bob, domain.Sell, "60000", "0.2", false), "60000")
+	r.trade(t, r.place(t, carol, domain.Buy, "60000", "0.2", false), r.place(t, bob, domain.Sell, "60000", "0.2", false), "60000")
+	if _, err := r.svc.CreateConditional(ctx, domain.ConditionalRequest{
+		UserID: carol, Symbol: perp.Symbol, Kind: domain.TakeProfit, TriggerPrice: d("61000"), Qty: d("0.1"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fl.set(flags.KeyProductUSDTM, true)
+	if _, err := order(alice, domain.Sell, domain.SideShort, "61000", "0.1"); apperr.From(err).Code != flags.CodeProductClosed {
+		t.Fatalf("a hedge-mode sell opening the short side: %v", err)
+	}
+	if _, err := order(alice, domain.Sell, domain.SideLong, "61000", "0.1"); err != nil {
+		t.Fatalf("a hedge-mode sell of the long side: %v", err)
+	}
+	r.book.Set(perp.Symbol, d("61000"), time.Now())
+	if n, err := r.svc.Trigger(ctx); err != nil || n != 1 {
+		t.Fatalf("trigger: %d %v", n, err)
+	}
+	list, _, err := r.svc.Conditionals(ctx, carol, perp.Symbol, "", "", 10)
+	if err != nil || len(list) != 1 || list[0].Status != domain.ConditionalTriggered || list[0].OrderID == "" {
+		t.Fatalf("the take-profit on a closed line: %+v %v", list, err)
+	}
+	if o, err := r.svc.AdminClose(ctx, bob, perp.Symbol, domain.SideBoth, "close-bob"); err != nil || o.Kind != domain.KindAdmin {
+		t.Fatalf("the console's close: %+v %v", o, err)
+	}
+	if n, err := r.svc.SweepClosed(ctx); err != nil || n != 0 {
+		t.Fatalf("the sweep took a close: %d %v", n, err)
+	}
+}
+
+// lockFails is a store that cannot take one user's lock.
+type lockFails struct {
+	ports.Store
+	user string
+}
+
+func (s lockFails) Tx(ctx context.Context, fn func(ports.Repos) error) error {
+	return s.Store.Tx(ctx, func(r ports.Repos) error { return fn(lockRepos{Repos: r, user: s.user}) })
+}
+
+type lockRepos struct {
+	ports.Repos
+	user string
+}
+
+func (r lockRepos) LockUser(ctx context.Context, user string) error {
+	if user == r.user {
+		return errors.New("lock timeout")
+	}
+	return r.Repos.LockUser(ctx, user)
+}
+
+// One user's orders that cannot be canceled leave the others' to be
+// (review C60 ①): the call fails saying how far it got, and a retry takes
+// the rest.
+func TestClosingGoesOnPastAUserItCannotLock(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	fl := &productFlags{closed: map[string]bool{}, at: map[string]time.Time{}}
+	r.svc.Features = fl
+	alice, bob := uuid.NewString(), uuid.NewString()
+	r.fund(alice, "10000")
+	r.fund(bob, "10000")
+	first := r.place(t, alice, domain.Buy, "59000", "0.1", false)
+	second := r.place(t, bob, domain.Buy, "59000", "0.1", false)
+	fl.set(flags.KeyProductUSDTM, true)
+	r.svc.Store = lockFails{Store: r.store, user: alice}
+	done, err := r.svc.CancelProduct(ctx, flags.KeyProductUSDTM, "ops@example.com", "closing the line")
+	e := apperr.From(err)
+	if e.Kind != apperr.KindUnavailable || e.Details["canceled"] != 1 || e.Details["failed_users"] != 1 || len(done) != 1 || done[0].ID != second.ID {
+		t.Fatalf("one user's lock failing: %+v %v", done, err)
+	}
+	r.svc.Store = r.store
+	done, err = r.svc.CancelProduct(ctx, flags.KeyProductUSDTM, "ops@example.com", "closing the line")
+	if err != nil || len(done) != 1 || done[0].ID != first.ID {
+		t.Fatalf("the retry: %+v %v", done, err)
+	}
 }
 
 // The product lines by the names the API uses.
