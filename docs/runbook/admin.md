@@ -582,7 +582,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 ## 测试
 
 - **单元与集成测试**：`internal/admin/...`（应用层用内存仓库与各服务的假实现；`adapters/postgres` 的集成测试连测试服 `exchange_test` 库，`task test:integration`）；迁移 `migrations/admin` 由 `./migrations/` 的集成测试逐个上下回滚。
-- **端到端** `bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用）。覆盖：
+- **端到端** `bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；调后台一律走 HTTP/1.1——本机 curl 8.7.1 走 HTTP/2 时，2026-10-07 有三个 nginx 已答 200 的回答以帧错误 exit 16 失败，公共的 `call` 不重试这种；上传安装包的分片在传输断开或路上答 5xx 时重传，同一分片重传即覆盖，A90）。覆盖：
   - 页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、撤单、开关往返、待办与事件流、报表、资产资料与其审计、分页列表与概览、用户页的估值余额、单笔撤单。
   - 交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复，测试服的下限是 60 秒；OPERATOR 不能改状态与参考倍数；ETH-BTC 只预览暂停（带挂单数）与只可撤单；没有确认令牌 409；LINK-BTC 的参考倍数修改经 ADMIN 确认后排期再取消，同一令牌再提交返回同一条修改；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC（C5.5 ⑩ 起跟随币安 LINKBTC、由 HOUSE 报价（第一次运行把它追加进 `market.house_liquidity` 的名单，名单其余不变），文档每次相同、只第一次创建；已有交易对写了别的状态时提示 `STATUS_IGNORED`）立即暂停、确认开放、一分钟后在币安买一价下 5% 挂单并撤掉，运行结束时仍在交易；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空；按币关闭 BTC 的合约（A63）：OPERATOR 403，预览列出两种保证金类型的合约与一个令牌，没有可重新开放的 409、`DELISTED` 400、没有合约的币 404、不带令牌 409，确认后得到一条 `COIN_CONTRACTS_STATUS` 修改并立即取消（退出时再取消本次运行留下的），BTC 的合约状态不变）。
   - 资金操作：双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`；运维的 `exchangectl ledger release-hold` 超过冻结单的数量被拒、默认解冻冻结单的全部，审计带 `forced`）、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，HOUSE 的仓位排在用户之后，扣 1 USDT 前的全仓保证金预览（扣后权益少 1），后台平掉后仓位为空；合约交易关闭时跳过）。
