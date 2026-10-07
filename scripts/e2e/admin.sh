@@ -2319,9 +2319,24 @@ else
     start_upload() {
       as ADMIN POST "/admin/v1/platform/apps/$1/uploads" "$(jq -nc --arg k "$2" --arg n "$3" --argjson s "$4" --arg h "$5" '{kind: $k, name: $n, size: $s, sha256: $h}')"
     }
+    # put_part PATH FILE: a part's PUT, sent again after a transfer that
+    # broke off (curl's exit 16, an HTTP/2 stream the Mac's path to
+    # Cloudflare dropped mid-way on 2026-10-07; call retries only what
+    # never left): a part sent again replaces itself, and while the broken
+    # one still holds the upload (PLATFORM_APP_UPLOAD_BUSY) it waits.
+    put_part() {
+      local try
+      for try in 1 2 3 4 5 6; do
+        if acall PUT "$1" "" -b "$WORK/ADMIN.jar" "${CSRF[@]}" -H 'Content-Type: application/octet-stream' --data-binary "@$2"; then
+          [[ $STATUS == 409 && $(jq -r '.code // ""' <<<"$BODY" 2>/dev/null) == PLATFORM_APP_UPLOAD_BUSY ]] || return 0
+        fi
+        echo "note: $1 again (try $try)" >&2
+        sleep 3
+      done
+      return 1
+    }
     send_part() { # send_part PLATFORM UPLOAD FILE: its one part, as bytes
-      acall PUT "/admin/v1/platform/apps/$1/uploads/$2/parts/1" "" -b "$WORK/ADMIN.jar" "${CSRF[@]}" -H 'Content-Type: application/octet-stream' \
-        --data-binary "@$3"
+      put_part "/admin/v1/platform/apps/$1/uploads/$2/parts/1" "$3"
     }
     # upload PLATFORM KIND FIXTURE NAME: started, sent and completed.
     upload() {
@@ -2390,8 +2405,7 @@ else
     BIG_UP=$(jq -r .upload_id <<<"$BODY")
     send_slice() { # send_slice N: part N of e2e-big.apk
       dd if="$(fix big path)" of="$WORK/part" bs=1048576 skip=$((($1 - 1) * 10)) count=10 2>/dev/null
-      acall PUT "/admin/v1/platform/apps/ANDROID/uploads/$BIG_UP/parts/$1" "" -b "$WORK/ADMIN.jar" "${CSRF[@]}" \
-        -H 'Content-Type: application/octet-stream' --data-binary "@$WORK/part"
+      put_part "/admin/v1/platform/apps/ANDROID/uploads/$BIG_UP/parts/$1" "$WORK/part"
     }
     send_slice 3
     expect 200 - "the last part first"
