@@ -97,6 +97,11 @@ expect 202 - "a market buy of 300 USDT of BTC"
 has_btc() { [[ $(jq -n "$(spot BTC) > 0") == true ]]; }
 eventually 40 "the BTC arrived" has_btc
 QTY=$(spot BTC)
+# The account counts BTC at its haircut as collateral (total_asset).
+call GET /v1/margin/assets ""
+expect 200 - "the margin assets"
+HAIRCUT=$(jq -r '.items[] | select(.asset == "BTC") | .haircut' <<<"$BODY")
+[[ $HAIRCUT =~ ^[0-9.]+$ ]] || { echo "FAIL BTC is not margin collateral: $BODY" >&2; exit 1; }
 call POST /v1/margin/transfer "{\"direction\":\"IN\",\"account\":\"MARGIN_CROSS\",\"asset\":\"BTC\",\"amount\":\"$QTY\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-in"
 expect 200 - "$QTY BTC into the cross margin account"
 
@@ -187,7 +192,7 @@ holds "$WORK/risk" "map(select(.mark.source == \"PLATFORM\")) | length > 0" "$PE
 holds "$WORK/risk" "map((.mark.index_price | tonumber) / (.ref.source_price | tonumber)) | max >= 1 + 0.7 * ($F - 1) and max <= $F + 0.004" \
   "$PERP's index followed"
 holds "$WORK/risk" "map((.mark.mark_price | tonumber) / (.ref.source_price | tonumber)) | max >= 1 + 0.6 * ($F - 1)" "and its mark"
-holds "$WORK/risk" "map((.margin.cross.total_asset | tonumber) / ($QTY * (.ref.source_price | tonumber))) | max >= 1 + 0.7 * ($F - 1)" \
+holds "$WORK/risk" "map((.margin.cross.total_asset | tonumber) / ($QTY * $HAIRCUT * (.ref.source_price | tonumber))) | max >= 1 + 0.7 * ($F - 1)" \
   "the margin account's BTC valued with the event"
 eventually 20 "the event is DONE" done_event
 check_event() {
@@ -221,7 +226,7 @@ fi
 holds "$WORK/plain" "all((.mark.index_price | tonumber) / (.ref.source_price | tonumber) - 1 | fabs < 0.003)" "$PERP's index stays on the reference market"
 # margin-service reads the ticker and the factor one after the other: a
 # push between the two may value one poll a step off.
-holds "$WORK/plain" "map((.margin.cross.total_asset | tonumber) / ($QTY * (.ref.source_price | tonumber)) - 1 | fabs) |
+holds "$WORK/plain" "map((.margin.cross.total_asset | tonumber) / ($QTY * $HAIRCUT * (.ref.source_price | tonumber)) - 1 | fabs) |
   (map(select(. < 0.003)) | length) >= 0.9 * length and all(. < 0.01)" "the margin account stays valued at the reference market's price"
 eventually 20 "the event is DONE" done_event
 check_event "(.end_platform_price | tonumber) / (.end_reference_price | tonumber) - 1 | fabs < 0.0005" "back at the reference price"
