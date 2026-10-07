@@ -8,7 +8,8 @@
 -- like the lines, the rows are append-only. A side table rather than a
 -- column on journal_lines: filling a column would rewrite every line
 -- (measured at about 5 minutes for the test server's 3.5 million, with the
--- append-only trigger off meanwhile); this fills in about 30 s.
+-- append-only trigger off meanwhile); this fills in about 30 s (16 s to
+-- copy, 14 s for the key, measured on those 3.5 million lines).
 
 -- +goose Up
 -- No line is posted while the lines before are copied.

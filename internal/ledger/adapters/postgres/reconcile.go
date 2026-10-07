@@ -50,6 +50,13 @@ const (
 	// rows against margin-service's loans) is margin-service's, which
 	// keeps the loans.
 	CheckMarginInterestConserved = "MARGIN_INTEREST_CONSERVED"
+	// Every journal line is listed in journal_line_types under its account
+	// (B141, B145): a line missing there is missing from the users' ledger
+	// filtered by type. Its rows come only from journal_lines' trigger, in
+	// the line's own transaction, with the journal's type; the counts of
+	// the two tables, read in one snapshot, also catch a row listed twice
+	// or without a line.
+	CheckLineTypesListed = "LINE_TYPES_LISTED"
 )
 
 // Mismatch is one finding of a check.
@@ -145,6 +152,15 @@ var checks = []struct {
 			COALESCE(c.income, 0), COALESCE(i.available, 0))
 		FROM charged c FULL JOIN income i ON i.asset = c.asset
 		WHERE COALESCE(c.income, 0) <> COALESCE(c.accrued, 0) OR COALESCE(c.income, 0) <> COALESCE(i.available, 0)
+		LIMIT 100`},
+	{CheckLineTypesListed, `WITH missing AS (
+			SELECT l.id::text AS key, format('the line of account %s is not in journal_line_types', l.account_id) AS detail
+			FROM journal_lines l LEFT JOIN journal_line_types t ON t.line_id = l.id AND t.account_id = l.account_id
+			WHERE t.line_id IS NULL LIMIT 100),
+		counts AS (SELECT (SELECT count(*) FROM journal_lines) AS lines, (SELECT count(*) FROM journal_line_types) AS listed)
+		SELECT key, detail FROM missing
+		UNION ALL
+		SELECT 'counts', format('journal_lines %s, journal_line_types %s', lines, listed) FROM counts WHERE lines <> listed
 		LIMIT 100`},
 }
 

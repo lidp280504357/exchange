@@ -365,6 +365,35 @@ func TestEntriesAcrossAccounts(t *testing.T) {
 	}
 }
 
+// TestLineTypesReconciled: the reconciliation finds a journal line missing
+// from journal_line_types (B145), as a line posted with its trigger off
+// would be; a consistent ledger has none.
+func TestLineTypesReconciled(t *testing.T) {
+	svc, store, db := setup(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	if err := svc.OnUserRegistered(ctx, uuid.NewString(), user, "SG"); err != nil {
+		t.Fatal(err)
+	}
+	if n := mismatches(t, store)[postgres.CheckLineTypesListed]; n != 0 {
+		t.Fatalf("a consistent ledger: %d mismatches", n)
+	}
+	// The test's own schema: no other test posts here meanwhile.
+	if _, err := db.Exec(ctx, `ALTER TABLE journal_lines DISABLE TRIGGER journal_lines_type`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Freeze(ctx, "unlisted", domain.EntryOrderFreeze, user, domain.AccountSpot, "USDT", d("1"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `ALTER TABLE journal_lines ENABLE TRIGGER journal_lines_type`); err != nil {
+		t.Fatal(err)
+	}
+	// The freeze's two lines, and the counts apart.
+	if n := mismatches(t, store)[postgres.CheckLineTypesListed]; n != 3 {
+		t.Fatalf("two lines missing from journal_line_types: %d mismatches", n)
+	}
+}
+
 func setupWith(t *testing.T, base *application.Service, e eligibility) *application.Service {
 	t.Helper()
 	return &application.Service{

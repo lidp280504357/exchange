@@ -45,8 +45,9 @@
 //     carry them (the contract backend's part of G1c, instruments
 //     runbook); a listed contract keeps its whole entry (operators may
 //     have changed it in the console) but its funding interval, interest
-//     and cap, which follow Binance's fundingInfo as above while it lists
-//     the contract (one it no longer lists keeps them): a contract
+//     and cap, which follow Binance's fundingInfo as above while it names
+//     the contract (one it no longer names keeps them; one it names with a
+//     rule the instruments cannot take gets the default): a contract
 //     takes Binance's funding rate only for periods that end when
 //     Binance's do (market-data runbook; Binance moved 23 of the coins'
 //     USDⓈ-M perpetuals to 4 hours). The console's changes still win at
@@ -203,10 +204,11 @@ func fundingInfo(url string) []json.RawMessage {
 }
 
 // fundingRules are the funding rules among a market's fundingInfo
-// entries, by symbol. One the instruments cannot take (an interval other
-// than 1, 4 or 8 hours, a cap past 5%) is left out, logged: its contract
-// funds by the default rule and does not take Binance's rate.
-func fundingRules(entries []json.RawMessage) map[string]fundingRule {
+// entries, by symbol, and every symbol the entries name. One the
+// instruments cannot take (an interval other than 1, 4 or 8 hours, a cap
+// past 5%) has no rule, logged: its contract funds by the default rule and
+// does not take Binance's rate.
+func fundingRules(entries []json.RawMessage, seen map[string]bool) map[string]fundingRule {
 	out := map[string]fundingRule{}
 	for _, e := range entries {
 		var f struct {
@@ -218,6 +220,7 @@ func fundingRules(entries []json.RawMessage) map[string]fundingRule {
 		if err := json.Unmarshal(e, &f); err != nil {
 			log.Fatalf("funding info %s: %v", symbolOf(e), err)
 		}
+		seen[f.Symbol] = true
 		limit, err1 := decimal.NewFromString(f.Cap)
 		floor, err2 := decimal.NewFromString(f.Floor)
 		if err1 != nil || err2 != nil {
@@ -395,8 +398,9 @@ func main() {
 	}
 	linear, inverse := perpetuals(in.Linear), perpetuals(in.Inverse)
 	linearTiers, inverseTiers := brackets(in.LinearBrackets), brackets(in.InverseBrackets)
-	funding := fundingRules(in.LinearFunding)
-	maps.Copy(funding, fundingRules(in.InverseFunding))
+	named := map[string]bool{}
+	funding := fundingRules(in.LinearFunding, named)
+	maps.Copy(funding, fundingRules(in.InverseFunding, named))
 	fundingOf := func(symbol string) fundingRule {
 		if f, ok := funding[symbol]; ok {
 			return f
@@ -405,23 +409,26 @@ func main() {
 	}
 
 	// A listed contract's funding follows Binance's (the rules above),
-	// while Binance lists it: one its fundingInfo does not (gone from
-	// Binance, or a snapshot from before funding was read) keeps what the
-	// file has, not the default (review B142).
+	// while Binance lists it: one its fundingInfo does not name (gone from
+	// Binance) keeps what the file has, not the default (review B142); one
+	// it names with a rule the instruments cannot take funds by the
+	// default, as a new one does (review B145). A snapshot from before
+	// funding was read keeps every listed contract's.
+	if len(in.LinearFunding)+len(in.InverseFunding) == 0 {
+		log.Printf("%s has no fundingInfo: the listed contracts' funding kept", *snap)
+	}
 	contracts := slices.Clone(doc.Contracts)
 	refreshed := 0
 	for _, c := range contracts {
 		ref, _ := c["reference_symbol"].(string)
-		if ref == "" {
+		if ref == "" || len(named) == 0 {
 			continue
 		}
-		f, ok := funding[ref]
-		if !ok {
-			if len(in.LinearFunding)+len(in.InverseFunding) > 0 {
-				log.Printf("%-18s Binance's fundingInfo has no %s: its funding kept", c["symbol"], ref)
-			}
+		if !named[ref] {
+			log.Printf("%-18s Binance's fundingInfo has no %s: its funding kept", c["symbol"], ref)
 			continue
 		}
+		f := fundingOf(ref)
 		hours, interest, limit := float64(f.Hours), f.interest().String(), f.Cap.String()
 		if c["funding_interval_hours"] == hours && c["interest_rate"] == interest && c["funding_cap"] == limit {
 			continue
