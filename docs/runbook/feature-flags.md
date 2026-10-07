@@ -39,7 +39,7 @@
 | `product.usdt_m` | U 本位合约这条产品线：关闭后两站不再显示，只放行只减仓平仓与撤单（新建条件单也拒），挂单与条件单撤销、每 5 秒兜底，拒绝向 USDT 合约账户划入；HOUSE 与做市账户照常报价（所有成交都对它们，持仓才能平、强平才有对手方），仓位、资金费、强平照常。默认打开，同上 | K |
 | `product.coin_m` | 币本位合约这条产品线：同 `product.usdt_m`，划入拒绝的是 BTC、ETH、ASTRA 的合约账户。默认打开，同上；与资格开关 `derivatives.coin_m`（按用户、地区）叠加：产品线关则全部不可交易 | K |
 
-产品线开关的「关闭时间」（`GET /v1/platform/products` 的 `closed_at`、后台卡片的关闭时间）取开关的 `updated_at`：关着时再 `exchangectl flags set`（改描述或规则）会把它挪后，两个服务每 5 秒兜底撤单的窗口（关闭前 10 秒起）随之挪后、只会变窄（审查 R44）。服务之间的两个内部接口（计数与关闭时撤单）的契约在 `api/internal/products.yaml`。
+产品线开关的「关闭时间」（`GET /v1/platform/products` 的 `closed_at`、后台卡片的关闭时间）取开关的 `updated_at`：关着时再 `exchangectl flags set`（改描述或规则）会把它挪后，两个服务每 5 秒兜底撤单的窗口（关闭前 30 秒起）随之挪后、只会变窄（审查 R44）。服务之间的两个内部接口（计数与关闭时撤单）的契约在 `api/internal/products.yaml`。
 
 ## 规则维度
 
