@@ -505,6 +505,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 杠杆交易 `margin` | 开关 `margin.enabled`、`margin.liquidation`、`margin.auto_borrow` | 关；或开着且强平开着，杠杆与自动借款都按用户或地区规则开放（对所有人全局打开即未达标，测试服现在如此，协调会话 2026-10-06 07:40 ③；杠杆设计 §8，E5） | 功能开关 |
 | 合约保险基金 `insurance` | 账本 `INSURANCE_FUND`（各资产）与交易中的合约 | 每个 TRADING 合约的结算币（U 本位为 USDT，币本位为该币）保险基金余额大于 0（币本位设计 2026-10-06 §2.7，协调会话 20:45，G5） | 合约与保险基金 |
 | 币本位合约 `coin_m` | 开关 `derivatives.coin_m` | 关；或按用户或地区规则开放（对所有人全局打开即未达标，测试服现在如此） | 功能开关 |
+| App 下载 `app_downloads` | 平台设置 → App 下载（instrument-service 的 `platform_apps`） | 仅供参考：显示两站对 Android、iOS 各提供什么（外部链接、上传的安装包或不提供），都不提供也算达标；读不到时未知（App 下载设计 2026-10-07 §5，H4） | App 下载 |
 
 ### 审计
 

@@ -3,6 +3,16 @@
 export const appsZh = {
   admin: {
     nav: { appDownloads: "App 下载" },
+    launch: {
+      items: {
+        app_downloads: {
+          name: "App 下载",
+          source: "平台设置 → App 下载（instrument-service 的 platform_apps）",
+          required: "仅供参考：配了哪个平台两站就提供哪个，都不配也不算未就绪",
+        },
+      },
+      appNone: "不提供",
+    },
     apps: {
       help: "两站下载页（/download）显示的 Android 与 iOS 安装方式：每个平台可关闭、给外部链接，或上传安装包由本站提供下载；改动 1 分钟内在两站生效。",
       otaHint: "iOS 上传的 .ipa 走 OTA 安装（itms-services），只适用于企业签名或 Ad Hoc 签名的包；在 App Store 或 TestFlight 上架的用「外部链接」。",
@@ -71,6 +81,16 @@ export const appsZh = {
 export const appsEn = {
   admin: {
     nav: { appDownloads: "App downloads" },
+    launch: {
+      items: {
+        app_downloads: {
+          name: "App downloads",
+          source: "Platform → App downloads (instrument-service's platform_apps)",
+          required: "For information: the sites offer the platforms set up; offering none is no gap",
+        },
+      },
+      appNone: "not offered",
+    },
     apps: {
       help: "How the download page of both sites (/download) offers the Android and iOS apps: each platform off, a link elsewhere, or an app uploaded here and served by the sites; a change shows on both sites within a minute.",
       otaHint: "An uploaded .ipa installs over the air (itms-services), for enterprise or Ad Hoc signed apps only; an app on the App Store or TestFlight takes a link.",

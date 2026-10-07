@@ -4838,10 +4838,13 @@ export interface components {
              *     fund of the settlement asset of every contract in TRADING holds
              *     something (value: balances by asset, contracts by asset, short:
              *     the assets without); coin_m: derivatives.coin_m off, or on by
-             *     rules, never for everyone (value: flag, enabled, rules).
+             *     rules, never for everyone (value: flag, enabled, rules);
+             *     app_downloads (App download design 2026-10-07 §5, H4): for
+             *     information, OK whatever is offered (value: android and ios,
+             *     each LINK, FILE or null for nothing offered).
              * @enum {string}
              */
-            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m";
+            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m" | "app_downloads";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */

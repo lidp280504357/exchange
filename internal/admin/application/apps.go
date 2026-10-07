@@ -78,6 +78,10 @@ type appState struct {
 	Version  int64           `json:"version"`
 	Mobile   *appFileJSON    `json:"mobileconfig"`
 	Files    []appFileJSON   `json:"files"`
+	// Public is what the sites are offered, nil for nothing.
+	Public *struct {
+		Mode string `json:"mode"`
+	} `json:"public"`
 }
 
 func validAppPlatform(platform string) error {

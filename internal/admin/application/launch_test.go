@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/admin/ports"
@@ -116,6 +117,8 @@ func TestLaunchChecklist(t *testing.T) {
 	pl := newFakePlatform()
 	ledger := &launchLedger{fakeLedger: h.ledger, house: map[string]string{"USDT": "2000000", "BTC": "0"}}
 	h.svc.Flags, h.svc.Wallet, h.svc.Catalog, h.svc.Content, h.svc.Probe, h.svc.Platform, h.svc.Ledger = flags, wallet, catalog, content, probe, pl, ledger
+	apps := newFakeApps()
+	h.svc.Apps, h.svc.AppFiles, h.svc.AppUploads = apps, newFakeAppFiles(func() time.Time { return h.now }), newMemUploads()
 
 	// The test server: the test setup.
 	c, err := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip")
@@ -126,6 +129,7 @@ func TestLaunchChecklist(t *testing.T) {
 		"welcome_credits": LaunchFail, "test_mode": LaunchFail, "registration": LaunchOK, "admin_totp": LaunchFail, "two_person": LaunchOK,
 		"test_assets": LaunchFail, "custodian": LaunchPending, "withdraw": LaunchOK, "brand": LaunchFail, "coin_profile": LaunchFail,
 		"legal": LaunchPending, "third_party": LaunchFail, "admins": LaunchFail, "domain": LaunchOK, "house": LaunchFail,
+		"app_downloads": LaunchOK,
 	}
 	got := launchStatuses(c)
 	for key, status := range want {
@@ -139,6 +143,16 @@ func TestLaunchChecklist(t *testing.T) {
 	if v := c.Items[slicesIndex(c, "admins")].Value; v["active_admins"] != 1 {
 		t.Fatalf("the administrators %+v", v)
 	}
+	// The apps to download (H4): for information, nothing offered is OK;
+	// unreadable is UNKNOWN.
+	if v := c.Items[slicesIndex(c, "app_downloads")].Value; len(v) != 2 || v["android"] != nil || v["ios"] != nil {
+		t.Fatalf("the apps %+v", v)
+	}
+	apps.down = true
+	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["app_downloads"] != LaunchUnknown {
+		t.Fatalf("the apps unreadable %v", launchStatuses(c))
+	}
+	apps.down = false
 	// HOUSE holds no BTC and no ETH (no balance at all); the test asset of
 	// no pair is not asked for.
 	if v := c.Items[slicesIndex(c, "house")].Value["backed"].(map[string]string); len(v) != 3 || v["BTC"] != "0" || v["ETH"] != "0" || v["USDT"] != "2000000" {

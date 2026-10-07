@@ -25,7 +25,7 @@ const FIX: Record<Key, string | null> = {
   welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
   third_party: null, admins: "/admins", domain: "/platform", house: "/house", margin: "/risk", insurance: "/derivatives",
-  coin_m: "/risk",
+  coin_m: "/risk", app_downloads: "/platform/apps",
 };
 
 export const launchKey = ["admin", "launch-checklist"];
@@ -235,6 +235,20 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
               ))
             : t("admin.launch.noOpenContracts")}
           {short.length > 0 && <span className="text-danger-strong"> · {t("admin.launch.insuranceShort", { assets: short.join(", ") })}</span>}
+        </>
+      );
+      break;
+    }
+    case "app_downloads": {
+      const offered = (p: "android" | "ios") => {
+        const m = v[p] as string | null | undefined;
+        return m ? t(`admin.apps.modes.${m}`) : t("admin.launch.appNone");
+      };
+      body = (
+        <>
+          {t("admin.apps.platform.ANDROID")}：{offered("android")}
+          <span className="text-fg-3"> · </span>
+          {t("admin.apps.platform.IOS")}：{offered("ios")}
         </>
       );
       break;

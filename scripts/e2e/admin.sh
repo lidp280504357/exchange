@@ -1943,13 +1943,18 @@ check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without 
 echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
 as AUDITOR GET /admin/v1/launch-checklist ""
 expect 200 - "every administrator reads the launch checklist"
-# Eighteen with the contracts' (G5), sixteen with margin trading's (E5);
-# fewer from an admin-service before them.
-check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 18
+# Nineteen with the apps to download (H4), eighteen with the contracts'
+# (G5), sixteen with margin trading's (E5); fewer from an admin-service
+# before them.
+check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 19
+    or ((.items | length) == 18 and all(.items[]; .key != "app_downloads"))
     or ((.items | length) == 16 and all(.items[]; .key != "insurance" and .key != "coin_m"))
     or ((.items | length) == 15 and all(.items[]; .key != "margin")))
   and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
-  "eighteen items, each with its state"
+  "nineteen items, each with its state"
+check '[.items[] | select(.key == "app_downloads")] | all(.status == "UNKNOWN" or (.status == "OK"
+  and all(.value.android, .value.ios; . == null or IN("LINK", "FILE"))))' \
+  "the App downloads item says what each platform offers, OK whatever it is"
 # An item whose source did not answer is UNKNOWN, its value without the
 # fields: not a failure of the item's logic (review ER ④).
 check '[.items[] | select(.key == "coin_m")] | all(.status == "UNKNOWN" or (.value.flag == "derivatives.coin_m" and (.value.enabled | type) == "boolean"

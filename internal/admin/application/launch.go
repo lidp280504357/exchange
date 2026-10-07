@@ -31,11 +31,12 @@ const (
 
 // The launch items in the order the design lists them, then HOUSE's
 // (review ㉚: design §3 row E), margin trading's (margin design
-// 2026-10-06 §8, E5) and the contracts' (coin-margined design 2026-10-06
-// §2.7, G5).
+// 2026-10-06 §8, E5), the contracts' (coin-margined design 2026-10-06
+// §2.7, G5) and the apps to download (App download design 2026-10-07 §5,
+// H4: for information, OK whatever is offered).
 var launchKeys = []string{
 	"welcome_credits", "test_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
-	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin", "insurance", "coin_m",
+	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin", "insurance", "coin_m", "app_downloads",
 }
 
 // launchDefaultName is the name the platform is seeded with (migration
@@ -145,6 +146,7 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 		put("coin_m")(launchCoinM(flagged))
 	}
 	put("insurance")(s.launchInsurance(ctx))
+	put("app_downloads")(s.launchApps(ctx))
 
 	out := LaunchChecklist{Ready: true, CheckedAt: s.Now()}
 	for _, key := range launchKeys {
@@ -153,6 +155,30 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 		out.Items = append(out.Items, it)
 	}
 	return out, nil
+}
+
+// launchApps: what the download page offers of each platform (the
+// public answer's mode, LINK or FILE, else null), for information: a
+// launch may offer neither, so it is OK whatever it says; UNKNOWN when the
+// apps cannot be read.
+func (s *Service) launchApps(ctx context.Context) (string, map[string]any) {
+	if s.Apps == nil {
+		return LaunchPending, nil
+	}
+	states, err := s.appStates(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "launch checklist: the apps are unknown", "error", err)
+		return LaunchUnknown, nil
+	}
+	value := map[string]any{}
+	for _, a := range states {
+		var offered any
+		if a.Public != nil {
+			offered = a.Public.Mode
+		}
+		value[strings.ToLower(a.Platform)] = offered
+	}
+	return LaunchOK, value
 }
 
 // launchWelcome: a new account gets nothing (every amount 0, or none).
