@@ -334,6 +334,13 @@ export const APPS_OFFERED = {
 };
 
 /**
+ * APPS_HIDDEN is an answer of GET /v1/platform/apps with the console's
+ * download-entry switch off and no app offered (design 2026-10-07, App
+ * download page, H5/H6): the sites show no entry, the page still opens.
+ */
+export const APPS_HIDDEN = { android: null, ios: null, entry: { visible: false } };
+
+/**
  * withApps runs fn while the page's GET /v1/platform/apps answers apps
  * (the download pages' states without changing the server's settings),
  * then lets the network be again.

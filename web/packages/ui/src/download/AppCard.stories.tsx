@@ -158,3 +158,21 @@ export const TopBarPanel: StoryObj<typeof AppQrPanel> = {
     </div>
   ),
 };
+
+/** The panel while the console shows the entry but no app is offered yet (H6). */
+export const TopBarPanelNone: StoryObj<typeof AppQrPanel> = {
+  render: () => (
+    <div className="inline-block rounded-2 border border-line-1 bg-bg-1 p-4 shadow-pop">
+      <AppQrPanel
+        title="扫码下载 App"
+        codes={[]}
+        empty={<p className="w-56 py-2 text-sm text-fg-3">暂未提供 App</p>}
+        footer={
+          <a href="/download" className="flex items-center justify-center rounded-2 bg-bg-2 py-2 text-sm text-fg-1">
+            更多下载方式
+          </a>
+        }
+      />
+    </div>
+  ),
+};

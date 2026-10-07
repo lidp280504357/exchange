@@ -26,10 +26,15 @@ export function usePlatformApps() {
   });
 }
 
-/** useAppsOffered is whether any app is offered: the download entries show only then. */
-export function useAppsOffered(): boolean {
-  const apps = usePlatformApps().data;
-  return Boolean(apps?.android || apps?.ios);
+/**
+ * useAppEntry is whether the sites show their download entries: the
+ * console's switch (design 2026-10-07, App download page, H5/H6), also
+ * while no app is offered (the page and the top bar's panel then say none
+ * is yet). An answer without the switch (cached from before it) and no
+ * answer yet count as on.
+ */
+export function useAppEntry(): boolean {
+  return usePlatformApps().data?.entry?.visible ?? true;
 }
 
 /** An offered app with its platform. */

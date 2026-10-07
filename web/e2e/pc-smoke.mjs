@@ -23,7 +23,7 @@
 // switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
+import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -596,21 +596,28 @@ try {
   await page.waitForSelector('header svg[data-avatar-default]', { visible: true });
   ok(`the profile: ${drawn} drawn at sign-up and the built-in avatar; renamed to ${renamed} (7 days to wait); a picture uploaded (${uploaded.side} px WebP, the top bar's 64 px) and back to the default`);
 
-  // 8c. App downloads (design 2026-10-07, App download page, batch H3): the
-  // page as the server has it (no app offered: "no app yet", and neither
-  // the top bar nor the footer offers one; offered: a card each), then with
-  // the answer of /v1/platform/apps replaced by an uploaded Android app and
-  // an App Store link: a card each with its QR code, the APK's facts and
-  // button, the store's button; the top bar's entry opens a QR code for
-  // each, and the footer leads to the page.
+  // 8c. App downloads (design 2026-10-07, App download page, batches H3 and
+  // H6): the page as the server has it (no app offered: "no app yet";
+  // offered: a card each), the top bar's entry and the footer's link as the
+  // console's switch says, also while no app is offered (the top bar's
+  // panel then says none is yet); then with the answer of /v1/platform/apps
+  // replaced by an uploaded Android app and an App Store link: a card each
+  // with its QR code, the APK's facts and button, the store's button; the
+  // top bar's entry opens a QR code for each, and the footer leads to the
+  // page; then with the switch off: no entry, the page still opens.
   const served = await page.evaluate(async () => (await fetch("/v1/platform/apps")).json());
+  const shown = served.entry?.visible ?? true;
+  const entries = async () => [Boolean(await page.$('header [data-testid="download-menu"]')), Boolean(await page.$('footer a[href="/download"]'))];
   await go("/download");
   await page.waitForSelector('[data-testid="download-page"]', { visible: true, timeout: 20000 });
-  if (!served.android && !served.ios) {
-    await waitText("暂未提供 App");
-    if (await page.$('header [data-testid="download-menu"], footer a[href="/download"]')) throw new Error("the top bar or the footer offers apps while none is");
-  } else {
-    for (const p of ["android", "ios"]) if (served[p]) await page.waitForSelector(`[data-testid="app-${p}"]`, { visible: true });
+  if (!served.android && !served.ios) await waitText("暂未提供 App");
+  else for (const p of ["android", "ios"]) if (served[p]) await page.waitForSelector(`[data-testid="app-${p}"]`, { visible: true });
+  const [menu0, footer0] = await entries();
+  if (menu0 !== shown || footer0 !== shown) throw new Error(`the console ${shown ? "shows" : "hides"} the download entries: the top bar's ${menu0}, the footer's ${footer0}`);
+  if (shown && !served.android && !served.ios) {
+    await page.hover('header [data-testid="download-menu"]');
+    await page.waitForFunction(() => document.querySelector('[data-testid="download-qrs"]')?.innerText.includes("暂未提供 App"), { timeout: 10000 });
+    await page.mouse.move(720, 700);
   }
   await withApps(page, APPS_OFFERED, async () => {
     await go("/download");
@@ -633,7 +640,14 @@ try {
     await page.mouse.move(720, 700);
     if (!(await page.$('footer a[href="/download"]'))) throw new Error("the footer does not lead to the download page");
   });
-  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet" without entries'}; with two apps, a card each (QR code, facts, button), the top bar's two QR codes and the footer's link`);
+  await withApps(page, APPS_HIDDEN, async () => {
+    await go("/download");
+    await page.waitForSelector('[data-testid="download-page"]', { visible: true, timeout: 20000 });
+    await waitText("暂未提供 App");
+    const [menu, footer] = await entries();
+    if (menu || footer) throw new Error(`the console hides the download entries, yet the top bar's ${menu} and the footer's ${footer} show`);
+  });
+  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet"'}, the entries ${shown ? "shown" : "hidden"} as the console says; with two apps, a card each (QR code, facts, button), the top bar's two QR codes and the footer's link; with the switch off no entry, the page still opens`);
 
   // 8d. Product lines (design 2026-10-07, product line switches, batch K2):
   // with the answer of /v1/platform/products replaced by spot and the

@@ -1,5 +1,5 @@
 import { LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, useSession, useSettings, type Locale, type UpDown } from "@exchange/core";
-import { useAppsOffered } from "@exchange/core/platform/apps";
+import { useAppEntry } from "@exchange/core/platform/apps";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
 import { useProfile } from "@exchange/core/user/profile";
 import { RadioGroup, Segmented, Skeleton, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
@@ -28,7 +28,7 @@ export default function Settings() {
   const hideSmall = useSettings((s) => s.hideSmallBalances);
   const set = useSettings((s) => s.set);
   const signedIn = useSession(selectSignedIn);
-  const appsOffered = useAppsOffered();
+  const appEntry = useAppEntry();
   usePageHeader({ title: t("mAccount.settings.title"), back: routes.me }, [t]);
 
   return (
@@ -90,8 +90,8 @@ export default function Settings() {
         </Group>
       </Section>
 
-      {appsOffered && (
-        // The apps to download, while any is offered (design 2026-10-07, App download page §4).
+      {appEntry && (
+        // The apps to download, as the console's switch says (design 2026-10-07, App download page §4, H6).
         <Group index={3}>
           <NavRow icon={<Download size={18} />} label={t("nav.downloadApp")} to={routes.download} />
         </Group>

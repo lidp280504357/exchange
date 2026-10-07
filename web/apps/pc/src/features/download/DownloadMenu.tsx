@@ -1,5 +1,5 @@
 import { routes } from "@exchange/core";
-import { useAppsOffered } from "@exchange/core/platform/apps";
+import { useAppEntry } from "@exchange/core/platform/apps";
 import { cn } from "@exchange/ui";
 import { Download } from "lucide-react";
 import { Suspense, useState } from "react";
@@ -11,14 +11,15 @@ import { DownloadQrs } from "./lazyQrs";
  * DownloadMenu is the top bar's download entry (design 2026-10-07, App
  * download page §4, as Binance's): a button to the download page whose
  * panel, on hover or keyboard focus (CSS only, as the other menus), shows
- * a QR code for each app. Hidden while no app is offered. The panel's
- * chunk loads when the pointer or the focus first reaches the button.
+ * a QR code for each app (or that none is offered yet). Shown as the
+ * console's switch says (H6). The panel's chunk loads when the pointer or
+ * the focus first reaches the button.
  */
 export function DownloadMenu() {
   const { t } = useTranslation();
-  const offered = useAppsOffered();
+  const shown = useAppEntry();
   const [armed, setArmed] = useState(false);
-  if (!offered) return null;
+  if (!shown) return null;
   const arm = () => {
     if (armed) return;
     setArmed(true);

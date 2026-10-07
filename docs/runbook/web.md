@@ -194,7 +194,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 
 ## App 下载（App 下载页设计 2026-10-07 §4，批次 H3）
 
-两个平台的 App 由后台「系统 → App 下载」设置（外部链接或上传的安装包，见 [admin.md](admin.md)），站点读公开接口 `GET /v1/platform/apps`（某平台不提供时为 null；core `@exchange/core/platform/apps` 的 `usePlatformApps`，每分钟重读）。两个平台都不提供时，下载页显示「暂未提供 App」，下面的入口都不出现（`useAppsOffered`）。
+两个平台的 App 由后台「系统 → App 下载」设置（外部链接或上传的安装包，见 [admin.md](admin.md)），站点读公开接口 `GET /v1/platform/apps`（某平台不提供时为 null；core `@exchange/core/platform/apps` 的 `usePlatformApps`，每分钟重读）。两个平台都不提供时，下载页显示「暂未提供 App」。下面的入口只看后台「显示下载入口」开关（回答里的 `entry.visible`，H5；core `useAppEntry`，回答没有它或还没读到时按开）：开着时两个平台都没配置也照常显示，PC 顶栏的二维码面板写「暂未提供 App」；关着时入口都不出现，`/download` 直接访问仍能打开（H6）。
 
 | 位置 | PC 站 | 手机站 |
 |---|---|---|
@@ -205,7 +205,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - 手机站按 UA 判断本机平台（core `devicePlatform`：iPhone/iPad/iPod，或自称 Macintosh 但有触屏的 iPad；Android）。
 - 体积：二维码库（qrcode.react）、顶栏的二维码面板（`features/download/lazyQrs.ts`，指针或焦点第一次到下载图标时开始加载，连同文案）与下载页各自成块，不在首屏；顶栏只多一个读 `/v1/platform/apps` 的查询与图标（PC 入口 172.6 → 174.0 KB，手机 150.9 → 151.0 KB）。
 - 文案在两站的 `src/i18n/download.ts`（`pcDownload`/`mDownload`）；顶栏、页脚与「我的」用 core 的 `nav.download`、`nav.downloadApp`。
-- 冒烟（两站第 8c 步）：先按测试服当时的设置检查（都不提供时：「暂未提供 App」，PC 顶栏与页脚、手机「我的」都没有入口；有提供时：对应的卡片），再用 `lib.mjs` 的 `withApps` 把这一页的 `/v1/platform/apps` 换成一个上传的 Android 安装包加一个 App Store 链接（`APPS_OFFERED`，不改测试服的设置）：PC 两张卡片各有二维码、APK 的大小与系统要求、按钮与商店链接，顶栏下载面板两个二维码，页脚有链接；手机（冒烟用 iPhone 的 UA）iOS 在前且标「本机」、APK 卡片有安装说明，「我的」出现「下载 App」。
+- 冒烟（两站第 8c 步）：先按测试服当时的设置检查（都不提供时「暂未提供 App」，有提供时对应的卡片；PC 顶栏与页脚、手机「我的」的入口按开关有无，开着而都不提供时 PC 顶栏面板写「暂未提供 App」），再用 `lib.mjs` 的 `withApps` 把这一页的 `/v1/platform/apps` 换成一个上传的 Android 安装包加一个 App Store 链接（`APPS_OFFERED`，不改测试服的设置）：PC 两张卡片各有二维码、APK 的大小与系统要求、按钮与商店链接，顶栏下载面板两个二维码，页脚有链接；手机（冒烟用 iPhone 的 UA）iOS 在前且标「本机」、APK 卡片有安装说明，「我的」出现「下载 App」；最后换成开关关闭（`APPS_HIDDEN`）：两站都没有入口，`/download` 仍能打开（H6）。
 
 ## 产品线开关（产品线开关设计 2026-10-07 §1 #2、#7，批次 K2）
 

@@ -1,6 +1,6 @@
 import { LOCALE_NAMES, LOCALES, routes, setLocale, switchSite, useSettings } from "@exchange/core";
 import { LEGAL_SLUGS, type LegalSlug } from "@exchange/core/content/index";
-import { useAppsOffered } from "@exchange/core/platform/apps";
+import { useAppEntry } from "@exchange/core/platform/apps";
 import { useOpenProducts } from "@exchange/core/platform/products";
 import { useBrandText, useBranding } from "@exchange/core/platform/index";
 import { ChartCredit } from "@exchange/ui";
@@ -31,7 +31,7 @@ export function Footer() {
   const p = useBranding();
   const copyright = useBrandText((x) => x.footer.copyright);
   const compliance = useBrandText((x) => x.footer.compliance);
-  const offered = useAppsOffered();
+  const appEntry = useAppEntry();
   // A closed product line leaves the products column (design 2026-10-07, product line switches §1 #2).
   const open = useOpenProducts();
   return (
@@ -74,8 +74,8 @@ export function Footer() {
           ))}
         </Column>
         <Column title={t("footer.about")}>
-          {/* The apps to download, while any is offered (design 2026-10-07, App download page §4). */}
-          {offered && <Link to={routes.download}>{t("nav.downloadApp")}</Link>}
+          {/* The apps to download, as the console's switch says (design 2026-10-07, App download page §4, H6). */}
+          {appEntry && <Link to={routes.download}>{t("nav.downloadApp")}</Link>}
           <button type="button" className="text-left" onClick={() => switchSite("m")}>
             {t("footer.toMobile")}
           </button>
