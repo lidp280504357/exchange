@@ -126,6 +126,11 @@ export function FuturesMetric({
   };
 
   const summary = latest ? `${labels.title} ${show(lead, latest.raw[lead])}` : labels.title;
+  // A point in words for screen readers, as the arrow keys reach it.
+  const describe = (i: number) => {
+    const p = series[i]!;
+    return `${pointTime(p.t, timeOf, locale, timeZone)}: ${values.map((v) => `${labels.values[v.key] ?? v.key} ${show(v.key, p.raw[v.key])}`).join(", ")}`;
+  };
   const tableRows = useMemo(
     () =>
       [...series].reverse().map((p) => ({
@@ -161,6 +166,7 @@ export function FuturesMetric({
             height={height}
             formatX={(t) => axisTime(t, timeOf, locale, timeZone)}
             tooltip={tooltip}
+            describe={describe}
             aria-label={summary}
             stale={stale}
           />

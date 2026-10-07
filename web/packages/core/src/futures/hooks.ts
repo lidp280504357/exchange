@@ -1,21 +1,27 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { coinProfile } from "../coins";
 import { buildRows, type MarketRow } from "../markets/list";
 import type { MarketRows } from "../markets/hooks";
-import { useContracts, usePairs } from "../trading/pairs";
+import { qk } from "../query/keys";
+import { fetchContracts, usePairs } from "../trading/pairs";
 import { useFuturesOverview, type ContractSpec, type FuturesOverviewItem } from "./data";
 import { groupOf, overviewRows, type MarginGroup, type OverviewOf, type OverviewRow } from "./list";
 
 // Hooks over ./list for the pages: the market rows with the contracts the
 // futures terminal opens (both margin types), and the overview's rows.
 
+/** How often the contracts are read again while a list shows them: contracts open in batches. */
+export const CONTRACTS_EVERY = 60_000;
+
 /**
  * useOpenContracts lists the contracts the futures terminal opens: its own
- * list (useContracts: both margin types, none still PREPARE), so a list
- * never links to a contract the terminal does not know.
+ * list (useContracts' query: both margin types, none still PREPARE), so a
+ * list never links to a contract the terminal does not know; read again
+ * every minute while a list shows them.
  */
 export function useOpenContracts(): { contracts: ContractSpec[]; loading: boolean; error: unknown; refetch: () => void } {
-  const terminal = useContracts();
+  const terminal = useQuery({ queryKey: qk.contracts, queryFn: fetchContracts, staleTime: 60_000, refetchInterval: CONTRACTS_EVERY });
   const contracts = useMemo(() => terminal.data?.contracts ?? [], [terminal.data]);
   const { refetch: refetchTerminal } = terminal;
   const refetch = useCallback(() => void refetchTerminal(), [refetchTerminal]);
@@ -29,7 +35,9 @@ export type FuturesMarketRows = MarketRows & {
 
 /**
  * useFuturesMarketRows is the market list's rows (useMarketRows) with
- * each contract's group (USDⓈ-M or COIN-M).
+ * each contract's group (USDⓈ-M or COIN-M). It loads until both the pairs
+ * and the contracts are in: a table that got its contracts later would
+ * switch from scrolling with the page to its own box (200 rows) mid-way.
  */
 export function useFuturesMarketRows(): FuturesMarketRows {
   const pairs = usePairs();
@@ -45,7 +53,7 @@ export function useFuturesMarketRows(): FuturesMarketRows {
   const group = useCallback((symbol: string) => groups.get(symbol) ?? "usdt", [groups]);
   return {
     rows,
-    loading: pairs.isPending,
+    loading: pairs.isPending || open.loading,
     error: pairs.error ?? (rows.length === 0 ? open.error : null),
     refetch,
     groupOf: group,

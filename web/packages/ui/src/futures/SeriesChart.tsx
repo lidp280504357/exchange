@@ -25,6 +25,8 @@ export type SeriesChartProps = {
   tooltip: (index: number) => ReactNode;
   /** What the chart shows, for screen readers (the table view has the values). */
   "aria-label": string;
+  /** Point i in words, announced while the arrow keys move along the points. */
+  describe?: (index: number) => string;
   /** The points are another period's, shown until the right ones arrive: dimmed. */
   stale?: boolean;
   className?: string;
@@ -36,7 +38,7 @@ const TOP = 6;
 /** Width of a character of a 10 px tick label (tabular figures), px. */
 const CHAR = 6.2;
 
-export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip, "aria-label": label, stale, className }: SeriesChartProps) {
+export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip, "aria-label": label, describe, stale, className }: SeriesChartProps) {
   const { locale } = useFormatContext();
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -174,63 +176,72 @@ export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip
   const lineValue = shown !== null && form.kind === "line" ? points[shown]?.v[form.key] : undefined;
   const ax = shown !== null ? x(shown) : 0;
 
+  // An image's content is hidden from screen readers: the point the arrow
+  // keys reach is read out from a live region beside it.
+  const spoken = keyboard.current && shown !== null && describe ? describe(shown) : "";
+
   return (
-    <div
-      ref={box}
-      role="img"
-      aria-label={label}
-      tabIndex={n > 0 ? 0 : -1}
-      onKeyDown={onKey}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      // A drag across the chart reads its points; it must not also switch
-      // the tabs of a swipeable panel around it (the phone's terminal).
-      onTouchStart={(e) => e.stopPropagation()}
-      onTouchEnd={(e) => e.stopPropagation()}
-      className={cn(
-        "relative w-full select-none rounded-1 outline-none transition-opacity duration-[var(--t-base)] focus-visible:ring-1 focus-visible:ring-brand",
-        stale && "opacity-50",
-        className,
-      )}
-      style={{ height }}
-    >
-      {width > 0 && (
-        <svg width={width} height={height} aria-hidden onPointerMove={pick} onPointerDown={pick} onPointerLeave={leave} style={{ touchAction: "pan-y" }}>
-          {shown !== null && form.kind !== "line" && <rect x={step * shown} y={TOP} width={step} height={plotH} className="fill-bg-2" />}
-          {scale.ticks.map((tick, i) => (
-            <g key={tick}>
-              <line x1={0} x2={plotW} y1={y(tick)} y2={y(tick)} shapeRendering="crispEdges" className={tick === 0 && scale.min < 0 ? "stroke-line-2" : "stroke-line-1"} />
-              <text x={plotW + 6} y={y(tick) + 3.5} className="fill-fg-3 text-[10px] tabular-nums">
-                {tickLabels[i]}
-              </text>
-            </g>
-          ))}
-          {marks}
-          {shown !== null && form.kind === "line" && (
-            <g>
-              <line x1={ax} x2={ax} y1={TOP} y2={TOP + plotH} shapeRendering="crispEdges" className="stroke-fg-3" />
-              {lineValue !== undefined && Number.isFinite(lineValue) && <circle cx={ax} cy={y(lineValue)} r={4} strokeWidth={2} className="fill-chart-1 stroke-bg-1" />}
-            </g>
-          )}
-          {labelIndexes(n, plotW, 84).map((i) => {
-            const px = x(i);
-            const anchor = px < 28 ? "start" : px > plotW - 28 ? "end" : "middle";
-            return (
-              <text key={points[i]!.t} x={anchor === "start" ? 0 : anchor === "end" ? plotW : px} y={height - 5} textAnchor={anchor} className="fill-fg-3 text-[10px] tabular-nums">
-                {formatX(points[i]!.t)}
-              </text>
-            );
-          })}
-        </svg>
-      )}
-      {shown !== null && (
-        <div
-          className="pointer-events-none absolute top-1 z-10 min-w-32 rounded-2 border border-line-1 bg-bg-1 px-2.5 py-2 text-xs shadow-pop"
-          style={ax > plotW / 2 ? { right: Math.max(0, width - ax + 10) } : { left: ax + 10 }}
-        >
-          {tooltip(shown)}
-        </div>
-      )}
-    </div>
+    <>
+      <div
+        ref={box}
+        role="img"
+        aria-label={label}
+        tabIndex={n > 0 ? 0 : -1}
+        onKeyDown={onKey}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        // A drag across the chart reads its points; it must not also switch
+        // the tabs of a swipeable panel around it (the phone's terminal).
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
+        className={cn(
+          "relative w-full select-none rounded-1 outline-none transition-opacity duration-[var(--t-base)] focus-visible:ring-1 focus-visible:ring-brand",
+          stale && "opacity-50",
+          className,
+        )}
+        style={{ height }}
+      >
+        {width > 0 && (
+          <svg width={width} height={height} aria-hidden onPointerMove={pick} onPointerDown={pick} onPointerLeave={leave} style={{ touchAction: "pan-y" }}>
+            {shown !== null && form.kind !== "line" && <rect x={step * shown} y={TOP} width={step} height={plotH} className="fill-bg-2" />}
+            {scale.ticks.map((tick, i) => (
+              <g key={tick}>
+                <line x1={0} x2={plotW} y1={y(tick)} y2={y(tick)} shapeRendering="crispEdges" className={tick === 0 && scale.min < 0 ? "stroke-line-2" : "stroke-line-1"} />
+                <text x={plotW + 6} y={y(tick) + 3.5} className="fill-fg-3 text-[10px] tabular-nums">
+                  {tickLabels[i]}
+                </text>
+              </g>
+            ))}
+            {marks}
+            {shown !== null && form.kind === "line" && (
+              <g>
+                <line x1={ax} x2={ax} y1={TOP} y2={TOP + plotH} shapeRendering="crispEdges" className="stroke-fg-3" />
+                {lineValue !== undefined && Number.isFinite(lineValue) && <circle cx={ax} cy={y(lineValue)} r={4} strokeWidth={2} className="fill-chart-1 stroke-bg-1" />}
+              </g>
+            )}
+            {labelIndexes(n, plotW, 84).map((i) => {
+              const px = x(i);
+              const anchor = px < 28 ? "start" : px > plotW - 28 ? "end" : "middle";
+              return (
+                <text key={points[i]!.t} x={anchor === "start" ? 0 : anchor === "end" ? plotW : px} y={height - 5} textAnchor={anchor} className="fill-fg-3 text-[10px] tabular-nums">
+                  {formatX(points[i]!.t)}
+                </text>
+              );
+            })}
+          </svg>
+        )}
+        {shown !== null && (
+          <div
+            className="pointer-events-none absolute top-1 z-10 min-w-32 rounded-2 border border-line-1 bg-bg-1 px-2.5 py-2 text-xs shadow-pop"
+            style={ax > plotW / 2 ? { right: Math.max(0, width - ax + 10) } : { left: ax + 10 }}
+          >
+            {tooltip(shown)}
+          </div>
+        )}
+      </div>
+      <p aria-live="polite" className="sr-only">
+        {spoken}
+      </p>
+    </>
   );
 }

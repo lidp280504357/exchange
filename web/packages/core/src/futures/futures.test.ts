@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TickerData } from "../ws/types";
 import { buildRows, type PairLike } from "../markets/list";
 import type { ContractSpec, FuturesDataPoint, FuturesOverviewItem, Liquidation } from "./data";
-import { hasFuturesData, isFuturesPeriod, nextRead, noFuturesData, POINT_DELAY } from "./data";
+import { FUNDING_DELAY, hasFuturesData, isDue, isFuturesPeriod, nextRead, noFuturesData, POINT_DELAY } from "./data";
 import {
   filterOverview,
   groupOf,
@@ -70,12 +70,23 @@ describe("reading again", () => {
     expect(nextRead("taker_ratio", "5m", last, at("2026-10-06T18:06:00Z"))).toBe(10.5 * 60_000);
     // Hours and days.
     expect(nextRead("basis", "1d", at("2026-10-06T00:00:00Z"), at("2026-10-06T12:00:00Z"))).toBe(12 * 3_600_000 + POINT_DELAY);
-    // Funding: the next settlement of the contract's interval.
-    expect(nextRead("funding", "5m", at("2026-10-06T16:00:00Z"), at("2026-10-06T20:00:00Z"))).toBe(4 * 3_600_000 + POINT_DELAY);
-    expect(nextRead("funding", "5m", at("2026-10-06T16:00:00Z"), at("2026-10-06T18:00:00Z"), 4)).toBe(2 * 3_600_000 + POINT_DELAY);
+    // Funding: the next settlement of the contract's interval, and the settled rate's longer wait.
+    expect(FUNDING_DELAY).toBe(POINT_DELAY + 30_000);
+    expect(nextRead("funding", "5m", at("2026-10-06T16:00:00Z"), at("2026-10-06T20:00:00Z"))).toBe(4 * 3_600_000 + FUNDING_DELAY);
+    expect(nextRead("funding", "5m", at("2026-10-06T16:00:00Z"), at("2026-10-06T18:00:00Z"), 4)).toBe(2 * 3_600_000 + FUNDING_DELAY);
+    // A latest point ahead of a slow clock waits no longer than a whole wait.
+    expect(nextRead("open_interest", "5m", at("2026-10-06T18:15:00Z"), at("2026-10-06T18:05:00Z"))).toBe(5 * 60_000 + POINT_DELAY);
     // Nothing yet.
     expect(nextRead("open_interest", "5m", undefined, 0)).toBe(5 * 60_000);
     expect(nextRead("open_interest", "5m", Number.NaN, 0)).toBe(5 * 60_000);
+  });
+
+  it("tells a tab coming back whether a point is due", () => {
+    const last = at("2026-10-06T18:05:00Z");
+    expect(isDue("open_interest", "5m", last, at("2026-10-06T18:11:00Z"))).toBe(false);
+    expect(isDue("open_interest", "5m", last, at("2026-10-06T18:11:30Z"))).toBe(true);
+    expect(isDue("taker_ratio", "5m", last, at("2026-10-06T18:11:30Z"))).toBe(false);
+    expect(isDue("open_interest", "5m", undefined, 0)).toBe(true);
   });
 });
 

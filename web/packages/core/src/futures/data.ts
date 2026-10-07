@@ -49,23 +49,37 @@ export const FUTURES_POINTS = 30;
 
 /** How long after a period ends its point is in: the service reads the reference market about 70 seconds after (G3b). */
 export const POINT_DELAY = 90_000;
+/** A settled funding rate takes longer: the service waits up to two minutes for the reference market's. */
+export const FUNDING_DELAY = POINT_DELAY + 30_000;
 
 const MINUTE = 60_000;
 const PERIOD_MS: Record<FuturesPeriod, number> = { "5m": 5 * MINUTE, "15m": 15 * MINUTE, "1h": 60 * MINUTE, "4h": 240 * MINUTE, "1d": 1440 * MINUTE };
 
+// wait is how long after the latest point the next one is in: a period
+// (two for the takers' volume, stamped with the start of the period it
+// was traded in; the funding interval for funding) and the service's delay.
+function wait(metric: FuturesMetric, period: FuturesPeriod, fundingHours: number): number {
+  if (metric === "funding") return fundingHours * 60 * MINUTE + FUNDING_DELAY;
+  return (metric === "taker_ratio" ? 2 : 1) * PERIOD_MS[period] + POINT_DELAY;
+}
+
 /**
  * nextRead is how long until a shown statistic is read again (ms): until
- * its next point is due — the latest point's time and a period (two for
- * the takers' volume, stamped with the start of the period it was traded
- * in; the funding interval for funding) and the service's delay — then
- * every minute while it is late (the service reads the coarser periods up
- * to half an hour after they end); without a point, in five minutes.
+ * its next point is due (wait), then every minute while it is late (the
+ * service reads the coarser periods up to half an hour after they end);
+ * without a point, in five minutes. A latest point ahead of this clock (a
+ * slow clock) waits no longer than a whole wait.
  */
 export function nextRead(metric: FuturesMetric, period: FuturesPeriod, latest: number | undefined, now: number, fundingHours = 8): number {
   if (latest === undefined || !Number.isFinite(latest)) return 5 * MINUTE;
-  const p = metric === "funding" ? fundingHours * 60 * MINUTE : PERIOD_MS[period];
-  const due = latest + (metric === "taker_ratio" ? 2 * p : p) + POINT_DELAY;
-  return due > now ? Math.max(MINUTE / 2, due - now) : MINUTE;
+  const w = wait(metric, period, fundingHours);
+  const due = latest + w;
+  return due > now ? Math.min(w, Math.max(MINUTE / 2, due - now)) : MINUTE;
+}
+
+/** isDue reports whether a statistic's next point should be in by now (a tab coming back reads it again then). */
+export function isDue(metric: FuturesMetric, period: FuturesPeriod, latest: number | undefined, now: number, fundingHours = 8): boolean {
+  return latest === undefined || !Number.isFinite(latest) || now >= latest + wait(metric, period, fundingHours);
 }
 
 /** How often the overview is read again while a list shows it. */
@@ -143,10 +157,17 @@ export function useFuturesData(
       unwrap(marketApi.GET("/v1/market/{symbol}/futures-data", { params: { path: { symbol }, query: { metric, period: p || undefined, limit } } })),
     enabled: on,
     staleTime: 30_000,
-    refetchInterval: on ? (query) => nextRead(metric, period, Date.parse(query.state.data?.points.at(-1)?.time ?? ""), Date.now(), fundingHours) : false,
+    refetchInterval: on ? (query) => nextRead(metric, period, latestOf(query.state.data), Date.now(), fundingHours) : false,
+    // Polling stops while the tab is hidden: back in front, a due point is read at once.
+    refetchOnWindowFocus: (query) => isDue(metric, period, latestOf(query.state.data), Date.now(), fundingHours),
     retry: retryServerErrors,
     placeholderData: (previous, query) => (query?.queryKey[3] === symbol && query.queryKey[4] === metric ? previous : undefined),
   });
+}
+
+// latestOf is the time of a response's latest point (NaN without one).
+function latestOf(data: { points: readonly FuturesDataPoint[] } | undefined): number {
+  return Date.parse(data?.points.at(-1)?.time ?? "");
 }
 
 /**
