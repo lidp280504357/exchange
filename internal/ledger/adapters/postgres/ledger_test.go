@@ -227,6 +227,109 @@ func TestTransfers(t *testing.T) {
 	}
 }
 
+// TestEntriesAcrossAccounts pages a user's lines over its accounts newest
+// first: the query reads each account's newest lines and merges them by
+// id, so a page holds the newest of all and the next one goes on where it
+// stopped; the filters apply before a page is cut.
+func TestEntriesAcrossAccounts(t *testing.T) {
+	svc, _, _ := setup(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	if err := svc.OnUserRegistered(ctx, uuid.NewString(), user, "SG"); err != nil {
+		t.Fatal(err)
+	}
+	// Another user's lines in between are not this one's.
+	other := uuid.NewString()
+	if err := svc.OnUserRegistered(ctx, uuid.NewString(), other, "SG"); err != nil {
+		t.Fatal(err)
+	}
+	moves := [][2]string{
+		{domain.AccountSpot, domain.AccountFutures},
+		{domain.AccountFutures, domain.AccountSpot},
+		{domain.AccountSpot, domain.AccountFutures},
+		{domain.AccountSpot, domain.AccountFutures},
+	}
+	for i, m := range moves {
+		for _, who := range []string{user, other} {
+			in := application.TransferInput{UserID: who, IdemKey: "move-" + string(rune('a'+i)), Asset: "USDT", Amount: d("10"), From: m[0], To: m[1]}
+			if _, err := svc.Transfer(ctx, in); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := svc.Freeze(ctx, "entries-order", domain.EntryOrderFreeze, user, domain.AccountSpot, "USDT", d("5"), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	all, next, err := svc.Entries(ctx, user, "", "", 0, 200)
+	if err != nil || next != 0 {
+		t.Fatalf("entries: %d, next %d, %v", len(all), next, err)
+	}
+	transfers, types := 0, map[string]bool{}
+	for i, e := range all {
+		if i > 0 && e.ID >= all[i-1].ID {
+			t.Fatalf("not newest first at %d: %d after %d", i, e.ID, all[i-1].ID)
+		}
+		if e.EntryType == domain.EntryAccountTransfer {
+			transfers++
+		}
+		types[e.AccountType] = true
+	}
+	// Four transfers of two lines each, the freeze's two lines and the
+	// welcome credit's (USDT and BTC).
+	if transfers != 8 || !types[domain.AccountSpot] || !types[domain.AccountFutures] || all[0].EntryType != domain.EntryOrderFreeze {
+		t.Fatalf("lines: %d transfer lines of %d, account types %v, newest %s", transfers, len(all), types, all[0].EntryType)
+	}
+
+	var paged []domain.Entry
+	var before int64
+	for range len(all) {
+		page, next, err := svc.Entries(ctx, user, "", "", before, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paged = append(paged, page...)
+		if next == 0 {
+			break
+		}
+		before = next
+	}
+	if len(paged) != len(all) {
+		t.Fatalf("pages of 3 hold %d lines, one page %d", len(paged), len(all))
+	}
+	for i := range all {
+		if paged[i].ID != all[i].ID {
+			t.Fatalf("page line %d: %d, want %d", i, paged[i].ID, all[i].ID)
+		}
+	}
+
+	only, _, err := svc.Entries(ctx, user, "", domain.EntryAccountTransfer, 0, 3)
+	if err != nil || len(only) != 3 {
+		t.Fatalf("transfers only: %+v %v", only, err)
+	}
+	for _, e := range only {
+		if e.EntryType != domain.EntryAccountTransfer {
+			t.Fatalf("type filter let through %s", e.EntryType)
+		}
+	}
+	// The welcome credit's BTC line is the only BTC one.
+	want := 0
+	for _, e := range all {
+		if e.Asset == "BTC" {
+			want++
+		}
+	}
+	btc, _, err := svc.Entries(ctx, user, "BTC", "", 0, 10)
+	if err != nil || len(btc) != want {
+		t.Fatalf("BTC: %+v, want %d lines, %v", btc, want, err)
+	}
+	for _, e := range btc {
+		if e.Asset != "BTC" {
+			t.Fatalf("asset filter let through %s", e.Asset)
+		}
+	}
+}
+
 func setupWith(t *testing.T, base *application.Service, e eligibility) *application.Service {
 	t.Helper()
 	return &application.Service{

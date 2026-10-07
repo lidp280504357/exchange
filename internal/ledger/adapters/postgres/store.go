@@ -201,12 +201,24 @@ func (r journals) Entries(ctx context.Context, ownerID, asset, entryType string,
 	}
 	// A trade against HOUSE is a trade to its user (ADR-0015): it shows and
 	// filters as TRADE_SETTLE.
-	rows, err := r.q.Query(ctx, `SELECT l.id, j.id,
-			CASE WHEN j.entry_type = 'HOUSE_TRADE_SETTLE' THEN 'TRADE_SETTLE' ELSE j.entry_type END,
-			a.account_type, l.asset, l.amount, l.balance_kind, l.available_after, l.frozen_after, j.posted_at
-		FROM journal_lines l JOIN accounts a ON a.id = l.account_id JOIN journals j ON j.id = l.journal_id
-		WHERE a.owner_id = $1 AND a.owner_type = 'USER' AND l.id < $2 AND ($3 = '' OR l.asset = $3)
-			AND ($4 = '' OR j.entry_type = $4 OR ($4 = 'TRADE_SETTLE' AND j.entry_type = 'HOUSE_TRADE_SETTLE'))
+	//
+	// The newest lines of each of the user's accounts, read backwards on
+	// (account_id, account_version), then the newest of those: a line's
+	// version grows with its id within an account (both are taken under
+	// the account's lock). Joined the other way the planner walked the
+	// whole of journal_lines backwards by id for a user with fewer lines
+	// than the page: 58 s over 3.5 million lines on the test server
+	// (2026-10-07; 17 ms this way).
+	rows, err := r.q.Query(ctx, `SELECT l.id, l.journal_id, l.entry_type, a.account_type, l.asset, l.amount, l.balance_kind,
+			l.available_after, l.frozen_after, l.posted_at
+		FROM accounts a CROSS JOIN LATERAL (
+			SELECT l.id, l.journal_id, l.asset, l.amount, l.balance_kind, l.available_after, l.frozen_after, j.posted_at,
+				CASE WHEN j.entry_type = 'HOUSE_TRADE_SETTLE' THEN 'TRADE_SETTLE' ELSE j.entry_type END AS entry_type
+			FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+			WHERE l.account_id = a.id AND l.id < $2
+				AND ($4 = '' OR j.entry_type = $4 OR ($4 = 'TRADE_SETTLE' AND j.entry_type = 'HOUSE_TRADE_SETTLE'))
+			ORDER BY l.account_version DESC LIMIT $5) l
+		WHERE a.owner_id = $1 AND a.owner_type = 'USER' AND ($3 = '' OR a.asset = $3)
 		ORDER BY l.id DESC LIMIT $5`, ownerID, beforeID, asset, entryType, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list entries: %w", err)
