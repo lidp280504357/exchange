@@ -329,7 +329,10 @@ try {
       timeout: 20000,
     });
     await go("/futures/data");
-    const row = await page.waitForFunction(() => [...document.querySelectorAll("ul li button")].find((b) => b.innerText.includes("BTCUSDT")) ?? false, { timeout: 20000 });
+    // A plain list, or from 50 contracts the windowed one: a row is a button either way.
+    const row = await page.waitForFunction(() => [...document.querySelectorAll("button")].find((b) => b.innerText.includes("BTCUSDT") && b.innerText.includes("费率")) ?? false, {
+      timeout: 20000,
+    });
     await row.click();
     await sheetOpen();
     await drawn("[role=dialog]");
