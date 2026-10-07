@@ -27,6 +27,12 @@ describe("closeAtMarket", () => {
     vi.spyOn(derivativesApi, "POST").mockResolvedValueOnce({
       data: { ...order("2", "0", "REJECTED"), reject_reason: "DERIV_REDUCE_ONLY_REJECTED" }, response: new Response(null, { status: 201 }),
     } as never);
-    expect(await closeAtMarket({ symbol: "BTC-USD-PERP", quantity: "2", position_side: "LONG" })).toMatchObject({ closed: "0", status: "REJECTED", reason: "DERIV_REDUCE_ONLY_REJECTED" });
+    // A refusal is not tried again: one order (review R14').
+    expect(await closeAtMarket({ symbol: "BTC-USD-PERP", quantity: "2", position_side: "LONG" })).toMatchObject({
+      closed: "0",
+      status: "REJECTED",
+      reason: "DERIV_REDUCE_ONLY_REJECTED",
+      orders: 1,
+    });
   });
 });
