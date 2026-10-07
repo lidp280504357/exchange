@@ -58,12 +58,12 @@ lift_deploy_degradations() {
   done
 }
 
-# prune_build_cache 把构建缓存删到 2 GB 以内（最近用过的留下，通常是 Go 模块与编译缓存）。Docker 29 的 buildx
+# prune_build_cache [上限] 把构建缓存删到上限以内（默认 2 GB，最近用过的留下，通常是 Go 模块与编译缓存）。Docker 29 的 buildx
 # 已没有 --keep-storage（对应的是 --max-used-space），不带 -a 只删悬空记录：2026-10-01 缓存涨到 21 GB，一次构建写满磁盘。
 # 2026-10-02 的 14 GB 是另一回事：全部记录都算"在用"（Reclaimable 0B），怎么删都删不掉，要重启 dockerd 才释放，
 # 见 docs/runbook/server-deploy.md。
 prune_build_cache() {
-  sudo docker builder prune -a -f --max-used-space 2gb >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
+  sudo docker builder prune -a -f --max-used-space "${1:-2gb}" >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
 }
 
 # pull_app_image 拉 GitHub Actions 为本提交构建的镜像（.github/workflows/image.yml，
@@ -384,7 +384,13 @@ main() {
   sudo docker image prune -f >/dev/null
   # 两天没用的镜像也删（构建前端用的 node、拉过的旧版本），下次要用时再拉
   sudo docker image prune -af --filter "until=48h" >/dev/null
-  prune_build_cache
+  # 镜像是从 ghcr.io 拉的：服务器上的构建缓存只在拉不到、回退本地构建时有用，删到 256 MB（2026-10-07 磁盘 86% 时
+  # 它占 1.9 GB、全部可回收，B147）；回退时冷缓存建得慢一些，照样能建
+  if [ -n "$apps" ] && [ -z "$build_image" ]; then
+    prune_build_cache 256mb
+  else
+    prune_build_cache
+  fi
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
   # 4. 发布第 1 步构建好的前端，紧跟新后端（解除只减仓最多要等近四分钟，站点不等它）

@@ -22,6 +22,19 @@
     <memory_worker_correct_memory_tracker>1</memory_worker_correct_memory_tracker>
     <memory_worker_use_cgroup>0</memory_worker_use_cgroup>
 
+    <!-- query_log is kept a week, part_log (a row per merge, 80 MB a day)
+         three days (B147, 2026-10-07: 357 MiB and 649 MiB after eight days,
+         with the disk at 86%). The test server's tables got the same TTL by
+         ALTER TABLE ... MODIFY TTL (part_log truncated then); a start that
+         finds a table defined otherwise renames it (query_log_0) and creates
+         it anew: drop the renamed one then. -->
+    <query_log>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </query_log>
+    <part_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+    </part_log>
+
     <trace_log remove="1"/>
     <text_log remove="1"/>
     <metric_log remove="1"/>
