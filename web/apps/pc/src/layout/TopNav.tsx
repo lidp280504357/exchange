@@ -204,7 +204,8 @@ function Menu({
       <div
         className={cn(
           "invisible absolute top-full z-[var(--z-dropdown)] translate-y-1 rounded-2 border border-line-1 bg-bg-1 py-1 opacity-0 shadow-pop transition-[opacity,transform] duration-[var(--t-fast)]",
-          wide ? "w-72 py-2" : "min-w-44",
+          // A wide panel fits its longest line: its entries' lines do not wrap, in any language (the user's request of 15:0x, F16).
+          wide ? "w-max min-w-72 py-2" : "min-w-44",
           "group-has-[:focus-visible]:visible group-has-[:focus-visible]:translate-y-0 group-has-[:focus-visible]:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100",
           align === "right" ? "right-0" : "left-0",
         )}
@@ -229,8 +230,8 @@ function MenuEntry({ to, icon, title, hint, onClick }: { to: string; icon: React
     >
       <EntryIcon>{icon}</EntryIcon>
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-sm font-medium text-fg-1">{title}</span>
-        <span className="text-xs text-fg-3">{hint}</span>
+        <span className="whitespace-nowrap text-sm font-medium text-fg-1">{title}</span>
+        <span className="whitespace-nowrap text-xs text-fg-3">{hint}</span>
       </span>
     </Link>
   );
