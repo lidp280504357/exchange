@@ -42,13 +42,34 @@ const fieldError = (tab, selector) => tab.fieldError(selector);
 /** signedInTab opens a tab on device signed in as the flows' account. */
 const signedInTab = (name, device = phone(390), extra = {}) => f.signedIn(user, { name, device, ...extra });
 
-/** clickSettled presses a button by its text, again when the page re-rendered it between finding and pressing it. */
-async function clickSettled(tab, label, scope) {
+/**
+ * clickSettled presses a visible, enabled button by its text, outside any
+ * sheet, again when the page re-rendered it between finding and pressing it
+ * (detached, or not clickable for a moment, as lib.mjs clickLive). Outside
+ * any sheet: a retry after a press that did open one never presses the
+ * sheet's own button of the same text (开多 opens a sheet whose submit is 开多,
+ * review B139).
+ */
+async function clickSettled(tab, label) {
   for (let i = 0; ; i++) {
     try {
-      return await tab.clickButton(label, scope);
+      const button = await tab.page.waitForFunction(
+        (want) =>
+          [...document.querySelectorAll("button, a")].find(
+            (el) =>
+              !el.closest("[role=dialog]") &&
+              el.innerText.replace(/\s+/g, " ").trim() === want &&
+              el.disabled !== true &&
+              el.getAttribute("aria-disabled") !== "true" &&
+              el.getClientRects().length > 0,
+          ) ?? false,
+        { timeout: 10000 },
+        label,
+      );
+      await button.evaluate((el) => el.scrollIntoView({ block: "center" }));
+      return await button.click();
     } catch (e) {
-      if (i >= 4 || !/detached/i.test(e.message)) throw e;
+      if (i >= 4 || !/detached|not clickable/i.test(String(e))) throw e;
       await new Promise((r) => setTimeout(r, 500));
     }
   }

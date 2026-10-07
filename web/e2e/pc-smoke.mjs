@@ -159,7 +159,8 @@ try {
     if (Math.abs(scrolled.gap) > 1) throw new Error(`the market table's header is ${scrolled.gap}px off its box's top`);
     ok(`the long market table scrolls in its own box (${scrolled.rows} rows in the DOM), its header stuck to the box's top`);
     await go("/markets?cat=spot");
-    await page.waitForSelector("main table tbody tr", { timeout: 20000 });
+    // Its rows, not the 14 skeleton rows of a table still loading (B139).
+    await page.waitForSelector("main table:not([aria-busy]) tbody tr", { timeout: 20000 });
     scrolled = await tableScroll();
   }
   if (scrolled.boxed || Math.abs(scrolled.gap) > 1) throw new Error(`the market table scrolls in a box (${scrolled.boxed}) or its header is ${scrolled.gap}px off the top bar`);

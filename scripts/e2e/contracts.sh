@@ -50,13 +50,15 @@ check '.max_leverage == 100 and .risk_tiers[0].max_notional == "15" and .tick_si
 
 echo "== funding and prices as Binance's (G1c: gen-contracts.go, house.sh follow-marks)"
 call GET "/v1/market/contracts?margin_type=ALL" ""
-check '[.contracts[] | select(.funding_interval_hours == 4)] | length > 0' "some contracts fund every 4 hours, as Binance funds them"
 check 'all(.contracts[]; .interest_rate == {"8": "0.0001", "4": "0.00005", "1": "0.0000125"}[.funding_interval_hours | tostring])' "0.03% of interest a day, per funding interval"
-call GET /v1/market/contracts/HYPE-USDT-PERP ""
-check '.reference_symbol == "HYPEUSDT" and .funding_interval_hours == 4' "HYPE's perpetual funds every 4 hours, as Binance's"
-call GET /v1/market/HYPE-USDT-PERP/mark-price ""
-expect 200 - "HYPE-USDT-PERP's mark price"
-check '.source == "BINANCE" and ((.next_funding_time | fromdateiso8601) - now) <= 4 * 3600' "its prices follow Binance's and its next settlement is at most 4 hours away"
+# Whichever trading contract Binance funds every 4 hours (23 of ours on
+# 2026-10-07; the list follows Binance, not this script).
+four=$(jq -r '[.contracts[] | select(.status == "TRADING" and .funding_interval_hours == 4 and (.reference_symbol // "") != "") | .symbol][0] // empty' <<<"$BODY")
+[[ -n $four ]] || { echo "FAIL no trading contract funds every 4 hours, as Binance funds 23 of ours (gen-contracts.go)" >&2; exit 1; }
+echo "ok   $four funds every 4 hours, as Binance's"
+call GET "/v1/market/$four/mark-price" ""
+expect 200 - "$four's mark price"
+check '.source == "BINANCE" and ((.next_funding_time | fromdateiso8601) - now) <= 4 * 3600' "its prices follow Binance's (house.sh follow-marks) and its next settlement is at most 4 hours away"
 
 echo "== mark price and funding"
 marked() {
