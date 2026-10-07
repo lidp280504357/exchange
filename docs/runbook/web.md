@@ -303,6 +303,7 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   未达预算时退出码非 0；`BUDGET=warn` 只报告。结果记在 `docs/阶段4验收报告.md`。
 - 检查清单流程（2026-10-04）：`scripts/e2e/webflows.sh [pc] [m] [admin]`（`task e2e` 里排在 `web.sh` 之后；单独运行先持运维锁：`scripts/ops/lock.sh run -- bash scripts/e2e/webflows.sh pc m admin`）把 [ui-checklist.md](ui-checklist.md) 能稳定判断的项在 headless Chrome 里逐项走一遍，每站约 4–6 分钟（网络慢时到 12 分钟）。逐项对应与结果见 `docs/阶段4验收报告.md` §8.1。
   - 脚本：`web/e2e/pc-flows.mjs`、`m-flows.mjs`、`admin-flows.mjs`，公共部分 `flows-lib.mjs`（建在 `lib.mjs` 的 Chrome 之上）。每一步以清单编号命名（`3`、`P4`、`M1`、`A2`），在自己的标签页（独立的浏览器上下文，各自的设备、时区、减少动效等媒体特性）里跑；只等事件与状态，不靠定时等待。
+  - 第 1 步（两站）：访客依次打开 `PRIVATE` 列表里每个需要登录的页面（资产各页、安全、设备、个人资料、通知），都应跳到 `/login?next=<该页>`，登录后回到最后一个（B151：之前只看 `/assets/history`，新加的个人资料页并没有被这一步检查）。
   - 输出 `ok|FAIL 编号 说明 (秒)`，每站一行汇总；失败的步骤把每个标签页的截图与日志（错误、地址、控制台、页面错误、失败请求）写到 `FLOWS_OUT`（默认 `~/.cache/exchange-e2e/flows/<run>`），打印路径后继续下一步；每站的结果另存 `<站点>-summary.json`。`FLOWS_ONLY=3,P4` 只跑这几项（准备步骤 `—` 总会跑）。
   - 后台流程经 ssh 建一个临时 ADMIN 与一个临时 AUDITOR（随机口令与密钥从标准输入传入、不打印），结束时停用；危险操作只打开、填写后取消，最后核对审计里 ADMIN 只有登录与退出。
   - 只为故障场景拦截请求（断网、令牌过期的 401、标记价降级）；服务器上只多出流程自己注册的账户与它们挂了又撤的单，不碰托管方。PC 流程的账户在每个下单步骤结束时撤单，脚本退出前（不论怎么结束）再撤一次，最后一步核对没有剩下的挂单。
