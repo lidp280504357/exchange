@@ -121,7 +121,8 @@ export function TopNav() {
                 to={routes.profile}
                 align="right"
               >
-                <UserLine className="mb-1 flex min-w-60 items-center gap-3 border-b border-line-1 px-4 pb-3 pt-2" />
+                {/* Bounded: a long username ends in an ellipsis instead of widening the menu (review GV, F17). */}
+                <UserLine className="mb-1 flex min-w-60 max-w-72 items-center gap-3 border-b border-line-1 px-4 pb-3 pt-2" />
                 {/* Each item with an icon in the other menus' box (the user's request of 14:2x, F13). */}
                 <MenuLink to={routes.profile} icon={<UserRound size={18} />}>
                   {t("nav.profile")}
