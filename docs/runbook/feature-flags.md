@@ -1,6 +1,6 @@
 # 功能开关运维（ADR-0005）
 
-高风险能力默认关闭，由 PostgreSQL `config.flags` 表控制；服务每 5 秒刷新本地副本，缺失的开关按关闭处理。管理后台 `/admin/` 的"功能开关"页可切换启用状态（OPERATOR/ADMIN，见 [admin.md](admin.md)）；规则（地区、账户状态、白名单等）用命令行工具 `exchangectl` 修改。每次修改在同一事务里写 `config.flag_changes` 历史，并经 `config.outbox` 发布 `audit.ConfigChanged` 到 `audit.events`（进入 ClickHouse `audit_logs`）。
+高风险能力默认关闭，由 PostgreSQL `config.flags` 表控制；服务每 5 秒刷新本地副本，缺失的开关按关闭处理（三个产品线开关 `product.*` 例外：默认打开，缺失按打开）。管理后台 `/admin/` 的"功能开关"页可切换启用状态（OPERATOR/ADMIN，见 [admin.md](admin.md)）；规则（地区、账户状态、白名单等）用命令行工具 `exchangectl` 修改。每次修改在同一事务里写 `config.flag_changes` 历史，并经 `config.outbox` 发布 `audit.ConfigChanged` 到 `audit.events`（进入 ClickHouse `audit_logs`）。
 
 ## 已知开关
 
@@ -35,6 +35,9 @@
 | `market.flat_minutes` | 不跟随参考市场的交易对与合约（平台币 ASTRA-USDT、ASTRA-USDT-PERP）在下一笔成交被应用时，把与上一根 1m K 线之间没有成交的分钟存成平盘 K 线并发到 `market.candle.flats`（ClickHouse `candles_1m`），图表与读模型都连续（按交易对；默认关；测试服对这两个打开，见 [market-data.md](market-data.md#规则)） | 4 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |
 | `wallet.test_assets` | 隐藏测试资产（ADR-0017，TUSD）的网络、充值地址、地址簿与提现只对这些规则放行的用户开放（资格 `TEST_ASSETS`），其他人一律当作没有这个网络（404）；关闭时谁都没有。wallet-service 按用户缓存资格结果 1 分钟（改开关后最多 1 分钟生效）；user-service 答不上来时按没有资格处理，隐藏网络不可见、其他网络照常列出（审查 AQ）。测试服只对地区 `AQ` 打开：`exchangectl flags set wallet.test_assets --on --allow-regions AQ --reason "..."`，端到端用 `AQ` 注册（[custody.md](custody.md)） | 4 |
+| `product.spot` | 币币交易这条产品线（产品线开关设计 2026-10-07）：关闭后两站不再显示，新现货单一律 `PRODUCT_CLOSED`（撤单照常），关闭时撤销全部现货挂单，HOUSE 停止报价，平台币模拟市场的现货机器人暂停。**默认打开**：迁移 config 00002 写入为开，没存的也按开算（`flags.Client.Closed`），只有开关、没有删除；全局，不带规则 | K |
+| `product.usdt_m` | U 本位合约这条产品线：关闭后两站不再显示，只放行只减仓平仓与撤单，挂单与条件单撤销，拒绝向 USDT 合约账户划入，HOUSE 停止报价；仓位、资金费、强平照常。默认打开，同上 | K |
+| `product.coin_m` | 币本位合约这条产品线：同 `product.usdt_m`，划入拒绝的是 BTC、ETH、ASTRA 的合约账户。默认打开，同上；与资格开关 `derivatives.coin_m`（按用户、地区）叠加：产品线关则全部不可交易 | K |
 
 ## 规则维度
 
