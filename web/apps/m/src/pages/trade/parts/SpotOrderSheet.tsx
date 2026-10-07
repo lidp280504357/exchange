@@ -28,7 +28,8 @@ function spotAvailable(list: Balance[] | undefined, asset: string): string {
 function toNewOrder(symbol: string, v: OrderFormValues, account: TradeAccount, effect: SideEffect): NewOrder {
   const margin = account === "SPOT" ? {} : { account, side_effect: effect };
   if (v.type === "limit") return { symbol, side: v.side, type: "LIMIT", price: v.price, quantity: v.quantity, time_in_force: "GTC", ...margin };
-  if (v.side === "BUY") return { symbol, side: "BUY", type: "MARKET", quote_amount: v.quoteAmount, ...margin };
+  // A market buy by total spends it; one by quantity buys it (B157).
+  if (v.side === "BUY") return { symbol, side: "BUY", type: "MARKET", ...(v.quoteAmount ? { quote_amount: v.quoteAmount } : { quantity: v.quantity }), ...margin };
   return { symbol, side: "SELL", type: "MARKET", quantity: v.quantity, ...margin };
 }
 
@@ -82,6 +83,7 @@ export function SpotOrderSheet({
     () => ({
       base: pair.base_asset, quote: pair.quote_asset, tickSize: pair.tick_size, lotSize: pair.lot_size, minQuantity: pair.min_quantity,
       maxQuantity: pair.max_quantity, minNotional: pair.min_notional, makerFeeRate: pair.maker_fee_rate, takerFeeRate: pair.taker_fee_rate,
+      priceBand: pair.price_band,
     }),
     [pair],
   );

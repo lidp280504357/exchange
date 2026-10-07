@@ -9,6 +9,7 @@ import { Tabs } from "../components/Tabs";
 import { cn } from "../lib/cn";
 import {
   estimateFee,
+  marketBuyPrice,
   maxQuantity,
   percentOfAmount,
   percentOfQuantity,
@@ -18,6 +19,7 @@ import {
   usable,
   validateOrder,
   type Balances,
+  type MarketBy,
   type OrderErrors,
   type OrderFieldError,
   type OrderSide,
@@ -30,9 +32,12 @@ export type OrderFormValues = {
   type: OrderType;
   /** Limit orders. */
   price?: string;
-  /** Limit orders and market sells. */
+  /**
+   * Limit orders, market sells (a total typed for a sell comes as its
+   * quantity at the last price) and market buys by quantity.
+   */
   quantity?: string;
-  /** Market buys: how much quote to spend. */
+  /** Market buys by total: how much quote to spend. */
   quoteAmount?: string;
 };
 
@@ -80,8 +85,11 @@ export type OrderFormProps = {
  * OrderForm is the spot order panel (design §6.2): buy/sell, limit/market,
  * price and quantity snapped to the tick and lot sizes, total = price ×
  * quantity kept in sync both ways, a percent slider of the balance, the
- * estimated fee and the pair's limits. It only calculates and presents:
- * the page submits (onSubmit) and owns side, type and the balances.
+ * estimated fee and the pair's limits. A market order (B157, as Binance
+ * has it) takes a quantity or a total, whichever is typed, the other
+ * estimated at the last price in grey; its slider sizes what it spends (a
+ * buy's total, a sell's quantity). It only calculates and presents: the
+ * page submits (onSubmit) and owns side, type and the balances.
  */
 export function OrderForm({
   side, onSideChange, type, onTypeChange, pair, available, lastPrice, onSubmit, submitting, signedIn, onSignIn, onDeposit, depositLabel,
@@ -91,6 +99,8 @@ export function OrderForm({
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("");
   const [total, setTotal] = useState("");
+  // The amount a market order is sized by: the field typed last.
+  const [drive, setDrive] = useState<MarketBy>(side === "BUY" ? "total" : "quantity");
   const [attempted, setAttempted] = useState(false);
   const [dragPct, setDragPct] = useState<number | null>(null);
   const seeded = useRef(false);
@@ -100,8 +110,9 @@ export function OrderForm({
   const totalDecimals = Math.min(quoteDecimals, priceDecimals + qtyDecimals);
   const buy = side === "BUY";
   const limit = type === "limit";
-  const byTotal = !limit && buy;
+  const market = !limit;
   const tone = buy ? "up" : "down";
+  const last = lastPrice ?? "";
 
   // A new pair starts empty and takes its last price once.
   const pairKey = `${pair.base}/${pair.quote}`;
@@ -131,6 +142,19 @@ export function OrderForm({
     setAttempted(false);
   }, [resetKey]);
 
+  // A market order starts sized by what it spends, the other field
+  // cleared; a limit order links the two again at its price. Only a change
+  // of side or type applies: the amounts are read, not followed.
+  useEffect(() => {
+    if (market) {
+      const by: MarketBy = buy ? "total" : "quantity";
+      setDrive(by);
+      if (by === "total") setQuantity("");
+      else setTotal("");
+    } else if (usable(quantity)) setTotal(totalOf(price, quantity));
+    else if (usable(total)) setQuantity(quantityForTotal(total, price, pair.lotSize));
+  }, [side, type]);
+
   // Order book picks: price, and with Shift the cumulative quantity.
   useEffect(() => {
     if (!fill) return;
@@ -138,6 +162,13 @@ export function OrderForm({
     const q = fill.quantity && usable(fill.quantity) ? snapToStep(fill.quantity, pair.lotSize) : null;
     if (p) setPrice(p);
     if (q) setQuantity(q);
+    if (market) {
+      if (q) {
+        setDrive("quantity");
+        setTotal("");
+      }
+      return;
+    }
     const np = p ?? price;
     const nq = q ?? quantity;
     if (p || q) setTotal(totalOf(np, nq));
@@ -149,36 +180,59 @@ export function OrderForm({
     if (usable(quantity)) setTotal(totalOf(p, quantity));
     else if (usable(total)) setQuantity(quantityForTotal(total, p, pair.lotSize));
   };
+  // A market order takes the field typed in; the other is cleared, its
+  // estimate shown in grey.
   const changeQuantity = (q: string) => {
     setQuantity(q);
-    setTotal(limit ? totalOf(price, q) : "");
+    if (limit) setTotal(totalOf(price, q));
+    else {
+      setDrive("quantity");
+      setTotal("");
+    }
   };
   const changeTotal = (v: string) => {
     setTotal(v);
     if (limit) setQuantity(quantityForTotal(v, price, pair.lotSize));
+    else {
+      setDrive("total");
+      setQuantity("");
+    }
   };
 
-  const max = byTotal ? (available?.quote ?? "") : maxQuantity(side, limit ? price : (lastPrice ?? ""), available, pair.lotSize);
-  const pctFromValues = byTotal
-    ? ratioPercent(total, available?.quote)
-    : buy
-      ? ratioPercent(limit ? totalOf(price, quantity) : "", available?.quote)
-      : ratioPercent(quantity, available?.base);
+  // The other field's estimate at the last price (a market order).
+  const estQuantity = market && drive === "total" ? quantityForTotal(total, last, pair.lotSize) : "";
+  const estTotal = market && drive === "quantity" && usable(totalOf(last, quantity)) ? dec.normalize(dec.round(totalOf(last, quantity), totalDecimals)) : "";
+  // The most one may buy or sell: a market buy by quantity is frozen at the
+  // band above the last price.
+  const max = maxQuantity(side, limit ? price : marketBuyPrice(last, pair.priceBand), available, pair.lotSize);
+  const spends = market && buy ? (available?.quote ?? "") : max;
+  const pctFromValues = buy
+    ? ratioPercent(limit ? totalOf(price, quantity) : drive === "total" ? total : totalOf(last, quantity), available?.quote)
+    : ratioPercent(market && drive === "total" ? estQuantity : quantity, available?.base);
   const pct = dragPct ?? pctFromValues;
 
+  // The slider sizes what the order spends: a market buy's total, a sell's
+  // quantity, a limit buy's quantity at its price.
   const slide = (p: number) => {
     setDragPct(p);
     if (!available) return;
-    if (byTotal) {
+    if (market && buy) {
       setTotal(percentOfAmount(available.quote, p, totalDecimals));
+      setDrive("total");
+      setQuantity("");
       return;
     }
-    const q = percentOfQuantity(maxQuantity(side, limit ? price : (lastPrice ?? ""), available, pair.lotSize), p, pair.lotSize);
+    const q = percentOfQuantity(maxQuantity(side, limit ? price : last, available, pair.lotSize), p, pair.lotSize);
     setQuantity(q);
-    setTotal(limit ? totalOf(price, q) : "");
+    if (limit) setTotal(totalOf(price, q));
+    else {
+      setDrive("quantity");
+      setTotal("");
+    }
   };
 
-  const errors: OrderErrors = validateOrder({ side, type, rules: pair, price, quantity, total, available: signedIn ? available : null, lastPrice });
+  const by = market ? drive : undefined;
+  const errors: OrderErrors = validateOrder({ side, type, rules: pair, price, quantity, total, available: signedIn ? available : null, lastPrice, by });
   const show = (field: keyof OrderErrors, value: string) => {
     const e = errors[field];
     if (!e) return undefined;
@@ -192,7 +246,7 @@ export function OrderForm({
       unit: e.values?.unit ?? "",
     });
 
-  const fee = estimateFee({ side, type, rules: pair, price, quantity, quoteAmount: total, lastPrice, baseDecimals, quoteDecimals });
+  const fee = estimateFee({ side, type, rules: pair, price, quantity, quoteAmount: total, lastPrice, by, baseDecimals, quoteDecimals });
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -202,28 +256,14 @@ export function OrderForm({
     }
     setAttempted(true);
     if (Object.keys(errors).length > 0 || submitting) return;
-    if (byTotal) onSubmit({ side, type, quoteAmount: total });
-    else if (!limit) onSubmit({ side, type, quantity });
-    else onSubmit({ side, type, price, quantity });
+    if (limit) onSubmit({ side, type, price, quantity });
+    else if (drive === "total" && buy) onSubmit({ side, type, quoteAmount: total });
+    else if (drive === "total") onSubmit({ side, type, quantity: estQuantity }); // a sell's total, at the last price
+    else onSubmit({ side, type, quantity });
   };
 
   const availAsset = buy ? pair.quote : pair.base;
   const availValue = buy ? available?.quote : available?.base;
-  // A market order has one amount, the slider under it as Binance has it
-  // (B157): a buy spends a total of the quote, a sell sells a quantity of
-  // the base. A limit order has both, the total under the slider.
-  const totalInput = (
-    <NumberInput
-      aria-label={t("common.total")}
-      prefix={<span className="text-xs">{t("common.total")}</span>}
-      unit={pair.quote}
-      align="right"
-      value={total}
-      onValueChange={changeTotal}
-      decimals={totalDecimals}
-      error={show("total", total)}
-    />
-  );
 
   return (
     <form noValidate onSubmit={submit} className={cn("flex flex-col gap-3", className)}>
@@ -275,23 +315,20 @@ export function OrderForm({
           disabled
         />
       )}
-      {byTotal ? (
-        totalInput
-      ) : (
-        <NumberInput
-          aria-label={t("common.amount")}
-          prefix={<span className="text-xs">{t("common.amount")}</span>}
-          unit={pair.base}
-          align="right"
-          value={quantity}
-          onValueChange={changeQuantity}
-          decimals={qtyDecimals}
-          step={pair.lotSize}
-          snap
-          onBlur={() => limit && setTotal(totalOf(price, snapToStep(quantity, pair.lotSize)))}
-          error={show("quantity", quantity)}
-        />
-      )}
+      <NumberInput
+        aria-label={t("common.amount")}
+        prefix={<span className="text-xs">{t("common.amount")}</span>}
+        unit={pair.base}
+        align="right"
+        value={quantity}
+        onValueChange={changeQuantity}
+        placeholder={estQuantity ? `≈ ${formatAmount(estQuantity)}` : undefined}
+        decimals={qtyDecimals}
+        step={pair.lotSize}
+        snap
+        onBlur={() => limit && setTotal(totalOf(price, snapToStep(quantity, pair.lotSize)))}
+        error={show("quantity", quantity)}
+      />
       <Slider
         className="px-1"
         value={pct}
@@ -302,10 +339,20 @@ export function OrderForm({
         formatMark={(m) => `${m}%`}
         formatValue={(v) => `${Math.round(v)}%`}
         tone={tone}
-        disabled={!signedIn || !usable(max)}
+        disabled={!signedIn || !usable(spends)}
         aria-label={`${t("common.available")} %`}
       />
-      {limit && totalInput}
+      <NumberInput
+        aria-label={t("common.total")}
+        prefix={<span className="text-xs">{t("common.total")}</span>}
+        unit={pair.quote}
+        align="right"
+        value={total}
+        onValueChange={changeTotal}
+        placeholder={estTotal ? `≈ ${formatAmount(estTotal)}` : undefined}
+        decimals={totalDecimals}
+        error={show("total", total)}
+      />
       <div className="flex flex-col gap-1.5 text-xs">
         <div className="flex items-center justify-between gap-2">
           <span className="text-fg-3">{availableLabel ?? t("common.available")}</span>
@@ -319,14 +366,12 @@ export function OrderForm({
           </span>
         </div>
         {info}
-        {!byTotal && (
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-fg-3">{buy ? t("ui.order.maxBuy") : t("ui.order.maxSell")}</span>
-            <span className="tabular-nums text-fg-1">
-              {signedIn && usable(max) ? formatAmount(max, qtyDecimals) : "—"} {pair.base}
-            </span>
-          </div>
-        )}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-fg-3">{buy ? t("ui.order.maxBuy") : t("ui.order.maxSell")}</span>
+          <span className="tabular-nums text-fg-1">
+            {signedIn && usable(max) ? formatAmount(max, qtyDecimals) : "—"} {pair.base}
+          </span>
+        </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-fg-3">
             {t("ui.order.estFee")}

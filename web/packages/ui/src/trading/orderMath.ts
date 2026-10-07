@@ -19,9 +19,30 @@ export type PairRules = {
   minNotional: string;
   makerFeeRate: string;
   takerFeeRate: string;
+  /**
+   * The price band (a share of the market price, "0.1" for 10 %): a market
+   * buy by quantity freezes its quantity at the band above the market
+   * price, so this is what the balance must cover. Absent, the market
+   * price alone.
+   */
+  priceBand?: string;
 };
 
 export type Balances = { base: string; quote: string };
+
+/**
+ * A market order's amount (B157, as Binance has it): the quantity of the
+ * base or the total of the quote, whichever was typed. A market buy by
+ * total spends it; a market sell by total sells its worth at the last
+ * price.
+ */
+export type MarketBy = "quantity" | "total";
+
+/** marketBuyPrice is what a market buy by quantity is frozen at per unit: the last price and the band above it. */
+export function marketBuyPrice(lastPrice: string | null | undefined, band: string | undefined): string {
+  if (!usable(lastPrice)) return "";
+  return usable(band) ? dec.mul(lastPrice, dec.add("1", band)) : lastPrice;
+}
 
 /** usable reports whether v is a decimal string above zero. */
 export function usable(v: string | null | undefined): v is string {
@@ -86,21 +107,25 @@ export function estimateFee(args: {
   quantity: string;
   quoteAmount: string;
   lastPrice?: string | null;
+  /** A market order's amount; by default a buy's total and a sell's quantity. */
+  by?: MarketBy;
   baseDecimals?: number;
   quoteDecimals?: number;
 }): FeeEstimate | null {
   const { side, type, rules, price, quantity, quoteAmount, lastPrice, baseDecimals = 8, quoteDecimals = 8 } = args;
+  const by = args.by ?? (side === "BUY" ? "total" : "quantity");
   const rate = type === "market" ? rules.takerFeeRate : rules.makerFeeRate;
   if (!dec.isDecimal(rate)) return null;
   const at = type === "market" ? lastPrice : price;
   if (side === "BUY") {
     let qty = quantity;
-    if (type === "market") qty = usable(quoteAmount) && usable(at) ? dec.div(quoteAmount, at, baseDecimals + 2, "down") : "";
+    if (type === "market" && by === "total") qty = usable(quoteAmount) && usable(at) ? dec.div(quoteAmount, at, baseDecimals + 2, "down") : "";
     if (!usable(qty)) return null;
     return { amount: dec.round(dec.mul(qty, rate), baseDecimals, "up"), asset: rules.base, rate };
   }
-  if (!usable(quantity) || !usable(at)) return null;
-  return { amount: dec.round(dec.mul(dec.mul(quantity, at), rate), quoteDecimals, "up"), asset: rules.quote, rate };
+  const qty = type === "market" && by === "total" ? (usable(at) ? quantityForTotal(quoteAmount, at, rules.lotSize) : "") : quantity;
+  if (!usable(qty) || !usable(at)) return null;
+  return { amount: dec.round(dec.mul(dec.mul(qty, at), rate), quoteDecimals, "up"), asset: rules.quote, rate };
 }
 
 /** An error message key under ui.order with its values. */
@@ -111,8 +136,11 @@ export type OrderErrors = { price?: OrderFieldError; quantity?: OrderFieldError;
 /**
  * validateOrder checks a draft against the pair's rules and the balances
  * (when signed in): minimum and maximum quantity, minimum notional, and
- * what the balance covers. Market buys are sized by total, market sells by
- * quantity; the notional of a market sell is estimated at the last price.
+ * what the balance covers. A market order is sized by its quantity or its
+ * total (by; by default a buy's total and a sell's quantity, B157), the
+ * notional estimated at the last price; a market buy by quantity needs the
+ * quote for its quantity at the band above it (what the order freezes), a
+ * market sell by total the base its total buys at the last price.
  */
 export function validateOrder(args: {
   side: OrderSide;
@@ -123,15 +151,26 @@ export function validateOrder(args: {
   total: string;
   available?: Balances | null;
   lastPrice?: string | null;
+  by?: MarketBy;
 }): OrderErrors {
   const { side, type, rules, price, quantity, total, available, lastPrice } = args;
   const errors: OrderErrors = {};
-  const byTotal = type === "market" && side === "BUY";
+  const market = type === "market";
+  const by = args.by ?? (side === "BUY" ? "total" : "quantity");
 
-  if (byTotal) {
+  if (market && by === "total") {
     if (!usable(total)) errors.total = { key: "totalRequired" };
     else if (usable(rules.minNotional) && dec.lt(total, rules.minNotional)) errors.total = { key: "minNotional", values: { value: rules.minNotional, unit: rules.quote } };
-    else if (available && dec.gt(total, available.quote)) errors.total = { key: "insufficient" };
+    else if (side === "BUY" && available && dec.gt(total, available.quote)) errors.total = { key: "insufficient" };
+    else if (side === "SELL") {
+      // The quantity its worth comes to at the last price.
+      const q = usable(lastPrice) ? quantityForTotal(total, lastPrice, rules.lotSize) : "";
+      if (!usable(q) || (usable(rules.minQuantity) && dec.lt(q, rules.minQuantity))) {
+        errors.total = { key: "minQuantity", values: { value: rules.minQuantity, unit: rules.base } };
+      } else if (usable(rules.maxQuantity) && dec.gt(q, rules.maxQuantity)) {
+        errors.total = { key: "maxQuantity", values: { value: rules.maxQuantity, unit: rules.base } };
+      } else if (available && dec.gt(q, available.base)) errors.total = { key: "insufficient" };
+    }
     return errors;
   }
 
@@ -148,13 +187,20 @@ export function validateOrder(args: {
     errors.quantity = { key: "insufficient" };
   }
 
-  const at = type === "market" ? lastPrice : price;
+  const at = market ? lastPrice : price;
   const notional = usable(at) ? dec.mul(at, quantity) : "";
   if (notional && usable(rules.minNotional) && dec.lt(notional, rules.minNotional)) {
     const e: OrderFieldError = { key: "minNotional", values: { value: rules.minNotional, unit: rules.quote } };
-    if (type === "market") errors.quantity ??= e;
+    if (market) errors.quantity ??= e;
     else errors.total ??= e;
   }
-  if (side === "BUY" && available && notional && dec.gt(notional, available.quote)) errors.total ??= { key: "insufficient" };
+  if (side === "BUY" && available && notional) {
+    // A market buy by quantity freezes it at the band above the last price.
+    const cost = market ? dec.mul(marketBuyPrice(lastPrice, rules.priceBand), quantity) : notional;
+    if (dec.gt(cost, available.quote)) {
+      if (market) errors.quantity ??= { key: "insufficient" };
+      else errors.total ??= { key: "insufficient" };
+    }
+  }
   return errors;
 }

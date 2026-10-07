@@ -28,6 +28,7 @@ const pair: PairRules = {
   minNotional: "10",
   makerFeeRate: "0.001",
   takerFeeRate: "0.002",
+  priceBand: "0.1",
 };
 
 const balances: Balances = { base: "0.53219", quote: "1000" };
@@ -180,29 +181,62 @@ describe("OrderForm", () => {
     expect(onSubmit).toHaveBeenCalledWith({ side: "BUY", type: "limit", price: "50000", quantity: "0.01" });
   });
 
-  it("sizes a market buy by its total", () => {
+  it("sizes a market buy by its total, the quantity estimated in grey", () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} initialType="market" />);
-    expect(screen.queryByLabelText("Amount")).toBeNull();
+    expect(field("Price").disabled).toBe(true);
     fireEvent.change(field("Total"), { target: { value: "250" } });
+    expect(field("Amount").value).toBe("");
+    expect(field("Amount").placeholder).toBe("≈ 0.005"); // 250 / 50000
     fireEvent.click(screen.getByRole("button", { name: "Buy BTC" }));
     expect(onSubmit).toHaveBeenCalledWith({ side: "BUY", type: "market", quoteAmount: "250" });
   });
 
-  it("keeps one amount for a market order, the slider under it (B157)", () => {
-    render(<Harness onSubmit={() => {}} initialType="market" />);
-    // The price row says 市价 and takes nothing; a buy has the total only.
-    expect(field("Price").disabled).toBe(true);
-    const total = field("Total");
-    const slider = screen.getByRole("slider");
-    expect(total.compareDocumentPosition(slider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "50%" }));
-    expect(total.value).toBe("500");
-    // A sell has the quantity only, sized from the base it holds.
-    fireEvent.click(screen.getByRole("radio", { name: "Sell" }));
-    expect(screen.queryByLabelText("Total")).toBeNull();
+  it("takes a market buy by quantity too (B157), checked at the band above the price", () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} initialType="market" />);
+    fireEvent.change(field("Amount"), { target: { value: "0.01" } });
+    expect(field("Total").value).toBe("");
+    expect(field("Total").placeholder).toBe("≈ 500"); // 0.01 x 50000
+    fireEvent.click(screen.getByRole("button", { name: "Buy BTC" }));
+    expect(onSubmit).toHaveBeenCalledWith({ side: "BUY", type: "market", quantity: "0.01" });
+    // 0.019 x 50000 x 1.1 = 1045 is more than the 1000 USDT available.
+    fireEvent.change(field("Amount"), { target: { value: "0.019" } });
+    expect(screen.getByText("Exceeds your available balance")).toBeTruthy();
+  });
+
+  it("sells by total at the last price (B157), the slider sizing the quantity", () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} initialType="market" initialSide="SELL" />);
+    fireEvent.change(field("Total"), { target: { value: "1000" } });
+    expect(field("Amount").placeholder).toBe("≈ 0.02");
+    fireEvent.click(screen.getByRole("button", { name: "Sell BTC" }));
+    expect(onSubmit).toHaveBeenCalledWith({ side: "SELL", type: "market", quantity: "0.02" });
     fireEvent.click(screen.getByRole("button", { name: "50%" }));
     expect(field("Amount").value).toBe("0.266");
+    expect(field("Total").value).toBe("");
+    // The slider sits under the two fields' first, as for a limit order.
+    expect(field("Amount").compareDocumentPosition(screen.getByRole("slider")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("starts a market buy from the total a limit order had", () => {
+    function Switch() {
+      const [type, setType] = useState<OrderType>("limit");
+      return (
+        <>
+          <button type="button" onClick={() => setType("market")}>
+            to market
+          </button>
+          <OrderForm side="BUY" onSideChange={() => {}} type={type} onTypeChange={setType} pair={pair} available={balances} lastPrice="50000" signedIn onSubmit={() => {}} />
+        </>
+      );
+    }
+    render(<Switch />);
+    fireEvent.change(field("Amount"), { target: { value: "0.01" } });
+    expect(field("Total").value).toBe("500");
+    fireEvent.click(screen.getByRole("button", { name: "to market" }));
+    expect(field("Total").value).toBe("500");
+    expect(field("Amount").value).toBe("");
   });
 
   it("fills a percentage of the balance from the slider", () => {
