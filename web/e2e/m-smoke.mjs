@@ -386,6 +386,14 @@ try {
   await page.waitForSelector('[data-testid="profile-avatar"] img[src*="/uploads/avatars/"]', { timeout: 30000 });
   await go("/me");
   await page.waitForSelector('[data-testid="me-identity"] img[src*="/uploads/avatars/"]', { timeout: 20000 });
+  // A plain image: wait until it has come in (review GJ, F9).
+  await page.waitForFunction(
+    () => {
+      const img = document.querySelector('[data-testid="me-identity"] img');
+      return img?.complete && img.naturalWidth > 0;
+    },
+    { timeout: 15000 },
+  );
   const mine = await page.$eval('[data-testid="me-identity"] [data-testid="my-username"]', (e) => e.textContent);
   if (mine !== renamed) throw new Error(`"me" calls the user ${mine}, not ${renamed}`);
   await shot("8b-me");

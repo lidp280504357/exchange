@@ -11,7 +11,7 @@ import { Skeleton } from "../components/Skeleton";
  * picture does not replace the built-in one on every page load; a profile
  * that failed shows the built-in one.
  */
-export function MyAvatar({ size, className }: { size: number; className?: string }) {
+export function MyAvatar({ size, className, decorative }: { size: number; className?: string; /** Unnamed: what holds it names it (the top bar's account menu). */ decorative?: boolean }) {
   const userId = useSession(selectUserId);
   const profile = useProfile();
   if (profile.isPending && profile.fetchStatus !== "idle") {
@@ -19,5 +19,5 @@ export function MyAvatar({ size, className }: { size: number; className?: string
   }
   // The profile's ID is the session's; read first, it also serves a page rendered without a session (tests).
   const seed = profile.data?.user_id || userId || undefined;
-  return <Avatar seed={seed} name={profile.data?.username} src={avatarOf(profile.data, size)} size={size} className={className} />;
+  return <Avatar seed={seed} name={decorative ? undefined : profile.data?.username} src={avatarOf(profile.data, size)} size={size} className={className} />;
 }

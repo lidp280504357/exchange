@@ -108,7 +108,7 @@ function ProfileRow() {
   const profile = useProfile();
   return (
     <Link to={routes.profile} data-testid="settings-profile" className="group flex min-h-16 items-center gap-3 px-4 py-3 transition-colors active:bg-bg-2">
-      <MyAvatar size={40} />
+      <MyAvatar size={40} decorative />
       <span className="min-w-0 flex-1">
         {profile.data ? (
           <span className="block truncate text-base font-medium text-fg-1">{profile.data.username}</span>

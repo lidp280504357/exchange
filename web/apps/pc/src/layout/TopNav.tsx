@@ -111,7 +111,16 @@ export function TopNav() {
             <>
               <NotificationBell />
               {/* The account menu opens on the user's avatar, headed by the username and UID (design 2026-10-07, avatars and usernames §1 #5). */}
-              <Menu label={<MyAvatar size={24} />} to={routes.profile} align="right">
+              <Menu
+                label={
+                  <>
+                    <MyAvatar size={24} decorative />
+                    <span className="sr-only">{t("nav.account")}</span>
+                  </>
+                }
+                to={routes.profile}
+                align="right"
+              >
                 <UserLine className="mb-1 flex min-w-60 items-center gap-3 border-b border-line-1 px-4 pb-3 pt-2" />
                 <MenuLink to={routes.profile}>{t("nav.profile")}</MenuLink>
                 <MenuLink to={routes.security}>{t("nav.security")}</MenuLink>

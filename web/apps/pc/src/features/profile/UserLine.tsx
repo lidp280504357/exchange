@@ -24,7 +24,8 @@ export function UserLine({ size = 40, className, after }: { size?: number; class
   const userId = profile.data?.user_id ?? sessionUser;
   return (
     <div className={className ?? "flex items-center gap-3"}>
-      <MyAvatar size={size} />
+      {/* The username is beside it: the avatar is decoration here. */}
+      <MyAvatar size={size} decorative />
       <div className="min-w-0">
         {profile.data ? (
           <div className="truncate text-sm font-medium text-fg-1" data-testid="my-username">

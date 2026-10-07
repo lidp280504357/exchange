@@ -29,6 +29,8 @@ export function AvatarEditor({ profile, locked }: { profile: Profile | undefined
   const [confirm, setConfirm] = useState(false);
   const [removing, setRemoving] = useState(false);
   const busy = state.phase === "preparing" || state.phase === "uploading";
+  // Once the picture is up the server is saving it: cancelling would not stop that (review GJ, F9).
+  const saving = state.phase === "uploading" && state.progress >= 1;
   const uploaded = Boolean(profile?.avatar_url);
   const usable = Boolean(profile) && !locked;
   const pick = () => input.current?.click();
@@ -79,9 +81,11 @@ export function AvatarEditor({ profile, locked }: { profile: Profile | undefined
       <Status state={state} uploaded={uploaded} />
       <div className="flex w-full gap-2">
         {busy ? (
-          <Button variant="secondary" size="lg" block onClick={cancel}>
-            {t("mProfile.avatar.cancel")}
-          </Button>
+          !saving && (
+            <Button variant="secondary" size="lg" block onClick={cancel}>
+              {t("mProfile.avatar.cancel")}
+            </Button>
+          )
         ) : (
           <>
             <Button variant="secondary" size="lg" block disabled={!usable} onClick={pick}>

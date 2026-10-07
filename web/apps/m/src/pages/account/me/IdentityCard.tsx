@@ -73,7 +73,7 @@ export function IdentityCard() {
             className="absolute inset-0 animate-[spin_8s_linear_infinite] rounded-full bg-[conic-gradient(from_0deg,var(--brand),transparent_35%,var(--brand)_65%,transparent_90%,var(--brand))] will-change-transform"
           />
           <span className="relative grid size-[58px] place-items-center rounded-full bg-bg-1">
-            <MyAvatar size={52} />
+            <MyAvatar size={52} decorative />
           </span>
         </span>
         <div className="min-w-0 flex-1 pt-1.5">

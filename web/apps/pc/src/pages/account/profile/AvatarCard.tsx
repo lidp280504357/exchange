@@ -28,6 +28,8 @@ export function AvatarCard({ profile, locked, index }: { profile: Profile | unde
   const [removing, setRemoving] = useState(false);
   const [over, setOver] = useState(false);
   const busy = state.phase === "preparing" || state.phase === "uploading";
+  // Once the picture is up the server is saving it: cancelling would not stop that (review GJ, F9).
+  const saving = state.phase === "uploading" && state.progress >= 1;
   const uploaded = Boolean(profile?.avatar_url);
   const usable = Boolean(profile) && !locked;
 
@@ -85,9 +87,11 @@ export function AvatarCard({ profile, locked, index }: { profile: Profile | unde
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {busy ? (
-          <Button size="sm" variant="ghost" onClick={cancel}>
-            {t("pcProfile.avatar.cancel")}
-          </Button>
+          !saving && (
+            <Button size="sm" variant="ghost" onClick={cancel}>
+              {t("pcProfile.avatar.cancel")}
+            </Button>
+          )
         ) : (
           <>
             {uploaded && (

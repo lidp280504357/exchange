@@ -572,6 +572,14 @@ try {
   await choosePicture(page, '[data-testid="avatar-input"]');
   await page.waitForSelector('[data-testid="profile-avatar"] img[src*="/uploads/avatars/"]', { timeout: 30000 });
   await page.waitForSelector('header img[src$="_64.webp"]', { timeout: 15000 });
+  // The avatars are plain images: wait until both have come in (review GJ, F9).
+  await page.waitForFunction(
+    () => ['[data-testid="profile-avatar"] img', 'header img[src$="_64.webp"]'].every((s) => {
+      const img = document.querySelector(s);
+      return img?.complete && img.naturalWidth > 0;
+    }),
+    { timeout: 15000 },
+  );
   const uploaded = await page.$eval('[data-testid="profile-avatar"] img', (img) => ({ src: img.getAttribute("src"), side: img.naturalWidth }));
   if (!uploaded.src?.endsWith(".webp") || uploaded.side !== 256) throw new Error(`the uploaded avatar: ${JSON.stringify(uploaded)}`);
   await shot("8b-profile");
