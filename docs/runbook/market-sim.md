@@ -91,6 +91,7 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
   - 测试服 10-07 的额度（BTC 约 84,100）：BTC-USDT 现货 HOUSE 还能买约 13.7 BTC，+16% 估算约 18 万 USDT，不连带时过得了 200,000 的上限。连带永续（BTC-USDT-PERP 约 66 BTC、BTC-USD-PERP 约 5 万张）约 177 万，所以设计 §5 的 e2e 例子（+16%，默认连带）会被拒，端到端按拒绝里的估算缩小幅度（见下）。上限与是否按减量打折待协调会话定（J0 契约 §8 第 3 点）。
 - **开关与配置**：`market.overlay` 关时 403 `SIM_OVERLAY_OFF`；market-sim 没有 `OVERLAY_API_SECRET` 时 503 `SIM_OVERLAY_UNCONFIGURED`。
 - **全部或全无**：一个请求里的事件全部建成或全部不建。平台币的 `JUMP` 先建；跟随交易对的事件写库失败时，把那个 `JUMP` 结束。
+- **后台**（J3、A81，操作见 [admin.md](admin.md)「任意币种价格事件」）：「模拟市场 → 价格控制」顶部的卡片建事件（交易对多选、按百分比或价格、三个秒数、默认连带，确认词 `overlay`）；admin-service 先查表单，再以 `admin` 键签名转发（`actor` 为当前管理员）。`SIM_EVENT_NEEDS_APPROVAL` 存成 `SIM_EVENT` 申请（`payload.symbol`、`payload.move`），第二位有 `sim.control` 的管理员批准后带 `approved_by` 再发；批准框逐个交易对给出平台现价、目标价与按上面算法估算的 HOUSE 最坏损失（admin-service 读同一个 `GET /internal/house/rooms/{symbol}`），注明执行时按当时的币安价重算、超过上限由这里拒绝。进行中的事件「立即恢复」即 `/end`；事件日程显示进度、乘数、起点与峰值、结束时的币安价与平台价。
 
 答复 201：`{"items": [{"symbol", "event_id", "type", "status", "factor_target", "base_price", "event"}]}`。立即开始的 `status` 为 `RUNNING`；`base_price` 是开始时的币安价，平台币为模型目标价。
 
