@@ -153,6 +153,13 @@ try {
       window.scrollTo(0, 0);
       return { boxed, rows, gap: Math.round(gap) };
     });
+  // The contracts come with their own request after the pairs: the table
+  // switches to its box when they arrive, so the check waits for them (the
+  // rail's 合约 count).
+  await page.waitForFunction(
+    () => Number([...document.querySelectorAll("main nav button")].find((b) => b.innerText.trim().startsWith("合约"))?.innerText.match(/(\d+)\s*$/)?.[1] ?? 0) > 0,
+    { timeout: 20000 },
+  );
   let scrolled = await tableScroll();
   if (scrolled.boxed) {
     if (Math.abs(scrolled.gap) > 1) throw new Error(`the market table's header is ${scrolled.gap}px off its box's top`);
