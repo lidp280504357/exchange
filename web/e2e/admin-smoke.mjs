@@ -713,6 +713,10 @@ try {
   const simTarget = Number(await page.$eval("[data-testid=sim-target]", (el) => el.textContent));
   await go("/sim/control");
   await waitText("价格模型");
+  // The page's own form comes with the simulated market's state; the card
+  // of price events on any pair above it, whose help names the price
+  // model too, comes at once (J3).
+  await page.waitForSelector("#sim-size", { timeout: 20000 });
   await page.$eval("#sim-size", (el) => el.select());
   await page.type("#sim-size", "-5");
   await page.click("[data-testid=sim-event-start]");
@@ -737,8 +741,9 @@ try {
     throw new Error("a price event spares the perpetuals and the leverage only when ticked");
   }
   await page.click("[data-testid=overlay-add-pair]");
-  await page.waitForSelector("[role=listbox]");
-  await page.keyboard.type("BTC-USDT");
+  const pairSearch = 'input[role=combobox][placeholder="搜索交易对"]';
+  await page.waitForSelector(pairSearch);
+  await page.type(pairSearch, "BTC-USDT");
   await page.keyboard.press("Enter");
   await page.waitForSelector("[data-testid=overlay-pair-BTC-USDT]");
   await page.waitForFunction(

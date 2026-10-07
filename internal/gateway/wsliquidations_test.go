@@ -51,20 +51,9 @@ func TestWebSocketLiquidationsChannel(t *testing.T) {
 	if m := c.next(); m["ok"] != true {
 		t.Fatalf("subscribe: %v", m)
 	}
-	// The ok goes out before the hub adds the subscriber (wsConn.subscribe),
-	// and this channel sends nothing on subscribing: wait for the hub, or a
-	// liquidation emitted in between is not pushed (CI on 344ee62b).
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		hub.mu.Lock()
-		n := len(hub.public["liquidations:BTC-USD-PERP"])
-		hub.mu.Unlock()
-		if n == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the subscriber was never added")
-		}
-	}
+	// The ok is queued with the subscription in place (38cc9847): a
+	// liquidation emitted right after it is pushed, though this channel
+	// sends nothing on subscribing.
 	emit("ETH-USDT-PERP", "LONG") // another contract's
 	emit("BTC-USD-PERP", "SHORT")
 	m := c.next()
