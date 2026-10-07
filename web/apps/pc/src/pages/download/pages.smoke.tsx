@@ -62,7 +62,7 @@ export function describePages(locale: Locale) {
       expect(html).toContain(say("Android 7.0 及以上", "Android 7.0 及以上", "Android 7.0 or later"));
       expect(html).toContain(offered.android?.url);
       expect(html).toContain(offered.ios?.url);
-      // The QR codes, named by their platforms (review GK, F12).
+      // The QR codes, named by their platforms (review GN, F12).
       for (const p of ["Android", "iOS"]) expect(html).toContain(`aria-label="${say(`${p} 下载二维码`, `${p} 下載二維碼`, `${p} download QR code`)}"`);
       expect(html.indexOf('data-testid="app-android"')).toBeLessThan(html.indexOf('data-testid="app-ios"'));
     });

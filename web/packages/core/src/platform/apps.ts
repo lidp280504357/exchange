@@ -70,11 +70,12 @@ export function parsePlatform(v: string | null | undefined): AppPlatform | null 
 }
 
 /**
- * safeHref passes only the links the server makes (https, and
+ * appHref passes only the links the server makes for apps (https, and
  * itms-services for an over-the-air install): anything else is not put in
- * a page's link or QR code.
+ * a page's link or QR code. Not the articles' content/markdown safeHref,
+ * which lets more through (http, mailto, relative links).
  */
-export function safeHref(url: string | null | undefined): string | undefined {
+export function appHref(url: string | null | undefined): string | undefined {
   return url && /^(https:|itms-services:)/i.test(url) ? url : undefined;
 }
 
@@ -84,7 +85,7 @@ export function safeHref(url: string | null | undefined): string | undefined {
  * link or downloads its file; undefined for a link of another kind.
  */
 export function installUrl(app: AppDownload): string | undefined {
-  return safeHref(app.install_url ?? app.url);
+  return appHref(app.install_url ?? app.url);
 }
 
 /**
@@ -95,7 +96,7 @@ export function installUrl(app: AppDownload): string | undefined {
  * needs the unknown-sources note.
  */
 export function qrUrl(platform: AppPlatform, app: AppDownload, page: string): string {
-  return app.mode === "LINK" && safeHref(app.url) ? app.url : `${page}?platform=${platform}`;
+  return app.mode === "LINK" && appHref(app.url) ? app.url : `${page}?platform=${platform}`;
 }
 
 // Android API levels and the versions that brought them: an .apk's min_os

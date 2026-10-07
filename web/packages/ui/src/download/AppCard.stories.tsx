@@ -1,4 +1,4 @@
-import type { AppDownload } from "@exchange/core/platform/apps";
+import { appHref, installUrl, type AppDownload } from "@exchange/core/platform/apps";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Button } from "../components/Button";
 import { QrCode } from "../data/QrCode";
@@ -36,9 +36,10 @@ const labels = (platform: string, kind: string, badge?: string): AppCardLabels =
 });
 const androidSteps = ["下载完成后点按安装包进行安装。", "如果提示禁止安装未知来源的应用，请在系统设置里允许当前浏览器安装应用。", "可以用 SHA-256 核对下载的文件是否完整。"];
 const iosSteps = ["在 Safari 中打开本页，点按「安装」并确认。", "回到主屏幕，等待图标下载完成。", "首次打开时在 设置 → 通用 → VPN 与设备管理 中信任该开发者。"];
-const qr = (value: string, caption: string) => (
+// A QR code named by its platform, with the line under it.
+const qr = (value: string, caption: string, name: string) => (
   <>
-    <QrCode value={value} size={132} label={caption} />
+    <QrCode value={value} size={132} label={name} />
     <span className="text-center text-xs leading-relaxed text-fg-3">{caption}</span>
   </>
 );
@@ -52,10 +53,10 @@ const meta = {
     labels: labels("Android", "安装包（APK）"),
     minOs: "Android 7.0 及以上",
     notes: notes["zh-CN"],
-    qr: qr("https://astras.vip/download?platform=android", "手机扫码下载"),
+    qr: qr("https://astras.vip/download?platform=android", "手机扫码下载", "Android 下载二维码"),
     actions: (
       <Button asChild size="lg">
-        <a href={apk.url}>下载 APK</a>
+        <a href={installUrl(apk)}>下载 APK</a>
       </Button>
     ),
     steps: androidSteps,
@@ -77,10 +78,10 @@ export const AppStoreLink: Story = {
     labels: labels("iOS", "App Store"),
     minOs: null,
     notes: "",
-    qr: qr(store.url, "手机扫码下载"),
+    qr: qr(store.url, "手机扫码下载", "iOS 下载二维码"),
     actions: (
       <Button asChild size="lg">
-        <a href={store.url}>前往 App Store</a>
+        <a href={installUrl(store)}>前往 App Store</a>
       </Button>
     ),
     steps: null,
@@ -94,9 +95,9 @@ export const EnterpriseIos: Story = {
     app: ota,
     labels: labels("iOS", "企业签名安装"),
     minOs: "iOS 15.0 及以上",
-    qr: qr("https://astras.vip/download?platform=ios", "用 iPhone 或 iPad 扫码，在 Safari 中打开后安装"),
+    qr: qr("https://astras.vip/download?platform=ios", "用 iPhone 或 iPad 扫码，在 Safari 中打开后安装", "iOS 下载二维码"),
     actions: (
-      <a href={ota.mobileconfig_url ?? ""} className="text-sm text-brand hover:underline">
+      <a href={appHref(ota.mobileconfig_url)} className="text-sm text-brand hover:underline">
         下载配置描述文件
       </a>
     ),
@@ -115,7 +116,7 @@ export const PhoneOwn: Story = {
     qr: undefined,
     actions: (
       <Button asChild size="lg" block>
-        <a href={ota.install_url ?? ""}>安装</a>
+        <a href={installUrl(ota)}>安装</a>
       </Button>
     ),
     steps: iosSteps,
@@ -131,7 +132,7 @@ export const PhoneOther: Story = {
     qr: undefined,
     actions: (
       <Button asChild size="lg" block variant="secondary">
-        <a href={apk.url}>下载 APK</a>
+        <a href={installUrl(apk)}>下载 APK</a>
       </Button>
     ),
     className: "w-[390px]",
@@ -145,8 +146,8 @@ export const TopBarPanel: StoryObj<typeof AppQrPanel> = {
       <AppQrPanel
         title="扫码下载 App"
         codes={[
-          { key: "android", value: "https://astras.vip/download?platform=android", caption: "Android" },
-          { key: "ios", value: store.url, caption: "iOS" },
+          { key: "android", value: "https://astras.vip/download?platform=android", caption: "Android", label: "Android 下载二维码" },
+          { key: "ios", value: store.url, caption: "iOS", label: "iOS 下载二维码" },
         ]}
         footer={
           <a href="/download" className="flex items-center justify-center rounded-2 bg-bg-2 py-2 text-sm text-fg-1">

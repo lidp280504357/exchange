@@ -1,6 +1,6 @@
 import { errorText, routes, useSettings } from "@exchange/core";
 import {
-  appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, safeHref, usePlatformApps, type AppDownload, type AppPlatform,
+  appHref, appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, usePlatformApps, type AppDownload, type AppPlatform,
 } from "@exchange/core/platform/apps";
 import { textOf } from "@exchange/core/platform/index";
 import { Button, EmptyState, ErrorState, QrCode, Skeleton, cn } from "@exchange/ui";
@@ -62,7 +62,7 @@ export default function Download() {
 
 // Card is one app on the PC: its QR code beside the facts. An OTA install
 // only works on an iPhone or iPad, so its QR code says so and it has a
-// button only on an iPad that asked for the desktop site (review GK, F12).
+// button only on an iPad that asked for the desktop site (review GN, F12).
 function Card({ platform, app, page, index }: { platform: AppPlatform; app: AppDownload; page: string; index: number }) {
   const { t } = useTranslation();
   const locale = useSettings((s) => s.locale);
@@ -70,7 +70,7 @@ function Card({ platform, app, page, index }: { platform: AppPlatform; app: AppD
   const nav = globalThis.navigator;
   const onIos = devicePlatform(nav?.userAgent ?? "", nav?.maxTouchPoints ?? 0) === "ios";
   const href = installUrl(app);
-  const mobileconfig = safeHref(app.mobileconfig_url);
+  const mobileconfig = appHref(app.mobileconfig_url);
   const label = { androidFile: t("pcDownload.downloadApk"), androidLink: t("pcDownload.open"), iosStore: t("pcDownload.appStore"), iosOta: onIos ? t("pcDownload.install") : null }[kind];
   const button = href ? label : null;
   const name = t(`pcDownload.platforms.${platform}`);

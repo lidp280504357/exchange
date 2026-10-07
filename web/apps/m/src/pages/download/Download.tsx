@@ -1,6 +1,6 @@
 import { errorText, routes, useSettings } from "@exchange/core";
 import {
-  appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, safeHref, usePlatformApps, type AppDownload, type AppPlatform,
+  appHref, appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, usePlatformApps, type AppDownload, type AppPlatform,
 } from "@exchange/core/platform/apps";
 import { textOf } from "@exchange/core/platform/index";
 import { Button, EmptyState, ErrorState, Skeleton } from "@exchange/ui";
@@ -51,7 +51,7 @@ export default function Download() {
 // Card is one app on the phone: the leading one (the phone's own, or the
 // one asked for) with a primary button and its install steps open. An
 // over-the-air install only works on an iPhone or iPad: elsewhere its
-// card says so instead of a button (review GK, F12).
+// card says so instead of a button (review GN, F12).
 function Card({ platform, app, own, lead, index }: { platform: AppPlatform; app: AppDownload; own: boolean; lead: boolean; index: number }) {
   const { t } = useTranslation();
   const locale = useSettings((s) => s.locale);
@@ -59,7 +59,7 @@ function Card({ platform, app, own, lead, index }: { platform: AppPlatform; app:
   const label = { androidFile: t("mDownload.downloadApk"), androidLink: t("mDownload.open"), iosStore: t("mDownload.appStore"), iosOta: t("mDownload.install") }[kind];
   const steps = kind === "androidFile" ? "helpAndroid" : kind === "iosOta" ? "helpIos" : null;
   const href = kind === "iosOta" && !own ? undefined : installUrl(app);
-  const mobileconfig = safeHref(app.mobileconfig_url);
+  const mobileconfig = appHref(app.mobileconfig_url);
   return (
     <AppCard
       platform={platform}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { androidVersion, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, safeHref, type AppDownload } from "./apps";
+import { androidVersion, appHref, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, type AppDownload } from "./apps";
 
 const notes = { "zh-CN": "", en: "" };
 const link: AppDownload = {
@@ -49,8 +49,8 @@ describe("the apps to download", () => {
     expect(installUrl(apk)).toBe(apk.url);
     expect(installUrl(ipa)).toMatch(/^itms-services:/);
     expect(installUrl({ ...link, url: "javascript:alert(1)" })).toBeUndefined();
-    expect(safeHref("http://example.com/a.apk")).toBeUndefined();
-    expect(safeHref(null)).toBeUndefined();
+    expect(appHref("http://example.com/a.apk")).toBeUndefined();
+    expect(appHref(null)).toBeUndefined();
     expect(qrUrl("ios", { ...link, url: "javascript:alert(1)" }, "https://astras.vip/download")).toBe("https://astras.vip/download?platform=ios");
   });
 
