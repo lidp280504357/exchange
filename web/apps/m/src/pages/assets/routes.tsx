@@ -7,12 +7,15 @@ import { lazyPage, type PageRoute } from "../../routing";
 const strings = () => import("../../i18n/assets");
 const auth = () => import("../../i18n/auth");
 
-const Overview = lazyPage(() => import("./Overview"), strings);
+// The overview carries the notice of the paused product lines (design 2026-10-07, product line switches §1 #2).
+const products = () => import("../../i18n/products");
+const Overview = lazyPage(() => import("./Overview"), strings, products);
 const Deposit = lazyPage(() => import("./Deposit"), strings);
 const Withdraw = lazyPage(() => import("./Withdraw"), strings, auth);
 const Transfer = lazyPage(() => import("./Transfer"), strings);
 const History = lazyPage(() => import("./History"), strings);
 const Margin = lazyPage(() => import("./Margin"), strings, () => import("../../i18n/margin"));
+const ClosedProducts = lazyPage(() => import("./ClosedProducts"), strings, products);
 
 export const assetRoutes: PageRoute[] = [
   { path: routes.assets, element: <Overview />, auth: true, shell: "tabs" },
@@ -21,4 +24,5 @@ export const assetRoutes: PageRoute[] = [
   { path: routes.transfer, element: <Transfer />, auth: true, shell: "page" },
   { path: routes.history, element: <History />, auth: true, shell: "page" },
   { path: routes.margin, element: <Margin />, auth: true, shell: "page" },
+  { path: routes.closedProducts, element: <ClosedProducts />, auth: true, shell: "page" },
 ];

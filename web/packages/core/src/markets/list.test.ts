@@ -195,6 +195,8 @@ describe("home page picks", () => {
     expect(symbols(o.gainers)).toEqual(["A-USDT", "BTC-USDT"]);
     expect(symbols(o.losers)).toEqual(["B-USDT", "BTC-USDT"]);
     expect(symbols(o.turnover)).toEqual(["B-USDT", "BTC-USDT"]);
+    // Spot closed (product line switches §1 #2): the contracts rank instead.
+    expect(symbols(rankOverview(buildRows([], contracts), (s) => ticker(s, { change: "0.01" }), 2).gainers)).toEqual(["BTC-USDT-PERP"]);
   });
 });
 
@@ -214,6 +216,18 @@ describe("markets page boards", () => {
     expect(symbols(h.losers)).toEqual(["ETH-BTC", "BTC-USDT", "BTC-USDT-PERP"]);
     expect(h.newest).toHaveLength(3);
     expect(h.newest.map((r) => r.symbol)).not.toContain("PEPE-USDT");
+  });
+
+  it("ranks the coin-margined contracts by turnover when nothing is quoted in USDT (the other lines closed)", () => {
+    const coin: ContractLike[] = [
+      { symbol: "BTC-USD-PERP", base_asset: "BTC", quote_asset: "USD", index_symbol: "BTC-USDT", tick_size: "0.1", status: "TRADING", max_leverage: 125 },
+      { symbol: "ETH-USD-PERP", base_asset: "ETH", quote_asset: "USD", index_symbol: "ETH-USDT", tick_size: "0.01", status: "TRADING", max_leverage: 125 },
+    ];
+    const usd = new Map<string, TickerData>([
+      ["BTC-USD-PERP", ticker("BTC-USD-PERP", { quote_volume: "900" })],
+      ["ETH-USD-PERP", ticker("ETH-USD-PERP", { quote_volume: "1200" })],
+    ]);
+    expect(symbols(rankHighlights(buildRows([], coin), (s) => usd.get(s), now, 3).hot)).toEqual(["ETH-USD-PERP", "BTC-USD-PERP"]);
   });
 
   it("flags stalled reference tickers only", () => {

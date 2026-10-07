@@ -60,7 +60,7 @@ export default function FuturesData() {
   const locale = useSettings((s) => s.locale);
   const wide = useMediaQuery("(min-width: 1280px)");
   const [params, setParams] = useSearchParams();
-  const group = parseMarginGroup(params.get("margin"));
+  const asked = parseMarginGroup(params.get("margin"));
   const sortKey = params.get("sort");
   const sortDir = params.get("dir");
   const sort = useMemo(() => parseOverviewSort(sortKey, sortDir), [sortKey, sortDir]);
@@ -86,6 +86,9 @@ export default function FuturesData() {
   );
 
   const hasCoin = rows.some((r) => r.group === "coin");
+  // With one contract line closed the other one is the whole overview, without the switch (design 2026-10-07, product line switches §1 #2).
+  const both = hasCoin && rows.some((r) => r.group === "usdt");
+  const group: MarginGroup = both || rows.length === 0 ? asked : hasCoin ? "coin" : "usdt";
   const inGroup = useMemo(() => filterOverview(rows, group), [rows, group]);
   const shown = useMemo(() => sortOverview(filterOverview(rows, group, query), sort), [rows, group, query, sort]);
   const totals = useMemo(() => overviewTotals(inGroup), [inGroup]);
@@ -230,7 +233,7 @@ export default function FuturesData() {
       {/* clip, not hidden: the table's header sticks to the page under the top bar. */}
       <section className="mt-6 min-w-0 overflow-clip rounded-3 border border-line-1 bg-bg-1">
         <div className="flex flex-wrap items-center gap-3 border-b border-line-1 px-4 py-3">
-          {hasCoin && (
+          {both && (
             <Segmented
               size="sm"
               aria-label={t("pcFutures.overview.title")}

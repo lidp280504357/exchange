@@ -10,6 +10,7 @@ import {
   type FuturesSortKey,
   type MarginGroup,
 } from "@exchange/core/futures/index";
+import { useOpenProducts } from "@exchange/core/platform/products";
 import {
   categoryCount,
   categoryTags,
@@ -89,7 +90,10 @@ export default function Markets() {
   const fav = useFavoriteToggle();
   const [now] = useState(() => Date.now());
 
-  const category = parseCategory(params.get("cat"));
+  // A closed product line's category is not offered: its address shows every market (design 2026-10-07, product line switches §1 #2).
+  const products = useOpenProducts();
+  const asked = parseCategory(params.get("cat"));
+  const category: MarketCategory = (asked === "spot" && !products.spot) || (asked === "futures" && !products.usdt_m && !products.coin_m) ? "all" : asked;
   const sortKey = params.get("sort");
   const sortDir = params.get("dir");
   // The futures category adds the open interest and funding columns, and its two groups (USDⓈ-M, COIN-M).
@@ -144,10 +148,13 @@ export default function Markets() {
   const favorites = useMemo(() => new Set(fav.symbols), [fav.symbols]);
   const tickerOf: TickerOf = useCallback((s) => tickers.get(s), [tickers]);
   const hasCoin = useMemo(() => rows.some((r) => r.kind === "perp" && groupOf(r.symbol) === "coin"), [rows, groupOf]);
+  // With one contract line closed the other one is the whole category, without the switch (design 2026-10-07, product line switches §1 #2).
+  const hasUsdt = useMemo(() => rows.some((r) => r.kind === "perp" && groupOf(r.symbol) === "usdt"), [rows, groupOf]);
+  const both = hasCoin && hasUsdt;
   const filtered = useMemo(() => {
     const list = filterRows(rows, { category, query, favorites, now });
-    return futures && hasCoin ? list.filter((r) => groupOf(r.symbol) === group) : list;
-  }, [rows, category, query, favorites, now, futures, hasCoin, group, groupOf]);
+    return futures && both ? list.filter((r) => groupOf(r.symbol) === group) : list;
+  }, [rows, category, query, favorites, now, futures, both, group, groupOf]);
   // New listings read newest first unless a column is chosen.
   const order = useMemo<FuturesSort | null>(() => sort ?? (category === "new" ? { key: "listed", desc: true } : null), [sort, category]);
   const sorted = useMemo(
@@ -385,7 +392,7 @@ export default function Markets() {
               size="md"
               containerClassName="max-w-sm"
             />
-            {futures && hasCoin && (
+            {futures && both && (
               <Segmented
                 size="sm"
                 aria-label={t("market.futures")}
@@ -444,13 +451,15 @@ type RailProps = {
 /** CategoryRail: the fixed categories, then the sector tags, each with its count. */
 function CategoryRail({ rows, loading, category, onChange, favorites, now, tags }: RailProps) {
   const { t } = useTranslation();
-  const fixed: { id: MarketCategory; label: string; icon: ReactNode }[] = [
+  const products = useOpenProducts();
+  const every: { id: MarketCategory; label: string; icon: ReactNode }[] = [
     { id: "all", label: t("common.all"), icon: <LayoutGrid size={16} /> },
     { id: "favorites", label: t("market.favorites"), icon: <Star size={16} /> },
     { id: "spot", label: t("market.spot"), icon: <Wallet size={16} /> },
     { id: "futures", label: t("market.futures"), icon: <Layers size={16} /> },
     { id: "new", label: t("market.newListings"), icon: <Sparkles size={16} /> },
   ];
+  const fixed = every.filter((c) => (c.id !== "spot" || products.spot) && (c.id !== "futures" || products.usdt_m || products.coin_m));
   const item = (id: MarketCategory, label: string, icon: ReactNode) => {
     const active = category === id;
     return (

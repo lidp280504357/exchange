@@ -1,5 +1,6 @@
 import { dec, errorText, formatPercent, formatPrice, pairName, useContracts, usePairs, useTickers } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
+import { isOpen, useOpenProducts } from "@exchange/core/platform/products";
 import { searchMarkets } from "@exchange/core/markets/search";
 import { CoinIcon, Input, Segmented, Sheet, cn, toast } from "@exchange/ui";
 import { Search, Star } from "lucide-react";
@@ -26,21 +27,25 @@ export function PairSheet({
   const contracts = useContracts();
   const tickers = useTickers();
   const favorites = useFavorites();
+  // A closed product line's markets are not offered (design 2026-10-07, product line switches §1 #2).
+  const products = useOpenProducts();
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("all");
 
   const rows = useMemo<Row[]>(() => {
-    const spot = (pairs.data?.pairs ?? [])
+    const spot = (products.spot ? (pairs.data?.pairs ?? []) : [])
       .filter((p) => p.status !== "DELISTED")
       .map((p) => ({ symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: pairName(p), decimals: p.price_decimals, futures: false }));
-    const perp = (contracts.data?.contracts ?? []).map((c) => ({
+    const perp = (contracts.data?.contracts ?? []).filter((c) => isOpen(c.symbol, products)).map((c) => ({
       symbol: c.symbol, base: c.base_asset, quote: c.quote_asset, name: t("m.perpetual"), decimals: dec.decimalsOf(c.tick_size), futures: true,
     }));
     return [...spot, ...perp];
-  }, [pairs.data, contracts.data, t]);
+  }, [pairs.data, contracts.data, t, products]);
 
   // The contracts group by margin once coin-margined ones are listed: USDT-margined ones quote in USDT, coin-margined ones in USD (design 2026-10-06 §2.6).
   const coinM = rows.some((r) => r.futures && r.quote === "USD");
+  // With one contract line closed the other one is the only contracts' tab.
+  const usdtM = rows.some((r) => r.futures && r.quote !== "USD");
   const inGroup = (r: Row) =>
     group === "all" ||
     (group === "fav"
@@ -73,12 +78,16 @@ export function PairSheet({
             { value: "fav", label: t("market.favorites") },
             { value: "all", label: t("common.all") },
             ...quotes.map((q2) => ({ value: q2, label: q2 })),
-            ...(coinM
+            ...(coinM && usdtM
               ? [
                   { value: "perp", label: t("mTrade.usdtMargined") },
                   { value: "coin", label: t("mTrade.coinMargined") },
                 ]
-              : [{ value: "perp", label: t("market.futures") }]),
+              : coinM
+                ? [{ value: "coin", label: t("mTrade.coinMargined") }]
+                : usdtM
+                  ? [{ value: "perp", label: t("market.futures") }]
+                  : []),
           ]}
         />
       </div>

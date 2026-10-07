@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo } from "react";
 import { marketApi, unwrap } from "../api/client";
 import { useMarket, useTickers } from "../market/hooks";
+import { isOpen, useOpenProducts } from "../platform/products";
 import { qk } from "../query/keys";
 import { useContracts, usePairs } from "../trading/pairs";
 import type { TickerData } from "../ws/types";
@@ -43,11 +44,23 @@ export type MarketRows = {
   refetch: () => void;
 };
 
-/** useMarketRows returns the list rows of every pair and contract. */
+/**
+ * useMarketRows returns the list rows of every pair and contract of the
+ * open product lines (a closed line's markets leave the home page's boards
+ * and the other lists; design 2026-10-07, product line switches §1 #2).
+ */
 export function useMarketRows(): MarketRows {
   const pairs = usePairs();
   const contracts = useContracts();
-  const rows = useMemo(() => buildRows(pairs.data?.pairs ?? [], contracts.data?.contracts ?? []), [pairs.data, contracts.data]);
+  const products = useOpenProducts();
+  const rows = useMemo(
+    () =>
+      buildRows(
+        products.spot ? (pairs.data?.pairs ?? []) : [],
+        (contracts.data?.contracts ?? []).filter((c) => isOpen(c.symbol, products)),
+      ),
+    [pairs.data, contracts.data, products],
+  );
   const { refetch: refetchPairs } = pairs;
   const { refetch: refetchContracts } = contracts;
   const refetch = useCallback(() => {

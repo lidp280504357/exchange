@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { mMessages } from "../../../i18n";
 import assets from "../../../i18n/assets";
 import margin from "../../../i18n/margin";
+import products from "../../../i18n/products";
 
 // The strings of the mobile assets pages: both languages have the same
 // keys, every key the pages name exists, and so do the keys built from data
@@ -26,15 +27,16 @@ function has(tree: unknown, key: string): boolean {
   return typeof lookup(tree, key) === "string" || typeof lookup(tree, `${key}_other`) === "string";
 }
 
-// The shared words, the shell's (m.*) and this area's (mAssets.*, and the
-// margin page's mMargin.*).
-const zh = { ...coreZh, ...mMessages["zh-CN"], ...assets["zh-CN"], ...margin["zh-CN"] };
-const en = { ...coreEn, ...mMessages.en, ...assets.en, ...margin.en };
+// The shared words, the shell's (m.*) and this area's (mAssets.*, the
+// margin page's mMargin.* and the wind-down page's mProducts.*).
+const zh = { ...coreZh, ...mMessages["zh-CN"], ...assets["zh-CN"], ...margin["zh-CN"], ...products["zh-CN"] };
+const en = { ...coreEn, ...mMessages.en, ...assets.en, ...margin.en, ...products.en };
 
 describe("assets page strings", () => {
   it("have the same keys in Chinese and English", () => {
     expect(keys(assets.en).sort()).toEqual(keys(assets["zh-CN"]).sort());
     expect(keys(margin.en).sort()).toEqual(keys(margin["zh-CN"]).sort());
+    expect(keys(products.en).sort()).toEqual(keys(products["zh-CN"]).sort());
   });
 
   it("cover every key the pages name, in both languages", () => {

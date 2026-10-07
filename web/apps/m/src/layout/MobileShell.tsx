@@ -1,4 +1,5 @@
 import { DEFAULT_SYMBOL, routes, selectSignedIn, useSession } from "@exchange/core";
+import { useTradeEntry } from "@exchange/core/platform/products";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { cn } from "@exchange/ui";
 import { ArrowLeftRight, Bell, CandlestickChart, Home, Search, UserRound, Wallet } from "lucide-react";
@@ -28,6 +29,8 @@ export function MobileShell() {
       setLastTrade(pathname);
     }
   }, [pathname]);
+  // The last trading page while its product line is open, else an open line's (design 2026-10-07, product line switches §1 #2).
+  const trade = useTradeEntry(lastTrade);
   return (
     <div className="flex min-h-dvh flex-col bg-bg-0 pb-[calc(56px+env(safe-area-inset-bottom))]">
       <TopBar />
@@ -41,7 +44,7 @@ export function MobileShell() {
         <div className="grid h-14 grid-cols-5">
           <Tab to={routes.home} icon={<Home size={20} />} label={t("nav.home")} end />
           <Tab to={routes.markets} icon={<CandlestickChart size={20} />} label={t("nav.markets")} />
-          <Tab to={lastTrade} icon={<ArrowLeftRight size={20} />} label={t("nav.trade")} match={/^\/(trade|futures)\//} />
+          <Tab to={trade} icon={<ArrowLeftRight size={20} />} label={t("nav.trade")} match={/^\/(trade|futures)\//} />
           <Tab to={routes.assets} icon={<Wallet size={20} />} label={t("nav.assets")} />
           <Tab to={routes.me} icon={<UserRound size={20} />} label={t("nav.me")} />
         </div>

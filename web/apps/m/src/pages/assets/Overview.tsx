@@ -1,4 +1,5 @@
 import { dec, errorText, formatAmount, formatPercent, routes, useSettings, useSettleAssets } from "@exchange/core";
+import { useOpenProducts } from "@exchange/core/platform/products";
 import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
 import { useMarginEntry } from "@exchange/core/margin/hooks";
 import { accountShare, convertValue, referencePrice, valuePortfolio, type AccountView, type AssetRow, type Portfolio } from "@exchange/core/assets/valuation";
@@ -25,6 +26,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
+import { WindDownNotice } from "../../features/products/WindDownNotice";
 import { usePageHeader } from "../../layout/header";
 import { Appear, PRESS, RETRY, Section, useKept } from "./parts/bits";
 import { filterAssets } from "./parts/logic";
@@ -72,6 +74,7 @@ export default function Overview() {
   return (
     <PullToRefresh onRefresh={refresh}>
       <div className="flex flex-col gap-3 px-4 pb-6 pt-2">
+        <WindDownNotice />
         <motion.div variants={listItem} initial="initial" animate="animate" custom={0}>
           <TotalCard
             loading={balances.isPending}
@@ -419,13 +422,16 @@ function AssetCard({ row, meta, onPick }: { row: AssetRow; meta: AssetMeta; onPi
 }
 
 // The FUTURES accounts' summaries: USDT's always, a coin's (coin-margined
-// contracts, design 2026-10-06 §2.6) once it holds something.
+// contracts, design 2026-10-06 §2.6) once it holds something; USDT's too
+// only while it holds something once the USDT-margined line is closed
+// (design 2026-10-07, product line switches §1 #2).
 function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
   const settles = useSettleAssets();
+  const products = useOpenProducts();
   return (
     <div className="flex flex-col gap-2">
       {settles
-        .filter((a) => a === "USDT" || held.includes(a))
+        .filter((a) => (a === "USDT" && products.usdt_m) || held.includes(a))
         .map((a) => (
           <FuturesSummary key={a} asset={a} decimals={a === "USDT" ? 2 : shownDecimals(meta.decimals(a))} />
         ))}

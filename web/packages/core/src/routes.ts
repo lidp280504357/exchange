@@ -19,6 +19,8 @@ export const routes = {
   margin: "/assets/margin",
   /** The username and the avatar (design 2026-10-07, avatars and usernames). */
   profile: "/account/profile",
+  /** What closed product lines still hold of the user's, to wind down (design 2026-10-07, product line switches §1 #2). */
+  closedProducts: "/assets/closed",
   /** The apps to download (design 2026-10-07, App download page §4). */
   download: "/download",
   security: "/account/security",

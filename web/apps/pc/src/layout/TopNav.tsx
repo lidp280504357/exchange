@@ -4,6 +4,7 @@ import {
 } from "@exchange/core";
 import { useMarginAssets } from "@exchange/core/margin/hooks";
 import { useBranding } from "@exchange/core/platform/index";
+import { isOpen, useOpenProducts } from "@exchange/core/platform/products";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
 import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
@@ -61,6 +62,11 @@ export function TopNav() {
   const coinContract = lastOf(true) ?? (bySymbol.has(DEFAULT_COIN_CONTRACT) ? DEFAULT_COIN_CONTRACT : listed.find((c) => isInverse(c))?.symbol);
   const account = (tradeAccount: "SPOT" | "MARGIN_CROSS") => () => setPrefs({ tradeAccount });
   const brand = useBranding().name;
+  // A closed product line leaves the menus (design 2026-10-07, product line
+  // switches §1 #2): spot takes the trade menu with it (margin trades in the
+  // spot terminal), each contract line its entry, both the futures menu.
+  const open = useOpenProducts();
+  const futuresTo = recent.find((s) => isContract(s) && isOpen(s, open)) ?? (open.usdt_m ? DEFAULT_CONTRACT : (coinContract ?? DEFAULT_CONTRACT));
   // The top bar's layer is above the pages' sticky table headers: its menus
   // open over them (review B61).
   return (
@@ -71,28 +77,34 @@ export function TopNav() {
         </Link>
         <nav className="flex h-full items-center gap-1 text-base">
           <Item to={routes.markets}>{t("nav.markets")}</Item>
-          <Menu label={t("nav.trade")} to={routes.trade(spot)} wide onOpen={() => setTradeOpened(true)}>
-            <MenuEntry to={routes.trade(spot)} icon={<ChartCandlestick size={18} />} title={t("pc.menu.spot")} hint={t("pc.menu.spotHint")} onClick={account("SPOT")} />
-            <MenuEntry
-              to={routes.trade(marginPair)}
-              icon={<Landmark size={18} />}
-              title={t("pc.menu.margin")}
-              hint={t("pc.menu.marginHint")}
-              onClick={account("MARGIN_CROSS")}
-            />
-          </Menu>
-          <Menu label={t("nav.futures")} to={routes.futures(recent.find(isContract) ?? DEFAULT_CONTRACT)} wide>
-            <MenuEntry
-              to={routes.futures(usdtContract)}
-              icon={<CircleDollarSign size={18} />}
-              title={t("pc.menu.usdtFutures")}
-              hint={t("pc.menu.usdtFuturesHint")}
-            />
-            {coinContract && (
-              <MenuEntry to={routes.futures(coinContract)} icon={<Bitcoin size={18} />} title={t("pc.menu.coinFutures")} hint={t("pc.menu.coinFuturesHint")} />
-            )}
-            <MenuEntry to={routes.futuresData} icon={<ChartColumn size={18} />} title={t("pc.menu.futuresData")} hint={t("pc.menu.futuresDataHint")} />
-          </Menu>
+          {open.spot && (
+            <Menu label={t("nav.trade")} to={routes.trade(spot)} wide onOpen={() => setTradeOpened(true)}>
+              <MenuEntry to={routes.trade(spot)} icon={<ChartCandlestick size={18} />} title={t("pc.menu.spot")} hint={t("pc.menu.spotHint")} onClick={account("SPOT")} />
+              <MenuEntry
+                to={routes.trade(marginPair)}
+                icon={<Landmark size={18} />}
+                title={t("pc.menu.margin")}
+                hint={t("pc.menu.marginHint")}
+                onClick={account("MARGIN_CROSS")}
+              />
+            </Menu>
+          )}
+          {(open.usdt_m || open.coin_m) && (
+            <Menu label={t("nav.futures")} to={routes.futures(futuresTo)} wide>
+              {open.usdt_m && (
+                <MenuEntry
+                  to={routes.futures(usdtContract)}
+                  icon={<CircleDollarSign size={18} />}
+                  title={t("pc.menu.usdtFutures")}
+                  hint={t("pc.menu.usdtFuturesHint")}
+                />
+              )}
+              {open.coin_m && coinContract && (
+                <MenuEntry to={routes.futures(coinContract)} icon={<Bitcoin size={18} />} title={t("pc.menu.coinFutures")} hint={t("pc.menu.coinFuturesHint")} />
+              )}
+              <MenuEntry to={routes.futuresData} icon={<ChartColumn size={18} />} title={t("pc.menu.futuresData")} hint={t("pc.menu.futuresDataHint")} />
+            </Menu>
+          )}
           {signedIn && (
             // The assets menu as the trade and futures menus (the user's request of 06:0x, B135).
             <Menu label={t("nav.assets")} to={routes.assets} wide>

@@ -1,5 +1,4 @@
 import {
-  DEFAULT_SYMBOL,
   dec,
   errorText,
   formatAmount,
@@ -20,6 +19,7 @@ import { useArticles, useHero } from "@exchange/core/content/index";
 import { useIsolatedLeverage } from "@exchange/core/margin/hooks";
 import { marqueeRows, rankOverview, useMarketRows, useMarketTickers, type MarketRow, type TickerOf } from "@exchange/core/markets/index";
 import { useTestMode, useWelcomeCredits } from "@exchange/core/platform/index";
+import { useTradeEntry } from "@exchange/core/platform/products";
 import {
   Badge,
   Button,
@@ -245,11 +245,13 @@ function AssetCard({ tickers }: { tickers: ReadonlyMap<string, TickerData> }) {
 
 function Shortcuts() {
   const { t } = useTranslation();
+  // A closed product line's terminal is not a way in (design 2026-10-07, product line switches §1 #2).
+  const trade = useTradeEntry();
   const items = [
     { key: "deposit", to: routes.deposit, icon: <ArrowDownToLine size={18} />, label: t("nav.deposit") },
     { key: "withdraw", to: routes.withdraw, icon: <ArrowUpFromLine size={18} />, label: t("nav.withdraw") },
     { key: "transfer", to: routes.transfer, icon: <ArrowLeftRight size={18} />, label: t("nav.transfer") },
-    { key: "trade", to: routes.trade(DEFAULT_SYMBOL), icon: <CandlestickChart size={18} />, label: t("nav.trade") },
+    { key: "trade", to: trade, icon: <CandlestickChart size={18} />, label: t("nav.trade") },
   ];
   return (
     <nav aria-label={t("mMarkets.home.shortcuts")} className="relative grid grid-cols-4 border-t border-line-1">

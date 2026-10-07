@@ -10,6 +10,7 @@ import {
   type FuturesSort,
   type MarginGroup,
 } from "@exchange/core/futures/index";
+import { useOpenProducts } from "@exchange/core/platform/products";
 import {
   categoryTags,
   filterRows,
@@ -83,7 +84,10 @@ export default function Markets() {
   const [now] = useState(() => Date.now());
   const [sortOpen, setSortOpen] = useState(false);
 
-  const category = parseCategory(params.get("cat"));
+  // A closed product line's category is not offered: its address shows every market (design 2026-10-07, product line switches §1 #2).
+  const products = useOpenProducts();
+  const asked = parseCategory(params.get("cat"));
+  const category: MarketCategory = (asked === "spot" && !products.spot) || (asked === "futures" && !products.usdt_m && !products.coin_m) ? "all" : asked;
   const sortKey = params.get("sort");
   const sortDir = params.get("dir");
   // The futures category: its two groups (USDⓈ-M, COIN-M), its open interest and funding, and their orders.
@@ -121,10 +125,13 @@ export default function Markets() {
   const favorites = useMemo(() => new Set(fav.symbols), [fav.symbols]);
   const tickerOf: TickerOf = useCallback((s) => tickers.get(s), [tickers]);
   const hasCoin = useMemo(() => rows.some((r) => r.kind === "perp" && groupOf(r.symbol) === "coin"), [rows, groupOf]);
+  // With one contract line closed the other one is the whole category, without the switch (design 2026-10-07, product line switches §1 #2).
+  const hasUsdt = useMemo(() => rows.some((r) => r.kind === "perp" && groupOf(r.symbol) === "usdt"), [rows, groupOf]);
+  const both = hasCoin && hasUsdt;
   const filtered = useMemo(() => {
     const list = filterRows(rows, { category, query, favorites, now });
-    return futures && hasCoin ? list.filter((r) => groupOf(r.symbol) === group) : list;
-  }, [rows, category, query, favorites, now, futures, hasCoin, group, groupOf]);
+    return futures && both ? list.filter((r) => groupOf(r.symbol) === group) : list;
+  }, [rows, category, query, favorites, now, futures, both, group, groupOf]);
   // New listings read newest first unless an order is chosen.
   const order = useMemo<FuturesSort | null>(() => sort ?? (category === "new" ? { key: "listed", desc: true } : null), [sort, category]);
   const sorted = useMemo(
@@ -156,8 +163,10 @@ export default function Markets() {
         }
       }
     };
-    return categoryPills(category, tags).map((c) => ({ value: c, label: label(c), icon: c === "favorites" ? <Star size={13} /> : undefined }));
-  }, [category, tags, t]);
+    return categoryPills(category, tags)
+      .filter((c) => (c !== "spot" || products.spot) && (c !== "futures" || products.usdt_m || products.coin_m))
+      .map((c) => ({ value: c, label: label(c), icon: c === "favorites" ? <Star size={13} /> : undefined }));
+  }, [category, tags, t, products]);
 
   const refresh = useCallback(
     () =>
@@ -310,7 +319,7 @@ export default function Markets() {
 
           {futures && (
             <div className="flex items-center gap-3 px-4 pt-2">
-              {hasCoin && (
+              {both && (
                 <Segmented
                   size="md"
                   className="min-w-0 flex-1"

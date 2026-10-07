@@ -314,11 +314,20 @@ export type Overview = { gainers: MarketRow[]; losers: MarketRow[]; turnover: Ma
 /**
  * rankOverview ranks the home page's three boards the way
  * /v1/market/summary does, on live tickers: USDT spot pairs that are
- * trading and have a price; gainers by change (highest first), losers
- * (lowest first), turnover by quote volume.
+ * trading and have a price (the open contracts while spot is closed);
+ * gainers by change (highest first), losers (lowest first), turnover by
+ * quote volume.
  */
 export function rankOverview(rows: readonly MarketRow[], tickerOf: TickerOf, limit = 5): Overview {
-  const eligible = rows.filter((r) => r.kind === "spot" && r.quote === "USDT" && r.status === "TRADING" && validDecimal(tickerOf(r.symbol)?.last ?? null));
+  const trading = rows.filter((r) => r.status === "TRADING");
+  // With spot closed (design 2026-10-07, product line switches §1 #2) the open contracts rank instead, USDT-margined first.
+  const pool =
+    [
+      trading.filter((r) => r.kind === "spot" && r.quote === "USDT"),
+      trading.filter((r) => r.kind === "perp" && r.quote === "USDT"),
+      trading.filter((r) => r.kind === "perp" && r.quote === "USD"),
+    ].find((list) => list.length > 0) ?? [];
+  const eligible = pool.filter((r) => validDecimal(tickerOf(r.symbol)?.last ?? null));
   const by = (key: SortKey, desc: boolean) =>
     sortRows(
       eligible.filter((r) => validDecimal(tickerField(tickerOf(r.symbol), key))),
@@ -338,14 +347,10 @@ export type Highlights = { hot: MarketRow[]; gainers: MarketRow[]; losers: Marke
 export function rankHighlights(rows: readonly MarketRow[], tickerOf: TickerOf, now: number, limit = 3): Highlights {
   const trading = rows.filter((r) => r.status === "TRADING");
   const withValue = (list: readonly MarketRow[], key: SortKey) => list.filter((r) => validDecimal(tickerField(tickerOf(r.symbol), key)));
-  const hot = sortRows(
-    withValue(
-      trading.filter((r) => r.quote === "USDT"),
-      "turnover",
-    ),
-    tickerOf,
-    { key: "turnover", desc: true },
-  );
+  // Turnover compares in USDT; with nothing quoted in USDT (only the coin-margined line open, design 2026-10-07 product line
+  // switches §1 #2) the contracts quoted in USD rank instead.
+  const usdt = trading.filter((r) => r.quote === "USDT");
+  const hot = sortRows(withValue(usdt.length > 0 ? usdt : trading.filter((r) => r.quote === "USD"), "turnover"), tickerOf, { key: "turnover", desc: true });
   const changes = withValue(trading, "change");
   return {
     hot: hot.slice(0, limit),

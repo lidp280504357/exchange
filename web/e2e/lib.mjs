@@ -338,11 +338,39 @@ export const APPS_OFFERED = {
  * (the download pages' states without changing the server's settings),
  * then lets the network be again.
  */
-export async function withApps(page, apps, fn) {
+export function withApps(page, apps, fn) {
+  return withAnswer(page, "/v1/platform/apps", apps, fn);
+}
+
+/**
+ * PRODUCTS_PAUSED is an answer of GET /v1/platform/products with spot and
+ * the USDT-margined contracts closed and the coin-margined ones open
+ * (design 2026-10-07, product line switches §1 #2): the sites hide the
+ * closed lines and their terminals say so, and a user's futures USDT (the
+ * smokes' transfer of step 5) is left to wind down.
+ */
+export const PRODUCTS_PAUSED = {
+  spot: { enabled: false, closed_at: "2026-10-07T08:00:00Z" },
+  usdt_m: { enabled: false, closed_at: "2026-10-07T08:00:00Z" },
+  coin_m: { enabled: true },
+};
+
+/**
+ * withProducts runs fn while the page's GET /v1/platform/products answers
+ * products (the product lines' switches without changing the server's).
+ * The sites read them as they start: go to a page inside fn.
+ */
+export function withProducts(page, products, fn) {
+  return withAnswer(page, "/v1/platform/products", products, fn);
+}
+
+// withAnswer runs fn while the page's requests of path answer body, then
+// lets the network be again.
+async function withAnswer(page, path, body, fn) {
   const answer = (req) => {
     if (req.isInterceptResolutionHandled()) return;
-    if (new URL(req.url()).pathname === "/v1/platform/apps") {
-      void req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(apps) });
+    if (new URL(req.url()).pathname === path) {
+      void req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     } else {
       void req.continue();
     }

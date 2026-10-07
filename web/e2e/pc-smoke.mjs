@@ -18,11 +18,12 @@
 // terminal's 数据 tab, the futures category's columns, /futures/data),
 // notifications, devices,
 // the profile (the drawn username, a rename, an avatar uploaded and
-// removed), the App download page and entries, the language switch and
-// sign-out. Script errors fail the run; every API
+// removed), the App download page and entries, closed product lines
+// (hidden, their terminals not open, the wind-down page), the language
+// switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { APPS_OFFERED, choosePicture, legendClear, menuOnTop, ok, sleep, start, withApps } from "./lib.mjs";
+import { APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -627,6 +628,56 @@ try {
     if (!(await page.$('footer a[href="/download"]'))) throw new Error("the footer does not lead to the download page");
   });
   ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet" without entries'}; with two apps, a card each (QR code, facts, button), the top bar's two QR codes and the footer's link`);
+
+  // 8d. Product lines (design 2026-10-07, product line switches, batch K2):
+  // with the answer of /v1/platform/products replaced by spot and the
+  // USDT-margined contracts closed (the server's switches untouched), the
+  // top bar has no trade menu and its futures menu no USDT-margined entry;
+  // the market list has no spot category, only coin-margined contracts and
+  // no USDⓈ-M/COIN-M switch; the search finds only those; the closed
+  // lines' terminals say they are not open while BTC-USD-PERP's opens; the
+  // assets page tells of the futures USDT left from step 5, and the
+  // wind-down page offers to move it out.
+  await withProducts(page, PRODUCTS_PAUSED, async () => {
+    await go("/markets");
+    await page.waitForSelector("main table tbody tr[data-row-id]", { visible: true, timeout: 20000 });
+    const bar = await page.$$eval("header nav > div > a, header nav > a", (as) => as.map((a) => a.textContent.trim()));
+    if (bar.includes("交易") || !bar.includes("合约")) throw new Error(`the top bar's menus with spot closed: ${bar.join(", ")}`);
+    const menu = await page.$eval('header nav > div:has(> a[href^="/futures/"])', (m) => m.textContent);
+    if (menu.includes("U本位合约") || !menu.includes("币本位合约") || !menu.includes("合约数据")) throw new Error(`the futures menu with USDⓈ-M closed: ${menu}`);
+    const rail = await page.$$eval("main nav button[aria-pressed]", (bs) => bs.map((b) => b.innerText.split("\n")[0].trim()));
+    if (rail.includes("现货") || !rail.includes("合约")) throw new Error(`the categories with spot closed: ${rail.join(", ")}`);
+    const ids = await page.$$eval("main table tbody tr[data-row-id]", (trs) => trs.map((tr) => tr.dataset.rowId));
+    const stray = ids.filter((id) => !id.endsWith("-USD-PERP"));
+    if (stray.length > 0) throw new Error(`the market list shows closed lines' markets: ${stray.slice(0, 5).join(", ")}`);
+    await page.$$eval("main nav button[aria-pressed]", (bs) => bs.find((b) => b.innerText.split("\n")[0].trim() === "合约")?.click());
+    await page.waitForFunction(() => document.querySelector('main nav button[aria-pressed="true"]')?.innerText.startsWith("合约"), { timeout: 10000 });
+    if (await page.$('main [role="radiogroup"][aria-label="合约"]')) throw new Error("the futures category switches between USDⓈ-M and COIN-M while USDⓈ-M is closed");
+    await page.click('header button[aria-label="搜索币种"]');
+    await page.waitForSelector('[role="dialog"] input', { visible: true, timeout: 10000 });
+    await page.type('[role="dialog"] input', "BTC");
+    await page.waitForFunction(() => document.querySelector('[role="dialog"] [role="option"][data-symbol="BTC-USD-PERP"]'), { timeout: 10000 });
+    const found = await page.$$eval('[role="dialog"] [role="option"]', (os) => os.map((o) => o.dataset.symbol));
+    if (found.some((s) => !s.endsWith("-USD-PERP"))) throw new Error(`the search finds closed lines' markets: ${found.join(", ")}`);
+    await page.keyboard.press("Escape");
+    for (const [path, line] of [["/trade/BTC-USDT", "币币交易"], ["/futures/BTC-USDT-PERP", "U 本位合约"]]) {
+      await go(path);
+      await page.waitForSelector('[data-testid="product-closed"]', { visible: true, timeout: 20000 });
+      await waitText(`${line}暂未开放`);
+    }
+    await shot("8d-closed");
+    await go("/futures/BTC-USD-PERP");
+    await waitText("标记价格");
+    if (await page.$('[data-testid="product-closed"]')) throw new Error("the coin-margined terminal says it is not open");
+    await go("/assets");
+    await page.waitForSelector('[data-testid="wind-down-notice"]', { visible: true, timeout: 20000 });
+    const notice = await page.$eval('[data-testid="wind-down-notice"]', (n) => n.innerText);
+    if (!notice.includes("合约账户余额")) throw new Error(`the wind-down notice: ${notice}`);
+    await page.click('[data-testid="wind-down-notice"] a[href="/assets/closed"]');
+    await page.waitForSelector('[data-testid="closed-products"] a[href="/assets/transfer?from=FUTURES&asset=USDT"]', { visible: true, timeout: 20000 });
+    await shot("8d-wind-down");
+  });
+  ok("with spot and USDⓈ-M closed: no trade menu nor USDⓈ-M entry, no spot category or switch, only coin-margined markets listed and found, their terminals not open, the futures USDT to move out under 待处置");
 
   // 9. Settings: English switches the site's language at once; so does
   // Traditional Chinese (design 2026-10-06 繁体中文), shown on the key pages

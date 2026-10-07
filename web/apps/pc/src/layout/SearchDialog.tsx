@@ -1,4 +1,5 @@
 import { dec, formatPercent, formatPrice, pairName, routes, useContracts, usePairs, useTickers } from "@exchange/core";
+import { isOpen, useOpenProducts } from "@exchange/core/platform/products";
 import { searchMarkets } from "@exchange/core/markets/search";
 import { CoinIcon, DialogPrimitive as RDialog, cn } from "@exchange/ui";
 import { Search } from "lucide-react";
@@ -48,19 +49,21 @@ function Results({
   const pairs = usePairs();
   const contracts = useContracts();
   const tickers = useTickers();
+  // A closed product line's markets are not found (design 2026-10-07, product line switches §1 #2).
+  const open = useOpenProducts();
   const entries = useMemo<Entry[]>(() => {
-    const spot = (pairs.data?.pairs ?? [])
+    const spot = (open.spot ? (pairs.data?.pairs ?? []) : [])
       .filter((p) => p.status !== "DELISTED")
       .map((p) => ({
         key: p.symbol, symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: pairName(p), to: routes.trade(p.symbol),
         decimals: p.price_decimals, futures: false,
       }));
-    const perp = (contracts.data?.contracts ?? []).map((c) => ({
+    const perp = (contracts.data?.contracts ?? []).filter((c) => isOpen(c.symbol, open)).map((c) => ({
       key: c.symbol, symbol: c.symbol, base: c.base_asset, quote: c.quote_asset, name: t("pc.perpetual"), to: routes.futures(c.symbol),
       decimals: dec.decimalsOf(c.tick_size), futures: true,
     }));
     return [...spot, ...perp];
-  }, [pairs.data, contracts.data, t]);
+  }, [pairs.data, contracts.data, t, open]);
   const shown = searchMarkets(entries, query).slice(0, 12);
 
   const keyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -101,6 +104,7 @@ function Results({
               type="button"
               role="option"
               aria-selected={i === active}
+              data-symbol={e.symbol}
               onMouseEnter={() => setActive(i)}
               onClick={() => onGo(e.to)}
               className={cn("flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors", i === active && "bg-bg-2")}

@@ -4,6 +4,7 @@ import {
   useSyncing, useTerminalPrefs, useTicker, useTickerSeed, useTrades, useTradesSeed, type CandleInterval, type Contract,
 } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
+import { isOpen, useOpenProducts } from "@exchange/core/platform/products";
 import { Button, CandleChart, EmptyState, ErrorState, FundingCountdown, OrderBook, PriceText, Segmented, Sheet, Skeleton, TradeTape, cn, toast } from "@exchange/ui";
 import { ChevronDown, Info, Star, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -45,6 +46,7 @@ export default function FuturesTerminal() {
   const positions = usePositions("");
   const fav = useFavorites();
   const contracts = useContracts().data?.contracts;
+  const products = useOpenProducts();
 
   useEffect(() => {
     if (contract) visit(contract.symbol);
@@ -116,9 +118,10 @@ export default function FuturesTerminal() {
   const mine = (positions.data?.positions ?? []).length;
   // USDT-margined or coin-margined (design 2026-10-06 §2.6): the switch
   // goes to the same coin's contract of the other kind, or the first one
-  // trading; it shows once both kinds are listed.
+  // trading; it shows once both kinds are listed, and their product lines
+  // are open (design 2026-10-07, product line switches §1 #2).
   const counterpart = (coin: boolean) => {
-    const kind = (contracts ?? []).filter((c) => isInverse(c) === coin);
+    const kind = (contracts ?? []).filter((c) => isInverse(c) === coin && isOpen(c.symbol, products));
     return (kind.find((c) => c.base_asset === contract.base_asset) ?? kind.find((c) => c.status === "TRADING") ?? kind[0])?.symbol;
   };
   const both = counterpart(true) !== undefined && counterpart(false) !== undefined;

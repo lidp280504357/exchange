@@ -1,5 +1,6 @@
 import { dec, errorText, formatPercent, routes, useSettings, useSettleAssets } from "@exchange/core";
 import { useBalances, useFuturesAccount, useLiveTickers, useMarginHoldings } from "@exchange/core/assets/hooks";
+import { useOpenProducts } from "@exchange/core/platform/products";
 import {
   accountShare,
   convertValue,
@@ -37,6 +38,7 @@ import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
+import { WindDownNotice } from "../../features/products/WindDownNotice";
 import { TOP_NAV_HEIGHT } from "../../layout/TopNav";
 import { AllocationRing, type AllocationSegment } from "./parts/Allocation";
 import { AssetsLayout, Card } from "./parts/AssetsLayout";
@@ -88,6 +90,7 @@ export default function Overview() {
         </>
       }
     >
+      <WindDownNotice />
       <div className="grid grid-cols-12 gap-4">
         <motion.div variants={listItem} initial="initial" animate="animate" custom={0} className="col-span-12 xl:col-span-6">
           <TotalCard
@@ -555,13 +558,16 @@ function ActionLink({ to, label, hint }: { to: string | null; label: string; hin
 }
 
 // The FUTURES accounts' summaries: USDT's always, a coin's (coin-margined
-// contracts, design 2026-10-06 §2.6) once it holds something.
+// contracts, design 2026-10-06 §2.6) once it holds something; USDT's too
+// only while it holds something once the USDT-margined line is closed
+// (design 2026-10-07, product line switches §1 #2).
 function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
   const settles = useSettleAssets();
+  const products = useOpenProducts();
   return (
     <>
       {settles
-        .filter((a) => a === "USDT" || held.includes(a))
+        .filter((a) => (a === "USDT" && products.usdt_m) || held.includes(a))
         .map((a) => (
           <FuturesSummary key={a} asset={a} decimals={a === "USDT" ? 2 : shownDecimals(meta.decimals(a))} />
         ))}

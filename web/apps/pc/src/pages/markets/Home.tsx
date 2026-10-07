@@ -1,5 +1,4 @@
 import {
-  DEFAULT_SYMBOL,
   dec,
   errorText,
   formatPercent,
@@ -26,6 +25,7 @@ import {
   type TickerOf,
 } from "@exchange/core/markets/index";
 import { useTestMode, useWelcomeCredits } from "@exchange/core/platform/index";
+import { useTradeEntry } from "@exchange/core/platform/products";
 import {
   Badge,
   Button,
@@ -115,6 +115,8 @@ function useRollIn(value: string | null | undefined): string | null | undefined 
 
 function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
   const { t } = useTranslation();
+  // A closed product line's terminal is not a way in (design 2026-10-07, product line switches §1 #2).
+  const trade = useTradeEntry();
   const signedIn = useSession(selectSignedIn);
   // The console's home-hero (design 2026-10-04 §4.4), else the bundled draft, else these strings.
   const hero = useHero().data;
@@ -148,7 +150,7 @@ function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
             {signedIn ? (
               <>
                 <Button asChild size="lg" icon={<CandlestickChart size={18} />}>
-                  <Link to={routes.trade(DEFAULT_SYMBOL)}>{t("pc.trade")}</Link>
+                  <Link to={trade}>{t("pc.trade")}</Link>
                 </Button>
                 <Button asChild size="lg" variant="secondary" icon={<Wallet size={18} />}>
                   <Link to={routes.assets}>{t("pcMarkets.home.assets")}</Link>
@@ -160,7 +162,7 @@ function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
                   {cta.href.startsWith("/") ? <Link to={cta.href}>{cta.text}</Link> : <a href={cta.href}>{cta.text}</a>}
                 </Button>
                 <Button asChild size="lg" variant="secondary" icon={<CandlestickChart size={18} />}>
-                  <Link to={routes.trade(DEFAULT_SYMBOL)}>{t("pc.trade")}</Link>
+                  <Link to={trade}>{t("pc.trade")}</Link>
                 </Button>
               </>
             )}
@@ -459,12 +461,14 @@ const Why = memo(function Why({ rows }: { rows: MarketRow[] }) {
 
 const Steps = memo(function Steps() {
   const { t } = useTranslation();
+  // A closed product line's terminal is not a way in (design 2026-10-07, product line switches §1 #2).
+  const trade = useTradeEntry();
   const signedIn = useSession(selectSignedIn);
   const credits = useWelcomeCredits();
   const steps = [
     { id: "register", icon: <UserPlus size={20} />, to: routes.register, done: signedIn },
     { id: "deposit", icon: <Wallet size={20} />, to: routes.deposit, done: false },
-    { id: "trade", icon: <CandlestickChart size={20} />, to: routes.trade(DEFAULT_SYMBOL), done: false },
+    { id: "trade", icon: <CandlestickChart size={20} />, to: trade, done: false },
   ];
   return (
     <section className="mx-auto max-w-[1440px] px-6 pt-20">
@@ -574,6 +578,8 @@ const News = memo(function News() {
 
 const Cta = memo(function Cta() {
   const { t } = useTranslation();
+  // A closed product line's terminal is not a way in (design 2026-10-07, product line switches §1 #2).
+  const trade = useTradeEntry();
   const signedIn = useSession(selectSignedIn);
   const credits = useWelcomeCredits();
   return (
@@ -587,7 +593,7 @@ const Cta = memo(function Cta() {
           </div>
           <div className="flex shrink-0 gap-3">
             <Button asChild size="lg">
-              <Link to={signedIn ? routes.trade(DEFAULT_SYMBOL) : routes.register}>{signedIn ? t("pc.trade") : t("pc.start")}</Link>
+              <Link to={signedIn ? trade : routes.register}>{signedIn ? t("pc.trade") : t("pc.start")}</Link>
             </Button>
             <Button asChild size="lg" variant="secondary">
               <Link to={routes.markets}>{t("nav.markets")}</Link>

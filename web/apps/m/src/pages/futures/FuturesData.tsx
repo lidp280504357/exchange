@@ -47,7 +47,7 @@ export default function FuturesData() {
   const navigate = useNavigate();
   const locale = useSettings((s) => s.locale);
   const [params, setParams] = useSearchParams();
-  const group = parseMarginGroup(params.get("margin"));
+  const asked = parseMarginGroup(params.get("margin"));
   const sortKey = params.get("sort");
   const sortDir = params.get("dir");
   const sort = useMemo(() => parseOverviewSort(sortKey, sortDir), [sortKey, sortDir]);
@@ -77,6 +77,9 @@ export default function FuturesData() {
   };
 
   const hasCoin = rows.some((r) => r.group === "coin");
+  // With one contract line closed the other one is the whole overview, without the switch (design 2026-10-07, product line switches §1 #2).
+  const both = hasCoin && rows.some((r) => r.group === "usdt");
+  const group: MarginGroup = both || rows.length === 0 ? asked : hasCoin ? "coin" : "usdt";
   const inGroup = useMemo(() => filterOverview(rows, group), [rows, group]);
   const shown = useMemo(() => sortOverview(filterOverview(rows, group, query), sort), [rows, group, query, sort]);
   const totals = useMemo(() => overviewTotals(inGroup), [inGroup]);
@@ -125,7 +128,7 @@ export default function FuturesData() {
     <div className="pb-6">
       <h1 className="sr-only">{t("mFutures.overview.title")}</h1>
       <div className="flex flex-col gap-2 px-4 pt-2">
-        {hasCoin && (
+        {both && (
           <Segmented
             size="md"
             block

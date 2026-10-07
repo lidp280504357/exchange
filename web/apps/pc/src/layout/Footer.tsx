@@ -1,6 +1,7 @@
 import { LOCALE_NAMES, LOCALES, routes, setLocale, switchSite, useSettings } from "@exchange/core";
 import { LEGAL_SLUGS, type LegalSlug } from "@exchange/core/content/index";
 import { useAppsOffered } from "@exchange/core/platform/apps";
+import { useOpenProducts } from "@exchange/core/platform/products";
 import { useBrandText, useBranding } from "@exchange/core/platform/index";
 import { ChartCredit } from "@exchange/ui";
 import type { ReactNode } from "react";
@@ -31,6 +32,8 @@ export function Footer() {
   const copyright = useBrandText((x) => x.footer.copyright);
   const compliance = useBrandText((x) => x.footer.compliance);
   const offered = useAppsOffered();
+  // A closed product line leaves the products column (design 2026-10-07, product line switches §1 #2).
+  const open = useOpenProducts();
   return (
     <footer className="border-t border-line-1 bg-bg-1">
       <div className="mx-auto grid max-w-[1440px] grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-8 px-6 py-10 text-sm">
@@ -49,8 +52,8 @@ export function Footer() {
         </div>
         <Column title={t("footer.products")}>
           <Link to={routes.markets}>{t("nav.markets")}</Link>
-          <Link to={routes.trade("BTC-USDT")}>{t("nav.spot")}</Link>
-          <Link to={routes.futures("BTC-USDT-PERP")}>{t("nav.futures")}</Link>
+          {open.spot && <Link to={routes.trade("BTC-USDT")}>{t("nav.spot")}</Link>}
+          {(open.usdt_m || open.coin_m) && <Link to={routes.futures(open.usdt_m ? "BTC-USDT-PERP" : "BTC-USD-PERP")}>{t("nav.futures")}</Link>}
         </Column>
         <Column title={t("footer.support")}>
           <Link to={routes.help}>{t("nav.help")}</Link>

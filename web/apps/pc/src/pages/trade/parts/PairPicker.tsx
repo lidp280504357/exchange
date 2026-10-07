@@ -1,4 +1,5 @@
 import { dec, errorText, formatPercent, formatPrice, pairName, useContracts, usePairs, useTickers } from "@exchange/core";
+import { isOpen, useOpenProducts } from "@exchange/core/platform/products";
 import { useFavorites } from "@exchange/core/markets/favorites";
 import { searchMarkets } from "@exchange/core/markets/search";
 import { CoinIcon, Input, Popover, Segmented, cn, toast } from "@exchange/ui";
@@ -28,20 +29,22 @@ export function PairPicker({
   const contracts = useContracts();
   const tickers = useTickers();
   const favorites = useFavorites();
+  // The terminal of a closed line does not open; the other line's contracts may be closed (design 2026-10-07, product line switches §1 #2).
+  const products = useOpenProducts();
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("all");
   const [active, setActive] = useState(0);
 
   const rows = useMemo<Row[]>(() => {
     if (kind === "futures") {
-      return (contracts.data?.contracts ?? []).map((c) => ({
+      return (contracts.data?.contracts ?? []).filter((c) => isOpen(c.symbol, products)).map((c) => ({
         symbol: c.symbol, base: c.base_asset, quote: c.quote_asset, name: t("pcTrade.perpetual"), decimals: dec.decimalsOf(c.tick_size),
       }));
     }
     return (pairs.data?.pairs ?? [])
       .filter((p) => p.status !== "DELISTED")
       .map((p) => ({ symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: pairName(p), decimals: p.price_decimals }));
-  }, [kind, pairs.data, contracts.data, t]);
+  }, [kind, pairs.data, contracts.data, t, products]);
 
   const groups = useMemo(() => ["fav", "all", ...new Set(rows.map((r) => r.quote))], [rows]);
   const shown = searchMarkets(
