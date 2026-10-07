@@ -89,8 +89,8 @@ func futuresRouter() (*chi.Mux, *statsFake) {
 	stats := &statsFake{
 		markets: map[string]ports.FuturesMarket{btc.Symbol: btc, coin.Symbol: coin},
 		interest: map[string]application.OpenInterest{
-			btc.Symbol:  {Market: btc, Quantity: d("94791.893")},
-			coin.Symbol: {Market: coin, Quantity: d("12668208")},
+			btc.Symbol:  {Market: btc, Quantity: d("94791.893"), At: time.Date(2026, 10, 6, 11, 4, 57, 161_000_000, time.UTC)},
+			coin.Symbol: {Market: coin, Quantity: d("12668208"), At: time.Date(2026, 10, 6, 11, 5, 0, 0, time.UTC)},
 		},
 	}
 	next := time.Date(2026, 10, 6, 16, 0, 0, 0, time.UTC)
@@ -187,17 +187,19 @@ func TestFuturesDataOverview(t *testing.T) {
 	}
 	btc := by["BTC-USDT-PERP"]
 	if str(btc.MarkPrice) != "86000.5" || str(btc.FundingRate) != "0.0001" || str(btc.NextFundingTime) != "2026-10-06T16:00:00Z" ||
-		str(btc.OpenInterest) != "94791.893" || str(btc.OpenInterestValue) != "8152150193.95" || str(btc.Change) != "0.01176" ||
-		str(btc.QuoteVolume) != "123456789.5" || !btc.FuturesData {
+		str(btc.OpenInterest) != "94791.893" || str(btc.OpenInterestValue) != "8152150193.95" || str(btc.OpenInterestAt) != "2026-10-06T11:04:57.161Z" ||
+		str(btc.Change) != "0.01176" || str(btc.QuoteVolume) != "123456789.5" || !btc.FuturesData {
 		t.Fatalf("BTC-USDT-PERP: %+v", btc)
 	}
-	// COIN-M: contracts at 100 USD; no mark or ticker yet.
+	// COIN-M: contracts at 100 USD, counted when the stored point was
+	// (A80 ③); no mark or ticker yet.
 	coin := by["BTC-USD-PERP"]
-	if str(coin.OpenInterest) != "12668208" || str(coin.OpenInterestValue) != "1266820800" || coin.MarkPrice != nil || coin.Change != nil || !coin.FuturesData {
+	if str(coin.OpenInterest) != "12668208" || str(coin.OpenInterestValue) != "1266820800" || str(coin.OpenInterestAt) != "2026-10-06T11:05:00Z" ||
+		coin.MarkPrice != nil || coin.Change != nil || !coin.FuturesData {
 		t.Fatalf("BTC-USD-PERP: %+v", coin)
 	}
 	astra := by["ASTRA-USDT-PERP"]
-	if astra.FuturesData || astra.OpenInterest != nil || str(astra.MarkPrice) != "0.25" || str(astra.FundingRate) != "0" {
+	if astra.FuturesData || astra.OpenInterest != nil || astra.OpenInterestAt != nil || str(astra.MarkPrice) != "0.25" || str(astra.FundingRate) != "0" {
 		t.Fatalf("the platform coin's perpetual: %+v", astra)
 	}
 }

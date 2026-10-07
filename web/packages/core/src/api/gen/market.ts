@@ -550,10 +550,22 @@ export interface components {
             funding_rate: components["schemas"]["NullableDecimal"];
             /** Format: date-time */
             next_funding_time: string | null;
-            /** @description Binance's now, in the base asset or contracts; null when not known. */
+            /**
+             * @description Binance's now, in the base asset or contracts: a USDⓈ-M
+             *     contract's read every minute, a COIN-M contract's the latest
+             *     5-minute point stored, where the data panel's curve ends
+             *     (Binance counts a COIN-M contract's open interest now another
+             *     way, docs/runbook/market-data.md); null when not known or
+             *     counted more than 30 minutes ago.
+             */
             open_interest: components["schemas"]["NullableDecimal"];
             /** @description The open interest's value in USD. */
             open_interest_value: components["schemas"]["NullableDecimal"];
+            /**
+             * Format: date-time
+             * @description When the open interest was counted (the source's reading, or the stored point's time); null with it.
+             */
+            open_interest_at?: string | null;
             /** @description The ticker's 24-hour change as a fraction (Ticker.change). */
             change: components["schemas"]["NullableDecimal"];
             /** @description The ticker's 24-hour volume in USD (USDT). */

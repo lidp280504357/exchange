@@ -236,11 +236,13 @@ try {
   if (fetchLog.length !== before) throw new Error(`three sections opened after the idle time fetched scripts: ${fetchLog.slice(before).join(", ")}`);
   ok(`the pages are fetched ahead while the browser is idle (every section's by ${fetchLog.find((l) => l.includes(" Settings-"))?.split(" ")[0]}): three sections never opened fetch no script`);
 
-  // 3. Users: the list (each with its username and avatar, I3); a row opens
-  // the user's page with its tabs.
+  // 3. Users: the list (each with its username and avatar, I3: a user who
+  // uploaded none has the sites' built-in avatar of their ID, A79); a row
+  // opens the user's page with its tabs.
   await go("/users");
   await rows(3);
   await page.waitForSelector("main tbody [data-testid=user-identity]");
+  await page.waitForSelector("main tbody [data-testid=user-identity] svg[data-avatar-default]");
   await pressRow("main tbody tr", (timeout) => page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }));
   const userId = await page.evaluate(() => location.pathname.split("/").pop());
   await waitText("UID");

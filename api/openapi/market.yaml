@@ -893,11 +893,21 @@ components:
           type: [string, 'null']
           format: date-time
         open_interest:
-          description: Binance's now, in the base asset or contracts; null when not known.
+          description: |
+            Binance's now, in the base asset or contracts: a USDⓈ-M
+            contract's read every minute, a COIN-M contract's the latest
+            5-minute point stored, where the data panel's curve ends
+            (Binance counts a COIN-M contract's open interest now another
+            way, docs/runbook/market-data.md); null when not known or
+            counted more than 30 minutes ago.
           $ref: '#/components/schemas/NullableDecimal'
         open_interest_value:
           description: The open interest's value in USD.
           $ref: '#/components/schemas/NullableDecimal'
+        open_interest_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the open interest was counted (the source's reading, or the stored point's time); null with it.
         change:
           description: The ticker's 24-hour change as a fraction (Ticker.change).
           $ref: '#/components/schemas/NullableDecimal'

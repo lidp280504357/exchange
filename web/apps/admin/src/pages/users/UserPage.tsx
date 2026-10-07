@@ -109,7 +109,7 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <Avatar name={user.username || user.id.replace(/-/g, "").slice(-2)} src={user.avatar_url ?? undefined} size={48} />
+        <Avatar name={user.username || user.id.replace(/-/g, "").slice(-2)} src={user.avatar_url ?? undefined} seed={user.id} size={48} />
         <div className="min-w-0">
           <div className="truncate font-mono text-sm font-medium text-fg-1" data-testid="user-username">
             {user.username || "—"}

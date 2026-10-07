@@ -554,12 +554,22 @@ func (s *FuturesStats) interestNow(ctx context.Context, m ports.FuturesMarket) (
 	return q, at, err
 }
 
-// OpenInterestNow returns a contract's open interest as last read.
+// futuresInterestFresh bounds the age of an open interest given as now:
+// a COIN-M contract's stored point once its series stops coming, or a
+// USDⓈ-M one's last reading while the source fails or reading is off, is
+// no longer now (A80 ②).
+const futuresInterestFresh = 30 * time.Minute
+
+// OpenInterestNow returns a contract's open interest as last taken, if it
+// was counted within futuresInterestFresh.
 func (s *FuturesStats) OpenInterestNow(symbol string) (OpenInterest, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	oi, ok := s.interest[symbol]
-	return oi, ok
+	s.mu.Unlock()
+	if !ok || s.now().Sub(oi.At) > futuresInterestFresh {
+		return OpenInterest{}, false
+	}
+	return oi, true
 }
 
 // forcedOrders follows the liquidation orders of a margin's contracts.

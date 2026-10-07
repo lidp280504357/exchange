@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { direction, holdings, inRange, over, stepOK, stepRange } from "./capsRules";
+import { direction, holdings, inRange, over, stepOK, stepRange, totalOver } from "./capsRules";
 
 describe("HOUSE's caps", () => {
   it("keeps each cap within its range", () => {
@@ -61,9 +61,16 @@ describe("HOUSE's caps", () => {
     ]);
     expect(total).toBe("5000000.5");
     expect(over(list, "1000000").map((h) => h.asset)).toEqual(["ASTRA", "BTC"]);
-    expect(over(list, "3000000")).toEqual([]);
+    // At the cap HOUSE stops already: its room is zero there (A80 ①).
+    expect(over(list, "3000000").map((h) => h.asset)).toEqual(["ASTRA"]);
+    expect(over(list, "3000000.01")).toEqual([]);
     expect(over(list, "0")).toEqual([]);
     expect(over(list, "")).toEqual([]);
+    expect(totalOver(total, "5000000.5")).toBe(true);
+    expect(totalOver(total, "5000000.51")).toBe(false);
+    expect(totalOver(total, "4000000")).toBe(true);
+    expect(totalOver(total, "0")).toBe(false);
+    expect(totalOver(total, "x")).toBe(false);
   });
 
   it("says which way a change moves a cap, a level cap of zero being none", () => {

@@ -8,7 +8,7 @@ import { Link } from "react-router";
 import { Num, TimeText } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
-import { direction, holdings, HOUSE_CAPS, inRange, over, stepOK, stepRange, type CapName, type Holding } from "./capsRules";
+import { direction, holdings, HOUSE_CAPS, inRange, over, stepOK, stepRange, totalOver, type CapName, type Holding } from "./capsRules";
 
 // HOUSE's caps at run time (user 2026-10-07, A69; market-maker review C45):
 // what HOUSE quotes within - each cap with its unit, current and first
@@ -277,7 +277,7 @@ function RequestCaps({ caps, held }: { caps: Caps; held: Held | undefined }) {
   const changed = HOUSE_CAPS.filter((f) => ok(f) && !dec.eq(values[f].trim(), caps[f]));
   const bad = HOUSE_CAPS.some((f) => !ok(f));
   const symbolOver: Holding[] = held && changed.includes("symbol") ? over(held.list, values.symbol) : [];
-  const totalOver = held && changed.includes("total") && dec.gt(held.total, values.total.trim());
+  const totalBeyond = !!held && changed.includes("total") && totalOver(held.total, values.total);
   // How far one change can move a cap from its value now.
   const stepError = (f: CapName) => {
     const r = stepRange(f, caps[f]);
@@ -365,7 +365,7 @@ function RequestCaps({ caps, held }: { caps: Caps; held: Held | undefined }) {
           </span>
         </div>
       )}
-      {totalOver && held && (
+      {totalBeyond && held && (
         <div role="alert" className="flex flex-col gap-1 rounded-2 border border-danger bg-danger/10 px-3 py-2 text-xs text-danger-strong" data-testid="house-caps-over-total">
           <span className="font-medium">{t("admin.house.caps.totalOver")}</span>
           <HeldText value={held.total} cap={values.total.trim()} />

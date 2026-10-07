@@ -3,7 +3,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // The admin console (admin.astras.vip). In development /admin/v1 goes to the
-// test server, so the session cookie (Path=/admin/) behaves as in production.
+// test server, so the session cookie (Path=/admin/) behaves as in production;
+// so do the users' avatars (/uploads, A79) and the apps to download
+// (/downloads), which the console's nginx serves beside it.
 // Its pages' chunks are preloaded by the entry (src/preload.ts), not by an
 // inline script in index.html as on the user sites: the console's CSP
 // forbids inline scripts.
@@ -14,7 +16,11 @@ export default defineConfig({
   server: {
     port: 5180,
     strictPort: true,
-    proxy: { "/admin/v1": { target: api, changeOrigin: true } },
+    proxy: {
+      "/admin/v1": { target: api, changeOrigin: true },
+      "/uploads": { target: api, changeOrigin: true },
+      "/downloads": { target: api, changeOrigin: true },
+    },
   },
   build: {
     sourcemap: false,

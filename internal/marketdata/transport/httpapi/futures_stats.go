@@ -164,9 +164,12 @@ type overviewJSON struct {
 	FundingRate     *string `json:"funding_rate"`
 	NextFundingTime *string `json:"next_funding_time"`
 	// OpenInterest is in the base asset (USDⓈ-M) or in contracts
-	// (COIN-M); OpenInterestValue in USD either way.
+	// (COIN-M); OpenInterestValue in USD either way; OpenInterestAt when
+	// it was counted: the source's reading, or the COIN-M stored point's
+	// time (A80 ③).
 	OpenInterest      *string `json:"open_interest"`
 	OpenInterestValue *string `json:"open_interest_value"`
+	OpenInterestAt    *string `json:"open_interest_at"`
 	Change            *string `json:"change"`
 	QuoteVolume       *string `json:"quote_volume"`
 	// FuturesData tells whether the data panel has the reference market's
@@ -214,7 +217,7 @@ func (h *FuturesData) overview(w http.ResponseWriter, r *http.Request) {
 		o.FuturesData = followed || (!known && c.ReferenceSymbol != "")
 		if oi, ok := h.Stats.OpenInterestNow(c.Symbol); ok {
 			qty := oi.Quantity.String()
-			o.OpenInterest = &qty
+			o.OpenInterest, o.OpenInterestAt = &qty, stamp(oi.At)
 			switch {
 			case oi.Market.CoinMargined:
 				o.OpenInterestValue = price(oi.Quantity.Mul(oi.Market.ContractSize))

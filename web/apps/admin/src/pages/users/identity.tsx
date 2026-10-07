@@ -15,7 +15,7 @@ export function UserIdentity({ user, size = 24 }: { user: UserSummary; size?: nu
   const src = (size > 64 ? user.avatar_url : user.avatar_thumb_url) ?? undefined;
   return (
     <span className="inline-flex min-w-0 items-center gap-2" data-testid="user-identity">
-      <Avatar name={user.username || user.id} src={src} size={size} />
+      <Avatar name={user.username || user.id} src={src} seed={user.id} size={size} />
       <span className="truncate font-mono text-xs text-fg-1">{user.username || "—"}</span>
     </span>
   );
@@ -60,7 +60,7 @@ export function ProfileResets({ user }: { user: UserSummary }) {
         )}
         title={t("admin.user.resetAvatarTitle", { name })}
         description={t("admin.user.resetAvatarHint")}
-        target={<Avatar name={name} src={user.avatar_url ?? undefined} size={48} />}
+        target={<Avatar name={name} src={user.avatar_url ?? undefined} seed={user.id} size={48} />}
         confirmWord={lastFour(user.id)}
         run={async (reason) =>
           adminData(await adminApi.POST("/admin/v1/users/{id}/avatar-reset", { params: { path: { id: user.id } }, body: { reason } }))

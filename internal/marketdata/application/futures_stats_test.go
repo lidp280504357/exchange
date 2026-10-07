@@ -692,6 +692,26 @@ func TestFuturesStatsInterestNow(t *testing.T) {
 	if v := counted(t, s.requests.WithLabelValues("coinm", "open_interest_now", "ok")); v != 0 {
 		t.Fatalf("stored points counted as source reads: %v", v)
 	}
+
+	// Given as now while counted within 30 minutes, whichever margin: a
+	// stored point whose series stopped, a reading while the source fails,
+	// are no longer now (A80 ②).
+	s.interest["BTC-USD-PERP"] = OpenInterest{Market: coinM, Quantity: decimal.RequireFromString("3336618"), At: futuresT0.Add(-5 * time.Minute)}
+	s.interest["BTC-USDT-PERP"] = OpenInterest{Market: usdM, Quantity: decimal.RequireFromString("94791.893"), At: futuresT0.Add(-time.Minute)}
+	if _, ok := s.OpenInterestNow("BTC-USD-PERP"); !ok {
+		t.Fatal("a point 5 minutes old is now")
+	}
+	s.now = func() time.Time { return futuresT0.Add(25*time.Minute + time.Second) }
+	if _, ok := s.OpenInterestNow("BTC-USD-PERP"); ok {
+		t.Fatal("a point 30 minutes and a second old is not now")
+	}
+	if oi, ok := s.OpenInterestNow("BTC-USDT-PERP"); !ok || oi.Quantity.String() != "94791.893" {
+		t.Fatalf("a reading 26 minutes old is: %+v %v", oi, ok)
+	}
+	s.now = func() time.Time { return futuresT0.Add(29*time.Minute + time.Second) }
+	if _, ok := s.OpenInterestNow("BTC-USDT-PERP"); ok {
+		t.Fatal("a reading 30 minutes and a second old is not now")
+	}
 }
 
 func TestFuturesStatsRunsWhileOn(t *testing.T) {
@@ -716,6 +736,11 @@ func TestFuturesStatsRunsWhileOn(t *testing.T) {
 		}
 		values := map[string]decimal.Decimal{"x": decimal.NewFromInt(1)}
 		if c.metric == ports.MetricOpenInterest {
+			// Recent enough to be now (A80 ②).
+			at = futuresT0.Add(-5 * time.Minute)
+			if !at.After(c.after) {
+				return nil, nil
+			}
 			values = map[string]decimal.Decimal{"open_interest": decimal.RequireFromString("3336618")}
 		}
 		return []ports.FuturesStat{{Symbol: c.symbol, Metric: c.metric, Period: c.period, At: at, Values: values}}, nil
@@ -748,7 +773,10 @@ func TestFuturesStatsRunsWhileOn(t *testing.T) {
 	}
 	// Open interest now: the source's for a USDⓈ-M contract, the latest
 	// 5-minute point stored for a COIN-M one, once the minute's loop has
-	// taken it.
+	// taken it; measured from the start (every sleep moved the clock on).
+	mu.Lock()
+	clock = futuresT0
+	mu.Unlock()
 	for {
 		usdM, okU := s.OpenInterestNow("BTC-USDT-PERP")
 		coinM, okC := s.OpenInterestNow("BTC-USD-PERP")
@@ -756,7 +784,7 @@ func TestFuturesStatsRunsWhileOn(t *testing.T) {
 			if usdM.Quantity.String() != "94791.893" || usdM.Market.CoinMargined {
 				t.Fatalf("USDⓈ-M open interest now: %+v", usdM)
 			}
-			if coinM.Quantity.String() != "3336618" || !coinM.At.Equal(futuresT0.Add(-time.Hour)) || !coinM.Market.CoinMargined {
+			if coinM.Quantity.String() != "3336618" || !coinM.At.Equal(futuresT0.Add(-5*time.Minute)) || !coinM.Market.CoinMargined {
 				t.Fatalf("COIN-M open interest now: %+v", coinM)
 			}
 			break

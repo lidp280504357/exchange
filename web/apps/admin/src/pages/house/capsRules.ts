@@ -64,14 +64,21 @@ export function holdings(assets: readonly { asset: string; value_usdt?: string |
 }
 
 /**
- * over lists the holdings a per-asset cap would leave beyond it, either
- * way: HOUSE stops buying those (selling, the ones sold below zero) on
- * every pair. None for a value that is not a cap (inRange).
+ * over lists the holdings a per-asset cap would leave at or beyond it,
+ * either way: HOUSE stops buying those (selling, the ones sold below zero)
+ * on every pair, as market-maker's room is zero there already (SpotRooms;
+ * A80 ①). None for a value that is not a cap (inRange).
  */
 export function over(list: readonly Holding[], cap: string): Holding[] {
   const v = cap.trim();
   if (!inRange("symbol", v)) return [];
-  return list.filter((h) => dec.gt(dec.abs(h.value), v));
+  return list.filter((h) => dec.gte(dec.abs(h.value), v));
+}
+
+/** totalOver reports whether a total cap would be at or below what HOUSE holds together (A80 ①). */
+export function totalOver(total: string, cap: string): boolean {
+  const v = cap.trim();
+  return inRange("total", v) && dec.gte(total, v);
 }
 
 /**
