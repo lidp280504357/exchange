@@ -4,6 +4,7 @@
 package httpx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,10 +39,23 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
+// StatusClientClosedRequest is nginx's 499: the client went away before
+// the answer.
+const StatusClientClosedRequest = 499
+
 // WriteError writes err in the unified error structure. Errors without a
 // code become COMMON_INTERNAL, and their cause is logged instead of sent.
+// When the client went away first (the request's context is canceled: a
+// page closed, a logout cut short) nobody reads the answer and nothing
+// failed here: the status is 499, logged at WARN, not a 5xx at ERROR
+// (review B149).
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	e := apperr.From(err)
+	if errors.Is(r.Context().Err(), context.Canceled) {
+		slog.Default().WarnContext(r.Context(), "request canceled by the client", "status", StatusClientClosedRequest, "code", e.Code, "error", err)
+		w.WriteHeader(StatusClientClosedRequest)
+		return
+	}
 	status := e.Kind.HTTPStatus()
 	if status >= http.StatusInternalServerError {
 		slog.Default().ErrorContext(r.Context(), "request failed", "code", e.Code, "error", err)

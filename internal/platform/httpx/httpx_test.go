@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,6 +43,9 @@ func newTestRouter(t *testing.T) (http.Handler, *bytes.Buffer, *prometheus.Regis
 	})
 	r.Get("/v1/leak", func(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, errors.New("pq: password authentication failed for user exchange"))
+	})
+	r.Get("/v1/gone", func(w http.ResponseWriter, r *http.Request) {
+		WriteError(w, r, apperr.Unavailable(r.Context().Err())) // as the gateway's proxy answers a client gone
 	})
 	return r, logs, reg
 }
@@ -180,6 +184,31 @@ func TestAccessLogAndMetrics(t *testing.T) {
 	}
 	if got := requestCount(t, reg, "unmatched", "404"); got != 1 {
 		t.Fatalf("unmatched routes must share one label: %v", got)
+	}
+}
+
+// A request whose client went away gets 499, logged at INFO by the access
+// log (and WARN by WriteError, on the default logger), and is counted as
+// such: not a 503 at ERROR (review B149).
+func TestACanceledRequestIsTheClients(t *testing.T) {
+	h, logs, reg := newTestRouter(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/gone", http.NoBody)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != StatusClientClosedRequest || rr.Body.Len() != 0 {
+		t.Fatalf("got %d %q", rr.Code, rr.Body.String())
+	}
+	var line map[string]any
+	if err := json.Unmarshal([]byte(strings.SplitN(logs.String(), "\n", 2)[0]), &line); err != nil {
+		t.Fatalf("bad log line: %v\n%s", err, logs.String())
+	}
+	if line["status"] != float64(StatusClientClosedRequest) || line["level"] != "INFO" {
+		t.Fatalf("access log: %v", line)
+	}
+	if got := requestCount(t, reg, "/v1/gone", "499"); got != 1 {
+		t.Fatalf("499 counter = %v", got)
 	}
 }
 
