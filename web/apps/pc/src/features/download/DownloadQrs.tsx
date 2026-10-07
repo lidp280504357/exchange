@@ -17,7 +17,10 @@ export function DownloadQrs() {
   return (
     <AppQrPanel
       title={t("pcDownload.menu.title")}
-      codes={list.map(({ platform, app }) => ({ key: platform, value: qrUrl(platform, app, page), caption: t(`pcDownload.platforms.${platform}`) }))}
+      codes={list.map(({ platform, app }) => {
+        const caption = t(`pcDownload.platforms.${platform}`);
+        return { key: platform, value: qrUrl(platform, app, page), caption, label: t("pcDownload.qrLabel", { platform: caption }) };
+      })}
       footer={
         <Link
           to={routes.download}

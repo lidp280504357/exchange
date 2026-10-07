@@ -1,6 +1,6 @@
 import { errorText, routes, useSettings } from "@exchange/core";
 import {
-  appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, usePlatformApps, type AppDownload, type AppPlatform,
+  appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, safeHref, usePlatformApps, type AppDownload, type AppPlatform,
 } from "@exchange/core/platform/apps";
 import { textOf } from "@exchange/core/platform/index";
 import { Button, EmptyState, ErrorState, Skeleton } from "@exchange/ui";
@@ -49,13 +49,17 @@ export default function Download() {
 }
 
 // Card is one app on the phone: the leading one (the phone's own, or the
-// one asked for) with a primary button and its install steps open.
+// one asked for) with a primary button and its install steps open. An
+// over-the-air install only works on an iPhone or iPad: elsewhere its
+// card says so instead of a button (review GK, F12).
 function Card({ platform, app, own, lead, index }: { platform: AppPlatform; app: AppDownload; own: boolean; lead: boolean; index: number }) {
   const { t } = useTranslation();
   const locale = useSettings((s) => s.locale);
   const kind = appKind(platform, app);
   const label = { androidFile: t("mDownload.downloadApk"), androidLink: t("mDownload.open"), iosStore: t("mDownload.appStore"), iosOta: t("mDownload.install") }[kind];
   const steps = kind === "androidFile" ? "helpAndroid" : kind === "iosOta" ? "helpIos" : null;
+  const href = kind === "iosOta" && !own ? undefined : installUrl(app);
+  const mobileconfig = safeHref(app.mobileconfig_url);
   return (
     <AppCard
       platform={platform}
@@ -72,18 +76,23 @@ function Card({ platform, app, own, lead, index }: { platform: AppPlatform; app:
         notes: t("mDownload.notes"),
         help: t("mDownload.help"),
         badge: own ? t("mDownload.thisPhone") : undefined,
+        copy: t("mDownload.copySha"),
       }}
       minOs={minOsText(platform, app.min_os, (key, vars) => t(`mDownload.${key}`, vars))}
       notes={textOf(app.notes, locale)}
       actions={
         <>
-          <Button asChild size="lg" block variant={lead ? "primary" : "secondary"}>
-            <a href={installUrl(app)} {...(app.mode === "LINK" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
-              {label}
-            </a>
-          </Button>
-          {app.mobileconfig_url && (
-            <a href={app.mobileconfig_url} className="self-center py-2 text-sm text-brand">
+          {href ? (
+            <Button asChild size="lg" block variant={lead ? "primary" : "secondary"}>
+              <a href={href} {...(app.mode === "LINK" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+                {label}
+              </a>
+            </Button>
+          ) : (
+            kind === "iosOta" && <p className="rounded-2 bg-bg-2 px-4 py-3 text-center text-sm text-fg-2">{t("mDownload.openOnIos")}</p>
+          )}
+          {mobileconfig && (
+            <a href={mobileconfig} className="self-center py-2 text-sm text-brand">
               {t("mDownload.mobileconfig")}
             </a>
           )}

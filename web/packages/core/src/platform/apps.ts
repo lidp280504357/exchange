@@ -70,12 +70,21 @@ export function parsePlatform(v: string | null | undefined): AppPlatform | null 
 }
 
 /**
+ * safeHref passes only the links the server makes (https, and
+ * itms-services for an over-the-air install): anything else is not put in
+ * a page's link or QR code.
+ */
+export function safeHref(url: string | null | undefined): string | undefined {
+  return url && /^(https:|itms-services:)/i.test(url) ? url : undefined;
+}
+
+/**
  * installUrl is where an app's button leads: an uploaded iOS app installs
  * over the air (itms-services, only from iOS), anything else opens its
- * link or downloads its file.
+ * link or downloads its file; undefined for a link of another kind.
  */
-export function installUrl(app: AppDownload): string {
-  return app.install_url ?? app.url;
+export function installUrl(app: AppDownload): string | undefined {
+  return safeHref(app.install_url ?? app.url);
 }
 
 /**
@@ -86,7 +95,7 @@ export function installUrl(app: AppDownload): string {
  * needs the unknown-sources note.
  */
 export function qrUrl(platform: AppPlatform, app: AppDownload, page: string): string {
-  return app.mode === "LINK" ? app.url : `${page}?platform=${platform}`;
+  return app.mode === "LINK" && safeHref(app.url) ? app.url : `${page}?platform=${platform}`;
 }
 
 // Android API levels and the versions that brought them: an .apk's min_os

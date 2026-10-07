@@ -21,6 +21,8 @@ export default defineConfig({
       // Before the terminal's: /futures/data is the overview page (design 2026-10-06 §3.3).
       ["^/futures/data/?$", ["src/pages/futures/FuturesData.tsx", "src/i18n/futures.ts"]],
       ["^/futures/", ["src/pages/trade/FuturesTerminal.tsx", "src/i18n/trade.ts", "src/i18n/futures.ts"]],
+      // The download page (the top bar's and the footer's entries; an iPad asking for the desktop site lands here).
+      ["^/download/?$", ["src/pages/download/Download.tsx", "src/i18n/download.ts"]],
       ["^/assets/?$", ["src/pages/assets/Overview.tsx", "src/i18n/assets.ts", "src/i18n/auth.ts"]],
     ]),
   ],

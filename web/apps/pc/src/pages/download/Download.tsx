@@ -1,6 +1,6 @@
 import { errorText, routes, useSettings } from "@exchange/core";
 import {
-  appKind, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, usePlatformApps, type AppDownload, type AppPlatform,
+  appKind, devicePlatform, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, safeHref, usePlatformApps, type AppDownload, type AppPlatform,
 } from "@exchange/core/platform/apps";
 import { textOf } from "@exchange/core/platform/index";
 import { Button, EmptyState, ErrorState, QrCode, Skeleton, cn } from "@exchange/ui";
@@ -60,13 +60,20 @@ export default function Download() {
   );
 }
 
-// Card is one app on the PC: its QR code beside the facts; an OTA install
-// only works on the phone, so its QR code says so and it has no button.
+// Card is one app on the PC: its QR code beside the facts. An OTA install
+// only works on an iPhone or iPad, so its QR code says so and it has a
+// button only on an iPad that asked for the desktop site (review GK, F12).
 function Card({ platform, app, page, index }: { platform: AppPlatform; app: AppDownload; page: string; index: number }) {
   const { t } = useTranslation();
   const locale = useSettings((s) => s.locale);
   const kind = appKind(platform, app);
-  const button = { androidFile: t("pcDownload.downloadApk"), androidLink: t("pcDownload.open"), iosStore: t("pcDownload.appStore"), iosOta: null }[kind];
+  const nav = globalThis.navigator;
+  const onIos = devicePlatform(nav?.userAgent ?? "", nav?.maxTouchPoints ?? 0) === "ios";
+  const href = installUrl(app);
+  const mobileconfig = safeHref(app.mobileconfig_url);
+  const label = { androidFile: t("pcDownload.downloadApk"), androidLink: t("pcDownload.open"), iosStore: t("pcDownload.appStore"), iosOta: onIos ? t("pcDownload.install") : null }[kind];
+  const button = href ? label : null;
+  const name = t(`pcDownload.platforms.${platform}`);
   const steps = kind === "androidFile" ? "helpAndroid" : kind === "iosOta" ? "helpIos" : null;
   return (
     <AppCard
@@ -74,7 +81,7 @@ function Card({ platform, app, page, index }: { platform: AppPlatform; app: AppD
       app={app}
       index={index}
       labels={{
-        platform: t(`pcDownload.platforms.${platform}`),
+        platform: name,
         kind: t(`pcDownload.kinds.${kind}`),
         version: t("pcDownload.version"),
         updated: t("pcDownload.updated"),
@@ -82,27 +89,28 @@ function Card({ platform, app, page, index }: { platform: AppPlatform; app: AppD
         minOs: t("pcDownload.minOs"),
         notes: t("pcDownload.notes"),
         help: t("pcDownload.help"),
+        copy: t("pcDownload.copySha"),
       }}
       minOs={minOsText(platform, app.min_os, (key, vars) => t(`pcDownload.${key}`, vars))}
       notes={textOf(app.notes, locale)}
       qr={
         <>
-          <QrCode value={qrUrl(platform, app, page)} size={132} label={t("pcDownload.scan")} />
+          <QrCode value={qrUrl(platform, app, page)} size={132} label={t("pcDownload.qrLabel", { platform: name })} />
           <span className="text-center text-xs leading-relaxed text-fg-3">{kind === "iosOta" ? t("pcDownload.scanIos") : t("pcDownload.scan")}</span>
         </>
       }
       actions={
-        button || app.mobileconfig_url ? (
+        button || mobileconfig ? (
           <>
             {button && (
-              <Button asChild size="lg" icon={kind === "androidFile" ? undefined : <ExternalLink size={16} />}>
-                <a href={installUrl(app)} {...(app.mode === "LINK" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+              <Button asChild size="lg" icon={kind === "androidLink" || kind === "iosStore" ? <ExternalLink size={16} /> : undefined}>
+                <a href={href} {...(app.mode === "LINK" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
                   {button}
                 </a>
               </Button>
             )}
-            {app.mobileconfig_url && (
-              <a href={app.mobileconfig_url} className="text-sm text-brand hover:underline">
+            {mobileconfig && (
+              <a href={mobileconfig} className="text-sm text-brand hover:underline">
                 {t("pcDownload.mobileconfig")}
               </a>
             )}

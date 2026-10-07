@@ -9,7 +9,7 @@ export const zhTW = {
     home: "首頁", markets: "行情", spot: "現貨交易", futures: "合約", assets: "資產", overview: "資產總覽", deposit: "充值",
     withdraw: "提現", transfer: "劃轉", history: "資金流水", announcements: "公告", help: "幫助中心", search: "搜尋幣種",
     notifications: "通知", account: "帳戶", profile: "個人資料", security: "安全", settings: "設定", sessions: "裝置與登入", logout: "登出",
-    login: "登入", register: "註冊", language: "語言", me: "我的", trade: "交易", margin: "槓桿帳戶", download: "下載",
+    login: "登入", register: "註冊", language: "語言", me: "我的", trade: "交易", margin: "槓桿帳戶",
     downloadApp: "下載 App",
   },
   footer: {

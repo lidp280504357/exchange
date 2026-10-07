@@ -25,6 +25,8 @@ export default {
       open: "前往下载",
       appStore: "前往 App Store",
       install: "安装",
+      openOnIos: "请在 iPhone 或 iPad 上用 Safari 打开本页安装",
+      copySha: "复制 SHA-256",
       mobileconfig: "下载配置描述文件",
       help: "安装说明",
       helpAndroid: {
@@ -61,6 +63,8 @@ export default {
       open: "Go to download",
       appStore: "Open the App Store",
       install: "Install",
+      openOnIos: "Open this page in Safari on an iPhone or iPad to install",
+      copySha: "Copy the SHA-256",
       mobileconfig: "Download the configuration profile",
       help: "How to install",
       helpAndroid: {

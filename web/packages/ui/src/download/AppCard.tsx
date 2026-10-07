@@ -26,6 +26,8 @@ export type AppCardLabels = {
   help: string;
   /** A badge beside the platform (the phone's own: "本机"). */
   badge?: string;
+  /** The SHA-256 copy button's name ("复制 SHA-256"). */
+  copy?: string;
 };
 
 export type AppCardProps = {
@@ -85,7 +87,7 @@ export function AppCard({ platform, app, labels, minOs, notes, qr, actions, step
         <Fact label="SHA-256" right={!wide}>
           <span className={cn("flex items-start gap-1", !wide && "justify-end")}>
             <span className="break-all font-mono text-xs leading-5 text-fg-2">{app.sha256}</span>
-            <CopyButton value={app.sha256} size={wide ? 12 : 14} />
+            <CopyButton value={app.sha256} size={wide ? 12 : 14} label={labels.copy} />
           </span>
         </Fact>
       )}

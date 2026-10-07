@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { androidVersion, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, type AppDownload } from "./apps";
+import { androidVersion, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, safeHref, type AppDownload } from "./apps";
 
 const notes = { "zh-CN": "", en: "" };
 const link: AppDownload = {
@@ -44,10 +44,14 @@ describe("the apps to download", () => {
     expect(appKind("ios", link)).toBe("iosStore");
   });
 
-  it("install a link or a file, an uploaded iOS app over the air", () => {
+  it("install a link or a file, an uploaded iOS app over the air; nothing of another kind", () => {
     expect(installUrl(link)).toBe(link.url);
     expect(installUrl(apk)).toBe(apk.url);
     expect(installUrl(ipa)).toMatch(/^itms-services:/);
+    expect(installUrl({ ...link, url: "javascript:alert(1)" })).toBeUndefined();
+    expect(safeHref("http://example.com/a.apk")).toBeUndefined();
+    expect(safeHref(null)).toBeUndefined();
+    expect(qrUrl("ios", { ...link, url: "javascript:alert(1)" }, "https://astras.vip/download")).toBe("https://astras.vip/download?platform=ios");
   });
 
   it("put a link in its QR code, the download page for a file", () => {

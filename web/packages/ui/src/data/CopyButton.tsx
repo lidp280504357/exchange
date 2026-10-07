@@ -9,6 +9,8 @@ export type CopyButtonProps = {
   value: string;
   /** Visible text next to the icon (default: icon only). */
   children?: ReactNode;
+  /** The icon-only button's name when "copy" alone would not say what it copies ("复制 SHA-256"). */
+  label?: string;
   size?: number;
   onCopied?: () => void;
   className?: string;
@@ -18,7 +20,7 @@ export type CopyButtonProps = {
  * CopyButton copies a value (an address, a trace ID, an order ID) and
  * shows a check for 1.5 s; the "copied" notice is announced politely.
  */
-export function CopyButton({ value, children, size = 14, onCopied, className }: CopyButtonProps) {
+export function CopyButton({ value, children, label, size = 14, onCopied, className }: CopyButtonProps) {
   const { t } = useTranslation();
   const [done, setDone] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -34,8 +36,8 @@ export function CopyButton({ value, children, size = 14, onCopied, className }: 
     <button
       type="button"
       onClick={copy}
-      aria-label={children ? undefined : done ? t("common.copied") : t("common.copy")}
-      title={done ? t("common.copied") : t("common.copy")}
+      aria-label={children ? undefined : done ? t("common.copied") : (label ?? t("common.copy"))}
+      title={done ? t("common.copied") : (label ?? t("common.copy"))}
       className={cn(
         "hit-area inline-flex shrink-0 items-center gap-1 rounded-1 text-fg-3 transition-colors hover:text-fg-1",
         done && "text-success hover:text-success",

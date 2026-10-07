@@ -25,6 +25,8 @@ export default {
     open: "前往下載",
     appStore: "前往 App Store",
     install: "安裝",
+    openOnIos: "請在 iPhone 或 iPad 上用 Safari 開啟本頁安裝",
+    copySha: "複製 SHA-256",
     mobileconfig: "下載配置描述檔案",
     help: "安裝說明",
     helpAndroid: {

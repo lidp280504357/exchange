@@ -68,6 +68,18 @@ export function describePages(locale: Locale) {
       expect(html.indexOf('data-testid="app-android"')).toBeLessThan(html.indexOf('data-testid="app-ios"'));
     });
 
+    it("an enterprise iOS app off an iPhone: a hint, not a dead install link", () => {
+      const ota = {
+        ...offered.android!,
+        url: "https://astras.vip/downloads/ios/0192a000-0000-7000-8000-000000000002.ipa",
+        install_url: "itms-services://?action=download-manifest&url=https://astras.vip/downloads/ios/0192a000-0000-7000-8000-000000000002.plist",
+        ios_install: "OTA" as const,
+      };
+      const html = render({ android: null, ios: ota });
+      expect(html).toContain(say("请在 iPhone 或 iPad 上用 Safari 打开本页安装", "請在 iPhone 或 iPad 上用 Safari 開啟本頁安裝", "Open this page in Safari on an iPhone or iPad to install"));
+      expect(html).not.toContain("itms-services:");
+    });
+
     it("the app a QR code asks for first", () => {
       const html = render(offered, "/download?platform=ios");
       expect(html.indexOf('data-testid="app-ios"')).toBeLessThan(html.indexOf('data-testid="app-android"'));
