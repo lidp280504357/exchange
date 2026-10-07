@@ -59,13 +59,17 @@ const (
 	overlayPeakEvery  = 10 * time.Second
 	overlaySystem     = "system:market-sim"
 	overlayFlagActor  = "system:market.overlay"
-	// overlayPushFailures is how many pushes of an event in a row may fail
-	// (market-data down or slow) before the event is canceled: market-data
-	// puts the pair back at 1 five seconds after the last push, and an
-	// event whose pushes come and go would have it jump back and forth
-	// (review C57 ③). A refusal that will not pass (a pair no longer
-	// followed, a bad signature) cancels it at once.
+	// The pushes failing (review C57 ③): market-data puts the pair back at
+	// 1 five seconds after the last push, so overlayPushFailures in a row
+	// are a dip back to the reference price. One dip is a market-data
+	// restart: the pushes go on along the schedule once it answers (the
+	// overlay-restart drill). A second dip - pushes coming and going, the
+	// pair jumping back and forth - or overlayPushGiveUp in a row cancels
+	// the event; so does a refusal that will not pass (a pair no longer
+	// followed, a bad signature) at once.
 	overlayPushFailures = 5
+	overlayDips         = 1
+	overlayPushGiveUp   = 120
 )
 
 // Codes of the overlays' refusals (J0 contract §3.1).
@@ -162,6 +166,7 @@ type overlayRun struct {
 	peakAt    time.Time       // when its peak was last saved
 	failing   bool            // its last push failed (logged once)
 	fails     int             // its pushes that failed in a row
+	dips      int             // its runs of overlayPushFailures failures
 }
 
 // NewOverlays returns the overlays; market nil leaves them unconfigured
@@ -700,8 +705,12 @@ func (o *Overlays) push(ctx context.Context, r *overlayRun, f float64, now time.
 			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("market-data refused its factor (%s)", code))
 			return false
 		}
-		if r.fails >= overlayPushFailures {
-			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("%d pushes of its factor in a row failed (%s)", r.fails, err))
+		if r.fails == overlayPushFailures {
+			r.dips++
+		}
+		if r.dips > overlayDips || r.fails >= overlayPushGiveUp {
+			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("its pushes failed %d times in a row, the pair back at the reference price %d times (%s)",
+				r.fails, r.dips, err))
 			return false
 		}
 		if !r.failing {

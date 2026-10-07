@@ -439,22 +439,34 @@ func TestOverlayLossCountsThePerpetualsWithRisk(t *testing.T) {
 	}
 }
 
-// Pushes failing five times in a row cancel the event (market-data, which
-// drops a factor 5 seconds after its last push, would jump back and forth
-// as they come and go); a refusal that will not pass cancels it at once,
-// one that may (market.overlay not yet on there) counts as a failure
-// (review C57 ③).
+// The pushes failing (review C57 ③): one run of five or more (market-data
+// dropped the factor: a restart) is gone through, the pushes going on
+// after it; a second, or two minutes of them, cancel the event - the pair
+// would jump back and forth; a refusal that will not pass cancels it at
+// once, one that may (market.overlay not yet on there) counts as a failure.
 func TestAnEventWhosePushesFailIsCanceled(t *testing.T) {
 	r := newOverlayRig(t)
-	made, err := r.o.Create(context.Background(), btcSpike(10))
+	req := btcSpike(10)
+	req.Hold = 5 * time.Minute
+	made, err := r.o.Create(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := made[0].Event.ID
 	r.market.failPush = true
+	r.seconds(20) // market-data restarting
+	r.market.failPush = false
+	r.seconds(1)
+	if !r.o.Has(id) {
+		t.Fatal("canceled for a market-data restart")
+	}
+	if last, _ := r.market.last("BTC-USDT"); !near(last.Factor.InexactFloat64(), 1.1) {
+		t.Fatalf("after the restart, in its hold: %s", last.Factor)
+	}
+	r.market.failPush = true
 	r.seconds(4)
 	if !r.o.Has(id) {
-		t.Fatal("canceled after four failures")
+		t.Fatal("canceled before the second run reached five")
 	}
 	r.seconds(1)
 	e := r.store.event(id)
@@ -464,6 +476,22 @@ func TestAnEventWhosePushesFailIsCanceled(t *testing.T) {
 	}
 	if a := r.store.audits[len(r.store.audits)-1]; a.Action != "market.sim.event_ended" || a.Reason == "" {
 		t.Fatalf("audit %+v", a)
+	}
+
+	// Two minutes of failures in one run: market-data gone for good.
+	long := btcSpike(5)
+	long.Hold = 5 * time.Minute
+	made, err = r.o.Create(context.Background(), long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.seconds(119)
+	if !r.o.Has(made[0].Event.ID) {
+		t.Fatal("canceled before two minutes of failures")
+	}
+	r.seconds(1)
+	if e := r.store.event(made[0].Event.ID); r.o.Has(e.ID) || e.Status != domain.EventDone || e.Result != domain.ResultCanceled {
+		t.Fatalf("after two minutes of failures: %+v", e)
 	}
 
 	r.market.failPush = false
