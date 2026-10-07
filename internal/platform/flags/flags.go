@@ -91,6 +91,11 @@ const (
 	KeyFuturesData   = "market.futures_data"
 )
 
+// KeyOverlay lets the simulated market's price events move a followed
+// pair's reference data on the platform (design 2026-10-07, general price
+// control, J0): off, every overlay is back to 1 at once.
+const KeyOverlay = "market.overlay"
+
 // Known describes the known flags.
 var Known = map[string]string{
 	KeyRegistrationSMS:   "SMS as a registration and login channel (high-risk regions stay email-only)",
@@ -122,6 +127,7 @@ var Known = map[string]string{
 	KeyCoinM:             "Coin-margined perpetuals (BTC-USD-PERP and the others, settled in their base asset): orders, positions and the FUTURES accounts of BTC, ETH and ASTRA, by user or region (eligibility COIN_M_TRADE; design 2026-10-06 §2)",
 	KeyReferenceMark:     "Mark price, index price and funding rate from the Binance contract the contract follows instead of the platform's own computation, which stays the fallback when the stream stalls, per symbol (design 2026-10-06 §3.1)",
 	KeyFuturesData:       "Reading the futures statistics from Binance (open interest, long and short ratios, taker volume, basis, funding history) and its liquidation stream; off, what is stored is still served (design 2026-10-06 §3.3)",
+	KeyOverlay:           "Price events on followed pairs: market-data multiplies a pair's reference book, trades, ticker and candles (and, with risk, its perpetuals' index and mark) by the factor market-sim pushes each second; off, every factor is 1 at once (design 2026-10-07, general price control)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

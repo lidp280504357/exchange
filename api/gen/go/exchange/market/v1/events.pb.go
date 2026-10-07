@@ -89,7 +89,11 @@ type DepthSnapshot struct {
 	Asks     []*PriceLevel          `protobuf:"bytes,4,rep,name=asks,proto3" json:"asks,omitempty"`
 	TakenAt  *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=taken_at,json=takenAt,proto3" json:"taken_at,omitempty"`
 	// True when the book is the reference market's (Binance).
-	Reference     bool `protobuf:"varint,6,opt,name=reference,proto3" json:"reference,omitempty"`
+	Reference bool `protobuf:"varint,6,opt,name=reference,proto3" json:"reference,omitempty"`
+	// The price event's factor the reference book's prices carry (design
+	// 2026-10-07, general price control); empty or "1" without one. HOUSE
+	// quotes less while it is set.
+	OverlayFactor string `protobuf:"bytes,7,opt,name=overlay_factor,json=overlayFactor,proto3" json:"overlay_factor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -166,19 +170,28 @@ func (x *DepthSnapshot) GetReference() bool {
 	return false
 }
 
+func (x *DepthSnapshot) GetOverlayFactor() string {
+	if x != nil {
+		return x.OverlayFactor
+	}
+	return ""
+}
+
 // DepthUpdate is how a public book changed since the message before it on
 // the symbol's topic: the levels that changed, quantity "0" removing one.
 // prev_sequence is that message's sequence; a consumer that did not see
 // it keeps its book until the next DepthSnapshot.
 type DepthUpdate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Symbol        string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
-	Sequence      int64                  `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	PrevSequence  int64                  `protobuf:"varint,3,opt,name=prev_sequence,json=prevSequence,proto3" json:"prev_sequence,omitempty"`
-	Bids          []*PriceLevel          `protobuf:"bytes,4,rep,name=bids,proto3" json:"bids,omitempty"`
-	Asks          []*PriceLevel          `protobuf:"bytes,5,rep,name=asks,proto3" json:"asks,omitempty"`
-	TakenAt       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=taken_at,json=takenAt,proto3" json:"taken_at,omitempty"`
-	Reference     bool                   `protobuf:"varint,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Symbol       string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Sequence     int64                  `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	PrevSequence int64                  `protobuf:"varint,3,opt,name=prev_sequence,json=prevSequence,proto3" json:"prev_sequence,omitempty"`
+	Bids         []*PriceLevel          `protobuf:"bytes,4,rep,name=bids,proto3" json:"bids,omitempty"`
+	Asks         []*PriceLevel          `protobuf:"bytes,5,rep,name=asks,proto3" json:"asks,omitempty"`
+	TakenAt      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=taken_at,json=takenAt,proto3" json:"taken_at,omitempty"`
+	Reference    bool                   `protobuf:"varint,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	// As DepthSnapshot's.
+	OverlayFactor string `protobuf:"bytes,8,opt,name=overlay_factor,json=overlayFactor,proto3" json:"overlay_factor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -260,6 +273,13 @@ func (x *DepthUpdate) GetReference() bool {
 		return x.Reference
 	}
 	return false
+}
+
+func (x *DepthUpdate) GetOverlayFactor() string {
+	if x != nil {
+		return x.OverlayFactor
+	}
+	return ""
 }
 
 // TradesPrinted is a batch of a symbol's public trades, oldest first.
@@ -1311,14 +1331,15 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"PriceLevel\x12\x14\n" +
 	"\x05price\x18\x01 \x01(\tR\x05price\x12\x1a\n" +
-	"\bquantity\x18\x02 \x01(\tR\bquantity\"\x80\x02\n" +
+	"\bquantity\x18\x02 \x01(\tR\bquantity\"\xa7\x02\n" +
 	"\rDepthSnapshot\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x03R\bsequence\x122\n" +
 	"\x04bids\x18\x03 \x03(\v2\x1e.exchange.market.v1.PriceLevelR\x04bids\x122\n" +
 	"\x04asks\x18\x04 \x03(\v2\x1e.exchange.market.v1.PriceLevelR\x04asks\x125\n" +
 	"\btaken_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\atakenAt\x12\x1c\n" +
-	"\treference\x18\x06 \x01(\bR\treference\"\xa3\x02\n" +
+	"\treference\x18\x06 \x01(\bR\treference\x12%\n" +
+	"\x0eoverlay_factor\x18\a \x01(\tR\roverlayFactor\"\xca\x02\n" +
 	"\vDepthUpdate\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x03R\bsequence\x12#\n" +
@@ -1326,7 +1347,8 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\x04bids\x18\x04 \x03(\v2\x1e.exchange.market.v1.PriceLevelR\x04bids\x122\n" +
 	"\x04asks\x18\x05 \x03(\v2\x1e.exchange.market.v1.PriceLevelR\x04asks\x125\n" +
 	"\btaken_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\atakenAt\x12\x1c\n" +
-	"\treference\x18\a \x01(\bR\treference\"~\n" +
+	"\treference\x18\a \x01(\bR\treference\x12%\n" +
+	"\x0eoverlay_factor\x18\b \x01(\tR\roverlayFactor\"~\n" +
 	"\rTradesPrinted\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x127\n" +
 	"\x06trades\x18\x02 \x03(\v2\x1f.exchange.market.v1.PublicTradeR\x06trades\x12\x1c\n" +

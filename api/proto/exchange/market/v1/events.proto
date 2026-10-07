@@ -53,6 +53,10 @@ message DepthSnapshot {
   google.protobuf.Timestamp taken_at = 5;
   // True when the book is the reference market's (Binance).
   bool reference = 6;
+  // The price event's factor the reference book's prices carry (design
+  // 2026-10-07, general price control); empty or "1" without one. HOUSE
+  // quotes less while it is set.
+  string overlay_factor = 7;
 }
 
 // DepthUpdate is how a public book changed since the message before it on
@@ -67,6 +71,8 @@ message DepthUpdate {
   repeated PriceLevel asks = 5;
   google.protobuf.Timestamp taken_at = 6;
   bool reference = 7;
+  // As DepthSnapshot's.
+  string overlay_factor = 8;
 }
 
 // TradesPrinted is a batch of a symbol's public trades, oldest first.
