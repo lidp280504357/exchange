@@ -19,6 +19,36 @@ func APK(pkg, versionName string, versionCode, minSdk uint32) []byte {
 	})
 }
 
+// APKPadded is APK with an entry of pad bytes that do not compress (stored
+// as they are): an .apk of about that size, for uploads in several parts.
+func APKPadded(pkg, versionName string, versionCode, minSdk uint32, pad int) []byte {
+	var b bytes.Buffer
+	w := zip.NewWriter(&b)
+	add := func(h *zip.FileHeader, data []byte) {
+		f, err := w.CreateHeader(h)
+		if err == nil {
+			_, err = f.Write(data)
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
+	add(&zip.FileHeader{Name: "AndroidManifest.xml", Method: zip.Deflate}, manifest(pkg, versionName, versionCode, minSdk))
+	noise := make([]byte, pad)
+	x := uint64(0x9e3779b97f4a7c15)
+	for i := range noise {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		noise[i] = byte(x) //nolint:gosec // the low byte of the generator, meant to wrap
+	}
+	add(&zip.FileHeader{Name: "assets/pad.bin", Method: zip.Store}, noise)
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
+	return b.Bytes()
+}
+
 // IPA is an .ipa of bundle with its versions and minimum iOS.
 func IPA(bundle, version, build, minOS string) []byte {
 	return zipOf(map[string][]byte{"Payload/E2E.app/Info.plist": infoPlist(bundle, version, build, minOS), "Payload/E2E.app/E2E": []byte("e2e")})

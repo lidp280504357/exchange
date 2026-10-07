@@ -211,6 +211,11 @@ func TestHouseCaps(t *testing.T) {
 	if err != nil || done.Status != domain.ApprovalExecuted || done.Result != "caps version 2 (set by an earlier attempt)" {
 		t.Fatalf("approved again %+v %v", done, err)
 	}
+	// Audited all the same (review FZ, A75 ③).
+	if got := h.auditsOf("admin.house.caps_changed"); len(got) != 1 || !strings.Contains(got[0], `"set_by_an_earlier_attempt":true`) ||
+		!strings.Contains(got[0], `{"after":"400000000","before":"500000000","cap":"level"}`) || !strings.Contains(got[0], `"version":2`) {
+		t.Fatalf("the earlier attempt's change audited %v", got)
+	}
 	if w := m.puts[0]; w.Version != 1 || w.Actor != "fin@example.com" || w.Approver != "boss@example.com" || w.ApprovalID != a.ID ||
 		w.Reason != "smaller levels" || len(w.Caps) != 1 || w.Caps["level"] != "400000000" {
 		t.Fatalf("the change sent %+v", w)
@@ -225,8 +230,8 @@ func TestHouseCaps(t *testing.T) {
 		m.caps["safety"] != "100" || m.caps["contract_leverage"] != "5" || m.by != "fin@example.com" {
 		t.Fatalf("approved %+v %v %+v", done, err, m.caps)
 	}
-	if got := h.auditsOf("admin.house.caps_changed"); len(got) != 1 || !strings.Contains(got[0], `{"after":"100","before":"1000","cap":"safety"}`) ||
-		!strings.Contains(got[0], `{"after":"5","before":"10","cap":"contract_leverage"}`) || !strings.Contains(got[0], `"approved_by":"boss@example.com"`) {
+	if got := h.auditsOf("admin.house.caps_changed"); len(got) != 2 || !strings.Contains(got[1], `{"after":"100","before":"1000","cap":"safety"}`) ||
+		!strings.Contains(got[1], `{"after":"5","before":"10","cap":"contract_leverage"}`) || !strings.Contains(got[1], `"approved_by":"boss@example.com"`) {
 		t.Fatalf("the change audited %v", got)
 	}
 	if v, _ := h.svc.HouseCapsOf(ctx, auditor); v.Pending != nil || len(v.Changes) != 3 || v.Changes[0].Version != 3 || v.Changes[0].ApprovalID != b.ID ||

@@ -77,9 +77,11 @@ export interface paths {
          *     complete; null otherwise (the sites leave the platform out, and
          *     hide the download entries while both are null). Cacheable for a
          *     minute; the ETag is the two platforms' versions, Android's then
-         *     iOS's ("3-5"; every change raises one of them), a strong tag that
-         *     If-None-Match matches weakened too (W/"3-5", as Cloudflare sends it)
-         *     and answers 304 while it has not changed. Batch H0; built in H1.
+         *     iOS's, and the profile's ("3-5-7": every change raises one of them,
+         *     a new domain moving the files' addresses included), a strong tag
+         *     that If-None-Match matches weakened too (W/"3-5-7", as Cloudflare
+         *     sends it) and answers 304 while it has not changed. Batch H0; built
+         *     in H1.
          */
         get: operations["getPlatformApps"];
         put?: never;

@@ -170,7 +170,7 @@ func join(dir string, n int, path string) (string, int64, error) {
 	h := sha256.New()
 	var size int64
 	for i := 1; i <= n; i++ {
-		got, err := appendPart(io.MultiWriter(f, h), filepath.Join(dir, strconv.Itoa(i)+".part"))
+		got, err := appendPart(io.MultiWriter(f, h), dir, i)
 		if err != nil {
 			_ = f.Close()
 			return "", 0, err
@@ -183,10 +183,12 @@ func join(dir string, n int, path string) (string, int64, error) {
 	return hex.EncodeToString(h.Sum(nil)), size, nil
 }
 
-func appendPart(w io.Writer, part string) (int64, error) {
-	p, err := os.Open(part) //nolint:gosec // a path of fixed parts and an ID
+// appendPart copies part n of dir to w; a part missing is the upload's
+// refusal naming it, as the part numbers the service names.
+func appendPart(w io.Writer, dir string, n int) (int64, error) {
+	p, err := os.Open(filepath.Join(dir, strconv.Itoa(n)+".part")) //nolint:gosec // a path of fixed parts and an ID
 	if errors.Is(err, fs.ErrNotExist) {
-		return 0, domain.ErrAppUploadIncomplete.WithDetail("missing", filepath.Base(part))
+		return 0, domain.ErrAppUploadIncomplete.WithDetail("missing", []int{n})
 	}
 	if err != nil {
 		return 0, err
@@ -282,6 +284,29 @@ func (d Disk) Stored() ([]ports.StoredPath, error) {
 			}
 			out = append(out, ports.StoredPath{Path: p, ModTime: fi.ModTime()})
 		}
+	}
+	return out, nil
+}
+
+// UploadDirs lists the uploads' directories by their IDs.
+func (d Disk) UploadDirs() ([]ports.StoredPath, error) {
+	entries, err := os.ReadDir(d.Uploads)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errNoDir(d.Uploads, err)
+	}
+	var out []ports.StoredPath
+	for _, e := range entries {
+		if !e.IsDir() || !uuidRE.MatchString(e.Name()) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, ports.StoredPath{Path: e.Name(), ModTime: fi.ModTime()})
 	}
 	return out, nil
 }

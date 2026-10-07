@@ -2262,7 +2262,7 @@ export interface paths {
         post?: never;
         /**
          * Drop an upload and its parts
-         * @description 409 PLATFORM_APP_UPLOAD_BUSY while a completion holds it. settings.write.
+         * @description 409 PLATFORM_APP_UPLOAD_BUSY while a completion or a part being written holds it. settings.write.
          */
         delete: operations["dropAppUpload"];
         options?: never;
@@ -2288,7 +2288,8 @@ export interface paths {
          * @description Exactly part_size bytes, the last part the rest (400
          *     COMMON_INVALID_ARGUMENT otherwise, or for a part number out of
          *     range); a part sent again replaces it; 409
-         *     PLATFORM_APP_UPLOAD_BUSY while a completion holds the upload. nginx
+         *     PLATFORM_APP_UPLOAD_BUSY while a completion or another part being
+         *     written holds the upload (send the parts one after another). nginx
          *     lets this route take 16 MB (client_max_body_size), the console's
          *     other routes less. settings.write.
          */

@@ -5,14 +5,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/skill/exchange/internal/admin/adapters/apppkg/apppkgtest"
 	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 )
 
@@ -100,7 +103,8 @@ func TestStore(t *testing.T) {
 	// one: refused, nothing stored.
 	other := upload(domain.AppAndroid, domain.AppKindApp, "x.apk", apk, 100)
 	other.ID = "0192a000-0000-7000-8000-0000000000cc"
-	if _, err := d.Store(ctx, other, "0192a000-0000-7000-8000-0000000000dd", "https://astras.vip", "Astras"); !apperr.Is(err, "PLATFORM_APP_UPLOAD_INCOMPLETE") {
+	if _, err := d.Store(ctx, other, "0192a000-0000-7000-8000-0000000000dd", "https://astras.vip", "Astras"); !apperr.Is(err, "PLATFORM_APP_UPLOAD_INCOMPLETE") ||
+		!slices.Equal(missingOf(err), []int{1}) {
 		t.Fatalf("no parts: %v", err)
 	}
 	send(t, d, other, apk)
@@ -117,6 +121,22 @@ func TestStore(t *testing.T) {
 	}
 	if list, _ := d.Stored(); len(list) != 1 {
 		t.Fatalf("a refused file left behind: %+v", list)
+	}
+
+	// An .apk of three parts of 1 MiB (the last one shorter), sent out of
+	// order: joined in order.
+	big := apppkgtest.APKPadded("vip.astras.app", "1.3.0", 43, 24, 2<<20+512)
+	bu := upload(domain.AppAndroid, domain.AppKindApp, "Astras-big.apk", big, 1<<20)
+	bu.ID = "0192a000-0000-7000-8000-000000000555"
+	for _, n := range []int{3, 1, 2} {
+		part := big[(n-1)*int(bu.PartSize) : min(n*int(bu.PartSize), len(big))]
+		if err := d.PutPart(ctx, bu.ID, n, bytes.NewReader(part), bu.PartLen(n)); err != nil {
+			t.Fatalf("part %d: %v", n, err)
+		}
+	}
+	if f, err := d.Store(ctx, bu, "0192a000-0000-7000-8000-000000000666", "https://astras.vip", "Astras"); err != nil || f.Size != int64(len(big)) ||
+		f.SHA256 != shaOf(big) || f.Build != "43" || bu.Parts() != 3 {
+		t.Fatalf("three parts out of order %+v %v", f, err)
 	}
 
 	// An .ipa gets its manifest naming the file at origin; a configuration
@@ -151,10 +171,24 @@ func TestStore(t *testing.T) {
 	if err := d.Remove(f.StoredAs, f.Manifest, f.StoredAs); err != nil {
 		t.Fatal(err)
 	}
-	if list, _ := d.Stored(); len(list) != 2 {
+	if list, _ := d.Stored(); len(list) != 3 {
 		t.Fatalf("after removing the .ipa: %+v", list)
 	}
 	if free, err := d.Free(); err != nil || free == 0 {
 		t.Fatalf("free %d %v", free, err)
 	}
+	dirs, err := d.UploadDirs()
+	if err != nil || len(dirs) != 6 || !slices.ContainsFunc(dirs, func(p ports.StoredPath) bool { return p.Path == uploadID }) {
+		t.Fatalf("the uploads' directories %+v %v", dirs, err)
+	}
+}
+
+// missingOf is an incomplete upload's missing parts.
+func missingOf(err error) []int {
+	var e *apperr.Error
+	if !errors.As(err, &e) {
+		return nil
+	}
+	m, _ := e.Details["missing"].([]int)
+	return m
 }

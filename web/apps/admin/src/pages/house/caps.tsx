@@ -1,4 +1,4 @@
-import { dec, errorText } from "@exchange/core";
+import { ApiError, dec, errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, ErrorState, Input, Skeleton } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { Num, TimeText } from "../../kit/format";
-import { announce, FundAction, type Approval } from "../../kit/funds";
+import { FundAction, type Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
 import { direction, HOUSE_CAPS, inRange, stepOK, type CapName } from "./capsRules";
 
@@ -199,6 +199,11 @@ function History({ changes, audit }: { changes: View["changes"]; audit: boolean 
               {c.approver && ` / ${c.approver}`}
               {c.previous && c.reason && ` · ${c.reason}`}
             </span>
+            {c.signed_by === "admin" && (
+              <Badge tone="success" title={t("admin.house.caps.consoleHint")}>
+                {t("admin.house.caps.console")}
+              </Badge>
+            )}
             {c.signed_by === "ops" && (
               <Badge tone="warn" title={t("admin.house.caps.opsHint")}>
                 {t("admin.house.caps.ops")}
@@ -240,17 +245,20 @@ function RequestCaps({ caps }: { caps: Caps }) {
       target={<span className="font-medium">HOUSE</span>}
       confirmWord="HOUSE"
       disabled={bad || changed.length === 0}
-      run={async (reason) =>
-        adminData(
-          await adminApi.POST("/admin/v1/house/caps", {
-            body: { caps: Object.fromEntries(changed.map((f) => [f, values[f].trim()])), version: caps.version, reason },
-          }),
-        )
-      }
-      onDone={(a) => {
-        announce(a);
-        void qc.invalidateQueries({ queryKey: houseCapsKey });
+      run={async (reason) => {
+        try {
+          return adminData(
+            await adminApi.POST("/admin/v1/house/caps", {
+              body: { caps: Object.fromEntries(changed.map((f) => [f, values[f].trim()])), version: caps.version, reason },
+            }),
+          );
+        } catch (err) {
+          // The caps moved or a request waits (409): the card reads them again.
+          if (err instanceof ApiError && err.status === 409) void qc.invalidateQueries({ queryKey: houseCapsKey });
+          throw err;
+        }
       }}
+      onDone={() => void qc.invalidateQueries({ queryKey: houseCapsKey })}
     >
       <div className="grid gap-2 sm:grid-cols-2">
         {HOUSE_CAPS.map((f) => (

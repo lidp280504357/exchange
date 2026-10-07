@@ -334,6 +334,8 @@ func (s *Service) executeHouseCaps(ctx context.Context, a domain.Approval, p Pri
 			return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "HOUSE's caps changed and their history cannot be read: try again")
 		}
 		if done > 0 {
+			// Changed then, audited now (review FZ, A75 ③).
+			s.auditHouseCaps(ctx, a, p, caps, done, true)
 			return fmt.Sprintf("caps version %d (set by an earlier attempt)", done), nil
 		}
 	}
@@ -342,20 +344,29 @@ func (s *Service) executeHouseCaps(ctx context.Context, a domain.Approval, p Pri
 	}
 	var set HouseCaps
 	_ = json.Unmarshal(out, &set)
+	s.auditHouseCaps(ctx, a, p, caps, set.Version, false)
+	return fmt.Sprintf("caps version %d", set.Version), nil
+}
+
+// auditHouseCaps audits an approved change of the caps as
+// admin.house.caps_changed: each cap before and after, the version it
+// made, and whether an earlier attempt whose answer was lost set it.
+func (s *Service) auditHouseCaps(ctx context.Context, a domain.Approval, p Principal, caps map[string]string, version int64, earlier bool) {
 	var previous map[string]string
 	_ = json.Unmarshal([]byte(a.Payload["previous"]), &previous)
 	changes := make([]map[string]string, 0, len(caps))
 	for _, name := range strings.Split(a.Payload["changed"], ",") {
 		changes = append(changes, map[string]string{"cap": name, "before": previous[name], "after": caps[name]})
 	}
-	details, _ := json.Marshal(map[string]any{
-		"approval_id": a.ID, "requested_by": a.RequestedByEmail, "approved_by": p.Admin.Email, "changes": changes, "version": set.Version,
-	})
+	d := map[string]any{"approval_id": a.ID, "requested_by": a.RequestedByEmail, "approved_by": p.Admin.Email, "changes": changes, "version": version}
+	if earlier {
+		d["set_by_an_earlier_attempt"] = true
+	}
+	details, _ := json.Marshal(d)
 	if err := s.audit(ctx, p, houseCapsTarget, "admin.house.caps_changed", a.Reason, string(details)); err != nil {
 		// Changed, its audit event lost: the approval's own (approved) says so.
 		s.Log.ErrorContext(ctx, "house caps: changed, unaudited", "approval_id", a.ID, "error", err)
 	}
-	return fmt.Sprintf("caps version %d", set.Version), nil
 }
 
 // houseCapsSetBy is the version market-maker's history has of a change by

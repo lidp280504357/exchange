@@ -143,6 +143,7 @@ func (f *fakeApps) DeleteAppFile(_ context.Context, platform, fileID, actor, _ s
 // package check.
 type fakeAppFiles struct {
 	parts   map[string]map[int][]byte
+	dirs    map[string]time.Time
 	stored  map[string]time.Time
 	free    uint64
 	invalid bool
@@ -151,7 +152,7 @@ type fakeAppFiles struct {
 }
 
 func newFakeAppFiles(now func() time.Time) *fakeAppFiles {
-	return &fakeAppFiles{parts: map[string]map[int][]byte{}, stored: map[string]time.Time{}, free: 100 << 30, now: now}
+	return &fakeAppFiles{parts: map[string]map[int][]byte{}, dirs: map[string]time.Time{}, stored: map[string]time.Time{}, free: 100 << 30, now: now}
 }
 
 func (f *fakeAppFiles) PutPart(_ context.Context, id string, n int, body io.Reader, size int64) error {
@@ -200,6 +201,7 @@ func (f *fakeAppFiles) Store(_ context.Context, u domain.AppUpload, fileID, orig
 
 func (f *fakeAppFiles) DropUpload(id string) error {
 	delete(f.parts, id)
+	delete(f.dirs, id)
 	return nil
 }
 
@@ -219,6 +221,19 @@ func (f *fakeAppFiles) Stored() ([]ports.StoredPath, error) {
 }
 
 func (f *fakeAppFiles) Free() (uint64, error) { return f.free, nil }
+
+// UploadDirs lists the uploads with parts, and the directories left
+// without one (dirs), all written at the time put in dirs or now.
+func (f *fakeAppFiles) UploadDirs() ([]ports.StoredPath, error) {
+	var out []ports.StoredPath
+	for id := range f.parts {
+		out = append(out, ports.StoredPath{Path: id, ModTime: f.now()})
+	}
+	for id, at := range f.dirs {
+		out = append(out, ports.StoredPath{Path: id, ModTime: at})
+	}
+	return out, nil
+}
 
 // memUploads keeps app_uploads in a map.
 type memUploads struct {
@@ -391,7 +406,8 @@ func TestAppUploads(t *testing.T) {
 	if _, err := h.svc.PutAppUploadPart(ctx, boss, domain.AppAndroid, u.ID, 2, bytes.NewReader(part(2))); err != nil {
 		t.Fatal(err)
 	}
-	// Another completion holds it: parts and completions wait.
+	// Another completion (or a part being written) holds it: parts,
+	// completions and drops wait (review FX, A74 ③); a part sent lets go.
 	uploads.hold[u.ID] = h.now.Add(time.Minute)
 	if _, err := h.svc.PutAppUploadPart(ctx, boss, domain.AppAndroid, u.ID, 2, bytes.NewReader(part(2))); code(err) != "PLATFORM_APP_UPLOAD_BUSY" {
 		t.Fatalf("a part while completing: %v", err)
@@ -399,7 +415,13 @@ func TestAppUploads(t *testing.T) {
 	if _, err := h.svc.CompleteAppUpload(ctx, boss, domain.AppAndroid, u.ID, "version 1.2.0", "admin.astras.vip"); code(err) != "PLATFORM_APP_UPLOAD_BUSY" {
 		t.Fatalf("completed twice: %v", err)
 	}
+	if err := h.svc.DropAppUpload(ctx, boss, domain.AppAndroid, u.ID); code(err) != "PLATFORM_APP_UPLOAD_BUSY" {
+		t.Fatalf("dropped while held: %v", err)
+	}
 	delete(uploads.hold, u.ID)
+	if _, err := h.svc.PutAppUploadPart(ctx, boss, domain.AppAndroid, u.ID, 2, bytes.NewReader(part(2))); err != nil || uploads.hold[u.ID].After(h.now) {
+		t.Fatalf("a part sent again: %v, still held until %v", err, uploads.hold[u.ID])
+	}
 
 	// instrument-service down: the stored file goes, the upload stays.
 	apps.down = true
@@ -493,10 +515,13 @@ func TestAppUploads(t *testing.T) {
 	// A day later the open ones are swept; a file no platform keeps goes
 	// once an hour old, those kept stay.
 	files.stored["android/0192a000-0000-7000-8000-0000000000ff.apk"] = h.now
+	// A directory left without its row (review FX, A74 ④): swept once old.
+	files.dirs["0192a000-0000-7000-8000-0000000000dd"] = h.now
 	h.now = h.now.Add(25 * time.Hour)
 	files.stored["android/0192a000-0000-7000-8000-0000000000fe.apk"] = h.now
+	files.dirs["0192a000-0000-7000-8000-0000000000dc"] = h.now
 	swept, gone, err := h.svc.SweepAppFiles(ctx)
-	if err != nil || swept != 3 || gone != 1 || len(uploads.rows) != 0 {
+	if err != nil || swept != 4 || gone != 1 || len(uploads.rows) != 0 || len(files.dirs) != 1 || files.dirs["0192a000-0000-7000-8000-0000000000dc"].IsZero() {
 		t.Fatalf("swept %d uploads, %d files: %v %v", swept, gone, err, files.stored)
 	}
 	if _, ok := files.stored["android/0192a000-0000-7000-8000-0000000000fe.apk"]; !ok {

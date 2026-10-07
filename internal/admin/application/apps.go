@@ -33,9 +33,12 @@ const (
 	// beyond its parts and its file (the services' data is on it too).
 	appDiskReserve = 2 << 30
 	// appOrphanAge is how old a file under /downloads/ that no platform
-	// keeps must be before the sweep deletes it (one being stored is
-	// younger).
+	// keeps, or an upload's directory without its row, must be before the
+	// sweep deletes it (one being written is younger).
 	appOrphanAge = time.Hour
+	// appPartHold is how long a part being written holds its upload
+	// against a completion or a drop (review FX, A74 ③).
+	appPartHold = 2 * time.Minute
 )
 
 // appHostRE is a host name the console may be reached at.
@@ -248,7 +251,9 @@ func (s *Service) AppUpload(ctx context.Context, p Principal, platform, id strin
 }
 
 // PutAppUploadPart stores part n of an upload: exactly its length (the
-// part size, the last part the rest).
+// part size, the last part the rest). It holds the upload while it writes,
+// so a completion never joins a part half written, nor a part lands after
+// the upload is gone; another part meanwhile is refused as busy.
 func (s *Service) PutAppUploadPart(ctx context.Context, p Principal, platform, id string, n int, body io.Reader) (domain.AppUpload, error) {
 	if err := p.require(domain.PermSettingsEdit); err != nil {
 		return domain.AppUpload{}, err
@@ -261,9 +266,11 @@ func (s *Service) PutAppUploadPart(ctx context.Context, p Principal, platform, i
 	if size == 0 {
 		return domain.AppUpload{}, apperr.Invalid("no such part: this upload has parts 1 to " + strconv.Itoa(u.Parts()))
 	}
-	if busy, err := s.AppUploads.Busy(ctx, id, s.Now()); err != nil || busy {
+	now := s.Now()
+	if ok, err := s.AppUploads.Claim(ctx, id, now, now.Add(appPartHold)); err != nil || !ok {
 		return domain.AppUpload{}, cmpErr(err, domain.ErrAppUploadBusy)
 	}
+	defer s.releaseUpload(ctx, id)
 	if err := s.AppFiles.PutPart(ctx, id, n, body, size); err != nil {
 		return domain.AppUpload{}, err
 	}
@@ -285,10 +292,18 @@ func (s *Service) DropAppUpload(ctx context.Context, p Principal, platform, id s
 	if _, err := s.upload(ctx, platform, id); err != nil {
 		return err
 	}
-	if busy, err := s.AppUploads.Busy(ctx, id, s.Now()); err != nil || busy {
+	now := s.Now()
+	if ok, err := s.AppUploads.Claim(ctx, id, now, now.Add(appPartHold)); err != nil || !ok {
 		return cmpErr(err, domain.ErrAppUploadBusy)
 	}
 	return s.dropUpload(ctx, id)
+}
+
+// releaseUpload lets the next part, completion or drop take an upload.
+func (s *Service) releaseUpload(ctx context.Context, id string) {
+	if err := s.AppUploads.Release(context.WithoutCancel(ctx), id); err != nil {
+		s.Log.WarnContext(ctx, "app upload: not released", "upload_id", id, "error", err)
+	}
 }
 
 // dropUpload removes an upload's parts, then its row: a crash in between
@@ -358,12 +373,8 @@ func (s *Service) CompleteAppUpload(ctx context.Context, p Principal, platform, 
 	if err != nil || !ok {
 		return nil, cmpErr(err, domain.ErrAppUploadBusy)
 	}
-	defer func() {
-		// Gone when it completed; released for another try otherwise.
-		if err := s.AppUploads.Release(context.WithoutCancel(ctx), id); err != nil {
-			s.Log.WarnContext(ctx, "app upload: not released", "upload_id", id, "error", err)
-		}
-	}()
+	// Gone when it completed; released for another try otherwise.
+	defer s.releaseUpload(ctx, id)
 	origin, title, err := s.appOrigin(ctx, host)
 	if err != nil {
 		return nil, err
@@ -451,10 +462,11 @@ func (s *Service) DeleteAppFile(ctx context.Context, p Principal, platform, file
 	return out.App, s.audit(ctx, p, appTarget(platform), "admin.platform.app_file_deleted", reason, string(d))
 }
 
-// SweepAppFiles drops the uploads expired with their parts, and deletes
-// the files under /downloads/ no platform keeps once they are
-// appOrphanAge old (a completion whose answer was lost, a deletion whose
-// file stayed); it returns how many of each.
+// SweepAppFiles drops the uploads expired with their parts and the
+// uploads' directories without a row, and deletes the files under
+// /downloads/ no platform keeps, those two once appOrphanAge old (a
+// completion whose answer was lost, a deletion whose file stayed); it
+// returns how many of each.
 func (s *Service) SweepAppFiles(ctx context.Context) (uploads, files int, err error) {
 	if s.appsReady() != nil {
 		return 0, 0, nil
@@ -466,6 +478,24 @@ func (s *Service) SweepAppFiles(ctx context.Context) (uploads, files int, err er
 	}
 	for _, u := range expired {
 		if err := s.dropUpload(ctx, u.ID); err != nil {
+			return uploads, 0, err
+		}
+		uploads++
+	}
+	// A directory whose row went (a crash between the two, or the row
+	// dropped by hand) goes too once it is old (review FX, A74 ④).
+	dirs, err := s.AppFiles.UploadDirs()
+	if err != nil {
+		return uploads, 0, err
+	}
+	for _, d := range dirs {
+		if now.Sub(d.ModTime) < appOrphanAge {
+			continue
+		}
+		if row, err := s.AppUploads.Get(ctx, d.Path); err != nil || row != nil {
+			continue
+		}
+		if err := s.AppFiles.DropUpload(d.Path); err != nil {
 			return uploads, 0, err
 		}
 		uploads++

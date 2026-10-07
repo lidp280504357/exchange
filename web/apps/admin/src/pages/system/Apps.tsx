@@ -243,10 +243,34 @@ async function putPart(platform: Platform, id: string, n: number, part: Blob) {
 
 type Chosen = { file: File; sha256: string };
 
+/** Unfinished is an upload left half-way, remembered in the browser until it is completed or abandoned. */
+type Unfinished = { id: string; sha256: string; name: string; size: number };
+
+const unfinishedKey = (platform: Platform, kind: Kind) => `admin.appUpload.${platform}.${kind}`;
+
+function readUnfinished(platform: Platform, kind: Kind): Unfinished | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(unfinishedKey(platform, kind)) ?? "null") as Unfinished | null;
+    return v && typeof v.id === "string" && typeof v.sha256 === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function keepUnfinished(platform: Platform, kind: Kind, u: Unfinished | null) {
+  try {
+    if (u) localStorage.setItem(unfinishedKey(platform, kind), JSON.stringify(u));
+    else localStorage.removeItem(unfinishedKey(platform, kind));
+  } catch {
+    // Private windows may refuse storage: the upload is then resumed only until a reload.
+  }
+}
+
 /**
  * UploadFile picks a file, hashes it, and once confirmed sends it in parts
- * and completes it; an upload that stopped half-way is resumed from the
- * parts the server has.
+ * and completes it. An upload that stopped half-way is remembered in the
+ * browser (review FX, A74 ①): choosing the same file resumes it from the
+ * parts the server has; it can be abandoned, its parts dropped.
  */
 function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
   const { t } = useTranslation();
@@ -257,17 +281,21 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
   const [hashing, setHashing] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<{ done: number; parts: number; checking: boolean } | null>(null);
-  // The upload a failure left, resumed on the next try with the same file.
-  const pending = useRef<{ id: string; sha256: string } | null>(null);
+  // The upload a failure (or a reload) left, resumed with the same file.
+  const [unfinished, setUnfinishedState] = useState<Unfinished | null>(() => readUnfinished(platform, kind));
+  const setUnfinished = (u: Unfinished | null) => {
+    keepUnfinished(platform, kind, u);
+    setUnfinishedState(u);
+  };
   const label = kind === "MOBILECONFIG" ? t("admin.apps.upload.MOBILECONFIG") : t(`admin.apps.upload.APP.${platform}`);
 
   const send = async (reason: string) => {
     if (!chosen) return null;
     const { file, sha256: sum } = chosen;
     let up: Upload | null = null;
-    if (pending.current?.sha256 === sum) {
+    if (unfinished?.sha256 === sum) {
       const res = await adminApi.GET("/admin/v1/platform/apps/{platform}/uploads/{upload_id}", {
-        params: { path: { platform, upload_id: pending.current.id } },
+        params: { path: { platform, upload_id: unfinished.id } },
       });
       if (res.response.ok && res.data) up = res.data;
     }
@@ -277,7 +305,7 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
         body: { kind, name: file.name, size: file.size, sha256: sum },
       }),
     );
-    pending.current = { id: up.upload_id, sha256: sum };
+    setUnfinished({ id: up.upload_id, sha256: sum, name: file.name, size: file.size });
     let done = up.received.length;
     setProgress({ done, parts: up.parts, checking: false });
     for (let n = 1; n <= up.parts; n++) {
@@ -292,8 +320,18 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
         body: { reason },
       }),
     );
-    pending.current = null;
+    setUnfinished(null);
     return out;
+  };
+
+  const abandon = async () => {
+    if (!unfinished) return;
+    const res = await adminApi.DELETE("/admin/v1/platform/apps/{platform}/uploads/{upload_id}", {
+      params: { path: { platform, upload_id: unfinished.id } },
+    });
+    // Gone already (completed, expired) is as good as dropped.
+    if (!res.response.ok && res.response.status !== 404) return setError(String(res.response.status));
+    setUnfinished(null);
   };
 
   return (
@@ -335,6 +373,14 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
         {hashing && <span className="text-xs text-fg-3">{t("admin.apps.hashing")}</span>}
         {error && <span className="text-xs text-danger-strong">{error}</span>}
       </span>
+      {unfinished && !chosen && (
+        <span className="flex flex-wrap items-center gap-2 text-xs text-fg-3" data-testid={`app-unfinished-${platform}-${kind}`}>
+          {t("admin.apps.unfinished", { name: unfinished.name, size: sizeText(unfinished.size) })}
+          <Button size="sm" variant="ghost" onClick={() => void abandon()} data-testid={`app-abandon-${platform}-${kind}`}>
+            {t("admin.apps.abandon")}
+          </Button>
+        </span>
+      )}
       {chosen && (
         <DangerAction
           open
@@ -372,7 +418,7 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
               </span>
             </div>
           )}
-          {!progress && pending.current?.sha256 === chosen.sha256 && <p className="text-xs text-fg-3">{t("admin.apps.resume")}</p>}
+          {!progress && unfinished?.sha256 === chosen.sha256 && <p className="text-xs text-fg-3">{t("admin.apps.resume")}</p>}
         </DangerAction>
       )}
     </div>

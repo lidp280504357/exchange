@@ -1578,6 +1578,9 @@ type AppFiles interface {
 	// Stored lists the files under /downloads/ with when they were last
 	// written.
 	Stored() ([]StoredPath, error)
+	// UploadDirs lists the uploads' directories (their upload IDs as Path)
+	// with when they were last written.
+	UploadDirs() ([]StoredPath, error)
 	// Free is the room left on the downloads' disk, in bytes.
 	Free() (uint64, error)
 }
@@ -1598,10 +1601,10 @@ type AppUploads interface {
 	// Received adds part n to the parts an upload has and returns it; nil
 	// when unknown.
 	Received(ctx context.Context, id string, n int) (*domain.AppUpload, error)
-	// Claim holds an upload for its completion until until; false while
-	// another holds it.
+	// Claim holds an upload for a completion, a part being written or a
+	// drop until until; false while another holds it.
 	Claim(ctx context.Context, id string, now, until time.Time) (bool, error)
-	// Release lets another completion take an upload.
+	// Release lets another part, completion or drop take an upload.
 	Release(ctx context.Context, id string) error
 	// Busy reports whether a completion holds an upload at now.
 	Busy(ctx context.Context, id string, now time.Time) (bool, error)

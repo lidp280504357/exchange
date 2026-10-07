@@ -94,7 +94,7 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 
 - 每次改动（设置、记入文件、删除文件）版本加 1，`config_history` 记一行 `PLATFORM_APP`（键为平台，前后两份，文件按 ID）。
 - 地址：文件的 `url` 为 `https://<平台资料的域名>/downloads/<stored_as>`，域名为空时用上传时的站点；iOS 的 `install_url` 为 `itms-services://?action=download-manifest&url=<清单地址>`（清单里写死上传时的地址，改域名后要重新上传 .ipa）。
-- 公开接口（经网关）：`GET /v1/platform/apps` → `{android, ios}`，未启用、关闭、链接为空或安装包不在的平台为 `null`；缓存 60 秒，`ETag` 为 `"<Android 版本>-<iOS 版本>"`（强标签，`If-None-Match` 带 `W/` 也认），没变时 304。
+- 公开接口（经网关）：`GET /v1/platform/apps` → `{android, ios}`，未启用、关闭、链接为空或安装包不在的平台为 `null`；缓存 60 秒，`ETag` 为 `"<Android 版本>-<iOS 版本>-<平台资料版本>"`（文件地址随资料里的域名变；强标签，`If-None-Match` 带 `W/` 也认），没变时 304。
 - 内部接口（后台调用，网关不转发 `/internal`）：
   - `GET /internal/platform/apps` → `{apps: [Android, iOS]}`，即后台的 `PlatformAppAdmin`（另带每个文件的 `stored_as`、`manifest`，供 admin-service 删除文件）。
   - `PUT /internal/platform/apps/{platform}`：`{mode, link_url, notes, enabled, expected_version, actor, reason}`；版本过期 409 `INSTRUMENT_PLATFORM_CHANGED`，`FILE` 没有安装包时 400。

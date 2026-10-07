@@ -5,7 +5,7 @@
 // .mobileconfig (a configuration profile), and prints each one's path,
 // size and SHA-256 as JSON. Nothing in them runs.
 //
-//	go run ./scripts/e2e/appfixture -out DIR [-version 1.0.0]
+//	go run ./scripts/e2e/appfixture -out DIR [-version 1.0.0] [-big MiB]
 package main
 
 import (
@@ -23,6 +23,7 @@ import (
 func main() {
 	out := flag.String("out", "", "the directory to write the files to")
 	version := flag.String("version", "1.0.0", "the apps' version")
+	big := flag.Int("big", 0, "also write e2e-big.apk of about this many MiB (an upload in several parts)")
 	flag.Parse()
 	if *out == "" {
 		fmt.Fprintln(os.Stderr, "usage: appfixture -out DIR [-version V]")
@@ -33,9 +34,15 @@ func main() {
 		"ipa":          apppkgtest.IPA("vip.astras.e2e", *version, "1", "15.0"),
 		"mobileconfig": apppkgtest.Mobileconfig(),
 	}
+	if *big > 0 {
+		files["big"] = apppkgtest.APKPadded("vip.astras.e2e", *version, 2, 24, *big<<20)
+	}
 	result := map[string]any{}
 	for kind, data := range files {
 		path := filepath.Join(*out, "e2e."+kind)
+		if kind == "big" {
+			path = filepath.Join(*out, "e2e-big.apk")
+		}
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

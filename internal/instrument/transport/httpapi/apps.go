@@ -127,40 +127,43 @@ func platformAppJSONOf(a domain.PlatformApp, siteDomain string) PlatformAppJSON 
 	return out
 }
 
-// appsETag is the two platforms' versions, Android's then iOS's: every
-// change raises one of them (review FM ②: a sum could come back to a value
-// it had). A strong tag; notModified takes it weakened too.
-func appsETag(list []domain.PlatformApp) string {
+// appsETag is the two platforms' versions, Android's then iOS's, and the
+// profile's, whose domain the files' addresses use: every change raises
+// one of them (review FM ②: a sum could come back to a value it had; FX:
+// a new domain moves the addresses). A strong tag; notModified takes it
+// weakened too.
+func appsETag(list []domain.PlatformApp, profileVersion int64) string {
 	v := map[string]int64{}
 	for _, a := range list {
 		v[a.Platform] = a.Version
 	}
-	return fmt.Sprintf(`"%d-%d"`, v[domain.AppAndroid], v[domain.AppIOS])
+	return fmt.Sprintf(`"%d-%d-%d"`, v[domain.AppAndroid], v[domain.AppIOS], profileVersion)
 }
 
-// apps returns the platforms with the profile's domain, which their files'
+// apps returns the platforms with the profile, whose domain their files'
 // addresses use.
-func (h *Handler) apps(r *http.Request) ([]domain.PlatformApp, string, error) {
+func (h *Handler) apps(r *http.Request) ([]domain.PlatformApp, domain.PlatformProfile, error) {
 	list, err := h.Apps.List(r.Context())
 	if err != nil {
-		return nil, "", err
+		return nil, domain.PlatformProfile{}, err
 	}
 	p, err := h.Platform.Profile(r.Context())
 	if err != nil {
-		return nil, "", err
+		return nil, domain.PlatformProfile{}, err
 	}
-	return list, p.Domain, nil
+	return list, p, nil
 }
 
 // publicApps serves the apps to the sites: cacheable for a minute, 304 for
 // the ETag they hold.
 func (h *Handler) publicApps(w http.ResponseWriter, r *http.Request) {
-	list, siteDomain, err := h.apps(r)
+	list, prof, err := h.apps(r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	tag := appsETag(list)
+	siteDomain := prof.Domain
+	tag := appsETag(list, prof.Version)
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.Header().Set("ETag", tag)
 	if notModified(r, tag) {
@@ -175,14 +178,14 @@ func (h *Handler) publicApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) internalApps(w http.ResponseWriter, r *http.Request) {
-	list, siteDomain, err := h.apps(r)
+	list, prof, err := h.apps(r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	out := make([]PlatformAppJSON, 0, len(list))
 	for _, a := range list {
-		out = append(out, platformAppJSONOf(a, siteDomain))
+		out = append(out, platformAppJSONOf(a, prof.Domain))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"apps": out})
 }

@@ -2098,17 +2098,17 @@ else
   expect 200 - "the sites read the apps"
   check '.ios.mode == "LINK" and .ios.url == "https://apps.apple.com/app/id6400000000"' "iOS's link"
   APPS_TAG=$(grep -i '^etag:' "$WORK/apps.headers" | cut -d' ' -f2- | tr -d '\r')
-  [[ $APPS_TAG =~ ^(W/)?\"[0-9]+-[0-9]+\"$ ]] || { echo "FAIL the apps' ETag: $APPS_TAG" >&2; exit 1; }
+  [[ $APPS_TAG =~ ^(W/)?\"[0-9]+-[0-9]+-[0-9]+\"$ ]] || { echo "FAIL the apps' ETag: $APPS_TAG" >&2; exit 1; }
   call GET /v1/platform/apps "" -H "If-None-Match: $APPS_TAG"
   [[ $STATUS == 304 ]] || { echo "FAIL the apps with their ETag: $STATUS" >&2; exit 1; }
-  echo "ok   the ETag is the two versions ($APPS_TAG); 304 with it"
+  echo "ok   the ETag is the two platforms' and the profile's versions ($APPS_TAG); 304 with it"
 
   ANDROID_FILES=$(app_of ANDROID "$APPS_BEFORE" | jq '[.files[] | select(.name | startswith("e2e") | not)] | length')
   IOS_FILES=$(app_of IOS "$APPS_BEFORE" | jq '[.files[] | select(.name | startswith("e2e") | not)] | length')
   if [[ $ANDROID_FILES != 0 || $IOS_FILES != 0 ]]; then
     echo "skip the uploads: an operator's files are kept (Android $ANDROID_FILES, iOS $IOS_FILES)"
   else
-    FIX=$(cd "$(dirname "$0")/../.." && go run ./scripts/e2e/appfixture -out "$WORK" -version "1.0.$RUN")
+    FIX=$(cd "$(dirname "$0")/../.." && go run ./scripts/e2e/appfixture -out "$WORK" -version "1.0.$RUN" -big 21)
     fix() { jq -r --arg k "$1" --arg f "$2" '.[$k][$f]' <<<"$FIX"; }
     # start_upload PLATFORM KIND NAME SIZE SHA256
     start_upload() {
@@ -2176,6 +2176,42 @@ else
     curl -s -o /dev/null -w '%{http_code}' "${APK_URL%/*}/" >"$WORK/dl.status"
     [[ $(cat "$WORK/dl.status") == 404 ]] || { echo "FAIL the downloads' directory: $(cat "$WORK/dl.status")" >&2; exit 1; }
     echo "ok   no listing of the downloads"
+    # An upload in three parts of 10 MiB (review FX, A74 ⑥): sent out of
+    # order, resumed from the parts the server has, joined in order, served
+    # whole by nginx; then deleted (the first .apk is kept, not current).
+    start_upload ANDROID APP e2e-big.apk "$(fix big size)" "$(fix big sha256)"
+    expect 201 - "an upload of $(($(fix big size) >> 20)) MiB starts"
+    check '.parts == 3' "in three parts"
+    BIG_UP=$(jq -r .upload_id <<<"$BODY")
+    send_slice() { # send_slice N: part N of e2e-big.apk
+      dd if="$(fix big path)" of="$WORK/part" bs=1048576 skip=$((($1 - 1) * 10)) count=10 2>/dev/null
+      acall PUT "/admin/v1/platform/apps/ANDROID/uploads/$BIG_UP/parts/$1" "" -b "$WORK/ADMIN.jar" "${CSRF[@]}" \
+        -H 'Content-Type: application/octet-stream' --data-binary "@$WORK/part"
+    }
+    send_slice 3
+    expect 200 - "the last part first"
+    send_slice 1
+    expect 200 - "then the first"
+    as ADMIN GET "/admin/v1/platform/apps/ANDROID/uploads/$BIG_UP" ""
+    check '.received == [1,3]' "a resume reads the parts the server has"
+    as ADMIN POST "/admin/v1/platform/apps/ANDROID/uploads/$BIG_UP/complete" '{"reason":"e2e: too soon"}'
+    expect 409 PLATFORM_APP_UPLOAD_INCOMPLETE "completed with part 2 missing"
+    check '.details.missing == [2]' "naming it"
+    send_slice 2
+    expect 200 - "the middle part"
+    as ADMIN POST "/admin/v1/platform/apps/ANDROID/uploads/$BIG_UP/complete" '{"reason":"e2e: three parts"}'
+    expect 200 - "completed"
+    check ".current.size == $(fix big size) and .current.sha256 == \"$(fix big sha256)\" and .current.build == \"2\" and (.files | length) == 2" \
+      "joined in order and checked; the first .apk kept"
+    BIG_URL=$(jq -r .current.url <<<"$BODY")
+    BIG_ID=$(jq -r .current.file_id <<<"$BODY")
+    curl -s -o "$WORK/dl-big.apk" -w '%{http_code}' "$BIG_URL" >"$WORK/dl.status"
+    [[ $(cat "$WORK/dl.status") == 200 && $(shasum -a 256 "$WORK/dl-big.apk" | cut -d' ' -f1) == "$(fix big sha256)" ]] ||
+      { echo "FAIL downloading $BIG_URL: $(cat "$WORK/dl.status")" >&2; exit 1; }
+    echo "ok   nginx serves the $(($(fix big size) >> 20)) MiB .apk whole"
+    as ADMIN DELETE "/admin/v1/platform/apps/ANDROID/files/$BIG_ID" '{"reason":"e2e: the big one done"}'
+    expect 200 - "deleted"
+    check '.current == null and (.files | length) == 1' "the first .apk kept, nothing current"
 
     # An .ipa: installed over the air with the manifest made for it; a
     # configuration profile beside it.

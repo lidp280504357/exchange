@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,12 +48,17 @@ func TestPlatformApps(t *testing.T) {
 		r.ServeHTTP(w, req)
 		return w
 	}
+	prof, err := plat.Profile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag := func(android, ios, profile int64) string { return fmt.Sprintf(`"%d-%d-%d"`, android, ios, profile) }
 	w := get("/v1/platform/apps", "")
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"android":null,"ios":null}` || w.Header().Get("ETag") != `"1-1"` ||
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"android":null,"ios":null}` || w.Header().Get("ETag") != tag(1, 1, prof.Version) ||
 		w.Header().Get("Cache-Control") != "public, max-age=60" {
 		t.Fatalf("nothing shown %d %s %s", w.Code, w.Body, w.Header().Get("ETag"))
 	}
-	if w := get("/v1/platform/apps", `W/"1-1"`); w.Code != http.StatusNotModified {
+	if w := get("/v1/platform/apps", "W/"+tag(1, 1, prof.Version)); w.Code != http.StatusNotModified {
 		t.Fatalf("with its ETag weakened: %d", w.Code)
 	}
 
@@ -74,12 +80,12 @@ func TestPlatformApps(t *testing.T) {
 		apperr.CodeInvalidArgument) {
 		t.Fatalf("FILE without an app: %v", err)
 	}
-	w = get("/v1/platform/apps", `"1-1"`)
+	w = get("/v1/platform/apps", tag(1, 1, prof.Version))
 	var public struct {
 		Android *httpapi.AppDownloadJSON `json:"android"`
 		IOS     *httpapi.AppDownloadJSON `json:"ios"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &public); err != nil || w.Code != http.StatusOK || w.Header().Get("ETag") != `"1-2"` ||
+	if err := json.Unmarshal(w.Body.Bytes(), &public); err != nil || w.Code != http.StatusOK || w.Header().Get("ETag") != tag(1, 2, prof.Version) ||
 		public.Android != nil || public.IOS == nil || public.IOS.Mode != "LINK" || public.IOS.URL != link.LinkURL ||
 		*public.IOS.IOSInstall != "APP_STORE" || public.IOS.Size != nil || public.IOS.Notes[domain.LocaleZH] != "首个版本" {
 		t.Fatalf("a link shown %d %s", w.Code, w.Body)
@@ -127,8 +133,17 @@ func TestPlatformApps(t *testing.T) {
 	if _, _, err := apps.DeleteFile(ctx, domain.AppAndroid, id, "admin:ops@example.com", "again"); !apperr.Is(err, apperr.CodeNotFound) {
 		t.Fatalf("deleted twice: %v", err)
 	}
-	if w := get("/v1/platform/apps", `"1-2"`); w.Code != http.StatusOK || w.Header().Get("ETag") != `"4-2"` {
+	if w := get("/v1/platform/apps", tag(1, 2, prof.Version)); w.Code != http.StatusOK || w.Header().Get("ETag") != tag(4, 2, prof.Version) {
 		t.Fatalf("after the changes: %d %s", w.Code, w.Header().Get("ETag"))
+	}
+	// A new domain moves the files' addresses: the ETag moves with it.
+	next := prof
+	next.Domain = "example.com"
+	if _, err := plat.UpdateProfile(ctx, next, prof.Version, "admin:ops@example.com", "a domain"); err != nil {
+		t.Fatal(err)
+	}
+	if w := get("/v1/platform/apps", tag(4, 2, prof.Version)); w.Code != http.StatusOK || w.Header().Get("ETag") != tag(4, 2, prof.Version+1) {
+		t.Fatalf("after the profile changed: %d %s", w.Code, w.Header().Get("ETag"))
 	}
 	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'PLATFORM_APP'`); n != 4 {
 		t.Fatalf("%d history rows", n)
