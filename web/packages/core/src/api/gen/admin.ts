@@ -1579,14 +1579,17 @@ export interface paths {
          *     (the flags product.spot, product.usdt_m and product.coin_m, seeded
          *     open and never deleted; one not stored counts as open), when and
          *     by whom it was last switched, and what closing it would touch now:
-         *     the open orders (spot: open orders on spot and margin accounts;
-         *     contracts: open and conditional orders) and the open positions
-         *     (contracts: positions; spot: the margin accounts that owe
-         *     anything), HOUSE's and the market-making accounts'
-         *     (MARKET_MAKER_USER_IDS) left out (the services' GET
-         *     /internal/products/{line}). A count that cannot be read is null and
-         *     its line named in `partial`. Needs instruments.read. The flags
-         *     page leaves product.* to this endpoint (400 there).
+         *     the open orders (spot: the active orders on spot and margin
+         *     accounts, liquidation orders left out and margin repayments, which a
+         *     closed spot line keeps, counted; contracts: the open orders and the
+         *     take-profits and stop-losses) and the open positions (contracts:
+         *     positions; spot: the margin accounts that owe anything), HOUSE's and
+         *     the market-making accounts' (MARKET_MAKER_USER_IDS) left out, as the
+         *     services count them (GET /internal/products/{line},
+         *     api/internal/products.yaml; each read waits 5 seconds at most). A
+         *     count that cannot be read is null and its line named in `partial`.
+         *     Needs instruments.read. The flags page leaves product.* to this
+         *     endpoint (400 there).
          */
         get: operations["getProducts"];
         /**
@@ -1607,11 +1610,15 @@ export interface paths {
          *     simulated market's spot bots wait while spot is closed. Positions,
          *     funding, liquidations (margin ones on spot too) and the
          *     reconciliation go on. Opening it again restores all of it; the
-         *     canceled orders stay canceled. A cancel that fails, or a service
-         *     without the endpoint yet, leaves the line closed and is said in the
-         *     audit (cancel: failed or unavailable). Switching to the state it is
-         *     in changes nothing, but closing a closed line again cancels its
-         *     orders still open (audited as admin.products.orders_canceled).
+         *     canceled orders stay canceled. The cancel waits 15 seconds at most;
+         *     one that fails part way or does not answer in time, or a service
+         *     without the endpoint yet, leaves the line closed, is said in the
+         *     answer's `cancel` (FAILED or UNAVAILABLE) and in the audit (cancel:
+         *     failed or unavailable). Switching to the state it is in changes
+         *     nothing, but closing a closed line again cancels its orders still
+         *     open (audited as admin.products.orders_canceled): run again, a
+         *     cancel takes what is left (spot's margin repayments and the
+         *     liquidations stay whatever is run).
          *     Audited as
          *     admin.products.toggled (product, from, to, canceled orders,
          *     reason). Needs instruments.trading (ADMIN).
@@ -5069,9 +5076,16 @@ export interface components {
              * @description When it was closed, while it is; null while open.
              */
             closed_at?: string | null;
-            /** @description The resting orders closing it would cancel now (the read model; the contracts' conditional orders are canceled too but not counted); null when it could not be read. */
+            /**
+             * @description The open orders as the line's service counts them: spot, the
+             *     active orders on spot and margin accounts (liquidation orders
+             *     left out; margin repayments, which a closed spot line keeps and
+             *     its cancel leaves, counted); the contracts, the open orders and
+             *     the take-profits and stop-losses. An order asked to cancel counts
+             *     until the engine confirms it. Null when it could not be read.
+             */
             open_orders: number | null;
-            /** @description The contracts' open positions that would stay (spot holds none, 0); null when it could not be read. */
+            /** @description What stays open when it closes - the contracts' open positions; spot, the margin accounts that owe anything (counted at most every 15 seconds). Null when it could not be read. */
             open_positions: number | null;
         };
         Products: {
@@ -5079,6 +5093,25 @@ export interface components {
             products: components["schemas"]["ProductState"][];
             /** @description The lines whose counts could not be read. */
             partial: components["schemas"]["ProductName"][];
+        };
+        /**
+         * @description How canceling a closed line's open orders through its service went
+         *     (A85). The line stays closed whatever it says; closing it again
+         *     cancels what is left.
+         */
+        ProductCancel: {
+            /**
+             * @description DONE: the service canceled what the closed line no longer takes.
+             *     UNAVAILABLE: the service has no endpoint for it yet. FAILED: it
+             *     could not be reached, did not answer within 15 seconds, or
+             *     failed part way.
+             * @enum {string}
+             */
+            status: "DONE" | "UNAVAILABLE" | "FAILED";
+            /** @description The orders the service said it canceled (with FAILED, those before it failed, when it said so). */
+            canceled: number;
+            /** @description Why it failed; null unless FAILED. */
+            error: string | null;
         };
         LaunchChecklist: {
             /** @description Every item is OK. */
@@ -9164,8 +9197,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Products"] & {
-                        /** @description The open orders the change canceled (0 when it opened a line or changed nothing). */
+                        /** @description The open orders the change canceled (0 when it opened a line or changed nothing; cancel.canceled when it canceled). */
                         canceled_orders: number;
+                        /** @description How canceling the closed line's orders went; null when the change asked no cancel (it opened a line or changed nothing). */
+                        cancel: components["schemas"]["ProductCancel"] | null;
                     };
                 };
             };

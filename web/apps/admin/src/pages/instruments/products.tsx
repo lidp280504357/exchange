@@ -3,7 +3,7 @@ import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchan
 import { Badge, Button, ErrorState, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { DangerAction } from "../../kit/actions";
+import { DangerAction, type Notice } from "../../kit/actions";
 import { TimeText } from "../../kit/format";
 import { Card } from "../../kit/Page";
 
@@ -15,6 +15,7 @@ import { Card } from "../../kit/Page";
 // line's orders still open can be canceled again.
 
 type ProductState = AdminSchemas["ProductState"];
+type ProductCancel = AdminSchemas["ProductCancel"];
 
 export const productsKey = ["admin", "products"];
 
@@ -89,7 +90,14 @@ function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
   const left = !p.enabled && (p.open_orders ?? 0) > 0;
   const put = async (enabled: boolean, reason: string) =>
     adminData(await adminApi.PUT("/admin/v1/products", { body: { product: p.product, enabled, reason } }));
-  const canceled = (res: unknown) => (res as { canceled_orders?: number }).canceled_orders ?? 0;
+  // What a close (or a cancel of what is left) did: a cancel that did not
+  // finish is told without the success tone, with how to retry (A85).
+  const said = (res: unknown, done: string): string | Notice => {
+    const c = (res as { cancel?: ProductCancel | null }).cancel;
+    if (!c || c.status === "DONE") return t(done, { n: c?.canceled ?? 0 });
+    if (c.status === "UNAVAILABLE") return { info: t("admin.products.cancelUnavailable") };
+    return { info: t("admin.products.cancelFailed", { n: c.canceled, why: c.error ?? "—" }) };
+  };
   return (
     <span className="flex flex-wrap gap-2">
       <DangerAction
@@ -119,7 +127,7 @@ function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
         target={<span className="font-medium">{name}</span>}
         confirmWord={p.product}
         run={(reason) => put(!p.enabled, reason)}
-        success={(res) => (closing ? t("admin.products.closedDone", { n: canceled(res) }) : t("admin.products.openedDone"))}
+        success={(res) => (closing ? said(res, "admin.products.closedDone") : t("admin.products.openedDone"))}
         invalidate={[productsKey]}
       />
       {left && (
@@ -134,7 +142,7 @@ function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
           target={<span className="font-medium">{name}</span>}
           confirmWord={p.product}
           run={(reason) => put(false, reason)}
-          success={(res) => t("admin.products.leftDone", { n: canceled(res) })}
+          success={(res) => said(res, "admin.products.leftDone")}
           invalidate={[productsKey]}
         />
       )}

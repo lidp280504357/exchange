@@ -65,10 +65,11 @@ func (s *productServices) CancelOpen(_ context.Context, product, actor, reason s
 
 // The product lines from the console (design 2026-10-07, product switches,
 // K3): each line's switch and what closing it touches, as its service
-// counts it; closing one cancels its orders through its service, opening
-// cancels nothing, the state it is in changes nothing - but a closed line's
-// orders still open are canceled on closing it again; the flags page leaves
-// the lines to their card; the checklist names what is open.
+// counts it; closing one cancels its orders through its service, the
+// answer saying how that went (A85), opening cancels nothing, the state it
+// is in changes nothing - but a closed line's orders still open are
+// canceled on closing it again; the flags page leaves the lines to their
+// card; the checklist names what is open.
 func TestProductLines(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -117,7 +118,7 @@ func TestProductLines(t *testing.T) {
 
 	// Closing: switched, its orders canceled through its service, audited.
 	ps, err = h.svc.SetProduct(ctx, boss, " COIN_M ", false, "close coin-margined for the drill")
-	if err != nil || ps.CanceledOrders != 4 || ps.Lines[2].Enabled || ps.Lines[2].ClosedAt == nil || !ps.Lines[2].ClosedAt.Equal(h.now) ||
+	if err != nil || ps.Cancel == nil || *ps.Cancel != (ProductCancel{Status: CancelDone, Canceled: 4}) || ps.Lines[2].Enabled || ps.Lines[2].ClosedAt == nil || !ps.Lines[2].ClosedAt.Equal(h.now) ||
 		ps.Lines[2].SwitchedBy != "boss@example.com" || ps.Lines[2].Version != 1 {
 		t.Fatalf("closed %+v %v", ps, err)
 	}
@@ -130,14 +131,15 @@ func TestProductLines(t *testing.T) {
 	}
 	// Closed already: nothing changes while no order is open...
 	svcs.lines["coin_m"] = ports.ProductLine{OpenPositions: 5}
-	if ps, err := h.svc.SetProduct(ctx, boss, "coin_m", false, "close it again"); err != nil || ps.CanceledOrders != 0 || len(svcs.asked) != 1 ||
+	if ps, err := h.svc.SetProduct(ctx, boss, "coin_m", false, "close it again"); err != nil || ps.Cancel != nil || len(svcs.asked) != 1 ||
 		pf.flags["product.coin_m"].Version != 1 {
 		t.Fatalf("closed again %+v %v %v", ps, err, svcs.asked)
 	}
 	// ...but orders still open (a cancel that failed) are canceled again.
 	svcs.lines["coin_m"] = ports.ProductLine{OpenOrders: 2, OpenPositions: 5}
 	svcs.cancel = 2
-	if ps, err := h.svc.SetProduct(ctx, boss, "coin_m", false, "cancel what is left"); err != nil || ps.CanceledOrders != 2 || len(svcs.asked) != 2 ||
+	if ps, err := h.svc.SetProduct(ctx, boss, "coin_m", false, "cancel what is left"); err != nil || ps.Cancel == nil ||
+		*ps.Cancel != (ProductCancel{Status: CancelDone, Canceled: 2}) || len(svcs.asked) != 2 ||
 		pf.flags["product.coin_m"].Version != 1 || len(h.auditsOf("admin.products.orders_canceled")) != 1 {
 		t.Fatalf("its orders left %+v %v %v", ps, err, svcs.asked)
 	}
@@ -145,11 +147,12 @@ func TestProductLines(t *testing.T) {
 	// Opening cancels nothing; the switch stands though a cancel fails,
 	// the audit saying why (a service without the endpoint yet, or down).
 	if ps, err := h.svc.SetProduct(ctx, boss, "coin_m", true, "open coin-margined again"); err != nil || !ps.Lines[2].Enabled ||
-		ps.Lines[2].ClosedAt != nil || ps.CanceledOrders != 0 || len(svcs.asked) != 2 {
+		ps.Lines[2].ClosedAt != nil || ps.Cancel != nil || len(svcs.asked) != 2 {
 		t.Fatalf("opened %+v %v", ps, err)
 	}
 	svcs.err, svcs.cancel = ports.ErrProductLineMissing, 0
-	if ps, err := h.svc.SetProduct(ctx, boss, "spot", false, "close spot"); err != nil || ps.Lines[0].Enabled || ps.CanceledOrders != 0 {
+	if ps, err := h.svc.SetProduct(ctx, boss, "spot", false, "close spot"); err != nil || ps.Lines[0].Enabled || ps.Cancel == nil ||
+		*ps.Cancel != (ProductCancel{Status: CancelUnavailable}) {
 		t.Fatalf("closed without the service's cancel %+v %v", ps, err)
 	}
 	if got := h.auditsOf("admin.products.toggled"); len(got) != 3 || !strings.Contains(got[2], `"cancel":"unavailable"`) {
@@ -159,12 +162,26 @@ func TestProductLines(t *testing.T) {
 	if _, err := h.svc.SetProduct(ctx, boss, "spot", true, "open spot"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.SetProduct(ctx, boss, "spot", false, "close spot again"); err != nil {
-		t.Fatal(err)
+	ps, err = h.svc.SetProduct(ctx, boss, "spot", false, "close spot again")
+	if err != nil || ps.Cancel == nil || ps.Cancel.Status != CancelFailed || ps.Cancel.Canceled != 0 || !strings.Contains(ps.Cancel.Error, "trading down") {
+		t.Fatalf("a failed cancel %+v %v", ps.Cancel, err)
 	}
 	if got := h.auditsOf("admin.products.toggled"); !strings.Contains(got[len(got)-1], `"cancel":"failed"`) || !strings.Contains(got[len(got)-1], "trading down") {
 		t.Fatalf("a failed cancel audited %v", got)
 	}
+	// A cancel failing part way says what it canceled; a closed line whose
+	// count is unknown is asked again all the same.
+	svcs.cancel, svcs.err = 3, apperr.Unavailable(errors.New("a user's lock"))
+	svcs.errs = map[string]error{"spot": errors.New("trading slow")}
+	ps, err = h.svc.SetProduct(ctx, boss, "spot", false, "cancel the rest")
+	if err != nil || ps.Cancel == nil || ps.Cancel.Status != CancelFailed || ps.Cancel.Canceled != 3 || ps.Lines[0].OpenOrders != nil {
+		t.Fatalf("a cancel failing part way %+v %v", ps.Cancel, err)
+	}
+	if got := h.auditsOf("admin.products.orders_canceled"); len(got) != 2 || !strings.Contains(got[1], `"canceled_orders":3`) ||
+		!strings.Contains(got[1], `"cancel":"failed"`) {
+		t.Fatalf("audited %v", got)
+	}
+	svcs.cancel, svcs.err, svcs.errs = 0, nil, nil
 
 	// A line whose service cannot count is null and named partial, the
 	// others as counted.

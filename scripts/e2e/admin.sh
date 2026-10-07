@@ -1029,8 +1029,12 @@ else
     at_exit reopen_coinm
     as ADMIN PUT /admin/v1/products '{"product":"coin_m","enabled":false,"reason":"e2e: the coin-margined contracts closed for a moment"}'
     expect 200 - "ADMIN closes the coin-margined contracts"
+    # The answer says how the cancel went (A85; an admin-service before it
+    # has no cancel).
     check "(.products[] | select(.product == \"coin_m\") | .enabled == false and (.closed_at | type) == \"string\" and .switched_by == \"$EMAIL_ADMIN\")
-      and (.canceled_orders | type) == \"number\"" "closed in the ADMIN's name, with the orders it canceled"
+      and (.canceled_orders | type) == \"number\"
+      and ((has(\"cancel\") | not) or (.cancel.status == \"DONE\" and .cancel.canceled == .canceled_orders and .cancel.error == null))" \
+      "closed in the ADMIN's name, with the orders it canceled"
     coinm_shown() { # coinm_shown true|false: the sites' products say it (cached 30 s)
       call GET "/v1/platform/products?t=$RANDOM" ""
       [[ $STATUS == 200 ]] && jq -e --argjson on "$1" '.coin_m.enabled == $on' <<<"$BODY" >/dev/null
@@ -1044,7 +1048,7 @@ else
     fi
     as ADMIN PUT /admin/v1/products '{"product":"coin_m","enabled":true,"reason":"e2e: open again"}'
     expect 200 - "and opens it again"
-    check '(.products[] | select(.product == "coin_m") | .enabled and .closed_at == null) and .canceled_orders == 0' "open, nothing canceled"
+    check '(.products[] | select(.product == "coin_m") | .enabled and .closed_at == null) and .canceled_orders == 0 and .cancel == null' "open, nothing canceled"
     eventually 140 "the sites see it open again within a minute" coinm_shown true
     toggled_twice() {
       as AUDITOR GET "/admin/v1/audit-logs?target=product:coin_m&limit=10" ""

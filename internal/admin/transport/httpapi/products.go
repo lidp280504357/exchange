@@ -72,6 +72,17 @@ func (h *Handler) setProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := productsJSON(ps)
-	out["canceled_orders"] = ps.CanceledOrders
+	out["canceled_orders"], out["cancel"] = 0, nil
+	if c := ps.Cancel; c != nil {
+		out["canceled_orders"] = c.Canceled
+		out["cancel"] = ProductCancelJSON{Status: c.Status, Canceled: c.Canceled, Error: optional(c.Error)}
+	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// ProductCancelJSON is how canceling a closed line's open orders went (A85).
+type ProductCancelJSON struct {
+	Status   string  `json:"status"`
+	Canceled int     `json:"canceled"`
+	Error    *string `json:"error"`
 }

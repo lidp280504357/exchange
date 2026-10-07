@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/skill/exchange/internal/admin/domain"
@@ -44,12 +45,32 @@ type ProductState struct {
 }
 
 // Products are the product lines, the lines whose counts could not be read
-// (Partial), and the open orders a switch canceled.
+// (Partial), and how the cancel a switch asked for went (nil when it asked
+// none).
 type Products struct {
-	Lines          []ProductState
-	Partial        []string
-	CanceledOrders int
+	Lines   []ProductState
+	Partial []string
+	Cancel  *ProductCancel
 }
+
+// ProductCancel is how canceling a closed line's open orders went (A85):
+// CancelDone; CancelUnavailable, its service having no endpoint for it
+// yet; or CancelFailed, the service unreachable, not answering in time or
+// failing part way (Canceled counts what it said it canceled), with Error.
+// The line stays closed either way, and closing it again cancels what is
+// left.
+type ProductCancel struct {
+	Status   string
+	Canceled int
+	Error    string
+}
+
+// How a cancel went.
+const (
+	CancelDone        = "DONE"
+	CancelUnavailable = "UNAVAILABLE"
+	CancelFailed      = "FAILED"
+)
 
 // Products returns the product lines with what closing each would touch.
 func (s *Service) Products(ctx context.Context, p Principal) (Products, error) {
@@ -60,9 +81,37 @@ func (s *Service) Products(ctx context.Context, p Principal) (Products, error) {
 }
 
 func (s *Service) products(ctx context.Context) (Products, error) {
-	all, err := s.Flags.List(ctx)
+	lines, err := s.productStates(ctx)
 	if err != nil {
 		return Products{}, err
+	}
+	// What closing each touches, as the service that runs it counts it,
+	// read together (each read waits for its service a few seconds at
+	// most: a switch reads them twice within the console's 30 seconds).
+	counts := make([]ports.ProductLine, len(lines))
+	errs := make([]error, len(lines))
+	var wg sync.WaitGroup
+	for i := range lines {
+		wg.Go(func() { counts[i], errs[i] = s.productLine(ctx, lines[i].Product) })
+	}
+	wg.Wait()
+	out := Products{Lines: lines, Partial: []string{}}
+	for i, st := range lines {
+		if errs[i] != nil {
+			s.Log.WarnContext(ctx, "product line: counts unknown", "product", st.Product, "error", errs[i])
+			out.Partial = append(out.Partial, st.Product)
+			continue
+		}
+		out.Lines[i].OpenOrders, out.Lines[i].OpenPositions = &counts[i].OpenOrders, &counts[i].OpenPositions
+	}
+	return out, nil
+}
+
+// productStates are the lines' switches as the flags have them.
+func (s *Service) productStates(ctx context.Context) ([]ProductState, error) {
+	all, err := s.Flags.List(ctx)
+	if err != nil {
+		return nil, err
 	}
 	stored := map[string]ports.Flag{}
 	for _, f := range all {
@@ -70,7 +119,7 @@ func (s *Service) products(ctx context.Context) (Products, error) {
 			stored[f.Key] = f
 		}
 	}
-	out := Products{Lines: make([]ProductState, 0, len(productLines)), Partial: []string{}}
+	lines := make([]ProductState, 0, len(productLines))
 	for _, line := range productLines {
 		st := ProductState{Product: line, Flag: productFlag(line), Enabled: true}
 		if f, ok := stored[st.Flag]; ok {
@@ -79,16 +128,9 @@ func (s *Service) products(ctx context.Context) (Products, error) {
 				st.ClosedAt = f.UpdatedAt
 			}
 		}
-		// What closing it touches, as the service that runs it counts it.
-		if counts, err := s.productLine(ctx, line); err != nil {
-			s.Log.WarnContext(ctx, "product line: counts unknown", "product", line, "error", err)
-			out.Partial = append(out.Partial, line)
-		} else {
-			st.OpenOrders, st.OpenPositions = &counts.OpenOrders, &counts.OpenPositions
-		}
-		out.Lines = append(out.Lines, st)
+		lines = append(lines, st)
 	}
-	return out, nil
+	return lines, nil
 }
 
 // productLine reads a line's counts from its service.
@@ -102,10 +144,11 @@ func (s *Service) productLine(ctx context.Context, line string) (ports.ProductLi
 // SetProduct opens or closes a product line: one administrator with
 // instruments.trading, a reason, audited as admin.products.toggled.
 // Closing it cancels its open orders through its service (which audits
-// each cancel); opening it cancels nothing. Switching a line to the state
-// it is in changes nothing - but closing a closed line again cancels its
-// orders still open (after a cancel that failed, or a service that had no
-// endpoint for it yet), audited as admin.products.orders_canceled.
+// each cancel), the answer saying how that went; opening it cancels
+// nothing. Switching a line to the state it is in changes nothing - but
+// closing a closed line again cancels its orders still open (after a
+// cancel that failed, or a service that had no endpoint for it yet),
+// audited as admin.products.orders_canceled.
 func (s *Service) SetProduct(ctx context.Context, p Principal, product string, enabled bool, reason string) (Products, error) {
 	if err := p.require(domain.PermInstrumentsTrading); err != nil {
 		return Products{}, err
@@ -118,57 +161,64 @@ func (s *Service) SetProduct(ctx context.Context, p Principal, product string, e
 	if !slices.Contains(productLines, product) {
 		return Products{}, apperr.Invalid("product must be spot, usdt_m or coin_m")
 	}
-	cur, err := s.products(ctx)
+	lines, err := s.productStates(ctx)
 	if err != nil {
 		return Products{}, err
 	}
-	was := cur.Lines[slices.IndexFunc(cur.Lines, func(l ProductState) bool { return l.Product == product })]
+	was := lines[slices.IndexFunc(lines, func(l ProductState) bool { return l.Product == product })]
 	if was.Enabled == enabled {
-		if enabled || was.OpenOrders == nil || *was.OpenOrders == 0 {
-			return cur, nil
+		if !enabled {
+			// Closed already: its orders still open are canceled (none
+			// counted, nothing is asked; a count unknown asks anyway).
+			if counts, err := s.productLine(ctx, product); err != nil || counts.OpenOrders > 0 {
+				c := s.cancelProduct(ctx, p, product, reason)
+				s.auditProduct(ctx, p, "admin.products.orders_canceled", product, false, false, c, reason)
+				return s.productsAfter(ctx, c)
+			}
 		}
-		// Closed already, orders still open: cancel them.
-		n, cancelErr := s.cancelProduct(ctx, p, product, reason)
-		s.auditProduct(ctx, p, "admin.products.orders_canceled", product, false, false, n, cancelErr, reason)
-		return s.productsAfter(ctx, n)
+		return s.products(ctx)
 	}
 	if _, err := s.Flags.Switch(ctx, productFlag(product), enabled, p.Admin.Email, reason); err != nil {
 		return Products{}, err
 	}
-	n := 0
-	var cancelErr error
+	var c *ProductCancel
 	if !enabled {
-		n, cancelErr = s.cancelProduct(ctx, p, product, reason)
+		c = s.cancelProduct(ctx, p, product, reason)
 	}
-	s.auditProduct(ctx, p, "admin.products.toggled", product, was.Enabled, enabled, n, cancelErr, reason)
-	return s.productsAfter(ctx, n)
+	s.auditProduct(ctx, p, "admin.products.toggled", product, was.Enabled, enabled, c, reason)
+	return s.productsAfter(ctx, c)
 }
 
-// cancelProduct asks the line's service to cancel its open orders; its
-// failure is logged and audited, the switch standing.
-func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reason string) (int, error) {
+// cancelProduct asks the line's service to cancel its open orders and
+// says how it went; a failure is logged (and audited by the caller), the
+// switch standing.
+func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reason string) *ProductCancel {
 	if s.ProductLines == nil {
-		return 0, ports.ErrProductLineMissing
+		return &ProductCancel{Status: CancelUnavailable}
 	}
 	n, err := s.ProductLines.CancelOpen(ctx, product, p.Admin.Email, reason)
-	if err != nil {
-		s.Log.WarnContext(ctx, "product line: its open orders not canceled", "product", product, "error", err)
+	switch {
+	case err == nil:
+		return &ProductCancel{Status: CancelDone, Canceled: n}
+	case errors.Is(err, ports.ErrProductLineMissing):
+		return &ProductCancel{Status: CancelUnavailable, Canceled: n}
 	}
-	return n, err
+	s.Log.WarnContext(ctx, "product line: its open orders not all canceled", "product", product, "canceled", n, "error", err)
+	return &ProductCancel{Status: CancelFailed, Canceled: n, Error: err.Error()}
 }
 
 // auditProduct audits a switch (or a cancel of a closed line's orders):
-// the line, from and to, the orders canceled and why none could be.
-func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, canceled int, cancelErr error,
-	reason string,
-) {
-	d := map[string]any{"product": product, "flag": productFlag(product), "from": from, "to": to, "canceled_orders": canceled}
-	switch {
-	case errors.Is(cancelErr, ports.ErrProductLineMissing):
-		d["cancel"] = "unavailable"
-	case cancelErr != nil:
-		d["cancel"] = "failed"
-		d["cancel_error"] = cancelErr.Error()
+// the line, from and to, the orders canceled and why not all could be.
+func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, c *ProductCancel, reason string) {
+	d := map[string]any{"product": product, "flag": productFlag(product), "from": from, "to": to, "canceled_orders": 0}
+	if c != nil {
+		d["canceled_orders"] = c.Canceled
+		switch c.Status {
+		case CancelUnavailable:
+			d["cancel"] = "unavailable"
+		case CancelFailed:
+			d["cancel"], d["cancel_error"] = "failed", c.Error
+		}
 	}
 	details, _ := json.Marshal(d)
 	if err := s.audit(ctx, p, "product:"+product, action, reason, string(details)); err != nil {
@@ -176,12 +226,12 @@ func (s *Service) auditProduct(ctx context.Context, p Principal, action, product
 	}
 }
 
-// productsAfter reads the lines after a change, with what it canceled.
-func (s *Service) productsAfter(ctx context.Context, canceled int) (Products, error) {
+// productsAfter reads the lines after a change, with how its cancel went.
+func (s *Service) productsAfter(ctx context.Context, c *ProductCancel) (Products, error) {
 	out, err := s.products(ctx)
 	if err != nil {
 		return Products{}, err
 	}
-	out.CanceledOrders = canceled
+	out.Cancel = c
 	return out, nil
 }
