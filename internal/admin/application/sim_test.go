@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/admin/ports"
@@ -54,6 +55,35 @@ func (f *fakeSim) Events(_ context.Context, all bool, limit int) (json.RawMessag
 func (f *fakeSim) CreateEvent(_ context.Context, event map[string]any, actor, approvedBy string) (json.RawMessage, error) {
 	if size, _ := event["size"].(float64); size > 0.3 && approvedBy == "" {
 		return nil, apperr.New(apperr.KindForbidden, "SIM_EVENT_NEEDS_APPROVAL", "beyond one operator's share").WithDetail("move", size)
+	}
+	if event["type"] == "OVERLAY" {
+		// An event a pair (J0 contract §3.1), the share by pair; an
+		// approved request's event comes back from its JSON.
+		var symbols []string
+		switch v := event["symbols"].(type) {
+		case []string:
+			symbols = v
+		case []any:
+			for _, s := range v {
+				symbols = append(symbols, s.(string))
+			}
+		}
+		pct, _ := event["target_pct"].(float64)
+		if pct > 30 && approvedBy == "" {
+			return nil, apperr.New(apperr.KindForbidden, "SIM_EVENT_NEEDS_APPROVAL", "beyond one operator's share").
+				WithDetail("move", pct/100).WithDetail("symbol", symbols[0])
+		}
+		f.last = event
+		items := []map[string]any{}
+		for _, s := range symbols {
+			id := uuid.NewString()
+			items = append(items, map[string]any{
+				"symbol": s, "event_id": id, "type": "OVERLAY", "status": "RUNNING", "factor_target": 1 + pct/100,
+				"base_price": "84100", "event": map[string]any{"id": id, "type": "OVERLAY", "symbol": s},
+			})
+			f.events = append(f.events, "OVERLAY "+s+" by "+actor+" approved by "+approvedBy)
+		}
+		return json.Marshal(map[string]any{"items": items})
 	}
 	f.last = event
 	f.events = append(f.events, event["type"].(string)+" by "+actor+" approved by "+approvedBy)
@@ -285,5 +315,104 @@ func TestASimRequestLapsesAndIsMeasuredAgainForItsDecider(t *testing.T) {
 	}
 	if _, err := h.svc.SimApprovalPreview(ctx, boss, uuid.NewString()); code(err) != apperr.CodeNotFound {
 		t.Fatalf("no such request: %v", err)
+	}
+}
+
+// A price event on any pair from the console (design 2026-10-07, general
+// price control, J3): its form checked here, market-sim's events a pair,
+// the pair beyond one operator's share named in the request, what an
+// approved one made, and no model of the simulated market's to measure it
+// by.
+func TestOverlayEventsFromTheConsole(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sim := &pricedSim{}
+	h.svc.Sim, h.svc.SimBots = sim, sim
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	ops, boss := h.login(t, "ops@example.com"), h.login(t, "boss@example.com")
+	pct := func(v float64) *float64 { return &v }
+	no := false
+	overlay := func(symbols ...string) SimEventInput {
+		return SimEventInput{Type: "overlay", Symbols: symbols, TargetPct: pct(2), RampUpSeconds: 15, RampDownSeconds: 5}
+	}
+	size := 0.02
+	for name, in := range map[string]SimEventInput{
+		"no pair":            overlay(),
+		"eleven pairs":       overlay("A-USDT", "B-USDT", "C-USDT", "D-USDT", "E-USDT", "F-USDT", "G-USDT", "H-USDT", "I-USDT", "J-USDT", "K-USDT"),
+		"a pair twice":       overlay("btc-usdt", "BTC-USDT"),
+		"no target":          {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, RampUpSeconds: 15, RampDownSeconds: 5},
+		"two targets":        {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPct: pct(2), TargetPrice: "90000", RampUpSeconds: 15, RampDownSeconds: 5},
+		"a price, two pairs": {Type: "OVERLAY", Symbols: []string{"BTC-USDT", "ETH-USDT"}, TargetPrice: "90000", RampUpSeconds: 15, RampDownSeconds: 5},
+		"no move":            {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPct: pct(0), RampUpSeconds: 15, RampDownSeconds: 5},
+		"a price below 0":    {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPrice: "-1", RampUpSeconds: 15, RampDownSeconds: 5},
+		"no ramp up":         {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPct: pct(2), RampDownSeconds: 5},
+		"a quick way back":   {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPct: pct(2), RampUpSeconds: 15, RampDownSeconds: 2},
+		"over ten minutes":   {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPct: pct(2), RampUpSeconds: 300, HoldSeconds: 200, RampDownSeconds: 101},
+		"a jump's size":      {Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPct: pct(2), RampUpSeconds: 15, RampDownSeconds: 5, Size: &size},
+		"a jump with pairs":  {Type: "JUMP", Size: &size, Symbols: []string{"BTC-USDT"}},
+		"a jump with risk":   {Type: "JUMP", Size: &size, Risk: &no},
+	} {
+		if _, err := h.svc.CreateSimEvent(ctx, ops, in, "e2e "+name); code(err) != apperr.CodeInvalidArgument {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if len(sim.events) != 0 {
+		t.Fatalf("refused, nothing sent: %v", sim.events)
+	}
+
+	// Within the share: market-sim's events, one a pair, in the operator's
+	// name; the pairs upper case, the leverage spared as asked.
+	in := overlay("btc-usdt", "ETH-USDT")
+	in.Risk = &no
+	res, err := h.svc.CreateSimEvent(ctx, ops, in, "a 2% rise on two pairs")
+	if err != nil || res.Event != nil || res.Approval != nil || !strings.Contains(string(res.Items), `"symbol":"BTC-USDT"`) ||
+		!strings.Contains(string(res.Items), `"symbol":"ETH-USDT"`) {
+		t.Fatalf("within the share %+v %v", res, err)
+	}
+	if got, _ := json.Marshal(sim.last); string(got) != `{"ramp_down_seconds":5,"ramp_up_seconds":15,"reason":"a 2% rise on two pairs","risk":false,`+
+		`"symbols":["BTC-USDT","ETH-USDT"],"target_pct":2,"type":"OVERLAY"}` {
+		t.Fatalf("as market-sim takes it: %s", got)
+	}
+	if got := h.auditsOf("admin.sim.event_created"); len(got) != 1 || !strings.Contains(got[0], `"items":[{`) {
+		t.Fatalf("audited with its events %v", got)
+	}
+	// The leverage follows unless spared (user 2026-10-07 03:0x); a price
+	// for one pair.
+	one := SimEventInput{Type: "OVERLAY", Symbols: []string{"BTC-USDT"}, TargetPrice: " 90000 ", RampUpSeconds: 15, HoldSeconds: 10, RampDownSeconds: 5}
+	if _, err := h.svc.CreateSimEvent(ctx, ops, one, "BTC to 90,000"); err != nil || sim.last["risk"] != true || sim.last["target_price"] != "90000" ||
+		sim.last["hold_seconds"] != 10 || sim.last["target_pct"] != nil {
+		t.Fatalf("by default with the leverage %v %v", sim.last, err)
+	}
+
+	// Beyond the share: a request naming the pair; approved, market-sim
+	// gets both names and the request says what it made.
+	big := overlay("BTC-USDT")
+	big.TargetPct = pct(35)
+	res, err = h.svc.CreateSimEvent(ctx, ops, big, "a 35% rise")
+	if err != nil || res.Approval == nil || res.Approval.Payload["symbol"] != "BTC-USDT" || res.Approval.Payload["move"] != "0.35" ||
+		!strings.Contains(res.Approval.Payload["change"], `"symbols":["BTC-USDT"]`) {
+		t.Fatalf("beyond the share %+v %v", res, err)
+	}
+	// Measured by the reference price when carried out, not by the
+	// simulated market's model.
+	if pv, err := h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID); err != nil || pv.Target != nil || pv.Expected != nil || pv.Impact != nil ||
+		pv.RequestedMove != "0.35" || pv.Expired {
+		t.Fatalf("the preview %+v %v", pv, err)
+	}
+	done, err := h.svc.DecideApproval(ctx, boss, res.Approval.ID, true, "the board agrees")
+	if err != nil || done.Status != domain.ApprovalExecuted || !strings.HasPrefix(done.Result, "events BTC-USDT ") ||
+		sim.events[len(sim.events)-1] != "OVERLAY BTC-USDT by ops@example.com approved by boss@example.com" {
+		t.Fatalf("approved %+v %v %v", done, err, sim.events)
+	}
+
+	// The form's prices: market-data's tickers.
+	h.svc.Prices = fakePrices{"BTC-USDT": decimal.NewFromInt(84_100)}
+	if prices, err := h.svc.SimPrices(ctx, ops); err != nil || prices["BTC-USDT"].String() != "84100" {
+		t.Fatalf("prices %v %v", prices, err)
+	}
+	h.svc.Prices = nil
+	if _, err := h.svc.SimPrices(ctx, ops); code(err) != apperr.CodeUnavailable {
+		t.Fatalf("no prices without market-data: %v", err)
 	}
 }

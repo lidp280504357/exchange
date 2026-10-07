@@ -905,6 +905,99 @@ check '(.items | length) >= 1 and all(.items[]; .buyer_bot and .seller_bot)' "bo
 as AUDITOR GET "/admin/v1/trades?accounts=robots" ""
 expect 400 COMMON_INVALID_ARGUMENT "bots or users, nothing else"
 
+echo "== price events on any pair (design 2026-10-07, general price control, J3)"
+# The form reads every pair's price; an OVERLAY's form is checked before
+# market-sim sees it; one beyond the share waits for a second
+# administrator, naming the pair (rejected here); a small event on
+# BTC-USDT (+0.5%, the perpetuals and the leverage spared, 5 s up, 20 s
+# held, 5 s back) runs in the operator's name, a second one on the pair is
+# refused while it runs, and 立即恢复 brings it back to Binance's price in
+# 3 seconds. market.overlay on for the event and back as it was.
+as AUDITOR GET /admin/v1/sim/prices ""
+if [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
+  echo "skip price events on any pair: this admin-service is from before J3"
+else
+  expect 200 - "every administrator reads the pairs' prices"
+  check '.prices["BTC-USDT"] | test("^[0-9.]+$")' "BTC-USDT's among them"
+  overlay() { # overlay EXTRA REASON: an OVERLAY on BTC-USDT, +0.5%, the leverage spared, with EXTRA's fields
+    jq -nc --argjson x "$1" --arg r "$2" '{type: "OVERLAY", symbols: ["BTC-USDT"], target_pct: 0.5, ramp_up_seconds: 5, hold_seconds: 20,
+      ramp_down_seconds: 5, risk: false, reason: $r} + $x'
+  }
+  as FINANCE POST /admin/v1/sim/events "$(overlay '{}' "e2e: finance moves BTC")"
+  expect 403 ADMIN_FORBIDDEN "FINANCE moves no price"
+  as OPERATOR POST /admin/v1/sim/events "$(overlay '{"symbols":["BTC-USDT","btc-usdt"]}' "e2e: a pair twice")"
+  expect 400 COMMON_INVALID_ARGUMENT "a pair once"
+  as OPERATOR POST /admin/v1/sim/events "$(overlay '{"symbols":["BTC-USDT","ETH-USDT"],"target_pct":null,"target_price":"100000"}' "e2e: a price for two pairs")"
+  expect 400 COMMON_INVALID_ARGUMENT "a price is for one pair"
+  as OPERATOR POST /admin/v1/sim/events "$(overlay '{"ramp_down_seconds":2}' "e2e: back in 2 seconds")"
+  expect 400 COMMON_INVALID_ARGUMENT "back in 3 seconds at least"
+  as OPERATOR POST /admin/v1/sim/events "$(overlay '{"ramp_up_seconds":590}' "e2e: over ten minutes")"
+  expect 400 COMMON_INVALID_ARGUMENT "10 minutes in all at most"
+  as OPERATOR POST /admin/v1/sim/events '{"type":"JUMP","size":0.01,"symbols":["BTC-USDT"],"reason":"e2e: a jump with pairs"}'
+  expect 400 COMMON_INVALID_ARGUMENT "pairs are a price event's"
+  if ! OVERLAY_FLAG=$(exchangectl flags show market.overlay 2>&1); then
+    [[ $OVERLAY_FLAG == *"is not set"* ]] || { echo "FAIL could not read market.overlay: $OVERLAY_FLAG" >&2; exit 1; }
+    OVERLAY_FLAG='{"enabled":false}'
+  fi
+  overlay_off() { exchangectl flags set market.overlay --off --reason "e2e admin.sh: back as it was" >/dev/null || { echo "FAIL market.overlay left on" >&2; EXIT_FAILED=1; }; }
+  OVERLAY_ON=""
+  if [[ $(jq -r .enabled <<<"$OVERLAY_FLAG") != true ]]; then
+    exchangectl flags set market.overlay --on --reason "e2e admin.sh: a price event from the console" >/dev/null
+    OVERLAY_ON=1
+    at_exit overlay_off
+    sleep 6 # services see a flag within 5 seconds
+  fi
+  as OPERATOR POST /admin/v1/sim/events "$(overlay '{"target_pct":35}' "e2e: BTC-USDT up 35%, to be rejected")"
+  if [[ $STATUS == 503 || ($STATUS == 409 && $(jq -r .code <<<"$BODY") == SIM_OVERLAY_RUNNING) ]]; then
+    echo "skip the price event itself: $STATUS $(jq -c '{code, message}' <<<"$BODY")"
+  else
+    expect 202 - "35% on BTC-USDT is beyond one operator's share"
+    check '.approval.kind == "SIM_EVENT" and .approval.payload.symbol == "BTC-USDT" and .approval.payload.move == "0.35" and
+      (.approval.payload.change | fromjson | .type == "OVERLAY" and .risk == false)' "it waits for a second administrator, naming the pair"
+    BIG_OVERLAY=$(jq -r .approval.id <<<"$BODY")
+    # shellcheck disable=SC2016 # expanded when the script ends
+    at_exit 'as ADMIN POST "/admin/v1/approvals/$BIG_OVERLAY/decide" "{\"approve\":false,\"reason\":\"e2e cleanup\"}" >/dev/null'
+    as AUDITOR GET "/admin/v1/approvals/$BIG_OVERLAY/sim-preview" ""
+    expect 200 - "its decider sees it measured"
+    check '.target_price == null and .expected_price == null and .requested_move == "0.35"' "by Binance's price when carried out, nothing of the coin's model"
+    as ADMIN POST "/admin/v1/approvals/$BIG_OVERLAY/decide" '{"approve":false,"reason":"e2e: no such move"}'
+    expect 200 - "ADMIN rejects it"
+    as OPERATOR POST /admin/v1/sim/events "$(overlay '{}' "e2e: BTC-USDT up 0.5% from the console, the leverage spared")"
+    case "$STATUS $(jq -r '.code // ""' <<<"$BODY")" in
+    "403 SIM_EVENT_NEEDS_APPROVAL" | "409 SIM_OVERLAY_LOSS_CAP")
+      echo "skip the price event itself: $(jq -c '{code, details}' <<<"$BODY")"
+      ;;
+    *)
+      expect 201 - "OPERATOR moves BTC-USDT up 0.5%"
+      check ".items | length == 1 and .[0].symbol == \"BTC-USDT\" and .[0].type == \"OVERLAY\" and .[0].status == \"RUNNING\" and
+        .[0].factor_target == 1.005 and (.[0].base_price | test(\"^[0-9.]+$\")) and .[0].event.risk == false and .[0].event.created_by == \"$EMAIL_OPERATOR\"" \
+        "an event on the pair, running from Binance's price, in the operator's name"
+      OVERLAY_EVENT=$(jq -r '.items[0].event_id' <<<"$BODY")
+      # shellcheck disable=SC2016 # expanded when the script ends
+      at_exit 'as OPERATOR POST "/admin/v1/sim/events/$OVERLAY_EVENT/end" "{\"reason\":\"e2e cleanup\"}" >/dev/null'
+      overlay_rising() {
+        as AUDITOR GET /admin/v1/sim/events ""
+        jq -e --arg id "$OVERLAY_EVENT" '.items[] | select(.id == $id) | .factor_now > 1 and .progress > 0 and .symbol == "BTC-USDT" and .risk == false' <<<"$BODY"
+      }
+      eventually 20 "its factor rises, its progress with it" overlay_rising
+      as OPERATOR POST /admin/v1/sim/events "$(overlay '{}' "e2e: a second event on the pair")"
+      expect 409 SIM_OVERLAY_RUNNING "one event a pair at a time"
+      check '.details.symbol == "BTC-USDT"' "naming the pair"
+      as OPERATOR POST "/admin/v1/sim/events/$OVERLAY_EVENT/end" '{"reason":"e2e: back to Binance now"}'
+      expect 200 - "立即恢复"
+      check ".result == \"CANCELED\" and .ended_by == \"$EMAIL_OPERATOR\"" "canceled by the operator"
+      overlay_done() {
+        as AUDITOR GET "/admin/v1/sim/events?all=true&limit=50" ""
+        jq -e --arg id "$OVERLAY_EVENT" '.items[] | select(.id == $id) | .status == "DONE" and .factor_now == 1 and (.end_reference_price | test("^[0-9.]+$"))' <<<"$BODY"
+      }
+      eventually 20 "back to Binance's price within seconds, DONE" overlay_done
+      ;;
+    esac
+  fi
+  # Back as it was now, not at the end of the run (the exit does it again).
+  [[ -z $OVERLAY_ON ]] || overlay_off
+fi
+
 echo "== paged lists and the overview"
 as AUDITOR GET "/admin/v1/users?limit=2" ""
 expect 200 - "accounts, newest first"

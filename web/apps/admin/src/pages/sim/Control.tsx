@@ -8,7 +8,8 @@ import { Link } from "react-router";
 import { DangerAction, FormError, useAdminT } from "../../kit/actions";
 import { TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
-import { EndEvent, ImpactLines, minutes, pct, price, simEventsKey, simKey, useEventText, useSim, type SimEvent, type SimEventType } from "./common";
+import { EndEvent, ImpactLines, minutes, pct, price, simEventsKey, simKey, useEventText, useSim, utc, type SimEvent, type SimEventType } from "./common";
+import { OverlayCard } from "./overlay";
 import { ReadOnly } from "../../kit/ReadOnly";
 import {
   MAX_LEAD, newTarget, SOLO_SPIKE, SPIKE_WIDTH, spikeMarkShare, spikePrices, TargetFields, TargetPlan, TargetPreview, targetBody, tryCheck,
@@ -42,6 +43,7 @@ export default function SimControl({ admin }: { admin: Admin }) {
   return (
     <Page title={t("admin.nav.simControl")} help={t("admin.sim.controlHelp")}>
       <ReadOnly admin={admin} perm="sim.control" />
+      <OverlayCard control={control} simSymbol={q.data?.symbol} />
       {q.data && <TargetBanner events={q.data.events} control={control} />}
       <Card title={t("admin.sim.events")} extra={<span className="text-xs text-fg-3">{t("admin.sim.share")}</span>}>
         {q.data ? <Launcher target={Number(q.data.target_price ?? 0)} perp={q.data.perp} control={control} /> : <Skeleton className="h-40 w-full" />}
@@ -146,13 +148,6 @@ const SPECS: { type: SimEventType; fields: Field[] }[] = [
   { type: "HALT", fields: [] },
   { type: "REANCHOR", fields: [] },
 ];
-
-/** utc is a datetime-local value as an RFC 3339 time in UTC, "" when blank. */
-function utc(local: string): string {
-  if (!local) return "";
-  const at = new Date(local);
-  return Number.isNaN(at.getTime()) ? "" : at.toISOString().replace(/\.\d+Z$/, "Z");
-}
 
 function Launcher({ target, perp, control }: { target: number; perp: string; control: boolean }) {
   const { t } = useTranslation();

@@ -1,5 +1,6 @@
+import { formatDecimal } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
-import { Button, DataTable, Drawer, Segmented, type ColumnDef } from "@exchange/ui";
+import { Button, DataTable, Drawer, Progress, Segmented, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,7 +16,10 @@ import { TargetPlan, TargetResult } from "./target";
  * running and past, who asked for them and who approved; a queued one is
  * canceled and a running one ended here (a HALT ends by resuming trading).
  * A threshold target shows how it ended and opens its plan beside where
- * the price went; a spike names its target (A6).
+ * the price went; a spike names its target (A6). A price event on any
+ * pair shows its progress and factor while it runs, the prices it went
+ * from, peaked at and ended at, and is restored to Binance's price here
+ * (J3).
  */
 export default function SimEvents({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
@@ -48,6 +52,13 @@ export default function SimEvents({ admin }: { admin: Admin }) {
           <span className="flex flex-wrap items-center gap-1">
             <EventStatus e={e} />
             <TargetResult result={e.result} />
+            {e.type === "OVERLAY" && e.status === "RUNNING" && (
+              // A price event on any pair: how far through it is, its factor now (J3).
+              <span className="flex items-center gap-1.5 text-xs text-fg-2" data-testid={`sim-overlay-progress-${e.id}`}>
+                <Progress value={(e.progress ?? 0) * 100} className="w-16" aria-label={t("admin.sim.overlay.factor", { f: e.factor_now ?? 1 })} />
+                <span className="font-mono">{t("admin.sim.overlay.factor", { f: (e.factor_now ?? 1).toFixed(4) })}</span>
+              </span>
+            )}
           </span>
         ),
       },
@@ -60,6 +71,18 @@ export default function SimEvents({ admin }: { admin: Admin }) {
             {e.ended_at && <span className="text-fg-3">{t("admin.sim.endedAt")} <TimeText value={e.ended_at} style="datetimeSeconds" /></span>}
             {!e.ended_at && e.ends_at && <span className="text-fg-3">{t("admin.simTarget.endsAt")} <TimeText value={e.ends_at} style="datetimeSeconds" /></span>}
             {e.from_price && <span className="text-fg-3">{t("admin.sim.fromPrice")} <span className="font-mono">{price(e.from_price)}</span></span>}
+            {e.base_price && <span className="text-fg-3">{t("admin.sim.overlay.base")} <span className="font-mono">{formatDecimal(e.base_price)}</span></span>}
+            {e.peak_price && <span className="text-fg-3">{t("admin.sim.overlay.peak")} <span className="font-mono">{formatDecimal(e.peak_price)}</span></span>}
+            {e.end_reference_price && (
+              <span className="text-fg-3">
+                {t("admin.sim.overlay.endRef")} <span className="font-mono">{formatDecimal(e.end_reference_price)}</span>
+                {e.end_platform_price && (
+                  <>
+                    {" "}· {t("admin.sim.overlay.endPlatform")} <span className="font-mono">{formatDecimal(e.end_platform_price)}</span>
+                  </>
+                )}
+              </span>
+            )}
           </span>
         ),
       },

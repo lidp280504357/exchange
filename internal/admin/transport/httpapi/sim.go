@@ -65,12 +65,29 @@ func (h *Handler) simImpact(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, raw)
 }
 
-// writeSim answers a change: done (status), or waiting for its approval
-// (202).
+func (h *Handler) simPrices(w http.ResponseWriter, r *http.Request) {
+	prices, err := h.Svc.SimPrices(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make(map[string]string, len(prices))
+	for symbol, p := range prices {
+		out[symbol] = p.String()
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"prices": out})
+}
+
+// writeSim answers a change: done (status; an OVERLAY's events as items),
+// or waiting for its approval (202).
 func writeSim(w http.ResponseWriter, done int, res application.SimResult) {
 	switch {
 	case res.Approval != nil:
 		httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"approval": approvalJSON(*res.Approval)})
+	case res.Items != nil:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(done)
+		_, _ = w.Write(append([]byte(`{"items":`), append(res.Items, '}')...))
 	case res.Event != nil:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(done)

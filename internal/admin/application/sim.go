@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -25,10 +26,23 @@ import (
 // receives as approved_by over the console's signed key: both names come
 // from the sessions, never from the browser.
 
-// Event types market-sim runs.
+// Event types market-sim runs. An OVERLAY is a price event on any pair
+// (design 2026-10-07, general price control: J3 here, market-sim's J2):
+// the followed pairs' reference data times a factor that ramps up, holds
+// and comes back to 1, the simulated market's own pair a JUMP.
 var simEventTypes = map[string]bool{
 	"JUMP": true, "TARGET": true, "TREND": true, "VOLATILITY": true, "PAUSE": true, "HALT": true, "REANCHOR": true, "SPIKE": true,
+	"OVERLAY": true,
 }
+
+// The bounds of an OVERLAY as market-sim takes it (J0 contract §3.1): ten
+// pairs at most, a ramp down of 3 seconds at least, 10 minutes in all
+// (OVERLAY_MAX_SECONDS, at most this).
+const (
+	overlayMaxSymbols  = 10
+	overlayMinRampDown = 3
+	overlayMaxSeconds  = 600
+)
 
 // The guards' refusals that a second administrator lifts.
 const (
@@ -60,6 +74,63 @@ type SimEventInput struct {
 	Spikes    []SimSpike `json:"spikes,omitempty"`
 	// WidthSeconds is a spike's width (SPIKE; 20 when absent).
 	WidthSeconds int `json:"width_seconds,omitempty"`
+	// An OVERLAY's (J0 contract §3.1): its pairs, its target (a price for
+	// one pair, or a share of each pair's reference price in percent), its
+	// ramps around HoldSeconds, and whether it reaches the perpetuals and
+	// the leverage (Risk; true when absent, user 2026-10-07 03:0x).
+	Symbols         []string `json:"symbols,omitempty"`
+	TargetPrice     string   `json:"target_price,omitempty"`
+	TargetPct       *float64 `json:"target_pct,omitempty"`
+	RampUpSeconds   int      `json:"ramp_up_seconds,omitempty"`
+	RampDownSeconds int      `json:"ramp_down_seconds,omitempty"`
+	Risk            *bool    `json:"risk,omitempty"`
+}
+
+// checkOverlay normalizes and checks an OVERLAY's fields, and refuses them
+// on any other event; market-sim checks the rest (which pairs it moves,
+// how far, HOUSE's loss cap, one operator's share).
+func (in *SimEventInput) checkOverlay() error {
+	if in.Type != "OVERLAY" {
+		if len(in.Symbols) > 0 || in.TargetPrice != "" || in.TargetPct != nil || in.RampUpSeconds != 0 || in.RampDownSeconds != 0 || in.Risk != nil {
+			return apperr.Invalid("symbols, a target, ramps and risk belong to an OVERLAY")
+		}
+		return nil
+	}
+	if in.Size != nil || in.Price != "" || in.Mu != nil || in.Factor != nil || in.DurationSeconds != 0 {
+		return apperr.Invalid("an OVERLAY takes symbols, a target and ramps, not size, price, mu, factor or duration_seconds")
+	}
+	seen := map[string]bool{}
+	for i, symbol := range in.Symbols {
+		symbol = strings.ToUpper(strings.TrimSpace(symbol))
+		if symbol == "" || seen[symbol] {
+			return apperr.Invalid("symbols are distinct pairs")
+		}
+		seen[symbol], in.Symbols[i] = true, symbol
+	}
+	if len(in.Symbols) == 0 || len(in.Symbols) > overlayMaxSymbols {
+		return apperr.Invalid("an OVERLAY names 1 to 10 pairs")
+	}
+	in.TargetPrice = strings.TrimSpace(in.TargetPrice)
+	switch {
+	case (in.TargetPrice == "") == (in.TargetPct == nil):
+		return apperr.Invalid("give target_price or target_pct")
+	case in.TargetPct != nil && (*in.TargetPct == 0 || math.IsNaN(*in.TargetPct) || math.IsInf(*in.TargetPct, 0)):
+		return apperr.Invalid("target_pct is a share in percent, not 0")
+	case in.TargetPrice != "" && len(in.Symbols) > 1:
+		return apperr.Invalid("several pairs take target_pct, not one target_price")
+	}
+	if in.TargetPrice != "" {
+		if p, err := decimal.NewFromString(in.TargetPrice); err != nil || !p.IsPositive() {
+			return apperr.Invalid("target_price is a positive decimal")
+		}
+	}
+	if in.RampUpSeconds < 1 || in.HoldSeconds < 0 || in.RampDownSeconds < overlayMinRampDown {
+		return apperr.Invalid("ramp_up_seconds is 1 at least, hold_seconds 0 at least, ramp_down_seconds 3 at least")
+	}
+	if in.RampUpSeconds+in.HoldSeconds+in.RampDownSeconds > overlayMaxSeconds {
+		return apperr.Invalid("an OVERLAY runs 600 seconds at most, its ramps and hold together")
+	}
+	return nil
 }
 
 // SimSpike is a spike a threshold target plans: when, how far from the
@@ -70,10 +141,12 @@ type SimSpike struct {
 	WidthSeconds int     `json:"width_seconds,omitempty"`
 }
 
-// SimResult is a change done (Event, or Version for the settings) or one
-// waiting for a second administrator (Approval).
+// SimResult is a change done (Event; an OVERLAY's Items, an event a pair;
+// Version for the settings) or one waiting for a second administrator
+// (Approval).
 type SimResult struct {
 	Event    json.RawMessage  `json:"event,omitempty"`
+	Items    json.RawMessage  `json:"items,omitempty"`
 	Version  *int64           `json:"version,omitempty"`
 	Approval *domain.Approval `json:"-"`
 }
@@ -108,6 +181,19 @@ func (s *Service) SimEvents(ctx context.Context, p Principal, all bool, limit in
 		limit = simEventsDefaultLimit
 	}
 	return s.Sim.Events(ctx, all, limit)
+}
+
+// SimPrices returns the last price of every listed pair that has one, for
+// the price event form (J3): market-data's tickers, a followed pair's the
+// reference market's (times the factor of a price event running on it).
+func (s *Service) SimPrices(ctx context.Context, p Principal) (ports.Prices, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return nil, err
+	}
+	if s.Prices == nil {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "market-data is not configured")
+	}
+	return s.Prices.Prices(ctx, 0)
 }
 
 // SimImpact measures the simulated market's perpetual contract at a mark
@@ -188,9 +274,12 @@ func (s *Service) CreateSimEvent(ctx context.Context, p Principal, in SimEventIn
 	}
 	in.Type = strings.ToUpper(strings.TrimSpace(in.Type))
 	if !simEventTypes[in.Type] {
-		return SimResult{}, apperr.Invalid("type must be JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR or SPIKE")
+		return SimResult{}, apperr.Invalid("type must be JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR, SPIKE or OVERLAY")
 	}
 	if err := in.checkTarget(s.Now()); err != nil {
+		return SimResult{}, err
+	}
+	if err := in.checkOverlay(); err != nil {
 		return SimResult{}, err
 	}
 	// asked is a start already past as the operator gave it: the event
@@ -220,12 +309,22 @@ func (s *Service) CreateSimEvent(ctx context.Context, p Principal, in SimEventIn
 	if err != nil {
 		return SimResult{}, err
 	}
-	audit := map[string]any{"event": raw}
+	res, audit := SimResult{Event: raw}, map[string]any{"event": raw}
+	if in.Type == "OVERLAY" {
+		// An event a pair (J0 contract §3.1).
+		var made struct {
+			Items json.RawMessage `json:"items"`
+		}
+		if json.Unmarshal(raw, &made) != nil || len(made.Items) == 0 {
+			return SimResult{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "market-sim answered without the events it made")
+		}
+		res, audit = SimResult{Items: made.Items}, map[string]any{"items": made.Items}
+	}
 	if asked != "" {
 		audit["asked_starts_at"] = asked
 	}
 	details, _ := json.Marshal(audit)
-	return SimResult{Event: raw}, s.audit(ctx, p, simAuditTarget, "admin.sim.event_created", strings.TrimSpace(reason), string(details))
+	return res, s.audit(ctx, p, simAuditTarget, "admin.sim.event_created", strings.TrimSpace(reason), string(details))
 }
 
 // simEventFields is an event as market-sim takes it, with the reason.
@@ -263,6 +362,15 @@ func simEventFields(in SimEventInput, reason string) map[string]any {
 	}
 	if in.WidthSeconds > 0 {
 		out["width_seconds"] = in.WidthSeconds
+	}
+	if in.Type == "OVERLAY" {
+		out["symbols"], out["risk"] = in.Symbols, in.Risk == nil || *in.Risk
+		out["ramp_up_seconds"], out["ramp_down_seconds"] = in.RampUpSeconds, in.RampDownSeconds
+		if in.TargetPct != nil {
+			out["target_pct"] = *in.TargetPct
+		} else {
+			out["target_price"] = in.TargetPrice
+		}
 	}
 	return out
 }
@@ -332,7 +440,8 @@ func (s *Service) requestSim(ctx context.Context, p Principal, kind string, chan
 		}
 	}
 	if e := apperr.From(refusal); e != nil {
-		for _, k := range []string{"move", "volume"} {
+		// An OVERLAY names the pair beyond the share (J3).
+		for _, k := range []string{"move", "volume", "symbol"} {
 			if v, ok := e.Details[k]; ok {
 				payload[k] = fmt.Sprint(v)
 			}
@@ -435,6 +544,12 @@ func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string
 	}
 	out := SimPreview{ExpiresAt: simExpiry(*a), RequestedMove: a.Payload["move"]}
 	out.Expired = !s.Now().Before(out.ExpiresAt)
+	if simOverlay(*a) {
+		// A price event on followed pairs: its factor is set against the
+		// reference price when it is carried out, and nothing of the
+		// simulated market's model moves (J3).
+		return out, nil
+	}
 	raw, err := s.Sim.Status(ctx)
 	if err != nil {
 		return SimPreview{}, err
@@ -474,6 +589,35 @@ func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string
 		}
 	}
 	return out, nil
+}
+
+// simOverlay reports whether a request is for an OVERLAY.
+func simOverlay(a domain.Approval) bool {
+	var change struct {
+		Type string `json:"type"`
+	}
+	return a.Kind == domain.KindSimEvent && json.Unmarshal([]byte(a.Payload["change"]), &change) == nil && change.Type == "OVERLAY"
+}
+
+// simCreated says what market-sim made of an approved event: the event,
+// or an OVERLAY's events, one a pair.
+func simCreated(raw json.RawMessage) string {
+	var made struct {
+		ID    string `json:"id"`
+		Items []struct {
+			Symbol  string `json:"symbol"`
+			EventID string `json:"event_id"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(raw, &made)
+	if len(made.Items) == 0 {
+		return "event " + made.ID
+	}
+	events := make([]string, 0, len(made.Items))
+	for _, it := range made.Items {
+		events = append(events, it.Symbol+" "+it.EventID)
+	}
+	return "events " + strings.Join(events, ", ")
 }
 
 // simExpected is where a request would take the price from target: a
@@ -529,11 +673,7 @@ func (s *Service) executeSim(ctx context.Context, a domain.Approval, p Principal
 		if err != nil {
 			return "", err
 		}
-		var e struct {
-			ID string `json:"id"`
-		}
-		_ = json.Unmarshal(raw, &e)
-		return "event " + e.ID, nil
+		return simCreated(raw), nil
 	default:
 		var change struct {
 			Params json.RawMessage `json:"params"`

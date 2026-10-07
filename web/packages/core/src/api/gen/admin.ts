@@ -1911,6 +1911,23 @@ export interface paths {
          *     sim.control (202, decided on the approvals), whose name market-sim
          *     then receives as the approver. 403 SIM_EVENTS_OFF while the flag
          *     sim.events is off; 400 beyond the hard caps.
+         *
+         *     An OVERLAY is a price event on any pair (design 2026-10-07, general
+         *     price control; J0 contract §3.1, docs/runbook/market-sim.md): each
+         *     followed pair gets an event whose factor ramps the pair's reference
+         *     data (book, trades, ticker, candles; with risk, the perpetuals'
+         *     index and mark and the leverage's valuation) to the target and back
+         *     to 1, the simulated market's own pair a JUMP of its model. One
+         *     operator's share is counted by pair (30% at once, 50% an hour; the
+         *     request names the pair beyond it); all or none of a request's events
+         *     are made, answered as items. 403 SIM_OVERLAY_OFF while the flag
+         *     market.overlay is off; 409 SIM_OVERLAY_RUNNING (a pair has an event
+         *     open; details.symbol), 409 SIM_OVERLAY_LOSS_CAP (HOUSE's worst loss
+         *     estimated beyond OVERLAY_MAX_LOSS_USDT: details.symbol,
+         *     estimate_usdt and cap_usdt, or reason when HOUSE's rooms cannot be
+         *     read); 400 SIM_OVERLAY_TOO_FAR (beyond ±90%), SIM_NOT_OVERLAYABLE (a
+         *     pair that follows no reference market and is not the simulated
+         *     market's); 503 SIM_OVERLAY_UNCONFIGURED.
          */
         post: operations["createSimEvent"];
         delete?: never;
@@ -1930,7 +1947,10 @@ export interface paths {
         put?: never;
         /**
          * Cancel a queued event or end a running one
-         * @description A HALT ends by resuming the pair and its perpetual. Needs sim.control.
+         * @description A HALT ends by resuming the pair and its perpetual. A running
+         *     OVERLAY comes back to the reference price at once (立即恢复): its
+         *     factor goes linearly to 1 within 3 seconds, its result CANCELED;
+         *     the pair counts as having an event until then. Needs sim.control.
          */
         post: operations["endSimEvent"];
         delete?: never;
@@ -1956,6 +1976,29 @@ export interface paths {
          *     reports.read.
          */
         get: operations["getSimPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The last price of every listed pair, for the price event form
+         * @description market-data's tickers (a followed pair's last is the reference
+         *     market's, times the factor of a price event running on it): the
+         *     form shows each chosen pair's price now and where the target takes
+         *     it (J3). Needs reports.read.
+         */
+        get: operations["getSimPrices"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4290,7 +4333,27 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR" | "SPIKE";
+            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR" | "SPIKE" | "OVERLAY";
+            /** @description An OVERLAY's pair (J3; absent on the simulated market's own events, as the fields below). */
+            symbol?: string;
+            /** @description An OVERLAY's target over the reference price when it was made (1.16 is +16%); price is that target. */
+            target_factor?: number;
+            ramp_up_seconds?: number;
+            ramp_down_seconds?: number;
+            /** @description The OVERLAY reaches the perpetuals' index and mark and the leverage's valuation. */
+            risk?: boolean;
+            /** @description An OVERLAY's factor now (1 unless running). */
+            factor_now?: number;
+            /** @description How far an OVERLAY is through its ramps and hold. */
+            progress?: number;
+            /** @description The reference price an OVERLAY started from. */
+            base_price?: string | null;
+            /** @description The platform's price furthest its way while it ran. */
+            peak_price?: string | null;
+            /** @description The reference market's price when it came back to 1. */
+            end_reference_price?: string | null;
+            /** @description The platform's price then. */
+            end_platform_price?: string | null;
             size: number;
             price: string | null;
             mu: number;
@@ -4336,9 +4399,50 @@ export interface components {
             /** @description A TARGET's spikes, made with it (in the answer to its creation only). */
             spikes?: components["schemas"]["SimEvent"][];
         };
+        /** @description An OVERLAY request's event on one pair (J0 contract §3.1). */
+        SimEventItem: {
+            symbol: string;
+            /** Format: uuid */
+            event_id: string;
+            /**
+             * @description JUMP on the simulated market's own pair.
+             * @enum {string}
+             */
+            type: "OVERLAY" | "JUMP";
+            /** @enum {string} */
+            status: "SCHEDULED" | "RUNNING" | "DONE" | "CANCELED";
+            factor_target: number;
+            /** @description The reference price it starts from (the simulated market's target for a JUMP); null while queued. */
+            base_price: string | null;
+            event: components["schemas"]["SimEvent"];
+        };
         SimEventWrite: {
             /** @enum {string} */
-            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR" | "SPIKE";
+            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR" | "SPIKE" | "OVERLAY";
+            /**
+             * @description An OVERLAY's pairs, distinct: each that follows a reference
+             *     market gets an OVERLAY event, the simulated market's own pair a
+             *     JUMP of its model (ramp_up_seconds its duration; hold, ramp down
+             *     and risk do not apply to it).
+             */
+            symbols?: string[];
+            /** @description An OVERLAY's target price, for one pair only; or target_pct. */
+            target_price?: string;
+            /** @description An OVERLAY's target in percent of each pair's reference price when it is made (16 is +16%, -20 is −20%); not 0. */
+            target_pct?: number;
+            /** @description How long an OVERLAY takes to reach its target. */
+            ramp_up_seconds?: number;
+            /** @description How long an OVERLAY takes back to the reference price; its ramps and hold_seconds together 600 at most. */
+            ramp_down_seconds?: number;
+            /**
+             * @description An OVERLAY reaches the perpetuals' index and mark and the
+             *     leverage's valuation (true when absent, user 2026-10-07 03:0x),
+             *     as a real move would: warnings, liquidations and funding
+             *     follow. false is the console's 不连带合约与杠杆: they see the
+             *     reference market's price, and the spot price and the
+             *     perpetual's mark part.
+             */
+            risk?: boolean;
             /** @description JUMP's move (0.1 is +10%); a SPIKE's, a share of the planned price (at most 0.05 alone, 0.10 approved). */
             size?: number;
             /** @description TARGET's level. */
@@ -4348,7 +4452,7 @@ export interface components {
             /** @description VOLATILITY's factor. */
             factor?: number;
             duration_seconds?: number;
-            /** @description A TARGET held this long at its level once crossed (then HOLD; at most a day). */
+            /** @description A TARGET held this long at its level once crossed (then HOLD; at most a day); an OVERLAY held at its target between its ramps. */
             hold_seconds?: number;
             /**
              * Format: date-time
@@ -9391,7 +9495,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The event. */
+            /** @description The event; an OVERLAY's events, one a pair. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -9399,6 +9503,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         event: components["schemas"]["SimEvent"];
+                    } | {
+                        items: components["schemas"]["SimEventItem"][];
                     };
                 };
             };
@@ -9461,6 +9567,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimPlan"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSimPrices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The prices by pair. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        prices: {
+                            [key: string]: components["schemas"]["Decimal"];
+                        };
+                    };
                 };
             };
             default: components["responses"]["Error"];

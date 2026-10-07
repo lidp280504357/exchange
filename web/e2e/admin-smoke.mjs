@@ -728,6 +728,29 @@ try {
   await page.waitForSelector("[data-testid=sim-target-preview] svg[role=img]", { timeout: 20000 });
   await waitText("能按时到达");
   await t.shot("4e-sim-target");
+  // Price events on any pair (J3): the leverage reached by default, its
+  // hint always there; BTC-USDT chosen shows its price now and the
+  // target's; the confirmation says it too, then is closed, nothing started.
+  await page.waitForSelector("[data-testid=overlay-card] [data-testid=overlay-open]", { timeout: 20000 });
+  await page.waitForFunction(() => /强平/.test(document.querySelector("[data-testid=overlay-risk-hint]")?.textContent ?? ""));
+  if ((await page.$eval("#overlay-spare", (el) => el.getAttribute("data-state"))) !== "unchecked") {
+    throw new Error("a price event spares the perpetuals and the leverage only when ticked");
+  }
+  await page.click("[data-testid=overlay-add-pair]");
+  await page.waitForSelector("[role=listbox]");
+  await page.keyboard.type("BTC-USDT");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("[data-testid=overlay-pair-BTC-USDT]");
+  await page.waitForFunction(
+    () => /BTC-USDT\s*现价 [0-9,.]+\s*目标 [0-9,.]+\s*\+1\.00%/.test(document.querySelector("[data-testid=overlay-lines]")?.textContent ?? ""),
+    { timeout: 20000 },
+  );
+  await page.click("[data-testid=overlay-start]");
+  await page.waitForSelector("[role=dialog] [data-testid=overlay-lines]");
+  await waitText("连带合约与杠杆");
+  await t.shot("4e-sim-overlay");
+  await clickButton("取消", "[role=dialog]");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   await go("/sim/events");
   await waitText("排队与进行中");
   await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
@@ -746,7 +769,7 @@ try {
   await rows(1);
   await waitText("机器人");
   await noError("the bots' orders");
-  ok("the simulated market: overview, price control with an event's impact (not started) and a target's preview, events, bots, the coin's holders; the bots' orders");
+  ok("the simulated market: overview, price control with an event's impact (not started), a target's preview and a price event on any pair (its leverage hint, confirmation closed), events, bots, the coin's holders; the bots' orders");
 
   // 9e. Margin trading (design 2026-10-06 §8, E5): its pages sit behind
   // margin.enabled. Off, the sidebar has none of them and their addresses

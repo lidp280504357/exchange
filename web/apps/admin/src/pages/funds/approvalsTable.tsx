@@ -104,6 +104,16 @@ export function ApprovalsTable({ admin, list }: { admin: Admin; list: CursorList
 /** simKind reports whether a request is a simulated market's change (C5). */
 const simKind = (kind: string) => kind === "SIM_EVENT" || kind === "SIM_PARAMS";
 
+/** overlayRequest reports whether a request is for a price event on any pair (J3). */
+function overlayRequest(a: Approval): boolean {
+  if (a.kind !== "SIM_EVENT") return false;
+  try {
+    return (JSON.parse((a.payload as Record<string, string>).change ?? "{}") as { type?: string }).type === "OVERLAY";
+  } catch {
+    return false;
+  }
+}
+
 /** marginKind reports whether a request is margin trading's (E5): its terms, or a liquidation by hand. */
 const marginKind = (kind: string) => kind === "MARGIN_PARAMS" || kind === "MARGIN_LIQUIDATE";
 
@@ -141,10 +151,16 @@ function SimChange({ a, full }: { a: Approval; full?: boolean }) {
   let spike = false;
   if (a.kind === "SIM_EVENT") {
     try {
-      const e = JSON.parse(p.change ?? "{}") as Partial<Omit<SimEvent, "spikes">> & { spikes?: RequestedSpike[] };
+      const e = JSON.parse(p.change ?? "{}") as Partial<Omit<SimEvent, "spikes">> & {
+        spikes?: RequestedSpike[];
+        symbols?: string[];
+        target_pct?: number;
+        target_price?: string;
+      };
       what = eventText({ type: e.type ?? "JUMP", size: e.size ?? 0, price: e.price ?? null, mu: e.mu ?? 0, factor: e.factor ?? 0,
         duration_seconds: e.duration_seconds ?? 0, hold_seconds: e.hold_seconds ?? 0, direction: e.direction, then: e.then,
-        width_seconds: e.width_seconds, spikes: e.spikes });
+        width_seconds: e.width_seconds, spikes: e.spikes, symbols: e.symbols, target_pct: e.target_pct, target_price: e.target_price,
+        ramp_up_seconds: e.ramp_up_seconds, ramp_down_seconds: e.ramp_down_seconds, risk: e.risk });
       spikes = e.spikes ?? [];
       spike = e.type === "SPIKE";
     } catch {
@@ -154,7 +170,12 @@ function SimChange({ a, full }: { a: Approval; full?: boolean }) {
   return (
     <span className="flex flex-col">
       <span>{what}</span>
-      {p.move && <span className="text-xs text-fg-3">{t("admin.sim.measuredMove", { move: pct(Number(p.move), 1) })}</span>}
+      {p.move && (
+        <span className="text-xs text-fg-3">
+          {t("admin.sim.measuredMove", { move: pct(Number(p.move), 1) })}
+          {p.symbol && ` · ${p.symbol}`}
+        </span>
+      )}
       {full &&
         spikes.map((s, i) => (
           <span key={i} className="text-xs text-fg-2">
@@ -359,7 +380,7 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
           confirmWord={lastFour(a.id)}
           run={run(true)}
         >
-          {simKind(a.kind) && <SimRequestNow id={a.id} />}
+          {simKind(a.kind) && <SimRequestNow id={a.id} overlay={overlayRequest(a)} />}
         </FundAction>
       )}
       {!attempted(a) && (

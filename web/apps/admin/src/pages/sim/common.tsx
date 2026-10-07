@@ -38,9 +38,10 @@ export function ImpactLines({ i }: { i: SimImpact }) {
  * SimRequestNow measures a simulated market's request for the
  * administrator deciding it (C5.5 ④): when it lapses, where it would take
  * the price now beside the move measured when it was asked for, and what
- * that would do to the perpetual.
+ * that would do to the perpetual. A price event on any pair (overlay) is
+ * measured against Binance's price when carried out (J3).
  */
-export function SimRequestNow({ id }: { id: string }) {
+export function SimRequestNow({ id, overlay }: { id: string; overlay?: boolean }) {
   const { t } = useTranslation();
   const q = useQuery({
     queryKey: [...simKey, "preview", id],
@@ -61,8 +62,9 @@ export function SimRequestNow({ id }: { id: string }) {
           {pv.requested_move && <span className="text-fg-3"> · {t("admin.sim.askedMove", { move: pct(Number(pv.requested_move), 1) })}</span>}
         </span>
       ) : (
-        <span className="text-fg-3">{t("admin.sim.noDirectMove")}</span>
+        <span className="text-fg-3">{t(overlay ? "admin.sim.overlay.requestNow" : "admin.sim.noDirectMove")}</span>
       )}
+      {overlay && pv.requested_move && <span className="text-fg-3">{t("admin.sim.askedMove", { move: pct(Number(pv.requested_move), 1) })}</span>}
       {pv.impact && <ImpactLines i={pv.impact} />}
       {pv.spike_impacts?.map((s) => (
         <span key={s.price} className="flex flex-col gap-0.5 border-t border-line-1 pt-1.5" data-testid="sim-request-spike">
@@ -112,15 +114,25 @@ export function EventStatus({ e }: { e: SimEvent }) {
 export function EndEvent({ e, text }: { e: SimEvent; text: string }) {
   const { t } = useTranslation();
   const running = e.status === "RUNNING";
+  // A running price event on any pair comes back to Binance's price in 3 seconds (J3).
+  const restore = running && e.type === "OVERLAY";
   return (
     <DangerAction
       trigger={(open) => (
         <Button size="sm" variant={running ? "danger" : "secondary"} onClick={open} data-testid={`sim-end-${e.id}`}>
-          {t(running ? "admin.sim.end" : "admin.sim.cancel")}
+          {t(restore ? "admin.sim.overlay.restore" : running ? "admin.sim.end" : "admin.sim.cancel")}
         </Button>
       )}
-      title={t(running ? "admin.sim.endTitle" : "admin.sim.cancelTitle")}
-      description={e.type === "HALT" ? t("admin.sim.endHalt") : e.type === "TARGET" ? t("admin.simTarget.endTarget") : undefined}
+      title={t(restore ? "admin.sim.overlay.restoreTitle" : running ? "admin.sim.endTitle" : "admin.sim.cancelTitle")}
+      description={
+        restore
+          ? t("admin.sim.overlay.restoreHint")
+          : e.type === "HALT"
+            ? t("admin.sim.endHalt")
+            : e.type === "TARGET"
+              ? t("admin.simTarget.endTarget")
+              : undefined
+      }
       target={text}
       confirmWord={lastFour(e.id)}
       run={async (reason) => adminData(await adminApi.POST("/admin/v1/sim/events/{id}/end", { params: { path: { id: e.id } }, body: { reason } }))}
@@ -167,13 +179,27 @@ export function MintShares({ payload: p, full }: { payload: Record<string, strin
 /** minutes says seconds in minutes, with a decimal when not whole. */
 export const minutes = (s: number) => (s % 60 === 0 ? String(s / 60) : (s / 60).toFixed(1));
 
+/** utc is a datetime-local value as an RFC 3339 time in UTC, "" when blank. */
+export function utc(local: string): string {
+  if (!local) return "";
+  const at = new Date(local);
+  return Number.isNaN(at.getTime()) ? "" : at.toISOString().replace(/\.\d+Z$/, "Z");
+}
+
 /**
  * EventFields are what an event's text reads, of an event or of a request
  * for one: a threshold target's side, what follows its crossing and its
- * spikes, a spike's width (A6).
+ * spikes, a spike's width (A6); a price event's pair (an event) or pairs
+ * and target (a request), its ramps and whether it reaches the leverage
+ * (J3).
  */
 export type EventFields = Pick<SimEvent, "type" | "size" | "price" | "mu" | "factor" | "duration_seconds" | "hold_seconds"> &
-  Partial<Pick<SimEvent, "direction" | "then" | "width_seconds">> & { spikes?: unknown[] | null };
+  Partial<Pick<SimEvent, "direction" | "then" | "width_seconds" | "symbol" | "target_factor" | "ramp_up_seconds" | "ramp_down_seconds" | "risk">> & {
+    spikes?: unknown[] | null;
+    symbols?: string[];
+    target_pct?: number;
+    target_price?: string;
+  };
 
 /** useEventText says what an event does: its type and its own numbers. */
 export function useEventText() {
@@ -181,6 +207,22 @@ export function useEventText() {
   return (e: EventFields) => {
     const over = e.duration_seconds > 0 ? t("admin.sim.over", { s: e.duration_seconds }) : "";
     switch (e.type) {
+      case "OVERLAY": {
+        // A price event on any pair (J3): its pairs, its target (a share of
+        // Binance's price, or a price), its ramps, the leverage reached or spared.
+        const pairs = e.symbol ?? e.symbols?.join(", ") ?? "";
+        const target =
+          e.target_pct !== undefined
+            ? pct(e.target_pct / 100)
+            : e.target_price
+              ? `→ ${e.target_price}`
+              : e.target_factor
+                ? `${pct(e.target_factor - 1)} → ${price(e.price)}`
+                : "";
+        const seconds = t("admin.sim.overlay.seconds", { up: e.ramp_up_seconds ?? 0, hold: e.hold_seconds, down: e.ramp_down_seconds ?? 0 });
+        const risk = t(e.risk === false ? "admin.sim.overlay.spared" : "admin.sim.overlay.withRisk");
+        return `${t("admin.sim.types.OVERLAY")} ${pairs} ${target} · ${seconds} · ${risk}`;
+      }
       case "JUMP":
         return `${t("admin.sim.types.JUMP")} ${pct(e.size, 1)}${over || ` · ${t("admin.sim.atOnce")}`}`;
       case "TARGET": {
