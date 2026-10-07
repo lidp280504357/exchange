@@ -16,6 +16,7 @@
 - gRPC `LedgerService`（`ledger-service:9185`）：`Freeze`、`Unfreeze`（`ORDER_*`/`WITHDRAW_*`；`account_type` 可为 `SPOT`、`FUTURES`、`MARGIN_CROSS`、`MARGIN_ISOLATED`，逐仓带 `scope` = 交易对）、`Transfer`、`GetBalances`（只有 SPOT/FUTURES），写操作都要幂等键；杠杆的 `PostMargin`、`AccrueMarginInterest`、`GetMarginBalances`、`ListMarginDebts` 只给 margin-service 用，见「杠杆账户」。
 - REST（经网关，需登录）：`GET /v1/account/balances`、`POST /v1/account/transfers`（必须带 `Idempotency-Key`）、`GET /v1/account/transfers`、`GET /v1/account/ledger`。
   - `/v1/account/ledger`（两站的资金流水）按用户的每个账户沿 `(account_id, account_version)` 倒着取最新的几行，再按行 ID 合并成一页（同一账户里版本与 ID 同序：两者都在账户锁内取得）。2026-10-07 之前按行 ID 倒序扫全表再按用户过滤：分录行比一页少的新用户要把全部 350 万行走一遍，测试服 58 秒（网关 20 秒超时，冒烟测试的「资金流水」步因此失败），改后 17 毫秒；集成测试 `TestEntriesAcrossAccounts` 校验跨账户的顺序、翻页与过滤。
+  - 按类型筛（`?type=`，B141）：`journal_line_types`（迁移 ledger 00010）把每一行按 `(account_id, entry_type, line_id)` 列一遍，筛选时每个账户沿这个键倒着取该类型的行，账户里少见的类型不用把其余的行走一遍（测试服一个做市机器人的划转记录 4.5 秒 → 30 毫秒）；`TRADE_SETTLE` 同时取 `HOUSE_TRADE_SETTLE`（和 HOUSE 的成交对用户就是成交，ADR-0015），两种并排取再合并。这张表由 `journal_lines` 的 AFTER INSERT 触发器在同一事务里写入（类型从分录头读，不会不一致），和分录一样只增不改（更新、删除、清空都被拒）。迁移时锁住 `journal_lines`（SHARE）后一次性补齐已有的行，测试服 350 万行约 45 秒；为此 ledger-service 的健康检查宽限 5 分钟。没有在 `journal_lines` 上加列：补一列要重写全部分录行（测试服实测约 5 分钟，期间要关掉只增不改的触发器）。
 - 划转：现货 ↔ 合约在一个事务里完成（§13 验收 11）。需要功能开关 `account.transfer` 且账户资格允许（user-service `CheckEligibility(TRANSFER)`）；余额不足的划转记为 `FAILED` 并保留，同键重试得到同样的错误；成功/失败分别发 `account.AccountTransferCompleted`/`AccountTransferFailed`。
 - 管理后台（2026-10-02 设计 C2）：
   - `Adjust` 可调现货或合约账户（`account_type`，默认 `SPOT`）。
