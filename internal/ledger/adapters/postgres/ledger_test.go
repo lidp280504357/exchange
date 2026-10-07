@@ -257,6 +257,14 @@ func TestEntriesAcrossAccounts(t *testing.T) {
 			}
 		}
 	}
+	// A trade against HOUSE (ADR-0015) shows and filters as TRADE_SETTLE.
+	house := domain.Posting{IdemKey: "house-trade-" + user, EntryType: domain.EntryHouseTradeSettle, Lines: []domain.Line{
+		{Account: domain.UserAccount(user, domain.AccountSpot, "USDT"), Amount: d("-3"), Kind: domain.Available},
+		{Account: domain.SystemAccount(domain.AccountMarketMaker, "USDT"), Amount: d("3"), Kind: domain.Available},
+	}}
+	if _, err := svc.Post(ctx, house); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.Freeze(ctx, "entries-order", domain.EntryOrderFreeze, user, domain.AccountSpot, "USDT", d("5"), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -275,8 +283,8 @@ func TestEntriesAcrossAccounts(t *testing.T) {
 		}
 		types[e.AccountType] = true
 	}
-	// Four transfers of two lines each, the freeze's two lines and the
-	// welcome credit's (USDT and BTC).
+	// Four transfers of two lines each, the trade's, the freeze's two lines
+	// and the welcome credit's (USDT and BTC).
 	if transfers != 8 || !types[domain.AccountSpot] || !types[domain.AccountFutures] || all[0].EntryType != domain.EntryOrderFreeze {
 		t.Fatalf("lines: %d transfer lines of %d, account types %v, newest %s", transfers, len(all), types, all[0].EntryType)
 	}
@@ -311,6 +319,33 @@ func TestEntriesAcrossAccounts(t *testing.T) {
 		if e.EntryType != domain.EntryAccountTransfer {
 			t.Fatalf("type filter let through %s", e.EntryType)
 		}
+	}
+	// The filtered pages read journal_line_types (B141): pages of 3 go on
+	// where the last stopped.
+	var transfersPaged int
+	before = 0
+	for range len(all) {
+		page, next, err := svc.Entries(ctx, user, "", domain.EntryAccountTransfer, before, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, e := range page {
+			if e.EntryType != domain.EntryAccountTransfer || (i > 0 && e.ID >= page[i-1].ID) || (before > 0 && e.ID >= before) {
+				t.Fatalf("transfer page after %d: %+v", before, page)
+			}
+		}
+		transfersPaged += len(page)
+		if next == 0 {
+			break
+		}
+		before = next
+	}
+	if transfersPaged != transfers {
+		t.Fatalf("transfer pages hold %d lines, want %d", transfersPaged, transfers)
+	}
+	trades, _, err := svc.Entries(ctx, user, "", domain.EntryTradeSettle, 0, 10)
+	if err != nil || len(trades) != 1 || trades[0].EntryType != domain.EntryTradeSettle || !trades[0].Amount.Equal(d("-3")) {
+		t.Fatalf("trades against HOUSE as TRADE_SETTLE: %+v %v", trades, err)
 	}
 	// The welcome credit's BTC line is the only BTC one.
 	want := 0

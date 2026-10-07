@@ -195,31 +195,60 @@ func (r journals) Insert(ctx context.Context, j domain.Journal, lines []domain.P
 	return seq, nil
 }
 
+// A user's ledger lines, newest first (Entries): $1 the owner, $2 below
+// this line id, $3 the asset (empty for all), $4 how many. A trade against HOUSE
+// is a trade to its user (ADR-0015): it shows as TRADE_SETTLE.
+const (
+	entriesColumns = `SELECT l.id, l.journal_id,
+		CASE WHEN j.entry_type = 'HOUSE_TRADE_SETTLE' THEN 'TRADE_SETTLE' ELSE j.entry_type END,
+		a.account_type, l.asset, l.amount, l.balance_kind, l.available_after, l.frozen_after, j.posted_at`
+	entriesOwner = `
+		WHERE a.owner_id = $1 AND a.owner_type = 'USER' AND ($3 = '' OR a.asset = $3)
+		ORDER BY l.id DESC LIMIT $4`
+	// Every type: each account's lines backwards on (account_id,
+	// account_version).
+	entriesAll = entriesColumns + `
+		FROM accounts a CROSS JOIN LATERAL (
+			SELECT l.* FROM journal_lines l WHERE l.account_id = a.id AND l.id < $2 ORDER BY l.account_version DESC LIMIT $4
+		) l JOIN journals j ON j.id = l.journal_id` + entriesOwner
+	// Types $5 and $6 (empty for none): each account's lines of each type
+	// backwards on journal_line_types' key (account_id, entry_type, line_id).
+	entriesOfTypes = entriesColumns + `
+		FROM accounts a CROSS JOIN LATERAL (
+			SELECT t.line_id FROM (
+				(SELECT t.line_id FROM journal_line_types t
+					WHERE t.account_id = a.id AND t.entry_type = $5 AND t.line_id < $2 ORDER BY t.line_id DESC LIMIT $4)
+				UNION ALL
+				(SELECT t.line_id FROM journal_line_types t
+					WHERE t.account_id = a.id AND t.entry_type = $6 AND t.line_id < $2 ORDER BY t.line_id DESC LIMIT $4)
+			) t ORDER BY t.line_id DESC LIMIT $4
+		) t JOIN journal_lines l ON l.id = t.line_id JOIN journals j ON j.id = l.journal_id` + entriesOwner
+)
+
 func (r journals) Entries(ctx context.Context, ownerID, asset, entryType string, beforeID int64, limit int) ([]domain.Entry, error) {
 	if beforeID <= 0 {
 		beforeID = 1<<63 - 1
 	}
-	// A trade against HOUSE is a trade to its user (ADR-0015): it shows and
-	// filters as TRADE_SETTLE.
-	//
-	// The newest lines of each of the user's accounts, read backwards on
-	// (account_id, account_version), then the newest of those: a line's
-	// version grows with its id within an account (both are taken under
-	// the account's lock). Joined the other way the planner walked the
-	// whole of journal_lines backwards by id for a user with fewer lines
-	// than the page: 58 s over 3.5 million lines on the test server
-	// (2026-10-07; 17 ms this way).
-	rows, err := r.q.Query(ctx, `SELECT l.id, l.journal_id, l.entry_type, a.account_type, l.asset, l.amount, l.balance_kind,
-			l.available_after, l.frozen_after, l.posted_at
-		FROM accounts a CROSS JOIN LATERAL (
-			SELECT l.id, l.journal_id, l.asset, l.amount, l.balance_kind, l.available_after, l.frozen_after, j.posted_at,
-				CASE WHEN j.entry_type = 'HOUSE_TRADE_SETTLE' THEN 'TRADE_SETTLE' ELSE j.entry_type END AS entry_type
-			FROM journal_lines l JOIN journals j ON j.id = l.journal_id
-			WHERE l.account_id = a.id AND l.id < $2
-				AND ($4 = '' OR j.entry_type = $4 OR ($4 = 'TRADE_SETTLE' AND j.entry_type = 'HOUSE_TRADE_SETTLE'))
-			ORDER BY l.account_version DESC LIMIT $5) l
-		WHERE a.owner_id = $1 AND a.owner_type = 'USER' AND ($3 = '' OR a.asset = $3)
-		ORDER BY l.id DESC LIMIT $5`, ownerID, beforeID, asset, entryType, limit)
+	// The newest lines of each of the user's accounts, then the newest of
+	// those (entriesAll, entriesOfTypes). Joined the other way the planner
+	// walked the whole of journal_lines backwards by id for a user with
+	// fewer lines than the page: 58 s over 3.5 million lines on the test
+	// server (2026-10-07; 17 ms this way). Within an account a line's
+	// version grows with its id (both are taken under the account's lock);
+	// filtered by type, one the account seldom has costs no walk through the
+	// rest (B141: 4.5 s for a busy bot's transfers before, 30 ms).
+	var rows pgx.Rows
+	var err error
+	if entryType == "" {
+		rows, err = r.q.Query(ctx, entriesAll, ownerID, beforeID, asset, limit)
+	} else {
+		// TRADE_SETTLE covers the trades against HOUSE.
+		also := ""
+		if entryType == domain.EntryTradeSettle {
+			also = domain.EntryHouseTradeSettle
+		}
+		rows, err = r.q.Query(ctx, entriesOfTypes, ownerID, beforeID, asset, limit, entryType, also)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list entries: %w", err)
 	}

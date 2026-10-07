@@ -243,6 +243,15 @@ func TestLedgerSchema(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("balanced journal: %v", err)
 	}
+	// Each line is listed under its account and its journal's type (B141).
+	var listed int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM journal_line_types t JOIN journal_lines l ON l.id = t.line_id
+		WHERE l.journal_id = $1 AND t.account_id = l.account_id AND t.entry_type = 'MANUAL_ADJUSTMENT'`, journal).Scan(&listed); err != nil || listed != 2 {
+		t.Fatalf("line types: %d %v", listed, err)
+	}
+	rejects(t, db, "line types are append-only", `UPDATE journal_line_types SET entry_type = 'TRADE_FEE'`)
+	rejects(t, db, "line types are kept", `DELETE FROM journal_line_types`)
+	rejects(t, db, "line types are not truncated", `TRUNCATE journal_line_types`)
 	tx, err = db.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
