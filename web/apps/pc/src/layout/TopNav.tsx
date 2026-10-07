@@ -9,7 +9,7 @@ import { Button, cn } from "@exchange/ui";
 import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Bell, Bitcoin, ChartCandlestick, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark,
-  ScrollText, Wallet,
+  LogOut, MonitorSmartphone, ScrollText, Settings, ShieldCheck, UserRound, Wallet,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -122,11 +122,23 @@ export function TopNav() {
                 align="right"
               >
                 <UserLine className="mb-1 flex min-w-60 items-center gap-3 border-b border-line-1 px-4 pb-3 pt-2" />
-                <MenuLink to={routes.profile}>{t("nav.profile")}</MenuLink>
-                <MenuLink to={routes.security}>{t("nav.security")}</MenuLink>
-                <MenuLink to={routes.sessions}>{t("nav.sessions")}</MenuLink>
-                <MenuLink to={routes.settings}>{t("nav.settings")}</MenuLink>
-                <button type="button" onClick={() => void signOut()} className="w-full px-4 py-2 text-left text-sm text-fg-2 hover:bg-bg-2 hover:text-fg-1">
+                {/* Each item with an icon in the other menus' box (the user's request of 14:2x, F13). */}
+                <MenuLink to={routes.profile} icon={<UserRound size={18} />}>
+                  {t("nav.profile")}
+                </MenuLink>
+                <MenuLink to={routes.security} icon={<ShieldCheck size={18} />}>
+                  {t("nav.security")}
+                </MenuLink>
+                <MenuLink to={routes.sessions} icon={<MonitorSmartphone size={18} />}>
+                  {t("nav.sessions")}
+                </MenuLink>
+                <MenuLink to={routes.settings} icon={<Settings size={18} />}>
+                  {t("nav.settings")}
+                </MenuLink>
+                <button type="button" onClick={() => void signOut()} className={cn(LINK_ROW, "w-full text-left")}>
+                  <EntryIcon>
+                    <LogOut size={18} />
+                  </EntryIcon>
                   {t("nav.logout")}
                 </button>
               </Menu>
@@ -215,9 +227,7 @@ function MenuEntry({ to, icon, title, hint, onClick }: { to: string; icon: React
       }}
       className="group/entry flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-bg-2"
     >
-      <span className="grid size-9 shrink-0 place-items-center rounded-2 bg-bg-2 text-fg-2 transition-colors group-hover/entry:bg-brand-soft group-hover/entry:text-brand">
-        {icon}
-      </span>
+      <EntryIcon>{icon}</EntryIcon>
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="text-sm font-medium text-fg-1">{title}</span>
         <span className="text-xs text-fg-3">{hint}</span>
@@ -226,13 +236,22 @@ function MenuEntry({ to, icon, title, hint, onClick }: { to: string; icon: React
   );
 }
 
-function MenuLink({ to, children }: { to: string; children: ReactNode }) {
+// EntryIcon is the icon box of every menu's entries.
+function EntryIcon({ children }: { children: ReactNode }) {
   return (
-    <Link
-      to={to}
-      onClick={(e) => e.currentTarget.blur()}
-      className="block px-4 py-2 text-sm text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1"
-    >
+    <span className="grid size-9 shrink-0 place-items-center rounded-2 bg-bg-2 text-fg-2 transition-colors group-hover/entry:bg-brand-soft group-hover/entry:text-brand">
+      {children}
+    </span>
+  );
+}
+
+// A one-line entry of the account menu: an icon and a title, no line under it.
+const LINK_ROW = "group/entry flex items-center gap-3 px-4 py-1.5 text-sm font-medium text-fg-1 transition-colors hover:bg-bg-2";
+
+function MenuLink({ to, icon, children }: { to: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <Link to={to} onClick={(e) => e.currentTarget.blur()} className={LINK_ROW}>
+      <EntryIcon>{icon}</EntryIcon>
       {children}
     </Link>
   );

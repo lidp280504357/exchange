@@ -62,6 +62,8 @@ export type AppCardProps = {
 export function AppCard({ platform, app, labels, minOs, notes, qr, actions, steps, stepsOpen, layout = "wide", index = 0, className }: AppCardProps) {
   const Icon = platform === "ios" ? Apple : Bot;
   const wide = layout === "wide";
+  const stepList = steps ?? [];
+  const hasSteps = stepList.length > 0;
   const facts = (
     <dl className={cn("grid min-w-0 content-start grid-cols-[auto_minmax(0,1fr)] text-sm", wide ? "flex-1 gap-x-4 gap-y-2" : "gap-x-4 gap-y-1.5")}>
       {app.version && (
@@ -129,16 +131,23 @@ export function AppCard({ platform, app, labels, minOs, notes, qr, actions, step
           <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-fg-2">{notes}</p>
         </div>
       )}
-      {actions && <div className={cn(wide ? "mt-auto flex flex-wrap items-center gap-4" : "flex flex-col gap-1")}>{actions}</div>}
-      {steps && steps.length > 0 && (
-        <details open={stepsOpen} className="rounded-2 bg-bg-2 px-4 py-3 text-sm">
-          <summary className="cursor-pointer font-medium text-fg-1">{labels.help}</summary>
-          <ol className="mt-2 list-decimal space-y-1 pl-5 leading-relaxed text-fg-2">
-            {steps.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ol>
-        </details>
+      {(actions || hasSteps) && (
+        // The buttons and the steps keep to the card's bottom, even with no
+        // buttons (an enterprise iOS app on a PC): side by side, the cards'
+        // steps line up (review, F14).
+        <div className={cn("flex flex-col", wide ? "mt-auto gap-5" : "gap-4")}>
+          {actions && <div className={cn(wide ? "flex flex-wrap items-center gap-4" : "flex flex-col gap-1")}>{actions}</div>}
+          {hasSteps && (
+            <details open={stepsOpen} className="rounded-2 bg-bg-2 px-4 py-3 text-sm">
+              <summary className="cursor-pointer font-medium text-fg-1">{labels.help}</summary>
+              <ol className="mt-2 list-decimal space-y-1 pl-5 leading-relaxed text-fg-2">
+                {stepList.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ol>
+            </details>
+          )}
+        </div>
       )}
     </motion.section>
   );
