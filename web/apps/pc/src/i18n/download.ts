@@ -1,0 +1,80 @@
+// Strings of the App download page and the top bar's download menu
+// (namespace pcDownload; design 2026-10-07, App download page §4).
+import zhTW from "./download.zh-TW";
+
+export default {
+  "zh-CN": {
+    pcDownload: {
+      title: "下载 {{brand}} App",
+      subtitle: "在手机上看行情、交易与管理资产，账户与网页版通用",
+      none: "暂未提供 App",
+      noneHint: "用手机浏览器打开本站，会自动进入手机版",
+      platforms: { android: "Android", ios: "iOS" },
+      kinds: { androidFile: "安装包（APK）", androidLink: "下载页", iosOta: "企业签名安装", iosStore: "App Store" },
+      version: "版本",
+      updated: "更新时间",
+      size: "大小",
+      minOs: "系统要求",
+      minAndroid: "Android {{version}} 及以上",
+      minAndroidApi: "Android API {{level}} 及以上",
+      minIos: "iOS {{version}} 及以上",
+      notes: "更新说明",
+      downloadApk: "下载 APK",
+      open: "前往下载",
+      appStore: "前往 App Store",
+      scan: "手机扫码下载",
+      scanIos: "用 iPhone 或 iPad 扫码，在 Safari 中打开后安装",
+      mobileconfig: "下载配置描述文件",
+      help: "安装说明",
+      helpAndroid: {
+        s1: "下载完成后点按安装包进行安装。",
+        s2: "如果提示禁止安装未知来源的应用，请在系统设置里允许当前浏览器安装应用，再点按一次安装包。",
+        s3: "可以用上面的 SHA-256 核对下载的文件是否完整。",
+      },
+      helpIos: {
+        s1: "在 iPhone 或 iPad 上用 Safari 打开本页，点按「安装」并在弹窗中确认。",
+        s2: "回到主屏幕，等待图标下载完成。",
+        s3: "首次打开如提示「未受信任的企业级开发者」，前往 设置 → 通用 → VPN 与设备管理，信任该开发者后再打开。",
+      },
+      menu: { title: "扫码下载 App", more: "更多下载方式" },
+    },
+  },
+  en: {
+    pcDownload: {
+      title: "Get the {{brand}} app",
+      subtitle: "Markets, trading and your assets on your phone, with the same account as the website",
+      none: "No app yet",
+      noneHint: "Open this site in a phone's browser and it takes you to the mobile site",
+      platforms: { android: "Android", ios: "iOS" },
+      kinds: { androidFile: "Installer (APK)", androidLink: "Download page", iosOta: "Enterprise install", iosStore: "App Store" },
+      version: "Version",
+      updated: "Updated",
+      size: "Size",
+      minOs: "Requires",
+      minAndroid: "Android {{version}} or later",
+      minAndroidApi: "Android API {{level}} or later",
+      minIos: "iOS {{version}} or later",
+      notes: "What's new",
+      downloadApk: "Download APK",
+      open: "Go to download",
+      appStore: "Open the App Store",
+      scan: "Scan with your phone",
+      scanIos: "Scan with an iPhone or iPad and install from Safari",
+      mobileconfig: "Download the configuration profile",
+      help: "How to install",
+      helpAndroid: {
+        s1: "Once downloaded, tap the installer to install it.",
+        s2: "If installing apps from unknown sources is blocked, allow your browser to install apps in the system settings, then tap the installer again.",
+        s3: "The SHA-256 above tells whether the file came down whole.",
+      },
+      helpIos: {
+        s1: "On the iPhone or iPad, open this page in Safari, tap Install and confirm.",
+        s2: "Go back to the home screen and wait for the icon to finish.",
+        s3: "If the first launch says Untrusted Enterprise Developer, trust the developer in Settings → General → VPN & Device Management, then open it again.",
+      },
+      menu: { title: "Scan to get the app", more: "More download options" },
+    },
+  },
+  // Generated from "zh-CN" (core's scripts/gen-zh-tw.mjs).
+  "zh-TW": zhTW,
+};

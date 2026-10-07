@@ -317,6 +317,47 @@ export async function choosePicture(page, selector, { width = 900, height = 600,
 }
 
 /**
+ * APPS_OFFERED is an answer of GET /v1/platform/apps with both kinds the
+ * download pages show (design 2026-10-07, App download page): an Android
+ * app uploaded in the console and an App Store link for iOS.
+ */
+export const APPS_OFFERED = {
+  android: {
+    mode: "FILE", url: "https://astras.vip/downloads/android/0192a000-0000-7000-8000-000000000001.apk", install_url: null, ios_install: null,
+    package: "vip.astras.app", version: "1.2.0", build: "42", min_os: "24", size: 50541363, sha256: "9f".repeat(32), mobileconfig_url: null,
+    notes: { "zh-CN": "新增价格提醒", en: "Price alerts" }, updated_at: "2026-10-07T03:00:00Z",
+  },
+  ios: {
+    mode: "LINK", url: "https://apps.apple.com/app/id1234567890", install_url: null, ios_install: "APP_STORE", package: null, version: null,
+    build: null, min_os: null, size: null, sha256: null, mobileconfig_url: null, notes: { "zh-CN": "", en: "" }, updated_at: "2026-10-07T03:00:00Z",
+  },
+};
+
+/**
+ * withApps runs fn while the page's GET /v1/platform/apps answers apps
+ * (the download pages' states without changing the server's settings),
+ * then lets the network be again.
+ */
+export async function withApps(page, apps, fn) {
+  const answer = (req) => {
+    if (req.isInterceptResolutionHandled()) return;
+    if (new URL(req.url()).pathname === "/v1/platform/apps") {
+      void req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(apps) });
+    } else {
+      void req.continue();
+    }
+  };
+  await page.setRequestInterception(true);
+  page.on("request", answer);
+  try {
+    await fn();
+  } finally {
+    page.off("request", answer);
+    await page.setRequestInterception(false);
+  }
+}
+
+/**
  * menuOnTop scrolls the PC site's page halfway down, requires the table's
  * header to be stuck right under the top bar (else there is nothing to
  * cover the menu and the check would prove nothing: a short page, review

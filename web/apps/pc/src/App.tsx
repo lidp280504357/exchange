@@ -11,6 +11,7 @@ import { accountRoutes } from "./pages/account/routes";
 import { assetRoutes } from "./pages/assets/routes";
 import { authRoutes } from "./pages/auth/routes";
 import { contentRoutes } from "./pages/content/routes";
+import { downloadRoutes } from "./pages/download/routes";
 import { futuresRoutes } from "./pages/futures/routes";
 import { marketRoutes } from "./pages/markets/routes";
 import { tradeRoutes } from "./pages/trade/routes";
@@ -24,7 +25,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 // screen; a toast raised before it arrives waits in the store.
 const Toaster = lazy(() => import("@exchange/ui/components/Toast").then((m) => ({ default: m.Toaster })));
 
-const shellRoutes = [...marketRoutes, ...futuresRoutes, ...assetRoutes, ...accountRoutes, ...contentRoutes];
+const shellRoutes = [...marketRoutes, ...futuresRoutes, ...assetRoutes, ...accountRoutes, ...contentRoutes, ...downloadRoutes];
 
 function route(r: PageRoute) {
   const element = r.auth ? <RequireAuth>{r.element}</RequireAuth> : r.element;

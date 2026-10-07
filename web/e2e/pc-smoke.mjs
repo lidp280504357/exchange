@@ -18,10 +18,11 @@
 // terminal's 数据 tab, the futures category's columns, /futures/data),
 // notifications, devices,
 // the profile (the drawn username, a rename, an avatar uploaded and
-// removed), the language switch and sign-out. Script errors fail the run; every API
+// removed), the App download page and entries, the language switch and
+// sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { choosePicture, legendClear, menuOnTop, ok, sleep, start } from "./lib.mjs";
+import { APPS_OFFERED, choosePicture, legendClear, menuOnTop, ok, sleep, start, withApps } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -579,6 +580,45 @@ try {
   await page.waitForSelector('[data-testid="profile-avatar"] svg[data-avatar-default]', { visible: true, timeout: 15000 });
   await page.waitForSelector('header svg[data-avatar-default]', { visible: true });
   ok(`the profile: ${drawn} drawn at sign-up and the built-in avatar; renamed to ${renamed} (7 days to wait); a picture uploaded (${uploaded.side} px WebP, the top bar's 64 px) and back to the default`);
+
+  // 8c. App downloads (design 2026-10-07, App download page, batch H3): the
+  // page as the server has it (no app offered: "no app yet", and neither
+  // the top bar nor the footer offers one; offered: a card each), then with
+  // the answer of /v1/platform/apps replaced by an uploaded Android app and
+  // an App Store link: a card each with its QR code, the APK's facts and
+  // button, the store's button; the top bar's entry opens a QR code for
+  // each, and the footer leads to the page.
+  const served = await page.evaluate(async () => (await fetch("/v1/platform/apps")).json());
+  await go("/download");
+  await page.waitForSelector('[data-testid="download-page"]', { visible: true, timeout: 20000 });
+  if (!served.android && !served.ios) {
+    await waitText("暂未提供 App");
+    if (await page.$('header [data-testid="download-menu"], footer a[href="/download"]')) throw new Error("the top bar or the footer offers apps while none is");
+  } else {
+    for (const p of ["android", "ios"]) if (served[p]) await page.waitForSelector(`[data-testid="app-${p}"]`, { visible: true });
+  }
+  await withApps(page, APPS_OFFERED, async () => {
+    await go("/download");
+    await page.waitForSelector('[data-testid="app-android"]', { visible: true, timeout: 20000 });
+    const cards = await page.evaluate(() =>
+      ["android", "ios"].map((p) => {
+        const card = document.querySelector(`[data-testid="app-${p}"]`);
+        return { text: card?.innerText ?? "", qr: card?.querySelectorAll('[role="img"] svg').length ?? 0, href: card?.querySelector("a[href]")?.getAttribute("href") };
+      }),
+    );
+    const [apk, store] = cards;
+    for (const want of ["下载 APK", "48.2 MB", "Android 7.0 及以上", "1.2.0"]) if (!apk?.text.includes(want)) throw new Error(`the APK's card has no ${want}: ${apk?.text}`);
+    if (!store?.text.includes("前往 App Store") || store.href !== APPS_OFFERED.ios.url) throw new Error(`the App Store card: ${JSON.stringify(store)}`);
+    if (apk?.qr !== 1 || store?.qr !== 1) throw new Error(`each card has a QR code: ${apk?.qr}, ${store?.qr}`);
+    await page.hover('header [data-testid="download-menu"]');
+    await page.waitForSelector('[data-testid="download-qrs"]', { visible: true, timeout: 10000 });
+    const menuQrs = await page.$$eval('[data-testid="download-qrs"] [role="img"] svg', (svgs) => svgs.length);
+    if (menuQrs !== 2) throw new Error(`the top bar's download panel has ${menuQrs} QR codes`);
+    await shot("8c-download");
+    await page.mouse.move(720, 700);
+    if (!(await page.$('footer a[href="/download"]'))) throw new Error("the footer does not lead to the download page");
+  });
+  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet" without entries'}; with two apps, a card each (QR code, facts, button), the top bar's two QR codes and the footer's link`);
 
   // 9. Settings: English switches the site's language at once; so does
   // Traditional Chinese (design 2026-10-06 繁体中文), shown on the key pages

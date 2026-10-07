@@ -14,6 +14,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
+import { DownloadMenu } from "../features/download/DownloadMenu";
 import { UserLine } from "../features/profile/UserLine";
 import { Logo } from "./Logo";
 import { SearchPalette } from "./SearchPalette";
@@ -24,7 +25,8 @@ const DEFAULT_COIN_CONTRACT = "BTC-USD-PERP";
 /**
  * TopNav: the bar fixed on every page (design §6.1), TOP_NAV_HEIGHT tall — markets, spot,
  * futures, assets and announcements on the left; search, notifications,
- * the account and the language on the right.
+ * the account, the apps to download (while any is offered) and the
+ * language on the right.
  */
 /** The top bar's height (its h-14): what sticky headers of the pages stick under. */
 export const TOP_NAV_HEIGHT = "3.5rem";
@@ -130,6 +132,7 @@ export function TopNav() {
               </Button>
             </>
           )}
+          <DownloadMenu />
           <LanguageMenu />
         </div>
       </div>

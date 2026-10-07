@@ -1,5 +1,6 @@
 import { LOCALE_NAMES, LOCALES, routes, setLocale, switchSite, useSettings } from "@exchange/core";
 import { LEGAL_SLUGS, type LegalSlug } from "@exchange/core/content/index";
+import { useAppsOffered } from "@exchange/core/platform/apps";
 import { useBrandText, useBranding } from "@exchange/core/platform/index";
 import { ChartCredit } from "@exchange/ui";
 import type { ReactNode } from "react";
@@ -29,6 +30,7 @@ export function Footer() {
   const p = useBranding();
   const copyright = useBrandText((x) => x.footer.copyright);
   const compliance = useBrandText((x) => x.footer.compliance);
+  const offered = useAppsOffered();
   return (
     <footer className="border-t border-line-1 bg-bg-1">
       <div className="mx-auto grid max-w-[1440px] grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-8 px-6 py-10 text-sm">
@@ -69,6 +71,8 @@ export function Footer() {
           ))}
         </Column>
         <Column title={t("footer.about")}>
+          {/* The apps to download, while any is offered (design 2026-10-07, App download page §4). */}
+          {offered && <Link to={routes.download}>{t("nav.downloadApp")}</Link>}
           <button type="button" className="text-left" onClick={() => switchSite("m")}>
             {t("footer.toMobile")}
           </button>

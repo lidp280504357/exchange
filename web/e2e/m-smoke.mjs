@@ -15,10 +15,10 @@
 // the futures terminal, the candle charts' legends clear of the highest
 // candle (there and on the coin page), the futures data (the terminal's
 // 数据 tab, the futures category, /futures/data), notifications, devices, help, the profile
-// (the drawn username, a rename, an avatar uploaded and removed), the language switch
-// and sign-out. Script errors fail the run; every API response is checked
+// (the drawn username, a rename, an avatar uploaded and removed), the App download page,
+// the language switch and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
-import { choosePicture, legendClear, ok, sleep, start } from "./lib.mjs";
+import { APPS_OFFERED, choosePicture, legendClear, ok, sleep, start, withApps } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.astras.vip" : APP);
@@ -396,6 +396,38 @@ try {
   await clickButton("恢复默认", "[role=dialog]");
   await page.waitForSelector('[data-testid="profile-avatar"] svg[data-avatar-default]', { visible: true, timeout: 15000 });
   ok(`the profile: ${drawn} drawn at sign-up and the built-in avatar on "me"; renamed to ${renamed} (7 days to wait); a picture uploaded, shown on "me", and back to the default`);
+
+  // 8c. App downloads (design 2026-10-07, App download page, batch H3): the
+  // page as the server has it (no app offered: "no app yet", and "me" has
+  // no download row; offered: a card each), then with the answer of
+  // /v1/platform/apps replaced by an uploaded Android app and an App Store
+  // link: this iPhone's platform first, marked as this phone, with the
+  // store's button; the APK's card with its button and install steps; and
+  // the download row on "me".
+  const served = await page.evaluate(async () => (await fetch("/v1/platform/apps")).json());
+  await go("/download");
+  await page.waitForSelector('[data-testid="download-page"]', { visible: true, timeout: 20000 });
+  if (!served.android && !served.ios) {
+    await waitText("暂未提供 App");
+    await go("/me");
+    await page.waitForSelector('[data-testid="me-identity"]', { visible: true, timeout: 20000 });
+    if (await page.$('a[href="/download"]')) throw new Error('"me" offers apps while none is');
+  } else {
+    for (const p of ["android", "ios"]) if (served[p]) await page.waitForSelector(`[data-testid="app-${p}"]`, { visible: true });
+  }
+  await withApps(page, APPS_OFFERED, async () => {
+    await go("/download");
+    await page.waitForSelector('[data-testid="app-android"]', { visible: true, timeout: 20000 });
+    const cards = await page.$$eval('[data-testid^="app-"]', (all) => all.map((c) => ({ id: c.dataset.testid, text: c.innerText })));
+    if (cards[0]?.id !== "app-ios" || !cards[0].text.includes("本机") || !cards[0].text.includes("前往 App Store")) {
+      throw new Error(`the iPhone's own platform does not lead: ${JSON.stringify(cards)}`);
+    }
+    for (const want of ["下载 APK", "48.2 MB", "安装说明"]) if (!cards[1]?.text.includes(want)) throw new Error(`the APK's card has no ${want}`);
+    await shot("8c-download");
+    await go("/me");
+    await page.waitForSelector('a[href="/download"]', { visible: true, timeout: 20000 });
+  });
+  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet" and no row on "me"'}; with two apps, this iPhone's first, the APK's steps, the row on "me"`);
 
   // 9. Settings: English switches the site's language at once (the page
   // and its header); so does Traditional Chinese (design 2026-10-06

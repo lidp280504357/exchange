@@ -1,15 +1,16 @@
 import { LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, useSession, useSettings, type Locale, type UpDown } from "@exchange/core";
+import { useAppsOffered } from "@exchange/core/platform/apps";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
 import { useProfile } from "@exchange/core/user/profile";
 import { RadioGroup, Segmented, Skeleton, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
 import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
-import { ChevronRight, Clock } from "lucide-react";
+import { ChevronRight, Clock, Download } from "lucide-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { usePageHeader } from "../../layout/header";
 import { PickerSheet } from "../auth/parts/PickerSheet";
-import { Group, Section } from "./parts/rows";
+import { Group, NavRow, Section } from "./parts/rows";
 import { previewTones, type Tone } from "./parts/updown";
 
 /**
@@ -27,6 +28,7 @@ export default function Settings() {
   const hideSmall = useSettings((s) => s.hideSmallBalances);
   const set = useSettings((s) => s.set);
   const signedIn = useSession(selectSignedIn);
+  const appsOffered = useAppsOffered();
   usePageHeader({ title: t("mAccount.settings.title"), back: routes.me }, [t]);
 
   return (
@@ -87,6 +89,13 @@ export default function Settings() {
           />
         </Group>
       </Section>
+
+      {appsOffered && (
+        // The apps to download, while any is offered (design 2026-10-07, App download page §4).
+        <Group index={3}>
+          <NavRow icon={<Download size={18} />} label={t("nav.downloadApp")} to={routes.download} />
+        </Group>
+      )}
 
       <p className="px-1 text-xs text-fg-3">{t("mAccount.settings.localNote")}</p>
     </div>

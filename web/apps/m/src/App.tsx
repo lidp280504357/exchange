@@ -12,6 +12,7 @@ import { accountRoutes } from "./pages/account/routes";
 import { assetRoutes } from "./pages/assets/routes";
 import { authRoutes } from "./pages/auth/routes";
 import { contentRoutes } from "./pages/content/routes";
+import { downloadRoutes } from "./pages/download/routes";
 import { futuresRoutes } from "./pages/futures/routes";
 import { homeRoutes } from "./pages/home/routes";
 import { tradeRoutes } from "./pages/trade/routes";
@@ -20,7 +21,7 @@ import { RequireAuth, type PageRoute } from "./routing";
 // The same paths as the PC site (design §4.1): shared links open the same
 // page on either site. Each page is its own chunk; each area lists its
 // pages in pages/<area>/routes.tsx with the shell it sits in.
-const all = [...homeRoutes, ...tradeRoutes, ...futuresRoutes, ...assetRoutes, ...accountRoutes, ...contentRoutes, ...authRoutes];
+const all = [...homeRoutes, ...tradeRoutes, ...futuresRoutes, ...assetRoutes, ...accountRoutes, ...contentRoutes, ...downloadRoutes, ...authRoutes];
 // The toaster (with the animation library) loads after the first screen.
 const Toaster = lazy(() => import("@exchange/ui/components/Toast").then((m) => ({ default: m.Toaster })));
 

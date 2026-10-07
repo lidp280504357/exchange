@@ -1,10 +1,11 @@
 import { errorText, routes, selectRestoring, selectSignedIn, signOut, switchSite, useSession } from "@exchange/core";
+import { useAppsOffered } from "@exchange/core/platform/apps";
 import { useBrandText } from "@exchange/core/platform/index";
 import { useTerminalPrefs } from "@exchange/core/trading/prefs";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { toast } from "@exchange/ui";
 import {
-  Bell, ClipboardList, FileText, History, Info, LifeBuoy, ListChecks, LogOut, Megaphone, Monitor, MonitorSmartphone, ReceiptText,
+  Bell, ClipboardList, Download, FileText, History, Info, LifeBuoy, ListChecks, LogOut, Megaphone, Monitor, MonitorSmartphone, ReceiptText,
   ShieldCheck, SlidersHorizontal, Star,
 } from "lucide-react";
 import { useState } from "react";
@@ -41,6 +42,7 @@ export default function Me() {
   const [confirm, setConfirm] = useState(false);
   const [about, setAbout] = useState(false);
   const copyright = useBrandText((p) => p.footer.copyright);
+  const appsOffered = useAppsOffered();
   const [busy, setBusy] = useState(false);
   usePageHeader(
     { title: <span className="text-md font-semibold text-fg-1">{t("nav.me")}</span>, right: <HeaderActions signedIn={signedIn} /> },
@@ -132,6 +134,8 @@ export default function Me() {
 
       <Section title={t("mAccount.me.groups.other")}>
         <Group index={8}>
+          {/* The apps to download, while any is offered (design 2026-10-07, App download page §4). */}
+          {appsOffered && <NavRow icon={<Download size={18} />} label={t("nav.downloadApp")} to={routes.download} />}
           <NavRow icon={<Monitor size={18} />} label={t("footer.toPC")} onClick={toPC} />
         </Group>
       </Section>

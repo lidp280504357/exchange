@@ -19,6 +19,8 @@ export const routes = {
   margin: "/assets/margin",
   /** The username and the avatar (design 2026-10-07, avatars and usernames). */
   profile: "/account/profile",
+  /** The apps to download (design 2026-10-07, App download page §4). */
+  download: "/download",
   security: "/account/security",
   settings: "/account/settings",
   sessions: "/account/sessions",
