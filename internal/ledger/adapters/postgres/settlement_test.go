@@ -60,6 +60,22 @@ func mismatches(t *testing.T, store *postgres.Store) map[string]int {
 	return out
 }
 
+// mismatchesOf returns one check's findings.
+func mismatchesOf(t *testing.T, store *postgres.Store, check string) []postgres.Mismatch {
+	t.Helper()
+	results, err := store.Reconcile(context.Background(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Check == check {
+			return r.Mismatches
+		}
+	}
+	t.Fatalf("no check %s", check)
+	return nil
+}
+
 func TestSettlement(t *testing.T) {
 	svc, store, _ := setup(t)
 	ctx := context.Background()

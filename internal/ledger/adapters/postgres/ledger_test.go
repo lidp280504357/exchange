@@ -2,7 +2,9 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -451,6 +453,23 @@ func TestLineTypesReconciled(t *testing.T) {
 	// The freeze's two lines, and the counts apart.
 	if n := mismatches(t, store)[postgres.CheckLineTypesListed]; n != 3 {
 		t.Fatalf("two lines missing from journal_line_types: %d mismatches", n)
+	}
+	// Past a hundred missing lines the report keeps 99 of them and the
+	// counts row (review B153).
+	if _, err := db.Exec(ctx, `ALTER TABLE journal_lines DISABLE TRIGGER journal_lines_type`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 50 {
+		if _, err := svc.Freeze(ctx, fmt.Sprintf("unlisted-%d", i), domain.EntryOrderFreeze, user, domain.AccountSpot, "USDT", d("1"), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(ctx, `ALTER TABLE journal_lines ENABLE TRIGGER journal_lines_type`); err != nil {
+		t.Fatal(err)
+	}
+	found := mismatchesOf(t, store, postgres.CheckLineTypesListed)
+	if len(found) != 100 || found[len(found)-1].Key != "counts" || !strings.Contains(found[len(found)-1].Detail, "journal_line_types") {
+		t.Fatalf("102 lines missing: %d mismatches, the last %+v", len(found), found[len(found)-1])
 	}
 }
 

@@ -1191,3 +1191,34 @@ func TestAnOrderOnItsWayInWhenSpotClosesIsRefused(t *testing.T) {
 		t.Fatalf("%v, %d orders, %d events", err, len(store.orders), len(store.events))
 	}
 }
+
+// recordAnchor records, for each anchor asked, whether the pair follows a
+// reference market.
+type recordAnchor struct{ followed []bool }
+
+func (r *recordAnchor) Anchor(_ context.Context, _ string, followed bool) (decimal.Decimal, error) {
+	r.followed = append(r.followed, followed)
+	return decimal.Zero, nil
+}
+
+// Place asks for the anchor of a pair following a reference market as
+// such (the reference price first) and of one that does not (the platform
+// coin: a recent trade first) as not (review B150, B153).
+func TestPlaceTellsTheAnchorWhetherThePairFollowsAReference(t *testing.T) {
+	svc, _, _, _ := newService()
+	ctx := context.Background()
+	prices := &recordAnchor{}
+	svc.Prices = prices
+	if _, err := svc.Place(ctx, buy("plain")); err != nil {
+		t.Fatal(err)
+	}
+	inst := svc.Instruments.(fakeInstruments)
+	inst.pair.Reference = "BTCUSDT"
+	svc.Instruments = inst
+	if _, err := svc.Place(ctx, buy("followed")); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(prices.followed, []bool{false, true}) {
+		t.Fatalf("followed: %v", prices.followed)
+	}
+}
