@@ -192,12 +192,12 @@ func (o *Order) checkMarket(pair Pair, anchor decimal.Decimal) error {
 	if !o.Price.IsZero() {
 		return apperr.Invalid("a market order has no price")
 	}
+	if o.Side == SideBuy && !o.Quantity.IsZero() {
+		return o.checkMarketBuyByQuantity(pair, anchor)
+	}
 	if o.Side == SideBuy {
-		if !o.Quantity.IsZero() {
-			return apperr.Invalid("a market buy spends quote_amount; it takes no quantity")
-		}
 		if !o.QuoteAmount.IsPositive() {
-			return apperr.Invalid("a market buy needs a positive quote_amount")
+			return apperr.Invalid("a market buy needs a positive quote_amount, or a quantity")
 		}
 		if !o.QuoteAmount.Equal(o.QuoteAmount.Truncate(pair.QuoteDecimals)) {
 			return precision(fmt.Sprintf("quote_amount has more than %d decimals", pair.QuoteDecimals))
@@ -229,6 +229,30 @@ func (o *Order) checkMarket(pair Pair, anchor decimal.Decimal) error {
 	return nil
 }
 
+// checkMarketBuyByQuantity checks a market buy sized in the base (B157,
+// as Binance takes one): a quantity on the lot and within the pair's
+// range, no quote_amount, and a market price to bound it with. It buys up
+// to the quantity at prices up to the protection price (the band above the
+// anchor) and freezes the quantity at that price (freeze); the engine
+// takes it as a limit IOC (or FOK) buy at that price (EngineOrder), as
+// derivatives-service sends its market orders.
+func (o *Order) checkMarketBuyByQuantity(pair Pair, anchor decimal.Decimal) error {
+	if !o.QuoteAmount.IsZero() {
+		return apperr.Invalid("a market buy takes quote_amount or quantity, not both")
+	}
+	if err := checkQuantity(o.Quantity, pair); err != nil {
+		return err
+	}
+	if !anchor.IsPositive() {
+		return apperr.Invalid("the pair has no market price to bound a market buy by quantity yet; give quote_amount")
+	}
+	if anchor.Mul(o.Quantity).LessThan(pair.MinNotional) {
+		return ErrMinNotional.WithDetail("min_notional", pair.MinNotional.String())
+	}
+	o.ProtectionPrice = floorTo(anchor.Mul(decimal.NewFromInt(1).Add(pair.PriceBand)), pair.TickSize)
+	return nil
+}
+
 // minSellProtection is the least share of the anchor a market sell
 // accepts, whatever the pair's price band.
 var minSellProtection = decimal.RequireFromString("0.5")
@@ -253,6 +277,8 @@ func (o *Order) freeze(pair Pair) (string, decimal.Decimal) {
 	switch {
 	case o.Side == SideSell:
 		return pair.Base, o.Quantity
+	case o.BuysByQuantity():
+		return pair.Quote, o.ProtectionPrice.Mul(o.Quantity).RoundCeil(pair.QuoteDecimals)
 	case o.Type == TypeMarket:
 		return pair.Quote, o.QuoteAmount
 	default:

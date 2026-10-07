@@ -991,6 +991,7 @@ type lines struct {
 	closedAt        time.Time // the closed lines' UpdatedAt
 	closing, checks int
 	refreshes       int
+	refreshErr      error // Refresh's answer when set
 }
 
 func (l *lines) Closed(key string) bool {
@@ -1005,7 +1006,7 @@ func (l *lines) Get(key string) (flags.Flag, bool) {
 
 func (l *lines) Refresh(context.Context) error {
 	l.refreshes++
-	return nil
+	return l.refreshErr
 }
 
 // The product switches (design 2026-10-07, §1 #3 and #7): with spot
@@ -1339,5 +1340,46 @@ func TestCancelOpenGoesOnPastAUserItCannotCancelFor(t *testing.T) {
 	canceled, err = svc.CancelOpen(ctx, "ops@example.com", "closing spot")
 	if err != nil || len(canceled) != 1 || canceled[0].UserID != users[0] {
 		t.Fatalf("the retry: %+v %v", canceled, err)
+	}
+	// Flags that cannot be read are a 503, as derivatives-service answers (B159).
+	products.refreshErr = errors.New("config database down")
+	if _, err := svc.CancelOpen(ctx, "ops@example.com", "closing spot"); apperr.From(err).Kind != apperr.KindUnavailable {
+		t.Fatalf("flags not read: %v", err)
+	}
+}
+
+// A market buy by quantity (B157) is accepted as the market order it is
+// and reaches the engine as a limit buy at its protection price, its IOC
+// kept, frozen at that price.
+func TestAMarketBuyByQuantityReachesTheEngineAsALimitAtItsProtection(t *testing.T) {
+	svc, store, led, _ := newService()
+	svc.Prices = fixedAnchor{d("60000")}
+	r := buy("by-qty")
+	r.Type, r.Price = domain.TypeMarket, decimal.Zero
+	o, err := svc.Place(context.Background(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 60000 x 1.1 = 66000 (the protection); 66000 x 0.001 = 66.
+	if len(led.calls) != 1 || led.calls[0] != "order:"+o.ID+" 66 USDT" {
+		t.Fatalf("freezes: %v", led.calls)
+	}
+	var accepted *orderv1.OrderAccepted
+	var place *orderv1.PlaceOrder
+	for _, e := range store.events {
+		switch m := e.msg.(type) {
+		case *orderv1.OrderAccepted:
+			accepted = m
+		case *orderv1.PlaceOrder:
+			place = m
+		}
+	}
+	if accepted.GetOrder().GetType() != orderv1.OrderType_ORDER_TYPE_MARKET || accepted.GetOrder().GetQuantity() != "0.001" {
+		t.Fatalf("accepted %+v", accepted.GetOrder())
+	}
+	eng := place.GetOrder()
+	if eng.GetType() != orderv1.OrderType_ORDER_TYPE_LIMIT || eng.GetPrice() != "66000" || eng.GetQuantity() != "0.001" ||
+		eng.GetTimeInForce() != orderv1.TimeInForce_TIME_IN_FORCE_IOC || eng.GetQuoteAmount() != "" || eng.GetProtectionPrice() != "" {
+		t.Fatalf("to the engine %+v", eng)
 	}
 }

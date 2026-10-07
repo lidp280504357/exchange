@@ -213,12 +213,20 @@ func (o Order) Unused() decimal.Decimal {
 	consumed := o.FilledQuantity
 	switch {
 	case o.Side == SideSell:
+	case o.BuysByQuantity(): // a limit buy at its protection price to the engine and the ledger
+		consumed = o.ProtectionPrice.Mul(o.FilledQuantity)
 	case o.Type == TypeMarket:
 		consumed = o.FilledQuote
 	default:
 		consumed = o.Price.Mul(o.FilledQuantity)
 	}
 	return decimal.Max(o.FrozenAmount.Sub(consumed), decimal.Zero)
+}
+
+// BuysByQuantity reports a market buy sized in the base (B157): frozen,
+// matched and released as a limit buy at its protection price.
+func (o Order) BuysByQuantity() bool {
+	return o.Type == TypeMarket && o.Side == SideBuy && o.QuoteAmount.IsZero() && o.Quantity.IsPositive()
 }
 
 // Terminal reports whether the order is finished.

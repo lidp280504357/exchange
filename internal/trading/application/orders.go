@@ -417,7 +417,7 @@ func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]Cance
 		return nil, errSpotOpen
 	}
 	if err := s.Products.Refresh(ctx); err != nil {
-		return nil, fmt.Errorf("reread the product lines: %w", err)
+		return nil, apperr.Unavailable(fmt.Errorf("reread the product lines: %w", err)) // 503, as derivatives-service answers
 	}
 	if !s.Products.Closed(flags.KeyProductSpot) {
 		return nil, errSpotOpen
@@ -650,7 +650,7 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 		}, "symbol", cur.Symbol); err != nil {
 			return err
 		}
-		if err := r.Emit(ctx, event.TopicOrderCommands, &orderv1.PlaceOrder{Order: msg, HouseOnly: s.houseOnly(ctx, cur.Symbol)}, "symbol", cur.Symbol); err != nil {
+		if err := r.Emit(ctx, event.TopicOrderCommands, &orderv1.PlaceOrder{Order: engineOrder(cur), HouseOnly: s.houseOnly(ctx, cur.Symbol)}, "symbol", cur.Symbol); err != nil {
 			return err
 		}
 		if cur.CancelRequested { // canceled while its freeze was pending

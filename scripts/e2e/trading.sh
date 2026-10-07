@@ -11,7 +11,9 @@
 # moment (design 2026-10-07, product switches): new orders are refused with
 # PRODUCT_CLOSED, the console's count sees the resting order, cancel-open
 # takes the resting orders (every user's but the market makers', as when an
-# operator closes it), and opened again orders are taken.
+# operator closes it), and opened again orders are taken. Then a market buy
+# by quantity (B157) buys exactly its quantity and gives back what its
+# protection price froze beyond the fills.
 #
 #   scripts/e2e/trading.sh
 set -euo pipefail
@@ -87,8 +89,8 @@ order "{\"symbol\":\"ETH-BTC\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"
 expect 422 ORDER_PRICE_OUT_OF_BAND "three times the reference price, past the band"
 order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.001\"}"
 expect 422 ORDER_MIN_NOTIONAL "below the minimum notional"
-order '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quantity":"0.1"}'
-expect 400 COMMON_INVALID_ARGUMENT "a market buy by quantity"
+order '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quantity":"0.1","quote_amount":"0.01"}'
+expect 400 COMMON_INVALID_ARGUMENT "a market buy by both quantity and quote_amount"
 order '{"symbol":"SOL-BTC","side":"BUY","type":"LIMIT","price":"0.002","quantity":"1"}'
 expect 422 INSTRUMENT_NOT_TRADING "a pair that is not trading"
 order '{"symbol":"NOPE-USDT","side":"BUY","type":"LIMIT","price":"1","quantity":"10"}'
@@ -194,5 +196,19 @@ eventually 30 "GET /v1/platform/products shows spot open" spot_is true
 taken() { order "$TINY"; [[ $STATUS == 422 ]]; }
 eventually 30 "orders get past the line again" taken
 expect 422 ORDER_MIN_NOTIONAL "the order's own checks again"
+
+echo "== a market buy by quantity (B157)"
+order '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quantity":"0.05"}'
+expect 202 - "a market buy of 0.05 ETH"
+# Frozen at the protection price (the band above the market price), more
+# than 0.05 ETH costs at the ask.
+check '.type == "MARKET" and .quantity == "0.05" and (.quote_amount // "") == "" and .frozen_asset == "BTC" and ((.frozen_amount | tonumber) > (0.05 * ('"$ASK"')))' "frozen in BTC at its protection price"
+BOUGHT=$(jq -r .order_id <<<"$BODY")
+eventually 40 "it fills against HOUSE" status_is "$BOUGHT" FILLED
+check '.filled_quantity == "0.05"' "the whole quantity bought"
+unfrozen() { [[ $(balance BTC | awk '{print $2}') == "0" ]]; }
+eventually 40 "what the protection price froze beyond the fills came back" unfrozen
+eth_bought() { awk -v got="$(balance ETH)" 'BEGIN { split(got, x, " "); exit !(x[1] > 2.049 && x[1] <= 2.05) }'; }
+eventually 40 "the ETH arrived, less its fee" eth_bought
 
 echo "all trading checks passed"

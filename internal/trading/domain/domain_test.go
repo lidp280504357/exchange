@@ -56,24 +56,27 @@ func TestOrderChecks(t *testing.T) {
 		anchor string
 		code   string
 	}{
-		"price off the tick":      {limit(domain.SideBuy, "60000.001", "0.001"), "0", "INSTRUMENT_PRECISION"},
-		"quantity off the lot":    {limit(domain.SideBuy, "60000", "0.000011"), "0", "INSTRUMENT_PRECISION"},
-		"quantity above the max":  {limit(domain.SideSell, "60000", "101"), "0", "ORDER_QUANTITY_OUT_OF_RANGE"},
-		"below the min notional":  {limit(domain.SideBuy, "100", "0.001"), "0", "ORDER_MIN_NOTIONAL"},
-		"above the band":          {limit(domain.SideBuy, "66000.01", "0.001"), "60000", "ORDER_PRICE_OUT_OF_BAND"},
-		"below the band":          {limit(domain.SideSell, "53999.99", "0.001"), "60000", "ORDER_PRICE_OUT_OF_BAND"},
-		"no price":                {limit(domain.SideBuy, "0", "0.001"), "0", apperr.CodeInvalidArgument},
-		"market buy by quantity":  {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("1")}, "0", apperr.CodeInvalidArgument},
-		"market buy too precise":  {marketBuy("10.0000001"), "0", "INSTRUMENT_PRECISION"},
-		"market buy too small":    {marketBuy("4.99"), "0", "ORDER_MIN_NOTIONAL"},
-		"market post only":        {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, QuoteAmount: d("10"), TimeInForce: domain.PostOnly}, "0", apperr.CodeInvalidArgument},
-		"market sell with price":  {domain.Request{UserID: "u", Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("1"), Price: d("1")}, "0", apperr.CodeInvalidArgument},
-		"market sell too small":   {domain.Request{UserID: "u", Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("0.00001")}, "60000", "ORDER_MIN_NOTIONAL"},
-		"unknown side":            {limit("HOLD", "60000", "0.001"), "0", apperr.CodeInvalidArgument},
-		"unknown type":            {domain.Request{UserID: "u", Side: domain.SideBuy, Type: "STOP"}, "0", apperr.CodeInvalidArgument},
-		"unknown time in force":   {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeLimit, TimeInForce: "GTD", Price: d("60000"), Quantity: d("0.001")}, "0", apperr.CodeInvalidArgument},
-		"bad client order id":     {domain.Request{UserID: "u", ClientOrderID: "has space", Side: domain.SideBuy, Type: domain.TypeLimit, Price: d("60000"), Quantity: d("0.001")}, "0", apperr.CodeInvalidArgument},
-		"unknown self-trade mode": {domain.Request{UserID: "u", STP: "ALLOW", Side: domain.SideBuy, Type: domain.TypeLimit, Price: d("60000"), Quantity: d("0.001")}, "0", apperr.CodeInvalidArgument},
+		"price off the tick":     {limit(domain.SideBuy, "60000.001", "0.001"), "0", "INSTRUMENT_PRECISION"},
+		"quantity off the lot":   {limit(domain.SideBuy, "60000", "0.000011"), "0", "INSTRUMENT_PRECISION"},
+		"quantity above the max": {limit(domain.SideSell, "60000", "101"), "0", "ORDER_QUANTITY_OUT_OF_RANGE"},
+		"below the min notional": {limit(domain.SideBuy, "100", "0.001"), "0", "ORDER_MIN_NOTIONAL"},
+		"above the band":         {limit(domain.SideBuy, "66000.01", "0.001"), "60000", "ORDER_PRICE_OUT_OF_BAND"},
+		"below the band":         {limit(domain.SideSell, "53999.99", "0.001"), "60000", "ORDER_PRICE_OUT_OF_BAND"},
+		"no price":               {limit(domain.SideBuy, "0", "0.001"), "0", apperr.CodeInvalidArgument},
+		"market buy by quantity without a market price": {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("1")}, "0", apperr.CodeInvalidArgument},
+		"market buy by quantity and quote":              {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("1"), QuoteAmount: d("10")}, "60000", apperr.CodeInvalidArgument},
+		"market buy by quantity off the lot":            {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("0.000011")}, "60000", "INSTRUMENT_PRECISION"},
+		"market buy by quantity too small":              {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("0.00001")}, "60000", "ORDER_MIN_NOTIONAL"},
+		"market buy too precise":                        {marketBuy("10.0000001"), "0", "INSTRUMENT_PRECISION"},
+		"market buy too small":                          {marketBuy("4.99"), "0", "ORDER_MIN_NOTIONAL"},
+		"market post only":                              {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, QuoteAmount: d("10"), TimeInForce: domain.PostOnly}, "0", apperr.CodeInvalidArgument},
+		"market sell with price":                        {domain.Request{UserID: "u", Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("1"), Price: d("1")}, "0", apperr.CodeInvalidArgument},
+		"market sell too small":                         {domain.Request{UserID: "u", Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("0.00001")}, "60000", "ORDER_MIN_NOTIONAL"},
+		"unknown side":                                  {limit("HOLD", "60000", "0.001"), "0", apperr.CodeInvalidArgument},
+		"unknown type":                                  {domain.Request{UserID: "u", Side: domain.SideBuy, Type: "STOP"}, "0", apperr.CodeInvalidArgument},
+		"unknown time in force":                         {domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeLimit, TimeInForce: "GTD", Price: d("60000"), Quantity: d("0.001")}, "0", apperr.CodeInvalidArgument},
+		"bad client order id":                           {domain.Request{UserID: "u", ClientOrderID: "has space", Side: domain.SideBuy, Type: domain.TypeLimit, Price: d("60000"), Quantity: d("0.001")}, "0", apperr.CodeInvalidArgument},
+		"unknown self-trade mode":                       {domain.Request{UserID: "u", STP: "ALLOW", Side: domain.SideBuy, Type: domain.TypeLimit, Price: d("60000"), Quantity: d("0.001")}, "0", apperr.CodeInvalidArgument},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := check(t, tc.req, tc.anchor); !apperr.Is(err, tc.code) {
@@ -122,6 +125,30 @@ func TestMarketOrdersCarryTheirProtection(t *testing.T) {
 		domain.Request{UserID: "u", Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("0.01")}, wide, d("60000.05"), time.Now())
 	if err != nil || !sell.ProtectionPrice.Equal(d("30000.03")) {
 		t.Fatalf("a sell on a 100%% band: %s %v", sell.ProtectionPrice, err)
+	}
+}
+
+// A market buy by quantity (B157) is bounded by the band above the anchor,
+// freezes its quantity at that price and gives back, at the end, what that
+// price did not consume (settlement releases each fill's difference).
+func TestAMarketBuyByQuantityIsALimitAtItsProtection(t *testing.T) {
+	buy, err := check(t, domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("0.001")}, "60000.05")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 66000.05 (the protection) x 0.001 = 66.00005 USDT.
+	if !buy.BuysByQuantity() || buy.TimeInForce != domain.IOC || !buy.ProtectionPrice.Equal(d("66000.05")) ||
+		buy.FrozenAsset != "USDT" || !buy.FrozenAmount.Equal(d("66.00005")) {
+		t.Fatalf("market buy by quantity: %+v", buy)
+	}
+	buy.Status, buy.FilledQuantity, buy.FilledQuote = domain.StatusCanceled, d("0.0006"), d("36.00003")
+	// 66.00005 - 66000.05 x 0.0006
+	if got := buy.Unused(); !got.Equal(d("26.40002")) {
+		t.Fatalf("unused %s", got)
+	}
+	byQuote, _ := check(t, domain.Request{UserID: "u", Side: domain.SideBuy, Type: domain.TypeMarket, QuoteAmount: d("100")}, "60000.05")
+	if byQuote.BuysByQuantity() {
+		t.Fatal("a market buy by quote amount")
 	}
 }
 

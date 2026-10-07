@@ -14,9 +14,13 @@ export interface paths {
         /**
          * Place a spot order
          * @description Limit orders need price and quantity; market buys spend
-         *     quote_amount, market sells sell quantity. A buy freezes quote
-         *     (price x quantity rounded up to the quote asset, or quote_amount),
-         *     a sell freezes base. Checks fail with INSTRUMENT_NOT_TRADING,
+         *     quote_amount or buy a quantity (one of the two, B157), market sells
+         *     sell quantity. A buy freezes quote (price x quantity rounded up to
+         *     the quote asset, or quote_amount; a market buy by quantity its
+         *     quantity at its protection price, the band above the market price,
+         *     and it needs a market price: without one it fails with
+         *     COMMON_INVALID_ARGUMENT), a sell freezes base; what a buy froze
+         *     beyond its fills comes back when it ends. Checks fail with INSTRUMENT_NOT_TRADING,
          *     INSTRUMENT_PRECISION, ORDER_QUANTITY_OUT_OF_RANGE,
          *     ORDER_MIN_NOTIONAL, ORDER_PRICE_OUT_OF_BAND, ORDER_TOO_MANY_OPEN or
          *     the USER_ eligibility codes, and nothing is stored. When the ledger

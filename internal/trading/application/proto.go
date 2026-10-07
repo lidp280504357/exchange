@@ -36,6 +36,20 @@ func toProto(o domain.Order) *orderv1.Order {
 	}
 }
 
+// engineOrder is the order as the engine takes it: a market buy by
+// quantity as a limit buy at its protection price, its time in force kept
+// (IOC or FOK; B157). The engine then needs no third kind of market order,
+// and the ledger releases each fill's difference to the trade price as
+// for any limit buy (buyer_limit_price). OrderAccepted keeps the market
+// order as placed.
+func engineOrder(o domain.Order) *orderv1.Order {
+	msg := toProto(o)
+	if o.BuysByQuantity() {
+		msg.Type, msg.Price, msg.ProtectionPrice = orderv1.OrderType_ORDER_TYPE_LIMIT, amount(o.ProtectionPrice), ""
+	}
+	return msg
+}
+
 // amount writes a decimal, or "" for an absent (zero) one.
 func amount(d decimal.Decimal) string {
 	if d.IsZero() {

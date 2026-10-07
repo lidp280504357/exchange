@@ -64,9 +64,9 @@ paths:
       operationId: cancelProductLineOrders
       summary: Cancel what a closed product line no longer takes
       description: |
-        Rereads the flag first and fails with COMMON_CONFLICT (409) while the
-        line is open (derivatives-service: COMMON_UNAVAILABLE, 503, when the
-        flags cannot be read). Then asks the engine to cancel, one user at a
+        Rereads the flag first (COMMON_UNAVAILABLE, 503, when the flags
+        cannot be read) and fails with COMMON_CONFLICT (409) while the line
+        is open. Then asks the engine to cancel, one user at a
         time, each order the closed line no longer takes, auditing each as
         admin.orders.canceled by actor with reason (target user:<id>,
         details with order_id, symbol and product; spot adds account_type,
@@ -116,8 +116,7 @@ paths:
             lock that timed out, say) while the others' were; details
             canceled (how many orders it asked to cancel) and failed_users
             (for how many users it could not). Run again, it takes what is
-            left. derivatives-service also answers so when it cannot read
-            the flags.
+            left. Also the answer when the flags cannot be read.
           content:
             application/json:
               schema:
