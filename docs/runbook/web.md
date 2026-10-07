@@ -218,7 +218,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 | `Avatar`（`seed`）、`DefaultAvatar` | `@exchange/ui` | 头像：图片加回退；`seed` 为用户 ID 时回退到 12 个内置头像之一 | Base/Avatar（首字母、坏图回退、12 个内置、按种子、上传的图） |
 | `MyAvatar` | `@exchange/ui/profile/MyAvatar` | 当前用户的头像（读资料，32 px 及以下用缩略图，`decorative` 在挨着用户名处不重复读名） | 需要会话，不单列故事 |
 | `UploadRing` | `@exchange/ui/profile/UploadRing` | 头像上传时外面那一圈：准备与保存时转动，上传时按进度填满 | Profile/UploadRing |
-| `AppCard`、`AppQrPanel` | `@exchange/ui/download/AppCard`、`…/AppQrPanel` | 下载页的平台卡片（宽：二维码在事实旁，PC；窄：数值靠右，手机）与 PC 顶栏的二维码面板；按钮、二维码与安装说明由站点决定 | Download/AppCard（APK、App Store 链接、企业签名 iOS、手机本机/另一平台、顶栏面板） |
+| `AppCard`、`AppQrPanel` | `@exchange/ui/download/AppCard`、`…/AppQrPanel` | 下载页的平台卡片（宽：二维码在事实旁，PC；窄：数值靠右，手机）与 PC 顶栏的二维码面板；按钮、二维码与安装说明由站点决定（按钮与安装说明总在卡片底部，并排的两张卡片对齐）。`AppQrPanel` 只有 PC 顶栏一处在用，放进 ui 只为进 Storybook | Download/AppCard（APK、App Store 链接、企业签名 iOS、手机本机/另一平台、顶栏面板） |
 
 手机站的窗口化列表 `WindowList`（`apps/m/src/components/`，合约数据总览也用它）在应用里，不在 ui，不进 Storybook。
 
