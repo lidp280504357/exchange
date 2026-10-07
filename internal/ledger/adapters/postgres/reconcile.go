@@ -55,7 +55,8 @@ const (
 	// filtered by type. Its rows come only from journal_lines' trigger, in
 	// the line's own transaction, with the journal's type; the counts of
 	// the two tables, read in one snapshot, also catch a row listed twice
-	// or without a line.
+	// or without a line (99 missing lines at most, so the counts' row
+	// always fits in the check's 100).
 	CheckLineTypesListed = "LINE_TYPES_LISTED"
 )
 
@@ -156,7 +157,7 @@ var checks = []struct {
 	{CheckLineTypesListed, `WITH missing AS (
 			SELECT l.id::text AS key, format('the line of account %s is not in journal_line_types', l.account_id) AS detail
 			FROM journal_lines l LEFT JOIN journal_line_types t ON t.line_id = l.id AND t.account_id = l.account_id
-			WHERE t.line_id IS NULL LIMIT 100),
+			WHERE t.line_id IS NULL LIMIT 99),
 		counts AS (SELECT (SELECT count(*) FROM journal_lines) AS lines, (SELECT count(*) FROM journal_line_types) AS listed)
 		SELECT key, detail FROM missing
 		UNION ALL

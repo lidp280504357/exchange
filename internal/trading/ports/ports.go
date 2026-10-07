@@ -125,7 +125,8 @@ type Eligibility interface {
 }
 
 // Prices gives the price that bands and market protection are measured
-// from: the last trade, or a reference price; zero when there is none.
+// from: the reference price of a pair that follows a reference market
+// (followed), else the last trade; zero when there is none.
 type Prices interface {
-	Anchor(ctx context.Context, symbol string) (decimal.Decimal, error)
+	Anchor(ctx context.Context, symbol string, followed bool) (decimal.Decimal, error)
 }

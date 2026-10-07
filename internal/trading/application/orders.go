@@ -104,7 +104,7 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	if slices.Contains(s.FeeFree, req.UserID) {
 		pair.MakerFeeRate, pair.TakerFeeRate = decimal.Zero, decimal.Zero
 	}
-	anchor, err := s.Prices.Anchor(ctx, pair.Symbol)
+	anchor, err := s.Prices.Anchor(ctx, pair.Symbol, pair.Reference != "")
 	if err != nil {
 		return domain.Order{}, err
 	}
@@ -210,7 +210,7 @@ func (s *Service) Liquidate(ctx context.Context, l Liquidation) (domain.Order, e
 	// Only a pair without a reference market bounds the order by its anchor.
 	anchor := decimal.Zero
 	if pair.Reference == "" {
-		if anchor, err = s.Prices.Anchor(ctx, pair.Symbol); err != nil {
+		if anchor, err = s.Prices.Anchor(ctx, pair.Symbol, false); err != nil {
 			return domain.Order{}, err
 		}
 	}

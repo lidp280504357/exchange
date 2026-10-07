@@ -21,7 +21,7 @@ func TestLastTradeIsCachedBriefly(t *testing.T) {
 	}, nil, time.Second)
 	l.now = func() time.Time { return now }
 	for range 3 {
-		if got, err := l.Anchor(context.Background(), "BTC-USDT"); err != nil || !got.Equal(price) {
+		if got, err := l.Anchor(context.Background(), "BTC-USDT", true); err != nil || !got.Equal(price) {
 			t.Fatalf("anchor %s, %v", got, err)
 		}
 	}
@@ -30,49 +30,78 @@ func TestLastTradeIsCachedBriefly(t *testing.T) {
 	}
 	price = decimal.RequireFromString("70100")
 	now = now.Add(time.Second)
-	if got, _ := l.Anchor(context.Background(), "BTC-USDT"); !got.Equal(price) || calls != 2 {
+	if got, _ := l.Anchor(context.Background(), "BTC-USDT", true); !got.Equal(price) || calls != 2 {
 		t.Fatalf("after the TTL: %s, %d lookups", got, calls)
 	}
-	if got, _ := (None{}).Anchor(context.Background(), "BTC-USDT"); !got.IsZero() {
+	if got, _ := (None{}).Anchor(context.Background(), "BTC-USDT", true); !got.IsZero() {
 		t.Fatal("None has no anchor")
 	}
 }
 
-func TestTheAnchorPrefersTheReferenceThenTheLastTrade(t *testing.T) {
+func TestTheAnchorOfAFollowedPairPrefersTheReference(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
-	trade := func(price string, age time.Duration) LastTradeFunc {
-		return func(context.Context, string) (decimal.Decimal, time.Time, error) {
-			if price == "" {
-				return decimal.Zero, time.Time{}, nil
-			}
-			return decimal.RequireFromString(price), now.Add(-age), nil
-		}
-	}
-	ref := func(price string) ReferenceFunc {
-		return func(context.Context, string) (decimal.Decimal, error) { return decimal.RequireFromString(price), nil }
-	}
-	none := ref("0")
-	down := func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, errors.New("unreachable") }
 	for _, c := range []struct {
 		name      string
 		last      LastTradeFunc
 		reference ReferenceFunc
 		want      string
 	}{
-		{"a fresh reference over a recent trade", trade("84000", time.Minute), ref("83900"), "83900"},
-		{"a price event's reference, 16% over the last trade", trade("84000", time.Minute), ref("97440"), "97440"},
-		{"no trade: the reference", trade("", 0), ref("83900"), "83900"},
-		{"no fresh reference: the last trade, however old", trade("70500", time.Hour), none, "70500"},
-		{"an unreachable reference: the last trade", trade("70500", time.Hour), down, "70500"},
-		{"no reference market at all (ASTRA-USDT)", trade("0.31", time.Minute), nil, "0.31"},
-		{"nothing at all", trade("", 0), down, "0"},
+		{"a fresh reference over a recent trade", tradeAt(now, "84000", time.Minute), ref("83900"), "83900"},
+		{"a price event's reference, 16% over the last trade", tradeAt(now, "84000", time.Minute), ref("97440"), "97440"},
+		{"no trade: the reference", tradeAt(now, "", 0), ref("83900"), "83900"},
+		{"no fresh reference: the last trade, however old", tradeAt(now, "70500", time.Hour), ref("0"), "70500"},
+		{"an unreachable reference: the last trade", tradeAt(now, "70500", time.Hour), down, "70500"},
+		{"nothing at all", tradeAt(now, "", 0), down, "0"},
 	} {
 		l := NewLastTrade(c.last, c.reference, time.Second)
 		l.now = func() time.Time { return now }
-		if got, err := l.Anchor(context.Background(), "BTC-USDT"); err != nil || got.String() != c.want {
+		if got, err := l.Anchor(context.Background(), "BTC-USDT", true); err != nil || got.String() != c.want {
 			t.Errorf("%s: anchor %s, %v; want %s", c.name, got, err, c.want)
 		}
 	}
+}
+
+// TestTheAnchorOfAPairWithoutAReferenceMarket: the platform coin's pair
+// anchors on its trade of the last five minutes, then on the price
+// market-data-service keeps for it (its 60 s TWAP, the book's mid,
+// market-sim's target), as market-sim's quotes do (review B150).
+func TestTheAnchorOfAPairWithoutAReferenceMarket(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	for _, c := range []struct {
+		name      string
+		last      LastTradeFunc
+		reference ReferenceFunc
+		want      string
+	}{
+		{"a recent trade over the platform's price", tradeAt(now, "0.3412", time.Minute), ref("0.3301"), "0.3412"},
+		{"an old trade gives way to the platform's price", tradeAt(now, "0.31", time.Hour), ref("0.3301"), "0.3301"},
+		{"no trade: the platform's price", tradeAt(now, "", 0), ref("0.3301"), "0.3301"},
+		{"an old trade without a price", tradeAt(now, "0.31", time.Hour), ref("0"), "0.31"},
+		{"an unreachable price service", tradeAt(now, "0.31", time.Hour), down, "0.31"},
+	} {
+		l := NewLastTrade(c.last, c.reference, time.Second)
+		l.now = func() time.Time { return now }
+		if got, err := l.Anchor(context.Background(), "ASTRA-USDT", false); err != nil || got.String() != c.want {
+			t.Errorf("%s: anchor %s, %v; want %s", c.name, got, err, c.want)
+		}
+	}
+}
+
+func tradeAt(now time.Time, price string, age time.Duration) LastTradeFunc {
+	return func(context.Context, string) (decimal.Decimal, time.Time, error) {
+		if price == "" {
+			return decimal.Zero, time.Time{}, nil
+		}
+		return decimal.RequireFromString(price), now.Add(-age), nil
+	}
+}
+
+func ref(price string) ReferenceFunc {
+	return func(context.Context, string) (decimal.Decimal, error) { return decimal.RequireFromString(price), nil }
+}
+
+func down(context.Context, string) (decimal.Decimal, error) {
+	return decimal.Zero, errors.New("unreachable")
 }
 
 // TestAPriceEventMovesTheBand: a price event pushes BTC-USDT's reference
@@ -88,7 +117,7 @@ func TestAPriceEventMovesTheBand(t *testing.T) {
 		return decimal.RequireFromString("97440"), nil
 	}, time.Second)
 	l.now = func() time.Time { return now }
-	anchor, err := l.Anchor(context.Background(), "BTC-USDT")
+	anchor, err := l.Anchor(context.Background(), "BTC-USDT", true)
 	if err != nil {
 		t.Fatal(err)
 	}

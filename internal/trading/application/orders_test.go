@@ -224,12 +224,16 @@ func (f fakeEligibility) Check(context.Context, string, string, string) (bool, s
 
 type noAnchor struct{}
 
-func (noAnchor) Anchor(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
+func (noAnchor) Anchor(context.Context, string, bool) (decimal.Decimal, error) {
+	return decimal.Zero, nil
+}
 
 // fixedAnchor anchors every pair at one price.
 type fixedAnchor struct{ price decimal.Decimal }
 
-func (f fixedAnchor) Anchor(context.Context, string) (decimal.Decimal, error) { return f.price, nil }
+func (f fixedAnchor) Anchor(context.Context, string, bool) (decimal.Decimal, error) {
+	return f.price, nil
+}
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
