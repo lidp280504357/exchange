@@ -7,19 +7,25 @@ import (
 // remaining is what an active order may still fill.
 func remaining(o Order) decimal.Decimal { return o.Qty.Sub(o.Filled) }
 
+// closableBy is what of its position an order that only closes may close:
+// the position's size, or nothing when the position is the other way.
+func closableBy(o Order, held map[PositionSide]Position) decimal.Decimal {
+	pos := held[o.PositionSide]
+	switch {
+	case o.PositionSide != SideBoth:
+		return pos.Qty.Abs()
+	case o.Side == Buy && pos.Qty.IsNegative(), o.Side == Sell && pos.Qty.IsPositive():
+		return pos.Qty.Abs()
+	}
+	return decimal.Zero
+}
+
 // CheckClosing checks that an order that only closes (reduce-only, or a
 // hedge-mode order against its side) fits in what its position has left
 // to close: the position's size less what the other active closing orders
 // on it would close.
 func CheckClosing(o Order, held map[PositionSide]Position, active []Order) error {
-	pos := held[o.PositionSide]
-	closable := decimal.Zero
-	switch {
-	case o.PositionSide != SideBoth:
-		closable = pos.Qty.Abs()
-	case o.Side == Buy && pos.Qty.IsNegative(), o.Side == Sell && pos.Qty.IsPositive():
-		closable = pos.Qty.Abs()
-	}
+	closable := closableBy(o, held)
 	for _, a := range active {
 		if a.ID != o.ID && a.Closing() && a.PositionSide == o.PositionSide && a.Side == o.Side {
 			closable = closable.Sub(remaining(a))
@@ -29,6 +35,47 @@ func CheckClosing(o Order, held map[PositionSide]Position, active []Order) error
 		return ErrReduceOnlyRejected.WithDetail("closable", decimal.Max(closable, decimal.Zero).String())
 	}
 	return nil
+}
+
+// BeyondPosition returns the user's closing orders their positions have no
+// room for any more (review C62): a closing order fits its position as it
+// is placed (CheckClosing), but the position may shrink while it rests -
+// auto-deleveraging against it, a liquidation, an order the other way
+// filling first - and the engine, which knows no positions, fills it
+// whole: PlanFill then opens the rest the other way. active are the
+// user's active orders on one contract, oldest first: the older ones keep
+// the room, the ones it no longer holds are returned. The liquidation
+// engine's, ADL's and the console's orders, and those on their way out,
+// are neither counted nor returned.
+func BeyondPosition(held map[PositionSide]Position, active []Order) []Order {
+	type way struct {
+		side PositionSide
+		dir  Side
+	}
+	room := map[way]decimal.Decimal{}
+	var out []Order
+	for _, o := range active {
+		switch o.Kind {
+		case KindUser, KindTakeProfit, KindStopLoss:
+		default:
+			continue
+		}
+		if !o.Closing() || o.CancelRequested {
+			continue
+		}
+		w := way{o.PositionSide, o.Side}
+		left, seen := room[w]
+		if !seen {
+			left = closableBy(o, held)
+		}
+		if rest := remaining(o); rest.GreaterThan(left) {
+			out = append(out, o)
+		} else {
+			left = left.Sub(rest)
+		}
+		room[w] = left
+	}
+	return out
 }
 
 // CheckRiskLimit checks that an opening order keeps the side it adds to

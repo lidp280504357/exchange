@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -196,6 +197,9 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 			if err := r.Orders().Update(ctx, plan.Order); err != nil {
 				return err
 			}
+			if err := s.trimClosing(ctx, r, userID, t.Symbol, positions, plan.Positions); err != nil {
+				return err
+			}
 		}
 		if err := r.Fills().Insert(ctx, plan.Fill); err != nil {
 			return err
@@ -224,6 +228,32 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		s.Metrics.Fills.Inc()
 		return nil
 	})
+}
+
+// trimClosing cancels, under the owner's lock, the closing orders the
+// positions a fill left have no room for (domain.BeyondPosition, review
+// C62), so that they cannot open the other way once filled. One filled
+// before its cancel reaches the engine still does: the engine's trade is
+// booked on both of its sides.
+func (s *Service) trimClosing(ctx context.Context, r ports.Repos, userID, symbol string, before map[domain.PositionSide]domain.Position,
+	changed []domain.PositionChange,
+) error {
+	held := maps.Clone(before)
+	for _, ch := range changed {
+		held[ch.Position.Side] = ch.Position
+	}
+	active, err := r.Orders().Active(ctx, userID, symbol)
+	if err != nil {
+		return err
+	}
+	for _, o := range domain.BeyondPosition(held, active) {
+		if _, err := s.requestCancel(ctx, r, o); err != nil {
+			return err
+		}
+		s.Log.InfoContext(ctx, "closing order beyond its position canceled", "user_id", userID, "symbol", symbol, "order_id", o.ID,
+			"position_side", o.PositionSide)
+	}
+	return nil
 }
 
 // settle books a request, or returns it to park when the ledger refuses

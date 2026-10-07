@@ -99,6 +99,55 @@ func TestClosingOrdersFitTheirPosition(t *testing.T) {
 	}
 }
 
+// Closing orders a shrunken position has no room for any more (review
+// C62): the older keep the room, the rest go; a hedge-mode close of the
+// long side by the long, a one-way reduce-only order by the position the
+// way it closes; the liquidation engine's and ADL's orders, and those
+// canceled already, are not counted.
+func TestClosingOrdersBeyondTheirPosition(t *testing.T) {
+	oneWay, hedge := settings(OneWay, Cross, 10), settings(Hedge, Cross, 10)
+	older := order(t, Sell, SideBoth, "61000", "0.3", true, oneWay)
+	newer := order(t, Sell, SideBoth, "61100", "0.2", true, oneWay)
+	small := order(t, Sell, SideBoth, "61200", "0.05", true, oneWay)
+	opening := order(t, Sell, SideBoth, "61300", "0.4", false, oneWay)
+	ids := func(list []Order) []string {
+		var out []string
+		for _, o := range list {
+			out = append(out, o.ID)
+		}
+		return out
+	}
+	newer.ID, small.ID, opening.ID = "o2", "o3", "o4"
+	active := []Order{older, newer, small, opening}
+	// A long of 0.55 holds 0.3 + 0.2 + 0.05: nothing goes.
+	if got := BeyondPosition(map[PositionSide]Position{SideBoth: {Qty: d("0.55")}}, active); len(got) != 0 {
+		t.Fatalf("all fit: %v", ids(got))
+	}
+	// Deleveraged to 0.35: the older 0.3 keeps its room, the 0.2 goes, the
+	// 0.05 still fits.
+	if got := ids(BeyondPosition(map[PositionSide]Position{SideBoth: {Qty: d("0.35")}}, active)); len(got) != 1 || got[0] != "o2" {
+		t.Fatalf("0.35 left: %v", got)
+	}
+	// Turned short: no reduce-only sell closes anything.
+	if got := ids(BeyondPosition(map[PositionSide]Position{SideBoth: {Qty: d("-0.1")}}, active)); len(got) != 3 {
+		t.Fatalf("a short: %v", got)
+	}
+	// Hedge mode: the sells of the long side, by the long.
+	sellLong := order(t, Sell, SideLong, "61000", "0.3", false, hedge)
+	buyShort := order(t, Buy, SideShort, "59000", "0.2", false, hedge)
+	buyShort.ID = "s1"
+	held := map[PositionSide]Position{SideLong: {Qty: d("0.1")}, SideShort: {Qty: d("-0.2")}}
+	if got := ids(BeyondPosition(held, []Order{sellLong, buyShort})); len(got) != 1 || got[0] != sellLong.ID {
+		t.Fatalf("hedge: %v", got)
+	}
+	// The liquidation engine's and ADL's, and one on its way out, stay.
+	liq, adl, gone := older, newer, small
+	liq.Kind, adl.Kind, gone.CancelRequested = KindLiquidation, KindADL, true
+	if got := BeyondPosition(map[PositionSide]Position{}, []Order{liq, adl, gone}); len(got) != 0 {
+		t.Fatalf("system orders and canceled ones: %v", ids(got))
+	}
+}
+
 func TestRiskLimits(t *testing.T) {
 	// At 20x the ladder allows 250000 of notional: 4.166 BTC at 60000.
 	s := settings(OneWay, Cross, 20)

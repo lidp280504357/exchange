@@ -312,8 +312,11 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol string, ref port
 }
 
 // Observe takes a live 1m candle update of a followed pair (the feed's
-// hook) into the open candle of every interval. An interval seen for the
-// first time in the middle is initialized from the source.
+// hook: the candle as shown and stored, a price event's factor applied)
+// into the open candle of every interval. An interval seen for the first
+// time in the middle is initialized from the source, with the minutes a
+// price event touched laid over it (withTouched): every interval's open
+// candle, in the charts and in the pushes, has an event's spike.
 func (rc *ReferenceCandles) Observe(k domain.Candle) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
@@ -420,6 +423,9 @@ func (rc *ReferenceCandles) initializer() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), initTimeout)
 		got, err := rc.history.Klines(ctx, mapped, req.interval, time.Time{}, 1)
+		if err == nil && len(got) > 0 {
+			got[len(got)-1] = rc.withTouched(ctx, req.ref, req.interval, got[len(got)-1])
+		}
 		cancel()
 		rc.mu.Lock()
 		delete(rc.pending, req.ref+"|"+string(req.interval))
@@ -433,6 +439,26 @@ func (rc *ReferenceCandles) initializer() {
 		rc.seedLocked(req.ref, req.interval, got[len(got)-1])
 		rc.mu.Unlock()
 	}
+}
+
+// withTouched lays the minutes a price event touched, as stored, over an
+// open candle read from the source, as the charts' history has them
+// (review C64): the source knows the reference market's prices only, so an
+// interval whose open candle is read after an event's spike - a restart's
+// initializer reaches the longer intervals minutes later - would chart
+// without the spike until it closed, while the shorter ones had it. Read
+// before rc.mu, as Candles reads them; a failed read leaves the source's
+// candle (the spike then shows once the interval closes).
+func (rc *ReferenceCandles) withTouched(ctx context.Context, symbol string, i domain.Interval, b domain.Candle) domain.Candle {
+	if rc.overlaid == nil {
+		return b
+	}
+	touched, err := rc.overlaid(ctx, symbol, b.OpenTime, i.Next(b.OpenTime))
+	if err != nil {
+		rc.log.Warn("reference K-lines: a price event's minutes not read for an open candle", "symbol", symbol, "interval", i, "error", err)
+		return b
+	}
+	return domain.MergeOverlaid([]domain.Candle{b}, i, touched)[0]
 }
 
 func (rc *ReferenceCandles) forget(req initRequest) {
