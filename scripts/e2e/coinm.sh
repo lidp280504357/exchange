@@ -9,7 +9,13 @@
 # a long against HOUSE (cross, 20x): 3 contracts of 100 USD settled in
 # BTC, worth 300 USD and 300 / mark in BTC, the reservation in BTC; a
 # reduce-only market sell closes it. A market sell of 3 opens a short the
-# same way and a reduce-only market buy closes it. Every fill is settled in
+# same way and a reduce-only market buy closes it. With 2 contracts long,
+# the coin-margined line closes for a moment as the console closes it
+# (design 2026-10-07 product switches, K1b; product.coin_m off and
+# derivatives-service's cancel-open, every user's open orders on the line
+# canceled, the market makers' kept): an opening order is PRODUCT_CLOSED,
+# a reduce-only sell of 1 trades with HOUSE; opened again, an opening buy
+# of 1 is taken and a reduce-only sell of 2 closes. Every fill is settled in
 # BTC; the realized PnL and the fees are in BTC, the FUTURES BTC holds
 # nothing frozen and is what went in plus the PnL less the fees. Then HOUSE
 # has no room for the contract (market.house_liquidity off for it, put back
@@ -30,6 +36,8 @@ set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 # shellcheck source=lib/remote.sh
 source "$(dirname "$0")/lib/remote.sh"
+# shellcheck source=lib/products.sh
+source "$(dirname "$0")/lib/products.sh"
 
 SYMBOL=BTC-USD-PERP
 IN=0.002
@@ -121,15 +129,39 @@ round_trip() {
 round_trip BUY SELL ""
 round_trip SELL BUY -
 
-# books: every fill settled in BTC, 6 closed; sets PNL and FEES.
+echo "== the coin-margined line closed: only closes taken (product switches, K1b)"
+market() { # market SIDE QUANTITY [REDUCE_ONLY]: a market order's request
+  printf '{"symbol":"%s","side":"%s","type":"MARKET","quantity":"%s","reduce_only":%s}' "$SYMBOL" "$1" "$2" "${3:-false}"
+}
+contracts() { position && [[ $(jq -r '.positions[0].quantity' <<<"$BODY") == "$1" ]]; }
+call POST /v1/derivatives/orders "$(market BUY 2)" "${AUTH[@]}"
+expect 202 - "a market buy of 2 contracts"
+eventually 40 "2 contracts long" contracts 2
+product_close coin_m
+check '.canceled == (.orders | length)' "closed: $(jq -r .canceled <<<"$BODY") open orders of the line canceled"
+call POST /v1/derivatives/orders "$(market BUY 1)" "${AUTH[@]}"
+expect 403 PRODUCT_CLOSED "an opening order"
+check '.details.product == "coin_m"' "naming the line"
+call POST /v1/derivatives/orders "$(market SELL 1 true)" "${AUTH[@]}"
+expect 202 - "a reduce-only market sell of 1: the holder closes"
+eventually 40 "1 contract left, against HOUSE" contracts 1
+product_open coin_m
+reopened() { call POST /v1/derivatives/orders "$(market BUY 1)" "${AUTH[@]}" && [[ $STATUS == 202 ]]; }
+eventually 20 "open again: an opening buy of 1 is taken" reopened
+eventually 40 "2 contracts long again" contracts 2
+call POST /v1/derivatives/orders "$(market SELL 2 true)" "${AUTH[@]}"
+expect 202 - "a reduce-only market sell of 2"
+eventually 40 "flat" flat
+
+# books: every fill settled in BTC, 9 closed; sets PNL and FEES.
 books() {
   call GET "/v1/derivatives/fills?symbol=$SYMBOL&limit=50" "" "${AUTH[@]}"
   jq -e '(.items | length) >= 4 and all(.items[]; .settled and .settle_asset == "BTC")
-    and ([.items[].closed_quantity | tonumber] | add) == 6' <<<"$BODY" >/dev/null || return 1
+    and ([.items[].closed_quantity | tonumber] | add) == 9' <<<"$BODY" >/dev/null || return 1
   PNL=$(jq '[.items[].realized_pnl | tonumber] | add' <<<"$BODY")
   FEES=$(jq '[.items[].fee | tonumber] | add' <<<"$BODY")
 }
-eventually 20 "the fills: settled in BTC, 6 closed" books
+eventually 20 "the fills: settled in BTC, 9 closed" books
 echo "ok   PnL $PNL BTC, fees $FEES BTC"
 settled() {
   call GET "/v1/derivatives/account?asset=BTC" "" "${AUTH[@]}" && jq -e '.frozen == "0" and .order_margin == "0" and .position_margin == "0"' <<<"$BODY" >/dev/null

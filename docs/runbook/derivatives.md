@@ -112,6 +112,22 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 
 部署会重启 market-data-service，标记价可能中断超过 10 秒，合约因此进入只减仓（2026-10-01 有一次 ETH-USDT-PERP 停在只减仓几个小时，直到端到端测试失败才发现）。`deploy/server-update.sh` 最后等 20 秒，解除部署期间开始、原因为 `INDEX_SOURCES` 或 `MARK_PRICE_STALE` 的只减仓，解除人记为 `deploy-<版本>`（`exchangectl` 读 `EXCHANGECTL_ACTOR`）；价源若真断了，10 秒后又会只减仓。部署之外开始的只减仓仍须人工解除。
 
+## 产品线开关（产品线开关设计 2026-10-07，批次 K1b）
+
+两条合约产品线各一个全局开关：U 本位 `product.usdt_m`、币本位 `product.coin_m`（迁移 config 00002 写入为开；没存的按开算，见 [feature-flags.md](feature-flags.md)）。合约属于哪条线按规格判：币本位（`contract_size` 为正）属 `coin_m`，其余属 `usdt_m`。服务每 5 秒重读开关（`flags.RefreshInterval`）。与按合约的只减仓、合约状态和资格开关是叠加关系。
+
+关闭后（`application/products.go`）：
+
+- 只收平仓：只减仓单、对冲模式的反向单（强平、ADL、止盈止损触发的单与后台平仓都是平仓单）与撤单照常；开仓单答 403 `PRODUCT_CLOSED`（`details.product` 为 `usdt_m` 或 `coin_m`）；新建止盈止损也答 `PRODUCT_CLOSED`（关闭时它们都被撤了，已有仓位直接下只减仓单平）。单向持仓模式下，平仓要带 `reduce_only`，不带的单按开仓单拒。
+- 仓位、资金费、强平、ADL 与对账照常；HOUSE 照常报价（所有成交都对 HOUSE，平仓单与强平单只能和它成交；开仓单进不来，HOUSE 的报价只会被平仓与强平用到；设计稿 §1 #3，协调会话 16:48 更正）。
+- 做市账户（`MARKET_MAKER_USER_IDS`，模拟市场的机器人）不受开关限制：平台币永续没有 HOUSE 报价，机器人的挂单是平仓的对手方。
+- 后台关闭时调 `POST /internal/products/{usdt_m|coin_m}/cancel-open`（`{actor, reason}`）：先重读开关（读不到答 503，还开着答 409 `COMMON_CONFLICT`），再按用户逐个加锁、撤销该线合约上的全部用户挂单（强平、ADL、后台平仓单不撤，做市账户的不撤）与生效中的止盈止损（状态 `CANCELED`、原因 `PRODUCT_CLOSED`），每单在同一事务里发审计 `admin.orders.canceled`（`Target` 为 `user:<id>`、`Actor` 为调用方给的 `actor`、`Details` 含 `order_id`、`symbol`、`product`、`type`）；答 202 `{canceled, orders: [{order_id, user_id, symbol, type: ORDER|CONDITIONAL}]}`，挂单由引擎确认撤销。重复调用只撤此刻还开着的。
+- 兜底：恢复循环每 5 秒检查关闭的线，撤掉关闭前 10 秒起新建的开仓挂单与止盈止损（关闭那一刻正在下的单，读开关时还没变），审计的 `actor` 为 `system:derivatives-service`；关闭之后下的平仓单不动，关闭以前就挂着的由上面的接口撤。
+- `GET /internal/products/{usdt_m|coin_m}` → `{product, closed, open_orders, open_positions}`：关闭会撤的挂单数（含止盈止损）与会保留的持仓数，HOUSE 与做市账户不计（后台「产品线」卡用）。
+- 重新打开即恢复下单；关闭期间撤掉的挂单不回放。
+
+端到端：`scripts/e2e/derivatives.sh` 与 `coinm.sh` 各有一步把线关上片刻（`scripts/e2e/lib/products.sh`：关开关、调 cancel-open；脚本结束时无论成败都重新打开），核对挂单与止盈止损被撤、开仓与新止盈止损被拒、持仓用户的只减仓单对 HOUSE 成交、重开后开仓单被收。测试服上这会撤掉其他用户在该线上的挂单（做市账户的除外）。
+
 ## 币本位合约（反向合约，币本位设计 2026-10-06 §2，批次 G1）
 
 - 规格（G0）：`margin_type` 为 `COIN`、`settle_asset` 为基础资产（BTC、ETH、ASTRA）、`contract_size` 为面值（美元：BTC 100、其它 10），以 USD 计价。服务读 instrument-service 的全部合约（`margin_type=ALL`），金额精度取结算资产的（BTC、ETH 8 位）。
@@ -163,6 +179,8 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 | `POST /internal/derivatives/positions/close` | 后台强制平仓（C2）：先撤该用户在这个合约上的全部挂单，再以 `ADMIN` 类型的市价只减仓单平掉；HOUSE 不平 |
 | `GET /internal/derivatives/users/{id}/cross-margin?debit=&asset=` | 后台调账预览（C5.5 ⑧）：该结算资产（缺省 USDT）全仓账户的权益、维持保证金与状态，以及扣减 `debit` 后的权益与状态（`HEALTHY`/`WARNING`/`LIQUIDATE`） |
 | `POST /internal/derivatives/contracts/{symbol}/tier-impact` | 新风险阶梯的影响（后台预览，2026-10-02 设计 §2 第 6 条）：`{risk_tiers}`，按保证金监控的规则（逐仓看仓位、全仓看整个账户，HOUSE 不计）算出会新被强平的仓位数、名义价值与账户数，新进入预警、超出杠杆风险限额、没有新鲜标记价的数量，以及最大的 20 个例子；阶梯不合法答 400，不改任何东西；全仓账户逐个向账本查余额，最多量 2000 个、8 秒（后台等 10 秒），剩下的仓位计入「没有新鲜标记价」那一项（`unmeasured`），后台因此不给确认（C5.5 ⑩） |
+| `GET /internal/products/{usdt_m\|coin_m}` | 产品线的开关状态与关闭会撤的挂单数、会保留的持仓数（见「产品线开关」） |
+| `POST /internal/products/{usdt_m\|coin_m}/cancel-open` | 后台关闭产品线时撤销其全部用户挂单与止盈止损，逐单审计（见「产品线开关」） |
 | `POST /internal/derivatives/contracts/{symbol}/price-impact` | 某个标记价的影响（后台"模拟市场"价格事件的确认框，ASTRA 设计 §6.3）：`{target_price}` → `positions`、`liquidated`（标记价到这里会新被强平的仓位数；全仓账户整个算进去）、`notional`（按目标价）、`accounts`、`insurance_cost`（按目标价平掉时逐仓保证金或全仓权益低于 0 的部分，即保险基金预计承担）、`unmeasured`（现在没有新鲜标记价、量不了的仓位）与最大的 20 个例子（保证金余额按目标价，维持保证金是现在与目标价两个）；与阶梯影响同一套保证金监控算法与上限（2000 个全仓账户、8 秒），HOUSE 不计，不改任何东西；目标价不是正数答 400 |
 
 WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，按 `symbol` 区分）、`fills`（合约成交带 `position_side`、`closed_quantity`、`realized_pnl`，手续费资产 USDT）、`positions`（`event` 为 OPEN、INCREASE、REDUCE、CLOSE、FLIP、MARGIN、FUNDING、LEVERAGE）、`risk`（`event` 为 WARNING、STARTED、LIQUIDATED、ADL）。

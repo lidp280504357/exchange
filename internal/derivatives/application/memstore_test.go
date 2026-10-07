@@ -163,6 +163,10 @@ func (r memOrders) Active(_ context.Context, userID, symbol string) ([]domain.Or
 	}), nil
 }
 
+func (r memOrders) ActiveOn(_ context.Context, symbols []string) ([]domain.Order, error) {
+	return r.sorted(func(o domain.Order) bool { return slices.Contains(symbols, o.Symbol) && o.Status.Active() }), nil
+}
+
 func (r memOrders) CountActive(ctx context.Context, userID, symbol string) (int, int, error) {
 	all, _ := r.Active(ctx, userID, "")
 	on := 0

@@ -175,6 +175,11 @@ func (r orders) CountActive(ctx context.Context, userID, symbol string) (int, in
 	return onSymbol, total, nil
 }
 
+func (r orders) ActiveOn(ctx context.Context, symbols []string) ([]domain.Order, error) {
+	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE symbol = ANY($1) AND status = ANY($2)
+		ORDER BY order_id`, symbols, activeStatuses)
+}
+
 func (r orders) Unreleased(ctx context.Context, userID string) ([]domain.Order, error) {
 	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE user_id = $1
 		AND (NOT released OR consumed_quantity < filled_quantity)

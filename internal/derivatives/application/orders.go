@@ -26,7 +26,8 @@ import (
 // their leverage and fit in the free margin (the available balance less
 // the cross positions' unrealized loss); orders that only close need
 // neither, but must fit in what their position has left to close. A
-// contract under reduce-only takes only those.
+// contract under reduce-only takes only those, and so does a closed product
+// line (PRODUCT_CLOSED, products.go).
 func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, error) {
 	if req.ClientOrderID != "" {
 		if prev, err := s.Store.Read().Orders().ByClientID(ctx, req.UserID, req.ClientOrderID); err == nil {
@@ -66,6 +67,9 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		o, err = domain.NewOrder(uuid.Must(uuid.NewV7()).String(), req, c, set, mark, s.Now())
 		if err != nil {
 			return err
+		}
+		if !o.Closing() && s.closedTo(c, o.UserID) {
+			return flags.ErrProductClosed(ProductOf(c))
 		}
 		if state, err := r.Contracts().Get(ctx, c.Symbol); err != nil {
 			return err

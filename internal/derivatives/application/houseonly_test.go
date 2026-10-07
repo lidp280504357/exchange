@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"testing"
 
 	"github.com/skill/exchange/internal/derivatives/domain"
@@ -10,6 +11,9 @@ import (
 type houseFlags map[string]bool
 
 func (f houseFlags) Enabled(key string, _ flags.Subject) bool { return f[key] }
+func (f houseFlags) Closed(string) bool                       { return false }
+func (f houseFlags) Get(string) (flags.Flag, bool)            { return flags.Flag{}, false }
+func (f houseFlags) Refresh(context.Context) error            { return nil }
 
 // Only a contract whose index pair follows a reference market trades with
 // HOUSE alone: the platform coin's perpetual has no HOUSE quotes, so its

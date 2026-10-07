@@ -129,13 +129,14 @@ export interface paths {
          *     Product lines (design 2026-10-07, product switches): while an
          *     operator has the contract's line closed (product.usdt_m for a
          *     USDT-margined contract, product.coin_m for a coin-margined one;
-         *     GET /v1/platform/products) only reduce-only orders that close a
-         *     position are taken; any other, and any new conditional order,
-         *     fails with PRODUCT_CLOSED (403, details product: usdt_m or
-         *     coin_m). Cancels go on; the open and conditional orders were
-         *     canceled when it closed (and any that slipped in, within 5
-         *     seconds); positions, funding and liquidations go on, closing
-         *     against HOUSE, which keeps quoting.
+         *     GET /v1/platform/products) only orders that close a position are
+         *     taken: reduce-only ones, and in hedge mode those against the
+         *     position's side (in one-way mode a close needs reduce_only); any
+         *     other, and any new conditional order, fails with PRODUCT_CLOSED
+         *     (403, details product: usdt_m or coin_m). Cancels go on; the open
+         *     and conditional orders were canceled when it closed (and any that
+         *     slipped in, within 5 seconds); positions, funding and liquidations
+         *     go on, closing against HOUSE, which keeps quoting.
          */
         post: operations["createDerivativesOrder"];
         /** Cancel the caller's active contract orders */
@@ -208,7 +209,8 @@ export interface paths {
          *     DERIV_NO_POSITION. At most 20 active per contract. While the
          *     contract's product line is closed (design 2026-10-07, product
          *     switches) a new one fails with PRODUCT_CLOSED (403, details
-         *     product: usdt_m or coin_m).
+         *     product: usdt_m or coin_m); the position closes with a reduce-only
+         *     order.
          */
         post: operations["createConditionalOrder"];
         delete?: never;

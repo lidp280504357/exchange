@@ -11,6 +11,7 @@ import (
 	"github.com/skill/exchange/internal/derivatives/domain"
 	"github.com/skill/exchange/internal/derivatives/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // MaxConditionals bounds a user's active take-profit and stop-loss orders
@@ -63,11 +64,16 @@ func (s *Service) triggerPrice(ctx context.Context, symbol, by string) decimal.D
 
 // CreateConditional places a take-profit or stop-loss on one of the
 // user's open positions (§5.8): it waits until its trigger price is
-// reached, then places an order that only closes the position.
+// reached, then places an order that only closes the position. A closed
+// product line takes none (its closing canceled them all, products.go):
+// its positions close with reduce-only orders.
 func (s *Service) CreateConditional(ctx context.Context, req domain.ConditionalRequest) (domain.Conditional, error) {
 	c, err := s.Instruments.Contract(ctx, req.Symbol)
 	if err != nil {
 		return domain.Conditional{}, err
+	}
+	if s.closedTo(c, req.UserID) {
+		return domain.Conditional{}, flags.ErrProductClosed(ProductOf(c))
 	}
 	if req.TriggerBy == "" {
 		req.TriggerBy = domain.TriggerMark

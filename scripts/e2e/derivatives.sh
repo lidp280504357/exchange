@@ -4,8 +4,15 @@
 # decision 2026-10-02): two new users move USDT to FUTURES; leverage stops
 # at the contract's 125x; a bid under the market rests with its margin
 # reserved until canceled; the buyer (cross, 10x) opens a long with a limit
-# buy over the ask, the seller (isolated, 20x) a short with a market sell;
-# both close with reduce-only market orders. The PnL of each is what its
+# buy over the ask, the seller (isolated, 20x) a short with a market sell.
+# Then the USDT-margined line closes for a moment as the console closes it
+# (design 2026-10-07 product switches, K1b; product.usdt_m off and
+# derivatives-service's cancel-open, every user's open orders on the line
+# canceled, the market makers' kept): the buyer's resting bid and
+# take-profit are canceled, an opening order and a new take-profit are
+# PRODUCT_CLOSED, a reduce-only sell of half the long trades with HOUSE;
+# opened again, an opening order is taken. Both then close with
+# reduce-only market orders. The PnL of each is what its
 # fills say ((sold - bought) x quantity), the positions are flat, FUTURES
 # holds nothing frozen and its balance is 500 plus the PnL less the fees;
 # the rest moves back to SPOT; the derivatives reconciliation (invariant 6)
@@ -20,6 +27,8 @@ set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 # shellcheck source=lib/remote.sh
 source "$(dirname "$0")/lib/remote.sh"
+# shellcheck source=lib/products.sh
+source "$(dirname "$0")/lib/products.sh"
 
 SYMBOL=ETH-USDT-PERP
 
@@ -70,6 +79,7 @@ book() { # sets ASK from HOUSE's book (Binance's)
 }
 eventually 40 "$SYMBOL shows HOUSE's asks" book
 LOW=$(awk -v m="$MARK" 'BEGIN { printf "%.2f", m * 0.97 }')
+HIGH=$(awk -v m="$MARK" 'BEGIN { printf "%.2f", m * 1.05 }')
 OVER=$(awk -v a="$ASK" 'BEGIN { printf "%.2f", a * 1.002 }')
 echo "ok   mark $MARK, ask $ASK"
 
@@ -107,9 +117,44 @@ check '.positions[0].quantity == "-0.1" and .positions[0].margin_mode == "ISOLAT
 call GET "/v1/derivatives/orders/$OPEN" "" "${BUYER[@]}"
 check '.status == "FILLED" and .reserved == "0" and (.fee | tonumber) > 0' "the buy filled, nothing left reserved, a fee paid"
 
+echo "== the USDT-margined line closed: its open orders canceled, only closes taken (product switches, K1b)"
+BID_BODY="{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.10\"}"
+TP_BODY="{\"symbol\":\"$SYMBOL\",\"kind\":\"TAKE_PROFIT\",\"trigger_price\":\"$HIGH\",\"quantity\":\"0.05\"}"
+call POST /v1/derivatives/orders "$BID_BODY" "${BUYER[@]}"
+expect 202 - "a bid of 0.10 at $LOW"
+BID=$(jq -r .order_id <<<"$BODY")
+eventually 40 "it rests (OPEN)" order_is "$BID" OPEN "${BUYER[@]}"
+call POST /v1/derivatives/conditional-orders "$TP_BODY" "${BUYER[@]}"
+expect 201 - "a take-profit of 0.05 at $HIGH"
+TP=$(jq -r .conditional_id <<<"$BODY")
+product_close usdt_m
+check "([.orders[] | select(.order_id == \"$BID\" and .type == \"ORDER\")] | length) == 1 and ([.orders[] | select(.order_id == \"$TP\" and .type == \"CONDITIONAL\")] | length) == 1 and .canceled == (.orders | length)" \
+  "closing it canceled the bid and the take-profit ($(jq -r .canceled <<<"$BODY") orders of the line)"
+eventually 40 "the bid is canceled" order_is "$BID" CANCELED "${BUYER[@]}"
+call GET "/v1/derivatives/conditional-orders?symbol=$SYMBOL" "" "${BUYER[@]}"
+check "[.items[] | select(.conditional_id == \"$TP\")][0] | .status == \"CANCELED\" and .reason == \"PRODUCT_CLOSED\"" "the take-profit CANCELED, PRODUCT_CLOSED"
+call POST /v1/derivatives/orders "$BID_BODY" "${BUYER[@]}"
+expect 403 PRODUCT_CLOSED "an opening order"
+check '.details.product == "usdt_m"' "naming the line"
+call POST /v1/derivatives/conditional-orders "$TP_BODY" "${BUYER[@]}"
+expect 403 PRODUCT_CLOSED "a new take-profit"
+call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.05\",\"reduce_only\":true}" "${BUYER[@]}"
+expect 202 - "a reduce-only market sell of 0.05: the holder closes"
+half() { position "${BUYER[@]}" >/dev/null && [[ $(jq -r '.positions[0].quantity' <<<"$BODY") == 0.05 ]]; }
+eventually 40 "the long is down to 0.05, against HOUSE" half
+product_state usdt_m
+check '.closed == true and .open_positions >= 2' "derivatives-service counts the line closed with the two positions on it"
+product_open usdt_m
+reopened() { call POST /v1/derivatives/orders "$BID_BODY" "${BUYER[@]}" && [[ $STATUS == 202 ]]; }
+eventually 20 "open again: an opening order is taken" reopened
+AGAIN=$(jq -r .order_id <<<"$BODY")
+call DELETE "/v1/derivatives/orders/$AGAIN" "" "${BUYER[@]}"
+expect 202 - "cancel it"
+eventually 40 "it is canceled" order_is "$AGAIN" CANCELED "${BUYER[@]}"
+
 echo "== close: reduce-only market orders"
-call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.10\",\"reduce_only\":true}" "${BUYER[@]}"
-expect 202 - "the buyer's reduce-only sell"
+call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.05\",\"reduce_only\":true}" "${BUYER[@]}"
+expect 202 - "the buyer's reduce-only sell of the rest"
 check '.reserved == "0"' "a closing order reserves nothing"
 call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.10\",\"reduce_only\":true}" "${SELLER[@]}"
 expect 202 - "the seller's reduce-only buy-back"

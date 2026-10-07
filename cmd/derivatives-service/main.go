@@ -98,7 +98,8 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	// Flags decide whether a contract's orders trade only with HOUSE (ADR-0015).
+	// Flags decide whether a contract's orders trade only with HOUSE (ADR-0015)
+	// and whether its product line is open (product.usdt_m, product.coin_m).
 	features, err := bootstrap.Flags(ctx, a, cfg.Postgres)
 	if err != nil {
 		return err
@@ -172,7 +173,8 @@ func setup(ctx context.Context, a *app.App) error {
 
 // recoverLoop finishes, every few seconds, orders whose freeze outcome was
 // not recorded, finished orders whose reservation was not released, and
-// settlements the ledger refused (once their cause is fixed).
+// settlements the ledger refused (once their cause is fixed); it cancels
+// what came in on a closed product line as it closed.
 func recoverLoop(a *app.App, svc *application.Service) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(5 * time.Second)
@@ -185,6 +187,7 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 			}
 			for name, step := range map[string]func(context.Context) (int, error){
 				"order freezes": svc.Recover, "order releases": svc.RecoverReleases, "parked settlements": svc.RetryPending,
+				"closed products": svc.SweepClosed,
 			} {
 				if n, err := step(ctx); err != nil {
 					a.Logger().WarnContext(ctx, "recovery failed", "step", name, "error", err)

@@ -590,8 +590,11 @@ func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
 // /internal): the contracts with their reduce-only state, mark price and
 // open interest; lifting reduce-only; the positions close to or in
 // liquidation; every user's open positions; closing a user's position at
-// the market.
+// the market; a contract product line's counts and, as the console closes
+// it, its open orders canceled (design 2026-10-07, product switches).
 func (h *Handler) InternalRoutes(r chi.Router) {
+	r.Get("/internal/products/{product}", h.product)
+	r.Post("/internal/products/{product}/cancel-open", h.cancelProduct)
 	r.Get("/internal/derivatives/contracts", h.overview)
 	r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 	r.Get("/internal/derivatives/risk", h.risk)
@@ -600,6 +603,67 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Get("/internal/derivatives/users/{id}/cross-margin", h.crossMargin)
 	r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
 	r.Post("/internal/derivatives/contracts/{symbol}/price-impact", h.priceImpact)
+}
+
+// product counts what closing a contract product line (usdt_m, coin_m)
+// touches now: the open orders it would cancel (take-profits and
+// stop-losses included) and the open positions that stay, HOUSE's and the
+// market makers' not counted.
+func (h *Handler) product(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "product")
+	key, err := application.ProductKey(name)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	orders, positions, err := h.Svc.ProductCounts(r.Context(), key)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"product": name, "closed": h.Svc.ProductClosed(key), "open_orders": orders, "open_positions": positions,
+	})
+}
+
+// cancelProduct cancels a closed contract product line's open orders as
+// the console closes it ({actor, reason}): 202 {canceled, orders:
+// [{order_id, user_id, symbol, type: ORDER or CONDITIONAL}]}, the engine
+// confirming the cancels; 409 COMMON_CONFLICT while the line is open.
+func (h *Handler) cancelProduct(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	key, err := application.ProductKey(chi.URLParam(r, "product"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	list, err := h.Svc.CancelProduct(r.Context(), key, body.Actor, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type orderJSON struct {
+		OrderID string `json:"order_id"`
+		UserID  string `json:"user_id"`
+		Symbol  string `json:"symbol"`
+		Type    string `json:"type"`
+	}
+	out := make([]orderJSON, 0, len(list))
+	for _, o := range list {
+		kind := "ORDER"
+		if o.Conditional {
+			kind = "CONDITIONAL"
+		}
+		out = append(out, orderJSON{OrderID: o.ID, UserID: o.UserID, Symbol: o.Symbol, Type: kind})
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"canceled": len(out), "orders": out})
 }
 
 func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {

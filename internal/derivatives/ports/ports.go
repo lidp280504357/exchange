@@ -64,6 +64,9 @@ type OrderRepo interface {
 	Active(ctx context.Context, userID, symbol string) ([]domain.Order, error)
 	// CountActive counts the user's active orders on symbol and overall.
 	CountActive(ctx context.Context, userID, symbol string) (onSymbol, total int, err error)
+	// ActiveOn returns every user's active orders on the symbols (a
+	// product line's, design 2026-10-07 product switches).
+	ActiveOn(ctx context.Context, symbols []string) ([]domain.Order, error)
 	// Unreleased returns the user's orders whose reservation is not all
 	// consumed or released.
 	Unreleased(ctx context.Context, userID string) ([]domain.Order, error)
@@ -291,4 +294,13 @@ type Marks interface {
 // Features answers feature-flag checks.
 type Features interface {
 	Enabled(key string, s flags.Subject) bool
+	// Closed reports whether an operator closed the product line of key
+	// (flags.Client.Closed: its flag stored and off).
+	Closed(key string) bool
+	// Get returns the local copy of a flag: a closed product line's
+	// UpdatedAt is when it closed.
+	Get(key string) (flags.Flag, bool)
+	// Refresh reloads the flags: closing a product line reads its flag
+	// before canceling its orders.
+	Refresh(ctx context.Context) error
 }
