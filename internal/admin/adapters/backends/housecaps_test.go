@@ -90,3 +90,36 @@ func TestMarketMakerCaps(t *testing.T) {
 		t.Fatalf("signatures %q %q", got[2].signedBy, got[3].signedBy)
 	}
 }
+
+// TestMarketMakerRooms reads what HOUSE may still buy and sell of a symbol
+// (J0 contract §4.2, for a price event's preview, A81): unsigned, a symbol
+// it does not quote (404) is no error.
+func TestMarketMakerRooms(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(svcsign.Header) != "" {
+			t.Errorf("a read signed")
+		}
+		switch r.URL.Path {
+		case "/internal/house/rooms/BTC-USD-PERP":
+			_, _ = w.Write([]byte(`{"symbol":"BTC-USD-PERP","buy":"50000","sell":"48000","mid":"84100","unit_value":"100","inverse":true,"updated_at":"2026-10-07T07:00:00Z"}`))
+		case "/internal/house/rooms/ASTRA-USDT":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"COMMON_NOT_FOUND","message":"HOUSE does not quote the symbol"}`))
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	m := MarketMaker{REST: REST{Client: &http.Client{Timeout: 5 * time.Second}}, Base: srv.URL}
+	ctx := context.Background()
+	r, quoted, err := m.HouseRooms(ctx, "BTC-USD-PERP")
+	if err != nil || !quoted || r.Buy.String() != "50000" || r.Sell.String() != "48000" || r.UnitValue.String() != "100" || !r.Inverse {
+		t.Fatalf("rooms %+v %v %v", r, quoted, err)
+	}
+	if _, quoted, err := m.HouseRooms(ctx, "ASTRA-USDT"); err != nil || quoted {
+		t.Fatalf("not quoted: %v %v", quoted, err)
+	}
+	if _, _, err := m.HouseRooms(ctx, "ETH-USDT"); err == nil {
+		t.Fatal("market-maker down is an error")
+	}
+}

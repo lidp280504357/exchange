@@ -960,6 +960,10 @@ else
     as AUDITOR GET "/admin/v1/approvals/$BIG_OVERLAY/sim-preview" ""
     expect 200 - "its decider sees it measured"
     check '.target_price == null and .expected_price == null and .requested_move == "0.35"' "by Binance's price when carried out, nothing of the coin's model"
+    # The pair now: its price, the target, HOUSE's worst loss or why none (A81).
+    check '(.overlay | length) == 1 and .overlay[0].symbol == "BTC-USDT" and (.overlay[0].price | test("^[0-9.]+$")) and .overlay[0].move == 0.35 and
+      ((.overlay[0].loss_usdt // "" | test("^[0-9.]+$")) or (.overlay[0].loss_note | IN("NOT_QUOTED", "UNREADABLE")))' \
+      "the pair's price now, the target 35% above, HOUSE's worst loss"
     as ADMIN POST "/admin/v1/approvals/$BIG_OVERLAY/decide" '{"approve":false,"reason":"e2e: no such move"}'
     expect 200 - "ADMIN rejects it"
     as OPERATOR POST /admin/v1/sim/events "$(overlay '{}' "e2e: BTC-USDT up 0.5% from the console, the leverage spared")"

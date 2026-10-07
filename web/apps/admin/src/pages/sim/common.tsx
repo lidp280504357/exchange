@@ -1,3 +1,4 @@
+import { formatDecimal } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -65,6 +66,19 @@ export function SimRequestNow({ id, overlay }: { id: string; overlay?: boolean }
         <span className="text-fg-3">{t(overlay ? "admin.sim.overlay.requestNow" : "admin.sim.noDirectMove")}</span>
       )}
       {overlay && pv.requested_move && <span className="text-fg-3">{t("admin.sim.askedMove", { move: pct(Number(pv.requested_move), 1) })}</span>}
+      {overlay &&
+        // Each pair measured now: its price, the target, HOUSE's worst loss (A81).
+        pv.overlay?.map((l) => (
+          <span key={l.symbol} className="flex flex-col border-t border-line-1 pt-1.5" data-testid="sim-request-overlay">
+            <span className="font-mono">
+              {l.symbol} {t("admin.sim.overlay.now")} {l.price ? formatDecimal(l.price) : "—"} → {l.target_price ? formatDecimal(l.target_price) : "—"}
+              {l.move !== null && ` (${pct(l.move)})`}
+            </span>
+            <span className={l.loss_usdt ? "text-warn-strong" : "text-fg-3"}>
+              {l.loss_usdt ? t("admin.sim.overlay.lossEstimate", { usdt: formatDecimal(l.loss_usdt) }) : t(`admin.sim.overlay.lossNote.${l.loss_note ?? "UNREADABLE"}`)}
+            </span>
+          </span>
+        ))}
       {pv.impact && <ImpactLines i={pv.impact} />}
       {pv.spike_impacts?.map((s) => (
         <span key={s.price} className="flex flex-col gap-0.5 border-t border-line-1 pt-1.5" data-testid="sim-request-spike">

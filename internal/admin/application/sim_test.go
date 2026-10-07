@@ -395,11 +395,35 @@ func TestOverlayEventsFromTheConsole(t *testing.T) {
 		t.Fatalf("beyond the share %+v %v", res, err)
 	}
 	// Measured by the reference price when carried out, not by the
-	// simulated market's model.
+	// simulated market's model: each pair's price now, the target, the
+	// move, and HOUSE's worst loss as market-sim works it out (A81) - with
+	// the leverage reached, on the pair and its two perpetuals.
 	if pv, err := h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID); err != nil || pv.Target != nil || pv.Expected != nil || pv.Impact != nil ||
-		pv.RequestedMove != "0.35" || pv.Expired {
-		t.Fatalf("the preview %+v %v", pv, err)
+		pv.RequestedMove != "0.35" || pv.Expired || len(pv.Overlay) != 1 || pv.Overlay[0].LossNote != "NO_PRICE" || pv.Overlay[0].Price != nil {
+		t.Fatalf("the preview without prices %+v %v", pv, err)
 	}
+	h.svc.Prices = fakePrices{"BTC-USDT": decimal.NewFromInt(84_100)}
+	mm := newFakeMarketMaker()
+	h.svc.MarketMaker = mm
+	if pv, _ := h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID); pv.Overlay[0].LossNote != "NOT_QUOTED" || pv.Overlay[0].Target.String() != "113535" ||
+		*pv.Overlay[0].Move != 0.35 {
+		t.Fatalf("HOUSE not quoting the pair %+v", pv.Overlay)
+	}
+	mm.rooms = map[string]ports.HouseRooms{
+		"BTC-USDT":      {Buy: decimal.RequireFromString("13.7"), Sell: decimal.NewFromInt(2), UnitValue: decimal.NewFromInt(84_100)},
+		"BTC-USDT-PERP": {Buy: decimal.NewFromInt(66), Sell: decimal.NewFromInt(66), UnitValue: decimal.NewFromInt(84_100)},
+		"BTC-USD-PERP":  {Buy: decimal.NewFromInt(50_000), Sell: decimal.NewFromInt(50_000), UnitValue: decimal.NewFromInt(100), Inverse: true},
+	}
+	// 13.7 × 84,100 × 0.35 + 66 × 84,100 × 0.35 + 50,000 × 100 × (1 − 1/1.35).
+	pv, err := h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID)
+	if err != nil || pv.Overlay[0].LossNote != "" || pv.Overlay[0].Loss.String() != "3642265.8" || pv.Overlay[0].Price.String() != "84100" {
+		t.Fatalf("HOUSE's worst loss %+v %v", pv.Overlay, err)
+	}
+	mm.down = true
+	if pv, _ := h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID); pv.Overlay[0].LossNote != "UNREADABLE" || pv.Overlay[0].Loss != nil {
+		t.Fatalf("market-maker down %+v", pv.Overlay)
+	}
+	h.svc.Prices = nil
 	done, err := h.svc.DecideApproval(ctx, boss, res.Approval.ID, true, "the board agrees")
 	if err != nil || done.Status != domain.ApprovalExecuted || !strings.HasPrefix(done.Result, "events BTC-USDT ") ||
 		sim.events[len(sim.events)-1] != "OVERLAY BTC-USDT by ops@example.com approved by boss@example.com" {

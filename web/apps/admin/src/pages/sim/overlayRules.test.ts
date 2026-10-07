@@ -32,6 +32,17 @@ describe("a price event on any pair", () => {
     expect(problem(draft({ hold: "-1" }))).toBe("seconds");
     expect(problem(draft({ up: "300", hold: "200", down: "101" }))).toBe("total");
     expect(problem(draft({ up: "300", hold: "200", down: "100" }))).toBe(null);
+    // A price is held to ±90% of the pair's price, as a percent (A81).
+    const lasts = { "BTC-USDT": "84100" };
+    const priced = (price: string) => {
+      const out = overlayBody(draft({ mode: "price", price }), lasts);
+      return "problem" in out ? out.problem : null;
+    };
+    expect(priced("159790")).toBe(null);
+    expect(priced("159791")).toBe("tooFar");
+    expect(priced("8410")).toBe(null);
+    expect(priced("8409")).toBe("tooFar");
+    expect(problem(draft({ mode: "price", price: "1000000" }))).toBe(null);
   });
 
   it("tells where the target takes a pair's price", () => {

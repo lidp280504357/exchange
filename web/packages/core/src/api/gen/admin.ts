@@ -4594,6 +4594,33 @@ export interface components {
                 price: components["schemas"]["Decimal"];
                 impact: components["schemas"]["SimImpact"];
             }[];
+            /**
+             * @description A price event on any pair (OVERLAY, A81): each pair measured now,
+             *     target_price, expected_price, move and impact staying null (the
+             *     simulated market's model does not move). Absent for the
+             *     simulated market's own changes.
+             */
+            overlay?: {
+                symbol: string;
+                /** @description The platform's price now (market-data's ticker; a followed pair's is the reference market's). */
+                price: components["schemas"]["NullableDecimal"];
+                /** @description Where the event's target takes it from that price. */
+                target_price: components["schemas"]["NullableDecimal"];
+                move: number | null;
+                /**
+                 * @description HOUSE's worst loss on the event, worked out as market-sim
+                 *     does before it starts (J0 contract §3.3: what HOUSE may
+                 *     still buy or sell there and, with risk, on the pair's
+                 *     perpetuals, from market-maker's rooms); market-sim alone
+                 *     refuses one beyond OVERLAY_MAX_LOSS_USDT.
+                 */
+                loss_usdt: components["schemas"]["NullableDecimal"];
+                /**
+                 * @description Why there is no loss_usdt.
+                 * @enum {string|null}
+                 */
+                loss_note: "NO_PRICE" | "NOT_QUOTED" | "UNREADABLE" | null;
+            }[];
         };
         SimHolding: {
             amount: components["schemas"]["Decimal"];

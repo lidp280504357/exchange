@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
@@ -49,4 +52,26 @@ func (m MarketMaker) SetHouseCaps(ctx context.Context, w ports.HouseCapsWrite) (
 // HouseCapsChanges returns the latest changes of the caps, newest first.
 func (m MarketMaker) HouseCapsChanges(ctx context.Context, limit int) (json.RawMessage, error) {
 	return m.do(ctx, http.MethodGet, m.Base+"/internal/house/caps/changes?limit="+strconv.Itoa(limit), nil, nil)
+}
+
+// HouseRooms returns what HOUSE may still buy and sell of a symbol (J0
+// contract §4.2, unsigned); false while it does not quote it (404).
+func (m MarketMaker) HouseRooms(ctx context.Context, symbol string) (ports.HouseRooms, bool, error) {
+	raw, err := m.do(ctx, http.MethodGet, m.Base+"/internal/house/rooms/"+url.PathEscape(symbol), nil, nil)
+	if apperr.Is(err, apperr.CodeNotFound) {
+		return ports.HouseRooms{}, false, nil
+	}
+	if err != nil {
+		return ports.HouseRooms{}, false, err
+	}
+	var body struct {
+		Buy       decimal.Decimal `json:"buy"`
+		Sell      decimal.Decimal `json:"sell"`
+		UnitValue decimal.Decimal `json:"unit_value"`
+		Inverse   bool            `json:"inverse"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return ports.HouseRooms{}, false, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "market-maker answered badly")
+	}
+	return ports.HouseRooms{Buy: body.Buy, Sell: body.Sell, UnitValue: body.UnitValue, Inverse: body.Inverse}, true, nil
 }

@@ -1058,6 +1058,18 @@ type MarketMaker interface {
 	SetHouseCaps(ctx context.Context, w HouseCapsWrite) (json.RawMessage, error)
 	// HouseCapsChanges lists the latest changes, newest first.
 	HouseCapsChanges(ctx context.Context, limit int) (json.RawMessage, error)
+	// HouseRooms is what HOUSE may still buy and sell of a pair or
+	// contract as last published (J0 contract §4.2); false while it does
+	// not quote it.
+	HouseRooms(ctx context.Context, symbol string) (HouseRooms, bool, error)
+}
+
+// HouseRooms is what HOUSE may still buy and sell of a pair or contract
+// (in the base asset, or contracts), what one unit is worth in USDT, and
+// whether it is an inverse (COIN-M) contract.
+type HouseRooms struct {
+	Buy, Sell, UnitValue decimal.Decimal
+	Inverse              bool
 }
 
 // HouseCapsWrite is a change of HOUSE's caps: the caps that change, by

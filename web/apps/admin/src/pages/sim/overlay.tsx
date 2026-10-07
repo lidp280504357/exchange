@@ -122,7 +122,7 @@ function OverlayForm({ simSymbol }: { simSymbol?: string }) {
       disabled: d.symbols.includes(s),
     }));
   }, [cfg.data, simSymbol, prices.data, d.symbols, t]);
-  const checked = overlayBody(d);
+  const checked = overlayBody(d, prices.data);
   const problem = "problem" in checked ? t(`admin.sim.overlay.bad.${checked.problem}`, checked.vars) : "";
   const total = [d.up, d.hold, d.down].reduce((s, v) => s + (Number(v) || 0), 0);
   const platform = simSymbol && d.symbols.includes(simSymbol) ? simSymbol : null;

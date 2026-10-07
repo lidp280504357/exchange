@@ -749,12 +749,13 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForSelector("[data-testid=overlay-pair-BTC-USDT]");
   await page.waitForFunction(
-    () => /BTC-USDT\s*现价 [0-9,.]+\s*目标 [0-9,.]+\s*\+1\.00%/.test(document.querySelector("[data-testid=overlay-lines]")?.textContent ?? ""),
+    () => /BTC-USDT\s*平台现价 [0-9,.]+\s*目标 [0-9,.]+\s*\+1\.00%/.test(document.querySelector("[data-testid=overlay-lines]")?.textContent ?? ""),
     { timeout: 20000 },
   );
   await page.click("[data-testid=overlay-start]");
   await page.waitForSelector("[role=dialog] [data-testid=overlay-lines]");
-  await waitText("连带合约与杠杆");
+  // In the dialog itself: the box outside it says 不连带合约与杠杆 (A81 ④).
+  await page.waitForFunction(() => /(^|[^不])连带合约与杠杆/.test(document.querySelector("[role=dialog]")?.textContent ?? ""));
   await t.shot("4e-sim-overlay");
   await clickButton("取消", "[role=dialog]");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));

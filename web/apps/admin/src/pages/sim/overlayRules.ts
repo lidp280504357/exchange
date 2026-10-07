@@ -39,18 +39,24 @@ export type OverlayBody = {
 };
 
 /** OverlayProblem names what is wrong with a draft: a key of admin.sim.overlay.bad and its values. */
-export type OverlayProblem = { problem: "pairs" | "onePrice" | "price" | "pct" | "seconds" | "total"; vars?: Record<string, number> };
+export type OverlayProblem = { problem: "pairs" | "onePrice" | "price" | "tooFar" | "pct" | "seconds" | "total"; vars?: Record<string, number> };
 
 const whole = (v: string) => /^\d+$/.test(v.trim());
 
-/** overlayBody checks a draft and makes its body, or says what is wrong first. */
-export function overlayBody(d: OverlayDraft): { body: OverlayBody } | OverlayProblem {
+/**
+ * overlayBody checks a draft and makes its body, or says what is wrong
+ * first; a target price is held to ±90% of the pair's price when lasts has
+ * it, as a percent is (A81).
+ */
+export function overlayBody(d: OverlayDraft, lasts?: Record<string, string>): { body: OverlayBody } | OverlayProblem {
   if (d.symbols.length === 0 || d.symbols.length > OVERLAY_MAX_PAIRS) return { problem: "pairs", vars: { max: OVERLAY_MAX_PAIRS } };
   const body: OverlayBody = { type: "OVERLAY", symbols: [...d.symbols], ramp_up_seconds: 0, ramp_down_seconds: 0, risk: !d.spare };
   if (d.mode === "price") {
     if (d.symbols.length !== 1) return { problem: "onePrice" };
     const p = d.price.trim();
     if (!dec.isDecimal(p) || !dec.gt(p, "0")) return { problem: "price" };
+    const move = moveOf(p, lasts?.[d.symbols[0] ?? ""]);
+    if (move !== null && Math.abs(move) > OVERLAY_MAX_PCT / 100) return { problem: "tooFar", vars: { max: OVERLAY_MAX_PCT } };
     body.target_price = p;
   } else {
     const p = d.pct.trim();

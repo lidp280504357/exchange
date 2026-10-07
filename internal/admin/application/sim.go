@@ -518,6 +518,21 @@ type SimPreview struct {
 	RequestedMove string
 	Impact        json.RawMessage
 	SpikeImpacts  []SimSpikeImpact
+	// Overlay measures a price event's pairs instead (A81).
+	Overlay []SimOverlayLine
+}
+
+// SimOverlayLine is one pair of a price event measured now for its
+// decider (A81): the platform's price, where the target takes it and the
+// move, and HOUSE's worst loss as market-sim estimates it before the event
+// starts (nil with LossNote: NO_PRICE, NOT_QUOTED, UNREADABLE).
+type SimOverlayLine struct {
+	Symbol   string
+	Price    *decimal.Decimal
+	Target   *decimal.Decimal
+	Move     *float64
+	Loss     *decimal.Decimal
+	LossNote string
 }
 
 // SimSpikeImpact is what a target's spike would do to the perpetual: at
@@ -547,7 +562,9 @@ func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string
 	if simOverlay(*a) {
 		// A price event on followed pairs: its factor is set against the
 		// reference price when it is carried out, and nothing of the
-		// simulated market's model moves (J3).
+		// simulated market's model moves (J3); each pair measured now
+		// (A81).
+		out.Overlay = s.overlayLines(ctx, *a)
 		return out, nil
 	}
 	raw, err := s.Sim.Status(ctx)
@@ -597,6 +614,102 @@ func simOverlay(a domain.Approval) bool {
 		Type string `json:"type"`
 	}
 	return a.Kind == domain.KindSimEvent && json.Unmarshal([]byte(a.Payload["change"]), &change) == nil && change.Type == "OVERLAY"
+}
+
+// overlayLines measures a price event's pairs now (A81): the platform's
+// price (market-data's tickers, the reference market's for a followed
+// pair), the target there, the move, and HOUSE's worst loss.
+func (s *Service) overlayLines(ctx context.Context, a domain.Approval) []SimOverlayLine {
+	var change struct {
+		Symbols     []string `json:"symbols"`
+		TargetPct   *float64 `json:"target_pct"`
+		TargetPrice string   `json:"target_price"`
+		Risk        *bool    `json:"risk"`
+	}
+	if json.Unmarshal([]byte(a.Payload["change"]), &change) != nil {
+		return nil
+	}
+	prices := ports.Prices{}
+	if s.Prices != nil {
+		var err error
+		if prices, err = s.Prices.Prices(ctx, 0); err != nil {
+			s.Log.WarnContext(ctx, "sim preview: no prices", "approval_id", a.ID, "error", err)
+			prices = ports.Prices{}
+		}
+	}
+	out := make([]SimOverlayLine, 0, len(change.Symbols))
+	for _, symbol := range change.Symbols {
+		line := SimOverlayLine{Symbol: symbol, LossNote: "NO_PRICE"}
+		if p, ok := prices[symbol]; ok && p.IsPositive() {
+			target, err := decimal.NewFromString(change.TargetPrice)
+			if change.TargetPct != nil {
+				target, err = p.Mul(decimal.NewFromFloat(1+*change.TargetPct/100)).Round(8), nil
+			}
+			if err == nil && target.IsPositive() {
+				f, _ := target.Div(p).Float64()
+				move := math.Round((f-1)*1e4) / 1e4
+				line.Price, line.Target, line.Move = &p, &target, &move
+				line.Loss, line.LossNote = s.overlayLoss(ctx, symbol, f, change.Risk == nil || *change.Risk)
+			}
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// overlayLoss is HOUSE's worst loss in USDT on a price event of factor f
+// on symbol, worked out as market-sim does before the event starts (its
+// lossOf, J0 contract §3.3): all HOUSE may still buy (f above 1) or sell
+// (below) there and, with risk, on the pair's perpetuals, at what a unit
+// is worth, times how far f takes the price and back. For the decider to
+// see; market-sim alone holds it against OVERLAY_MAX_LOSS_USDT.
+func (s *Service) overlayLoss(ctx context.Context, symbol string, f float64, risk bool) (*decimal.Decimal, string) {
+	if s.MarketMaker == nil {
+		return nil, "UNREADABLE"
+	}
+	symbols := []string{symbol}
+	if risk {
+		symbols = append(symbols, symbol+"-PERP")
+		if base, ok := strings.CutSuffix(symbol, "-USDT"); ok {
+			symbols = append(symbols, base+"-USD-PERP")
+		}
+	}
+	total := decimal.Zero
+	for i, sym := range symbols {
+		r, quoted, err := s.MarketMaker.HouseRooms(ctx, sym)
+		if err != nil {
+			s.Log.WarnContext(ctx, "sim preview: HOUSE's rooms not read", "symbol", sym, "error", err)
+			return nil, "UNREADABLE"
+		}
+		if !quoted {
+			if i == 0 {
+				return nil, "NOT_QUOTED"
+			}
+			continue
+		}
+		units := r.Sell
+		if f > 1 {
+			units = r.Buy
+		}
+		total = total.Add(units.Mul(r.UnitValue).Mul(decimal.NewFromFloat(overlayLossShare(f, r.Inverse))).Round(8))
+	}
+	loss := total.Round(2)
+	return &loss, ""
+}
+
+// overlayLossShare is how much of a unit's worth a factor f takes back
+// once it comes back to 1 (market-sim's domain.OverlayLoss): an inverse
+// contract is valued in its coin.
+func overlayLossShare(f float64, inverse bool) float64 {
+	switch {
+	case f >= 1 && inverse:
+		return 1 - 1/f
+	case f >= 1:
+		return f - 1
+	case inverse:
+		return 1/f - 1
+	}
+	return 1 - f
 }
 
 // simCreated says what market-sim made of an approved event: the event,

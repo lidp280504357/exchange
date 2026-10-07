@@ -26,6 +26,16 @@ type fakeMarketMaker struct {
 	// loses the answer.
 	down, lose bool
 	puts       []ports.HouseCapsWrite
+	// rooms is what HOUSE may still buy and sell, by the symbols it quotes.
+	rooms map[string]ports.HouseRooms
+}
+
+func (m *fakeMarketMaker) HouseRooms(_ context.Context, symbol string) (ports.HouseRooms, bool, error) {
+	if m.down {
+		return ports.HouseRooms{}, false, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "market-maker is down")
+	}
+	r, ok := m.rooms[symbol]
+	return r, ok, nil
 }
 
 func newFakeMarketMaker() *fakeMarketMaker {

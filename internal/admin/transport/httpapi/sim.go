@@ -140,6 +140,21 @@ type SimPreviewJSON struct {
 	RequestedMove *string              `json:"requested_move"`
 	Impact        json.RawMessage      `json:"impact"`
 	SpikeImpacts  []SimSpikeImpactJSON `json:"spike_impacts"`
+	// Overlay is a price event's pairs measured now (A81), absent for the
+	// simulated market's own changes.
+	Overlay []SimOverlayLineJSON `json:"overlay,omitempty"`
+}
+
+// SimOverlayLineJSON is one pair of a price event measured now: the
+// platform's price, the target, the move, HOUSE's worst loss or why it has
+// none.
+type SimOverlayLineJSON struct {
+	Symbol      string   `json:"symbol"`
+	Price       *string  `json:"price"`
+	TargetPrice *string  `json:"target_price"`
+	Move        *float64 `json:"move"`
+	LossUSDT    *string  `json:"loss_usdt"`
+	LossNote    *string  `json:"loss_note"`
 }
 
 // SimSpikeImpactJSON is what a target's worst spike one way would do to
@@ -172,6 +187,23 @@ func (h *Handler) simPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	if out.Impact == nil {
 		out.Impact = json.RawMessage("null")
+	}
+	if pv.Overlay != nil {
+		out.Overlay = make([]SimOverlayLineJSON, 0, len(pv.Overlay))
+	}
+	dec := func(d *decimal.Decimal) *string {
+		if d == nil {
+			return nil
+		}
+		v := d.String()
+		return &v
+	}
+	for _, l := range pv.Overlay {
+		line := SimOverlayLineJSON{Symbol: l.Symbol, Price: dec(l.Price), TargetPrice: dec(l.Target), Move: l.Move, LossUSDT: dec(l.Loss)}
+		if l.LossNote != "" {
+			line.LossNote = &l.LossNote
+		}
+		out.Overlay = append(out.Overlay, line)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
