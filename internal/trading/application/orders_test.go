@@ -192,9 +192,13 @@ type fakeLedger struct {
 	releases    []string
 	accounts    []domain.Account
 	debts       map[string]string
+	debtErr     error // MarginDebt's answer when set
 }
 
 func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset string) (decimal.Decimal, error) {
+	if l.debtErr != nil {
+		return decimal.Zero, l.debtErr
+	}
 	if v, ok := l.debts[string(a.Type)+" "+a.Scope+" "+asset]; ok {
 		return d(v), nil
 	}
@@ -1204,6 +1208,19 @@ func TestTheSweepTakesWhatSlippedInAsSpotClosed(t *testing.T) {
 	}
 	if n, err := svc.SweepClosed(ctx); err != nil || n != 0 {
 		t.Fatalf("sweep again: %d %v", n, err)
+	}
+	// Without an answer from the ledger the repayment is canceled too, its
+	// audit saying the debt was not read (B156).
+	led.debtErr = apperr.Unavailable(errors.New("ledger down"))
+	if n, err := svc.SweepClosed(ctx); err != nil || n != 1 {
+		t.Fatalf("sweep without the ledger: %d %v", n, err)
+	}
+	if got, _ := store.Read().Orders().Get(ctx, repay.ID); !got.CancelRequested {
+		t.Fatal("the repayment whose debt was not read stayed")
+	}
+	last, _ := store.events[len(store.events)-1].msg.(*auditv1.AdminActionPerformed)
+	if !strings.Contains(last.GetDetails(), repay.ID) || !strings.Contains(last.GetDetails(), `"ledger":"unread"`) {
+		t.Fatalf("audit %+v", last)
 	}
 }
 

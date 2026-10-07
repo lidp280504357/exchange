@@ -356,25 +356,26 @@ func takenWhileClosed(o domain.Order) bool {
 
 // repayment reports a stored order the closed line takes, as repays
 // decides for a new one (review B155: the sweeps keep only these). When
-// the ledger cannot answer, the order counts as none: closed means closed,
-// and the user may place it again.
-func (s *Service) repayment(ctx context.Context, o domain.Order) bool {
+// the ledger cannot answer, the order counts as none (unread says so, for
+// the cancel's audit, B156): closed means closed, and the user may place
+// it again.
+func (s *Service) repayment(ctx context.Context, o domain.Order) (keep, unread bool) {
 	if !takenWhileClosed(o) {
-		return false
+		return false, false
 	}
 	brings := o.BaseAsset
 	if o.Side == domain.SideSell {
 		brings = o.QuoteAsset
 	}
 	if brings == "" {
-		return false
+		return false, false
 	}
 	owing, err := s.owes(ctx, o.Account(), brings)
 	if err != nil {
 		s.Log.WarnContext(ctx, "the margin debt was not read; the order is canceled as spot trading is closed", "order_id", o.ID, "error", err)
-		return false
+		return false, true
 	}
-	return owing
+	return owing, false
 }
 
 // CanceledOrder is an order CancelOpen asked the engine to cancel.
@@ -506,15 +507,23 @@ func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Ti
 				return err
 			}
 			for _, o := range active {
-				if o.CancelRequested || o.LiquidationID != "" || o.CreatedAt.Before(since) || s.repayment(ctx, o) {
+				if o.CancelRequested || o.LiquidationID != "" || o.CreatedAt.Before(since) {
+					continue
+				}
+				keep, unread := s.repayment(ctx, o)
+				if keep {
 					continue
 				}
 				if _, err := s.requestCancel(ctx, r, o); err != nil {
 					return err
 				}
-				details, _ := json.Marshal(map[string]string{
+				audit := map[string]string{
 					"order_id": o.ID, "symbol": o.Symbol, "account_type": string(o.AccountType), "product": flags.ProductNames[flags.KeyProductSpot],
-				})
+				}
+				if unread {
+					audit["ledger"] = "unread" // a repayment, maybe: its debt could not be read
+				}
+				details, _ := json.Marshal(audit)
 				if err := r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
 					Target: "user:" + o.UserID, Action: "admin.orders.canceled", Actor: actor, Reason: reason, Details: string(details),
 				}, "actor", actor); err != nil {

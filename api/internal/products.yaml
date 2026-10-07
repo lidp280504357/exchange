@@ -104,6 +104,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancelOpenResult'
+        '409':
+          description: COMMON_CONFLICT, the line is open (close its flag first); nothing is canceled.
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '503':
+          description: |
+            COMMON_UNAVAILABLE: some users' orders could not be canceled (a
+            lock that timed out, say) while the others' were; details
+            canceled (how many orders it asked to cancel) and failed_users
+            (for how many users it could not). Run again, it takes what is
+            left. derivatives-service also answers so when it cannot read
+            the flags.
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
         default:
           $ref: '../openapi/common.yaml#/components/responses/Error'
 components:
