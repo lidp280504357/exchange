@@ -96,12 +96,13 @@ done
 
 # 保留期与大小上限（用户 2026-10-07 21:17 批准的方案，审查 C56 ③），对已存在的 topic 也生效；时间与每分区字节数
 # 哪个先到就删最旧的段：
-#   - 业务与可重放的 topic（含 .retry/.dlq、order.commands）：时间照上面不变，每分区再加 20 GiB 作灾难保险；
-#   - 派生状态：6 小时、每分区 6 GiB。它们只被实时跟读（tail），没人回放；实测每个约 0.6–0.7 GB/小时，
-#     四个盘口类 topic 留一天要约 63 GB，不值得（2026-10-02 曾因留 7 天把磁盘写到 85%）；
-#   - 行情 K 线与 ticker（market.candle.events）：同样只被跟读（衍生品服务的标记价、网关推送），按用户决定
-#     （2026-10-07 21:09，测试服磁盘扩到 150 GB 后）留最近 3 天，约 8 GB/天，每分区 12 GiB。
-# 预计 Redpanda 共约 45 GB。
+#   - 业务与可重放的 topic（含 .retry/.dlq、order.commands）：时间照上面不变，每分区再加 20 GiB 作灾难保险——
+#     眼下每个都不到 1.5 GB，正常碰不到，只防写满磁盘（2026-10-01 磁盘写满时 Docker 丢了运行中容器的网络端点）；
+#   - 派生状态：6 小时、每分区 6 GiB。它们只被实时跟读（tail），没人回放，6 小时够当场排查；实测每个约
+#     0.6–0.7 GB/小时，四个盘口类 topic 留一天要约 63 GB，不值得（2026-10-02 曾因留 7 天把磁盘写到 85%）；
+#   - 行情 K 线与 ticker（market.candle.events）：同样只被跟读（衍生品服务的标记价、网关推送），按用户要求
+#     （2026-10-07 21:09，测试服磁盘扩到 150 GB 后）留最近 3 天便于排查，约 8 GB/天，每分区 12 GiB。
+# 预计 Redpanda 共约 45 GB。这里是唯一的真相：每次部署都对已存在的 topic 重设一遍，线上手工改的会被改回。
 business=("${NS}market.liquidations" "${NS}market.liquidations.retry" "${NS}market.liquidations.dlq"
   "${NS}order.commands" "${NS}derivatives.order.commands")
 for entry in "${BUSINESS[@]}"; do
