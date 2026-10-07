@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALL_OPEN, allOpen, isOpen, openProducts, productOf, productOfPath, terminalLine, tradeEntry } from "./products";
+import { noteMarginTypes } from "../trading/pairs";
+import { ALL_OPEN, allOpen, entryOf, isOpen, openProducts, productOf, productOfPath, terminalLine, tradeEntry } from "./products";
 
 describe("product lines", () => {
   it("are open until known, and a line the answer leaves out stays open", () => {
@@ -27,6 +28,21 @@ describe("product lines", () => {
     expect(terminalLine("trade", "BTC-USDT")).toBe("spot");
     expect(terminalLine("futures", "BTC-USD-PERP")).toBe("coin_m");
     expect(terminalLine("futures", "BTC-USDT")).toBeNull();
+  });
+
+  it("take a contract's line from its margin type once the contracts are read", () => {
+    expect(productOf("XYZ-USDT-PERP")).toBe("usdt_m");
+    noteMarginTypes([{ symbol: "XYZ-USDT-PERP", margin_type: "COIN" }, { symbol: "XYZ-USD-PERP", margin_type: "USDT" }]);
+    expect(productOf("XYZ-USDT-PERP")).toBe("coin_m");
+    expect(productOf("XYZ-USD-PERP")).toBe("usdt_m");
+  });
+
+  it("lead the bare /trade and /futures to an open line", () => {
+    expect(entryOf("trade", ALL_OPEN)).toBe("/trade/BTC-USDT");
+    expect(entryOf("futures", ALL_OPEN)).toBe("/futures/BTC-USDT-PERP");
+    expect(entryOf("futures", { ...ALL_OPEN, usdt_m: false })).toBe("/futures/BTC-USD-PERP");
+    expect(entryOf("trade", { ...ALL_OPEN, spot: false })).toBe("/futures/BTC-USDT-PERP");
+    expect(entryOf("futures", { spot: true, usdt_m: false, coin_m: false })).toBe("/trade/BTC-USDT");
   });
 
   it("lead a trade entry to an open line, the last one visited first", () => {

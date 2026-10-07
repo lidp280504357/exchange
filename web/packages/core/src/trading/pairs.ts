@@ -79,7 +79,22 @@ export function assetDecimals(assets: AssetInfo[] | undefined, asset: string, fa
  */
 export async function fetchContracts() {
   const list = await unwrap(marketApi.GET("/v1/market/contracts", { params: { query: { margin_type: "ALL" } } }));
+  noteMarginTypes(list.contracts);
   return { ...list, contracts: list.contracts.filter((c) => c.status !== "PREPARE") };
+}
+
+// Each contract's margin type as the last list read gave it: a contract's
+// product line follows it (design 2026-10-07, product line switches).
+const marginTypes = new Map<string, "USDT" | "COIN">();
+
+/** noteMarginTypes records the contracts' margin types (fetchContracts, with each list it reads). */
+export function noteMarginTypes(list: readonly { symbol: string; margin_type: "USDT" | "COIN" }[]): void {
+  for (const c of list) marginTypes.set(c.symbol, c.margin_type);
+}
+
+/** marginTypeOf is a contract's margin type as the contracts list gave it, undefined before the list is read. */
+export function marginTypeOf(symbol: string): "USDT" | "COIN" | undefined {
+  return marginTypes.get(symbol);
 }
 
 /** useContracts returns fetchContracts' list (cached for a minute). */

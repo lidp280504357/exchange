@@ -9,6 +9,7 @@ import {
   type Transfer as TransferRecord,
 } from "@exchange/core/assets/hooks";
 import { checkTransfer, otherAccount, transferCoins, transferMax, type AccountType } from "@exchange/core/assets/transfer";
+import { futuresLineOf, useOpenProducts } from "@exchange/core/platform/products";
 import { sortAssets } from "@exchange/core/wallet/networks";
 import { Badge, Button, CoinIcon, CountUp, EmptyState, ErrorState, FormField, HIDDEN_AMOUNT, NumberInput, Skeleton, TimeText, cn, mapServerError, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -82,13 +83,22 @@ export default function Transfer() {
   // first (review FE, B128). A coin asked for in the address that it
   // cannot hold falls back to USDT once the lists are in.
   const contracts = useContracts();
+  // Nothing moves into a closed product line's futures account (design
+  // 2026-10-07, product line switches §1 #3): its coins are not offered
+  // that way, and with both contract lines closed only out of futures.
+  const products = useOpenProducts();
+  const inward = products.usdt_m || products.coin_m;
+  useEffect(() => {
+    if (!inward && from === "SPOT") setFrom("FUTURES");
+  }, [inward, from]);
   const ordered = useMemo(() => {
-    const all = transferCoins(sortAssets(meta.list.map((a) => a.asset_code)), settles, list, from);
+    const coins = transferCoins(sortAssets(meta.list.map((a) => a.asset_code)), settles, list, from);
+    const all = from === "SPOT" ? coins.filter((a) => products[futuresLineOf(a)]) : coins;
     return all.length > 0 ? all : [asset];
-  }, [list, from, meta.list, asset, settles]);
+  }, [list, from, meta.list, asset, settles, products]);
   const known = contracts.isSuccess && balances.isSuccess && meta.list.length > 0;
   useEffect(() => {
-    if (known && !ordered.includes(asset)) setAsset("USDT");
+    if (known && !ordered.includes(asset)) setAsset(ordered.includes("USDT") ? "USDT" : (ordered[0] ?? "USDT"));
   }, [known, ordered, asset]);
 
   const edit = (v: string) => {
@@ -145,7 +155,7 @@ export default function Transfer() {
             fromBalance={balances.isPending ? undefined : available}
             toBalance={balances.isPending ? undefined : availableOf(list, to, asset)}
             turns={turns}
-            onSwap={swap}
+            onSwap={inward ? swap : null}
           />
           <FormField label={t("mAssets.transfer.coin")}>
             {(control) => (
@@ -248,7 +258,8 @@ function Direction({
   fromBalance: string | undefined;
   toBalance: string | undefined;
   turns: number;
-  onSwap: () => void;
+  /** null while the funds may only go one way (both contract lines closed). */
+  onSwap: (() => void) | null;
 }) {
   const { t } = useTranslation();
   const reduced = useReducedMotion();
@@ -261,11 +272,12 @@ function Direction({
       </div>
       <motion.button
         type="button"
-        onClick={onSwap}
+        onClick={onSwap ?? undefined}
+        disabled={!onSwap}
         aria-label={t("mAssets.transfer.swap")}
         animate={{ rotate: turns * 180 }}
         transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 300, damping: 22 }}
-        className="grid size-tap shrink-0 place-items-center rounded-full border border-line-2 bg-bg-1 text-brand active:bg-bg-3"
+        className="grid size-tap shrink-0 place-items-center rounded-full border border-line-2 bg-bg-1 text-brand active:bg-bg-3 disabled:opacity-40"
       >
         <ArrowUpDown size={18} />
       </motion.button>

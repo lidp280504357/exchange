@@ -14,6 +14,7 @@ import {
   type AssetInfo,
 } from "@exchange/core";
 import { contractFor, tradeSymbolFor } from "@exchange/core/assets/links";
+import { futuresLineOf, useOpenProducts } from "@exchange/core/platform/products";
 import { useMemo } from "react";
 
 // Helpers every assets page shares: names, decimals and flags of the
@@ -95,15 +96,18 @@ export function useAssetMeta(): AssetMeta {
 export function useTradeLinks() {
   const pairs = usePairs().data?.pairs;
   const contracts = useContracts().data?.contracts;
+  // A closed product line's terminal is no way to trade (design 2026-10-07, product line switches §1 #2).
+  const open = useOpenProducts();
   return useMemo(
     () => ({
       spot: (asset: string): string | null => {
-        const s = tradeSymbolFor(asset, pairs ?? []);
+        const s = open.spot ? tradeSymbolFor(asset, pairs ?? []) : null;
         return s ? routes.trade(s) : null;
       },
-      futures: (asset: string): string => routes.futures(contractFor(asset, contracts ?? []) ?? DEFAULT_CONTRACT),
+      futures: (asset: string): string | null =>
+        open[futuresLineOf(asset)] ? routes.futures(contractFor(asset, contracts ?? []) ?? DEFAULT_CONTRACT) : null,
     }),
-    [pairs, contracts],
+    [pairs, contracts, open],
   );
 }
 

@@ -33,7 +33,7 @@ import {
   type ColumnDef,
   type DataColumnMeta,
 } from "@exchange/ui";
-import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, CirclePause, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -578,7 +578,7 @@ function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
 function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }) {
   const { t } = useTranslation();
   const account = useFuturesAccount(true, asset);
-  const links = useTradeLinks();
+  const trade = useTradeLinks().futures(asset);
   const a = account.data;
   return (
     <div
@@ -605,10 +605,18 @@ function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }
           </Figure>
         </>
       )}
-      <Link to={links.futures(asset)} className="ml-auto flex items-center gap-1 text-brand hover:brightness-110">
-        <ChartCandlestick size={14} />
-        {t("pcAssets.overview.openFutures")}
-      </Link>
+      {trade ? (
+        <Link to={trade} className="ml-auto flex items-center gap-1 text-brand hover:brightness-110">
+          <ChartCandlestick size={14} />
+          {t("pcAssets.overview.openFutures")}
+        </Link>
+      ) : (
+        // A closed product line's account winds down (design 2026-10-07, product line switches §1 #2).
+        <Link to={routes.closedProducts} className="ml-auto flex items-center gap-1 text-brand hover:brightness-110">
+          <CirclePause size={14} />
+          {t("pcProducts.notice.title")}
+        </Link>
+      )}
     </div>
   );
 }

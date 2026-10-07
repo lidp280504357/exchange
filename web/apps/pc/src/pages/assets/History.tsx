@@ -384,7 +384,10 @@ function EntryDetail({ entry, loaded, meta, onClose }: { entry: LedgerEntry; loa
                 return to ? { to, label: t("pcAssets.history.open.spot") } : null;
               })()
             : relation === "futures"
-              ? { to: links.futures(entry.asset), label: t("pcAssets.history.open.futures") }
+              ? (() => {
+                  const to = links.futures(entry.asset);
+                  return to ? { to, label: t("pcAssets.history.open.futures") } : null;
+                })()
               : relation === "margin"
                 ? { to: routes.margin, label: t("pcAssets.history.open.margin") }
                 : null;

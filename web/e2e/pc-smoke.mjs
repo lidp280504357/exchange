@@ -179,7 +179,13 @@ try {
   let scrolled = await tableScroll();
   if (scrolled.boxed) {
     if (Math.abs(scrolled.gap) > 1) throw new Error(`the market table's header is ${scrolled.gap}px off its box's top`);
-    ok(`the long market table scrolls in its own box (${scrolled.rows} rows in the DOM), its header stuck to the box's top`);
+    // The box fills the row beside the category rail: no blank under it (F19).
+    const fill = await page.evaluate(() => ({
+      rail: Math.round(document.querySelector('main nav[aria-label="分类"]').getBoundingClientRect().bottom),
+      box: Math.round(document.querySelector("main table").closest("section").getBoundingClientRect().bottom),
+    }));
+    if (fill.box < fill.rail - 1) throw new Error(`the market table's box ends ${fill.rail - fill.box}px above the category rail's end`);
+    ok(`the long market table scrolls in its own box (${scrolled.rows} rows in the DOM), its header stuck to the box's top, the box as long as the rail`);
     await go("/markets?cat=spot");
     // Its rows, not the 14 skeleton rows of a table still loading (B139).
     await page.waitForSelector("main table:not([aria-busy]) tbody tr", { timeout: 20000 });
@@ -635,9 +641,9 @@ try {
   // top bar has no trade menu and its futures menu no USDT-margined entry;
   // the market list has no spot category, only coin-margined contracts and
   // no USDⓈ-M/COIN-M switch; the search finds only those; the closed
-  // lines' terminals say they are not open while BTC-USD-PERP's opens; the
-  // assets page tells of the futures USDT left from step 5, and the
-  // wind-down page offers to move it out.
+  // lines' terminals say they are not open while BTC-USD-PERP's opens, and
+  // the bare /trade leads there; the assets page tells of the futures USDT
+  // left from step 5, and the wind-down page offers to move it out.
   await withProducts(page, PRODUCTS_PAUSED, async () => {
     await go("/markets");
     await page.waitForSelector("main table tbody tr[data-row-id]", { visible: true, timeout: 20000 });
@@ -669,6 +675,9 @@ try {
     await go("/futures/BTC-USD-PERP");
     await waitText("标记价格");
     if (await page.$('[data-testid="product-closed"]')) throw new Error("the coin-margined terminal says it is not open");
+    // The bare /trade leads to an open line (F18 ④).
+    await go("/trade");
+    await page.waitForFunction(() => location.pathname === "/futures/BTC-USD-PERP", { timeout: 20000 });
     await go("/assets");
     await page.waitForSelector('[data-testid="wind-down-notice"]', { visible: true, timeout: 20000 });
     const notice = await page.$eval('[data-testid="wind-down-notice"]', (n) => n.innerText);

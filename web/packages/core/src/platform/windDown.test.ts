@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALL_OPEN } from "./products";
-import { futuresLineOf, hasWindDown, windDownOf } from "./windDown";
+import { ALL_OPEN, futuresLineOf } from "./products";
+import { hasWindDown, windDownOf } from "./windDown";
 
 describe("winding down a closed product line", () => {
   it("keeps what a closed line still holds", () => {

@@ -1,8 +1,9 @@
-import { DEFAULT_CONTRACT, DEFAULT_SYMBOL, routes, useAssetProfiles, usePrivateSync } from "@exchange/core";
+import { routes, useAssetProfiles, usePrivateSync } from "@exchange/core";
 import { useBrandingEffects } from "@exchange/core/platform/index";
 import type { QueryClient } from "@tanstack/react-query";
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router";
+import { EntryRedirect } from "./features/products/ProductGate";
 import { AppShell } from "./layout/AppShell";
 import { AuthShell } from "./layout/AuthShell";
 import { PageSkeleton } from "./layout/PageSkeleton";
@@ -42,8 +43,8 @@ export function App({ queryClient }: { queryClient: QueryClient }) {
       <Routes>
         <Route element={<AppShell />}>
           {shellRoutes.map(route)}
-          <Route path="/trade" element={<Navigate to={routes.trade(DEFAULT_SYMBOL)} replace />} />
-          <Route path="/futures" element={<Navigate to={routes.futures(DEFAULT_CONTRACT)} replace />} />
+          <Route path="/trade" element={<EntryRedirect kind="trade" />} />
+          <Route path="/futures" element={<EntryRedirect kind="futures" />} />
           {/* The mobile site's "me" tab: a switch or device redirect from it lands on the account pages. */}
           <Route path={routes.me} element={<Navigate to={routes.security} replace />} />
           <Route path="*" element={<NotFound />} />

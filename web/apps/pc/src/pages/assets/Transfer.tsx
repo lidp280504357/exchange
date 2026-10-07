@@ -1,6 +1,7 @@
 import { ApiError, dec, errorText, formatAmount, formatDecimal, newIdempotencyKey, useContracts, useSettings, useSettleAssets } from "@exchange/core";
 import { availableOf, useBalances, useFuturesAccount, useTransferAction, useTransfers, type Transfer as TransferRecord } from "@exchange/core/assets/hooks";
 import { checkTransfer, otherAccount, transferCoins, transferMax, type AccountType } from "@exchange/core/assets/transfer";
+import { futuresLineOf, useOpenProducts } from "@exchange/core/platform/products";
 import { sortAssets } from "@exchange/core/wallet/networks";
 import {
   Badge,
@@ -85,10 +86,21 @@ export default function Transfer() {
   // first (review FE, B128). A coin asked for in the address that it
   // cannot hold falls back to USDT once the lists are in.
   const contracts = useContracts();
-  const ordered = useMemo(() => transferCoins(sortAssets(meta.list.map((a) => a.asset_code)), settles, list, from), [meta.list, settles, list, from]);
+  // Nothing moves into a closed product line's futures account (design
+  // 2026-10-07, product line switches §1 #3): its coins are not offered
+  // that way, and with both contract lines closed only out of futures.
+  const products = useOpenProducts();
+  const inward = products.usdt_m || products.coin_m;
+  useEffect(() => {
+    if (!inward && from === "SPOT") setFrom("FUTURES");
+  }, [inward, from]);
+  const ordered = useMemo(() => {
+    const coins = transferCoins(sortAssets(meta.list.map((a) => a.asset_code)), settles, list, from);
+    return from === "SPOT" ? coins.filter((a) => products[futuresLineOf(a)]) : coins;
+  }, [meta.list, settles, list, from, products]);
   const known = contracts.isSuccess && balances.isSuccess && meta.list.length > 0;
   useEffect(() => {
-    if (known && !ordered.includes(asset)) setAsset("USDT");
+    if (known && !ordered.includes(asset)) setAsset(ordered.includes("USDT") ? "USDT" : (ordered[0] ?? "USDT"));
   }, [known, ordered, asset]);
   const items = coinItems(ordered.length > 0 ? ordered : [asset], locale).map((it) => ({
     ...it,
@@ -145,11 +157,12 @@ export default function Transfer() {
               <motion.button
                 type="button"
                 onClick={swap}
+                disabled={!inward}
                 aria-label={t("pcAssets.transfer.swap")}
                 title={t("pcAssets.transfer.swap")}
                 animate={{ rotate: turns * 180 }}
                 transition={{ type: "spring", stiffness: 300, damping: 22 }}
-                className="grid size-11 place-items-center rounded-full border border-line-2 bg-bg-2 text-fg-2 transition-colors hover:border-brand hover:text-brand"
+                className="grid size-11 place-items-center rounded-full border border-line-2 bg-bg-2 text-fg-2 transition-colors hover:border-brand hover:text-brand disabled:pointer-events-none disabled:opacity-40"
               >
                 <ArrowLeftRight size={18} />
               </motion.button>

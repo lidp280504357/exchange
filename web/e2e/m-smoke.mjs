@@ -479,6 +479,9 @@ try {
     if (await page.$('[data-testid="product-closed"]')) throw new Error("the coin-margined terminal says it is not open");
     const kinds = await page.$$eval('[role="radiogroup"]', (gs) => gs.filter((g) => g.textContent.includes("U 本位") && g.textContent.includes("币本位")).length);
     if (kinds > 0) throw new Error("the terminal switches to USDⓈ-M while USDⓈ-M is closed");
+    // The bare /trade leads to an open line (F18 ④).
+    await go("/trade");
+    await page.waitForFunction(() => location.pathname === "/futures/BTC-USD-PERP", { timeout: 20000 });
     await go("/assets");
     await page.waitForSelector('[data-testid="wind-down-notice"]', { visible: true, timeout: 20000 });
     const notice = await page.$eval('[data-testid="wind-down-notice"]', (n) => n.innerText);

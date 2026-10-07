@@ -67,8 +67,9 @@ type Item = { row: MarketRow; t: TickerData | undefined; fav: boolean; ov?: Futu
 /**
  * Rows from which the table scrolls virtually, in a box of its own. Below
  * it every row renders and the page scrolls (55 rows of 56 px with their
- * sparklines loading in view are light); a box beside the long category
- * rail left a blank under it and scrolled inside the scrolling page.
+ * sparklines loading in view are light). The box fills the row beside the
+ * category rail, at least min(760 px, the window less 180 px): a box of
+ * that height alone beside a longer rail left a blank under it (F19).
  */
 const VIRTUAL_FROM = 200;
 
@@ -367,7 +368,7 @@ export default function Markets() {
         />
 
         {/* clip, not hidden: the table's header sticks to the page under the top bar. */}
-        <section className="min-w-0 overflow-clip rounded-3 border border-line-1 bg-bg-1">
+        <section className={cn("min-w-0 overflow-clip rounded-3 border border-line-1 bg-bg-1", virtual && "flex flex-col self-stretch")}>
           <div className="flex items-center gap-3 border-b border-line-1 px-4 py-3">
             <Input
               ref={searchRef}
@@ -412,26 +413,33 @@ export default function Markets() {
             )}
             <span className={cn("text-xs text-fg-3 tabular-nums", !futures && "ml-auto")}>{!loading && t("pcMarkets.pairs", { count: data.length })}</span>
           </div>
-          <DataTable
-            aria-label={t("nav.markets")}
-            columns={columns}
-            data={data}
-            getRowId={(it) => it.row.symbol}
-            loading={loading}
-            loadingRows={14}
-            error={error}
-            onRetry={refetch}
-            empty={empty}
-            sorting={sorting}
-            onSortingChange={onSortingChange}
-            manualSorting
-            onRowClick={(it) => navigate(tradePath(it.row))}
-            virtual={virtual}
-            // The page scrolls the table; while it loads, the 14 skeleton
-            // rows keep the footer below the fold (no layout shift).
-            height={virtual ? "min(760px, calc(100dvh - 180px))" : undefined}
-            stickyTop={virtual ? 0 : TOP_NAV_HEIGHT}
-          />
+          <div className={cn(virtual && "relative min-h-[min(760px,calc(100dvh_-_180px))] flex-1")}>
+            <div className={cn(virtual && "absolute inset-0")}>
+              <DataTable
+                aria-label={t("nav.markets")}
+                columns={columns}
+                data={data}
+                getRowId={(it) => it.row.symbol}
+                loading={loading}
+                loadingRows={14}
+                error={error}
+                onRetry={refetch}
+                empty={empty}
+                sorting={sorting}
+                onSortingChange={onSortingChange}
+                manualSorting
+                onRowClick={(it) => navigate(tradePath(it.row))}
+                virtual={virtual}
+                // The page scrolls the table; while it loads, the 14 skeleton
+                // rows keep the footer below the fold (no layout shift). A long
+                // table fills its wrapper, which grows to the rail's height
+                // (the section stretches) and adds nothing to it (absolute).
+                className={virtual ? "h-full" : undefined}
+                height={virtual ? "100%" : undefined}
+                stickyTop={virtual ? 0 : TOP_NAV_HEIGHT}
+              />
+            </div>
+          </div>
         </section>
       </div>
     </div>

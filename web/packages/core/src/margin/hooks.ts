@@ -3,6 +3,7 @@ import { marginApi, unwrap } from "../api/client";
 import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
 import { useEligibility } from "../assets/hooks";
+import { useOpenProducts } from "../platform/products";
 import { retryServerErrors } from "../wallet/hooks";
 import { isEmpty, type MarginAccountType, type MarginLoan, type MarginPair, type MarginTransfer } from "./math";
 
@@ -97,10 +98,13 @@ export function useMaxBorrowable(account: MarginAccountType, symbol: string, ass
   });
 }
 
-/** useMarginOpen tells whether margin trading is open to the caller (MARGIN_TRADE: account status, then margin.enabled). */
+/** useMarginOpen tells whether margin trading is open to the caller (MARGIN_TRADE: account status, then margin.enabled; and the spot line). */
 export function useMarginOpen() {
   const q = useEligibility("MARGIN_TRADE");
-  return { open: q.data?.allowed === true, reason: q.data?.reason_code, pending: q.isPending, query: q };
+  // Margin trades on the spot books: it is closed while spot is (design 2026-10-07, product line switches §1 #7).
+  const spot = useOpenProducts().spot;
+  const allowed = q.data?.allowed === true;
+  return { open: allowed && spot, reason: allowed && !spot ? "PRODUCT_CLOSED" : q.data?.reason_code, pending: q.isPending, query: q };
 }
 
 /**

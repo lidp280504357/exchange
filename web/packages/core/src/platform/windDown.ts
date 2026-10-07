@@ -5,7 +5,7 @@ import { useMarginAccounts } from "../margin/hooks";
 import { isEmpty, type MarginAccount } from "../margin/math";
 import { useContractOpenOrders, usePositions } from "../trading/derivatives";
 import { useOpenOrders } from "../trading/orders";
-import { isOpen, type OpenProducts, type ProductLine } from "./products";
+import { futuresLineOf, isOpen, type OpenProducts } from "./products";
 
 // What the closed product lines still hold of the user's (design
 // 2026-10-07, product line switches §1 #2), read for the assets page's
@@ -57,11 +57,6 @@ export function useWindDown(open: OpenProducts) {
     error: positions.error ?? orders.error ?? spotOrders.error ?? balances.error ?? (spotClosed ? margin.error : null),
     refetch,
   };
-}
-
-/** futuresLineOf is the line a FUTURES account belongs to: USDT's to the USDT-margined contracts, a coin's to the coin-margined. */
-export function futuresLineOf(asset: string): ProductLine {
-  return asset === "USDT" ? "usdt_m" : "coin_m";
 }
 
 /**

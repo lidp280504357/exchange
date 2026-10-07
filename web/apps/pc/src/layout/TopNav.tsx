@@ -4,7 +4,7 @@ import {
 } from "@exchange/core";
 import { useMarginAssets } from "@exchange/core/margin/hooks";
 import { useBranding } from "@exchange/core/platform/index";
-import { isOpen, useOpenProducts } from "@exchange/core/platform/products";
+import { entryOf, isOpen, useOpenProducts } from "@exchange/core/platform/products";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
 import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
@@ -66,7 +66,8 @@ export function TopNav() {
   // switches §1 #2): spot takes the trade menu with it (margin trades in the
   // spot terminal), each contract line its entry, both the futures menu.
   const open = useOpenProducts();
-  const futuresTo = recent.find((s) => isContract(s) && isOpen(s, open)) ?? (open.usdt_m ? DEFAULT_CONTRACT : (coinContract ?? DEFAULT_CONTRACT));
+  const lastOpen = recent.find((s) => isContract(s) && isOpen(s, open));
+  const futuresTo = lastOpen ? routes.futures(lastOpen) : entryOf("futures", open);
   // The top bar's layer is above the pages' sticky table headers: its menus
   // open over them (review B61).
   return (
@@ -90,7 +91,7 @@ export function TopNav() {
             </Menu>
           )}
           {(open.usdt_m || open.coin_m) && (
-            <Menu label={t("nav.futures")} to={routes.futures(futuresTo)} wide>
+            <Menu label={t("nav.futures")} to={futuresTo} wide>
               {open.usdt_m && (
                 <MenuEntry
                   to={routes.futures(usdtContract)}

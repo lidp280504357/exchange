@@ -20,7 +20,7 @@ import {
   cn,
   listItem,
 } from "@exchange/ui";
-import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, ChevronRight, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, CirclePause, ChevronRight, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
@@ -441,7 +441,7 @@ function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
 
 function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }) {
   const { t } = useTranslation();
-  const links = useTradeLinks();
+  const trade = useTradeLinks().futures(asset);
   const query = useFuturesAccount(true, asset);
   const a = query.data;
   return (
@@ -469,10 +469,18 @@ function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }
           </Figure>
         </div>
       )}
-      <Link to={links.futures(asset)} className="mt-1 flex min-h-tap items-center justify-center gap-1 text-sm font-medium text-brand">
-        <ChartCandlestick size={14} />
-        {t("mAssets.overview.openFutures")}
-      </Link>
+      {trade ? (
+        <Link to={trade} className="mt-1 flex min-h-tap items-center justify-center gap-1 text-sm font-medium text-brand">
+          <ChartCandlestick size={14} />
+          {t("mAssets.overview.openFutures")}
+        </Link>
+      ) : (
+        // A closed product line's account winds down (design 2026-10-07, product line switches §1 #2).
+        <Link to={routes.closedProducts} className="mt-1 flex min-h-tap items-center justify-center gap-1 text-sm font-medium text-brand">
+          <CirclePause size={14} />
+          {t("mProducts.notice.title")}
+        </Link>
+      )}
     </div>
   );
 }

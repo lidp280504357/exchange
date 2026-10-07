@@ -497,6 +497,7 @@ function EntryDetail({ entry, loaded, meta }: { entry: LedgerEntry; loaded: Ledg
   const siblings = loaded.filter((e) => e.journal_id === entry.journal_id && e.id !== entry.id);
   const relation = ledgerRelation(entry.entry_type, entry.account_type);
   const spot = relation === "spot" ? links.spot(entry.asset) : null;
+  const futures = relation === "futures" ? links.futures(entry.asset) : null;
   const related: { to: string; label: string } | null =
     relation === "deposit"
       ? { to: withQuery(routes.deposit, { asset: entry.asset }), label: t("mAssets.history.open.deposit") }
@@ -506,8 +507,8 @@ function EntryDetail({ entry, loaded, meta }: { entry: LedgerEntry; loaded: Ledg
           ? { to: withQuery(routes.transfer, { asset: entry.asset, from: entry.account_type }), label: t("mAssets.history.open.transfer") }
           : relation === "spot" && spot
             ? { to: spot, label: t("mAssets.history.open.spot") }
-            : relation === "futures"
-              ? { to: links.futures(entry.asset), label: t("mAssets.history.open.futures") }
+            : relation === "futures" && futures
+              ? { to: futures, label: t("mAssets.history.open.futures") }
               : relation === "margin"
                 ? { to: routes.margin, label: t("mAssets.history.open.margin") }
                 : null;

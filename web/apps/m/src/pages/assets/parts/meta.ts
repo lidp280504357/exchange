@@ -12,6 +12,7 @@ import {
   type AssetInfo,
 } from "@exchange/core";
 import { contractFor, tradeSymbolFor } from "@exchange/core/assets/links";
+import { futuresLineOf, useOpenProducts } from "@exchange/core/platform/products";
 import { useMemo } from "react";
 
 // Helpers every assets page of the mobile site shares: names, decimals and
@@ -84,22 +85,25 @@ export function useAssetMeta(): AssetMeta {
 export type TradeLinks = {
   /** The spot terminal of the asset's market, or null when none trades it. */
   spot: (asset: string) => string | null;
-  /** The futures terminal of the asset's perpetual (or the default one). */
-  futures: (asset: string) => string;
+  /** The futures terminal of the asset's perpetual (or the default one), or null while its product line is closed. */
+  futures: (asset: string) => string | null;
 };
 
 /** useTradeLinks tells where "trade" goes for an asset: its spot pair, or the futures terminal. */
 export function useTradeLinks(): TradeLinks {
   const pairs = usePairs().data?.pairs;
   const contracts = useContracts().data?.contracts;
+  // A closed product line's terminal is no way to trade (design 2026-10-07, product line switches §1 #2).
+  const open = useOpenProducts();
   return useMemo(
     () => ({
       spot: (asset: string): string | null => {
-        const s = tradeSymbolFor(asset, pairs ?? []);
+        const s = open.spot ? tradeSymbolFor(asset, pairs ?? []) : null;
         return s ? routes.trade(s) : null;
       },
-      futures: (asset: string): string => routes.futures(contractFor(asset, contracts ?? []) ?? DEFAULT_CONTRACT),
+      futures: (asset: string): string | null =>
+        open[futuresLineOf(asset)] ? routes.futures(contractFor(asset, contracts ?? []) ?? DEFAULT_CONTRACT) : null,
     }),
-    [pairs, contracts],
+    [pairs, contracts, open],
   );
 }
