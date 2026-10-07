@@ -176,6 +176,11 @@ type User struct {
 	Timezone  string
 	KYCLevel  int32
 	CreatedAt time.Time
+	// Username and the uploaded avatar's addresses (design 2026-10-07,
+	// avatars and usernames; empty for the default avatar).
+	Username       string
+	AvatarURL      string
+	AvatarThumbURL string
 	// Tags are the console's tags on it (filled by the console).
 	Tags []string
 }

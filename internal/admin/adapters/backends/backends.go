@@ -66,7 +66,7 @@ func (u Users) Get(ctx context.Context, userID string) (ports.User, error) {
 func userOf(p *userv1.User) ports.User {
 	out := ports.User{
 		ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), Timezone: p.GetTimezone(),
-		KYCLevel: p.GetKycLevel(),
+		KYCLevel: p.GetKycLevel(), Username: p.GetUsername(), AvatarURL: p.GetAvatarUrl(), AvatarThumbURL: p.GetAvatarThumbUrl(),
 	}
 	if t := p.GetCreatedAt(); t != nil {
 		out.CreatedAt = t.AsTime()

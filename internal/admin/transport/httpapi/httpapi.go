@@ -443,13 +443,22 @@ func writePage(w http.ResponseWriter, items any, next string) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": cursor})
 }
 
+// optional is s, or null when it is empty.
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func userJSON(u ports.User) map[string]any {
 	tags := u.Tags
 	if tags == nil {
 		tags = []string{}
 	}
 	return map[string]any{
-		"id": u.ID, "status": u.Status, "region": u.Region, "language": u.Language, "timezone": u.Timezone, "kyc_level": u.KYCLevel,
+		"id": u.ID, "username": u.Username, "avatar_url": optional(u.AvatarURL), "avatar_thumb_url": optional(u.AvatarThumbURL),
+		"status": u.Status, "region": u.Region, "language": u.Language, "timezone": u.Timezone, "kyc_level": u.KYCLevel,
 		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags,
 	}
 }
