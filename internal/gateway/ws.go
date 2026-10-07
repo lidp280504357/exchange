@@ -551,9 +551,16 @@ func (c *wsConn) subscribe(args []string, lastSeq int64) {
 	}
 	user := c.id.UserID
 	c.mu.Unlock()
-	c.enqueue(wsReply{Op: "subscribe", OK: true, Args: args})
+	reply := wsReply{Op: "subscribe", OK: true, Args: args}
 	if len(public) > 0 {
-		c.hub.subscribePublic(c, public)
+		// The reply is queued with the subscriptions in place (the hub's
+		// lock): a client that publishes or waits after reading it gets
+		// every update broadcast since. Queued first and registered after,
+		// an update in between went to no one (a liquidation lost on CI's
+		// TestWebSocketLiquidationsChannel).
+		c.hub.subscribePublic(c, public, reply)
+	} else {
+		c.enqueue(reply)
 	}
 	if lastSeq > 0 && len(private) > 0 {
 		pushes, complete := c.hub.missed(user, lastSeq, private)

@@ -277,11 +277,14 @@ func (h *Hub) broadcastLocked(ch string, msg wsMarket) {
 	}
 }
 
-// subscribePublic adds c to public channels and queues what a new
-// subscriber starts from: the depth snapshot, the latest ticker or candle.
-func (h *Hub) subscribePublic(c *wsConn, channels []string) {
+// subscribePublic adds c to public channels and queues the subscription's
+// reply, then what a new subscriber starts from: the depth snapshot, the
+// latest ticker or candle. Under the hub's lock, so no update is broadcast
+// between the reply and the subscriptions.
+func (h *Hub) subscribePublic(c *wsConn, channels []string, reply wsReply) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	c.enqueue(reply)
 	for _, ch := range channels {
 		subs := h.public[ch]
 		if subs == nil {
