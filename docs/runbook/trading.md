@@ -16,7 +16,7 @@
 4. 调账本 gRPC `Freeze`，类型 `ORDER_FREEZE`，幂等键 `order:<订单ID>`。冻结的内容：
    - 限价买单：价格 × 数量，向上取整到计价资产精度。
    - 市价买单：`quote_amount`。
-   - 市价买单按数量（B157，2026-10-07 起，币安同样有）：数量 × 保护价（锚点之上一个价格带，按 tick 向下取），向上取整到计价资产精度；要有锚点，没有时返回 `COMMON_INVALID_ARGUMENT`（请改用 `quote_amount`），`quantity` 与 `quote_amount` 只能给一个。送给引擎时是保护价上的限价 IOC（或 FOK）买单（与 derivatives-service 送市价单同一做法，引擎不用多一种市价单）：成交里带 `buyer_limit_price` = 保护价，账本结算时当场释放每笔与成交价的差额，订单结束时按限价买单释放剩下的（保护价 × 未成交数量）。`OrderAccepted` 与订单记录仍是 MARKET；没成交完的部分撤销原因为 `IOC`。订单表的形状约束由迁移 trading 00008 放开（市价买单 `quote_amount` 与 `quantity` 二选一，按数量的必须有 `protection_price`；先 NOT VALID 加上再单独校验，校验期间订单照常可写）。
+   - 市价买单按数量（B157，2026-10-07 起，币安同样有）：数量 × 保护价（锚点之上一个价格带，按 tick 向下取），向上取整到计价资产精度；要有锚点，没有时返回 `COMMON_INVALID_ARGUMENT`（请改用 `quote_amount`），`quantity` 与 `quote_amount` 只能给一个。送给引擎时是保护价上的限价 IOC（或 FOK）买单（与 derivatives-service 送市价单同一做法，引擎不用多一种市价单）：成交里带 `buyer_limit_price` = 保护价，账本结算时当场释放每笔与成交价的差额，订单结束时按限价买单释放剩下的（保护价 × 未成交数量）。`OrderAccepted` 与订单记录仍是 MARKET；没成交完的部分撤销原因为 `IOC`。订单表的形状约束由迁移 trading 00008 放开（市价买单 `quote_amount` 与 `quantity` 二选一，按数量的必须有 `protection_price`；新约束先 NOT VALID 加上、再去掉旧约束、再单独校验，没有一刻没有约束，每一步都可重跑（B162），校验期间订单照常可写）。杠杆账户上用 `AUTO_BORROW` 按数量市价买时，按保护价冻结也就按它借币，多借的价格带在订单结束后还掉（B160，见下一条）。
    - 卖单：数量（基础资产）。
 5. 冻结成功：同一事务把冻结状态记为 FROZEN，并经 outbox 发 `order.events: OrderAccepted` 与 `order.commands: PlaceOrder`，两者都按交易对分区。PlaceOrder 带着引擎需要的全部参数（费率、资产精度、市价单保护价、`house_only`），重放命令就能重建订单簿。返回 202 和订单（NEW）。
    - `house_only`（阶段 4 B4，ADR-0015）：交易对跟随参考市场、`market.house_liquidity` 对它打开且 `market.internal_matching` 关闭时为真，订单只和 HOUSE 的虚拟流动性成交（见 [market-maker.md](market-maker.md)）。与 HOUSE 成交时用户照常付手续费（HOUSE 不付），结算见 [ledger.md](ledger.md#house-的现货成交adr-0013)。
@@ -69,6 +69,7 @@
   - 市价买单：成交金额；
   - 限价买单：限价 × 成交数量（成交价低于限价的差额由结算当场释放，见 [ledger.md](ledger.md#成交结算)）。
 - 账本不可达时，事件重试；恢复任务每 5 秒补解冻 10 秒以前完成、还没解冻的订单。
+- 借了币的杠杆单（B160）：杠杆账户上的订单在 margin-service 借过币（`borrowed` > 0）时，结束后把冻结里回来的在借款额度内还掉——未用的冻结；按数量的市价买还包括保护价在成交价之上多冻、结算时放回的部分（`domain.Order.BorrowToRepay`）。为等账本把成交结算完（价差在结算时放回），订单结束 10 秒内只解冻、不标记已解冻，恢复任务（每 5 秒、取 10 秒以前完成的）再调账本 `RepayReleased`（见 [ledger.md](ledger.md)）并标记；一笔订单只还一次。全部成交的限价买单没有未用冻结，借款照旧留着（价格改善的部分不还，杠杆端到端按此核对借款额）；撤销的限价单还掉未用部分。端到端 `margin.sh` 的 B160 一步：按数量市价买约 30 USDT 的 SOL（20 USDT 自有），约 10 秒后借款只剩成交花费超出自有的部分。
 - 成交记录：每笔成交为买卖双方各写一条 `fills`，按成交与订单去重。`GET /v1/orders/{id}/fills` 按 sequence 列出，`GET /v1/fills?symbol=` 按时间倒序分页。
 - 成交消耗的冻结资金由账本结算转给对手方（`TRADE_SETTLE`/`TRADE_FEE`），与这里的解冻互不依赖先后。
 

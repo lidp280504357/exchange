@@ -142,12 +142,13 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 | `MARGIN_TRANSFER_IN` / `MARGIN_TRANSFER_OUT` | `margin:margin-transfer:<划转ID>:0` | 现货 ↔ 杠杆资产行；划出后这个资产的资产行（可用 + 冻结）不得少于它的负债行与利息行之和——负债占着的部分划不走（`LEDGER_INSUFFICIENT_BALANCE`） |
 | `MARGIN_BORROW` | `margin:margin-borrow:<借款ID>:0` | 资产行 +A / 负债行 −A |
 | `MARGIN_INTEREST` | 借币的首小时 `margin:margin-borrow:<借款ID>:1`；整点 `margin-interest:<资产>:<整点的 Unix 秒>`，第 n 块（n ≥ 1）再加 `:<n>` | 利息行 −i / `MARGIN_INTEREST_INCOME` +Σi；整点每资产每小时一笔，每笔至多 1,000 个账户，多的按账户顺序分块 |
-| `MARGIN_REPAY` | `margin:margin-repay:<还款ID>:0`；成交的自动还款 `trade-repay:<成交ID>:<buyer 或 seller>` | 资产行 −(I+P) / 利息行 +I / 负债行 +P。先息后本：I 必须等于还款额与所欠利息中较小者（`LEDGER_INTEREST_FIRST`）；多还 `LEDGER_DEBT_OVERPAID` |
+| `MARGIN_REPAY` | `margin:margin-repay:<还款ID>:0`；成交的自动还款 `trade-repay:<成交ID>:<buyer 或 seller>`；借了币的订单结束时的还款 `trade-repay:release:<订单ID>`（B160） | 资产行 −(I+P) / 利息行 +I / 负债行 +P。先息后本：I 必须等于还款额与所欠利息中较小者（`LEDGER_INTEREST_FIRST`）；多还 `LEDGER_DEBT_OVERPAID` |
 | `MARGIN_TRADE_SETTLE` | `trade:<成交ID>` | 订单在杠杆账户上时的成交结算：行与 `TRADE_SETTLE`/`HOUSE_TRADE_SETTLE` 相同，只是这一方的账户是杠杆资产行 |
 | `MARGIN_LIQUIDATE` | `margin:margin-repay:<还款ID>:0`（强平还款与保险基金补足）、`margin:liquidation-fee:<强平ID>:0` | 强平（批次 E3）的三种动作：`LIQUIDATION_REPAY` 同 REPAY，用强平后账户里的余额还；`INSURANCE_COVER` 由 `INSURANCE_FUND` 付：基金 −(I+P)、利息行 +I、负债行 +P，同样先息后本、不能多还，基金不够时拒绝；`LIQUIDATION_FEE`：资产行 −f、`INSURANCE_FUND` +f |
 
 - `PostMargin` 一次请求可含几步（借币 = `BORROW` + 首小时 `INTEREST`），要么全记、要么全不记，每步一条 journal，请求记在 `ledger.margin_postings`：同键同内容返回原来的 journal，同键不同内容 `COMMON_IDEMPOTENCY_CONFLICT`；同键的两个请求同时到，后一个等锁后发现前一个已记账，就重放而不再动余额（审查 CJ）。
 - 成交结算（批次 E2）：`TradeExecuted` 带双方的账户类型（空为现货），订单在杠杆账户上的一方在该账户的资产行结算（逐仓的 `scope` 是成交的交易对），分录类型 `MARGIN_TRADE_SETTLE`；手续费仍记 `TRADE_FEE`，从这一方收到的资产里扣。订单带 `AUTO_REPAY` 的一方在同一事务里另记一条 `MARGIN_REPAY`（备注 `auto-repay order <订单ID> trade <交易对> <成交ID>`）：用这笔成交收到的资产（扣过手续费）还这个资产的负债，先息后本、最多还清；margin-service 消费 `ledger.events` 里的这类分录同步借款表。
+- 订单结束时还借款（B160，gRPC `RepayReleased`，spot-trading-service 调）：杠杆账户上借了币的订单结束时，把冻结里回来的（未用的冻结；按数量的市价买还包括保护价在成交价之上多冻、结算时逐笔放回的部分）在它借的额度内还掉：先息后本，最多欠款与可用余额，金额按资产精度向下截；键 `trade-repay:release:<订单ID>`、备注 `auto-repay order <订单ID> release`，一笔订单只还一次（重复调用返回第一次的 journal，`repaid` 为 0），没欠款或没可用时什么都不记。前缀与成交的自动还款相同，margin-service 照样从 `ledger.events` 记成一笔 AUTO_REPAY 还款（借款与资金池随之）。交易服务在订单结束 10 秒后（给成交结算留时间）由恢复任务调用，见 [trading.md](trading.md)。集成测试 `TestRepayReleased`。
 - `GetBalances`、`GET /v1/account/balances` 与 `BalanceChanged`（频道 `balances`）只有 SPOT/FUTURES：两站把非 FUTURES 的行都当现货累加，杠杆行（含负数的负债行）会把资产算错。杠杆账户经 margin-service 的 `/v1/margin/accounts` 与 `margin` 频道看；`EntryPosted` 的行带 `scope`。
 - 后台的风控冻结（holds）只在 SPOT：杠杆账户由 margin-service 整体冻结（`FROZEN`），强平又要能卖出账户里的全部资产。
 - 杠杆划转的开关与账户资格由 margin-service 检查（划入要 `margin.enabled` 与 `MARGIN_TRADE` 资格，划出不查），账本的 `PostMargin` 不再查。
