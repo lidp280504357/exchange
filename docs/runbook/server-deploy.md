@@ -62,7 +62,7 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 2. 先把要发布的都准备好，线上什么都不碰（审查 2026-10-03）：把构建缓存删到 2 GB 以内，确认根分区至少还有 8 GB；拉 Actions 构建好的应用镜像，拉不到才在服务器上构建（`docker build`，与 compose 的构建段相同），都只标成 `exchange-app:next`；在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台与 Storybook（只写仓库里的 `dist`，[web.md](web.md)）。要在服务器上构建（镜像或前端）时先查一次内存（见上文），不够就停。最后校验仓库里的 nginx 新配置：用正在运行的 nginx 镜像、在它的 compose 网络里，配上服务器上的证书与 Cloudflare 地址段跑 `nginx -t`（以前要到第 6 步、容器都换完才发现配置错了）。磁盘不够、内存不够、构建失败或 nginx 配置不通过都停在这一步：配置、镜像标签、容器、站点都还是旧的，这次写下的 `deploy.started` 与 `exchange-app:next` 也删掉（以前这之前就同步了新配置、改了 `latest` 标签，被拒后谁 `compose up` 或重启 nginx 都会混用新旧版本）。所有应用服务共用这一个镜像，只构建一次：按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 在导出时写满了磁盘。
 3. 切换：把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`、`udun-mock/`；`udun-mock/` 是托管钱包模拟网关的状态，属主 uid 10001，脚本在这里创建；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响），幂等核对 Redpanda topic，把 `exchange-app:next` 打成 `exchange-app:latest`。
 4. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)，日志逐条列出改了的与因后台改过而保留的项），再 `up -d --no-build` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
-5. 清理悬空镜像与两天没用的镜像，再把构建缓存删到 2 GB 以内。
+5. 清理悬空镜像与两天没用的镜像，再把构建缓存删到 2 GB 以内；镜像是从 ghcr.io 拉的（这次没在服务器上构建）就删到 256 MB：缓存只在拉不到、回退本地构建时有用（2026-10-07 磁盘 86% 时它占 1.9 GB、全部可回收，B147）。
 6. 校验并热加载 nginx 配置，紧接着把第 2 步构建好的站点发布到 `nginx/sites/*`（不等下一步，免得新后端配旧站点好几分钟）。
 7. 解除部署期间开始的合约只减仓（见上文，最多等三分钟多）。
 
@@ -129,6 +129,7 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 以下调优是在旧测试服（t2.medium，2 vCPU / 3.8 GiB 突发型）上做的；2026-09-30 起的 c5a.xlarge（4 vCPU / 7.8 GiB）沿用了这些设置，可以按需放宽（例如 ClickHouse 的内存上限）。评估与数据见 [阶段 1 验收报告](../阶段1验收报告.md) §6：
 
 - ClickHouse：`deploy/compose/clickhouse/config.d/small-server.xml` 去掉诊断用的系统日志表（trace_log、metric_log 等，保留 query_log、part_log），服务日志 warning 级、100 MB × 3，内存上限为物理内存 30%（7.8 GiB 上约 2.3 GiB）。
+  - 保留的两张有 TTL（B147，2026-10-07）：query_log 7 天，part_log（每次合并一行，约 80 MB/天）3 天；之前没有 TTL，八天涨到 357 MiB 与 649 MiB。测试服当时用 `ALTER TABLE system.query_log MODIFY TTL event_date + INTERVAL 7 DAY` 与 `... system.part_log ... 3 DAY` 直接加上（part_log 先 `TRUNCATE`）；`MODIFY TTL` 顺带发起的 `MATERIALIZE TTL` 变更撞上内存上限失败，已 `KILL MUTATION`，过期行改由之后的合并删除。ClickHouse 启动时发现某张系统日志表的定义与配置不同，会把旧表改名（如 `query_log_0`）再按配置新建：遇到这种改名表直接 `DROP`。
   - 内存计数：总内存追踪器会随运行时间往上漂（2026-10-05 运行 2.5 天后记着 1.9 GiB，jemalloc 实际只分配了 0.3 GiB），接近上限时读模型的写入与后台报表都报 241 memory limit exceeded。所以打开了 memory worker，按 jemalloc 的常驻内存校正计数：`memory_worker_correct_memory_tracker` 为 1、`memory_worker_use_cgroup` 为 0（cgroup 的数字含页缓存）。这两项是 25.3 里的服务器设置，换 ClickHouse 镜像版本时复核它们还在、含义没变。
   - 改了这份配置要重启 ClickHouse 才生效：部署的 rsync 用"写临时文件再改名"替换 `infra/clickhouse/config.d/small-server.xml`，容器的单文件挂载仍指向旧文件（旧 inode），这些设置也只在启动时读；`docker compose up -d` 看配置没变什么都不做，`restart` 才重新挂载。在运维锁下重启（约半分钟，analytics-consumer 自动重试）：`scripts/ops/lock.sh run --owner clickhouse-restart -- ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml restart clickhouse'`。
   - 检查设置：`clickhouse-client -q "SELECT name, value FROM system.server_settings WHERE name LIKE 'memory_worker%'"`（在 ClickHouse 容器里，或用 MCP 的 `ch_query`）。检查效果：`system.metrics` 的 `MemoryTracking` 与 `system.asynchronous_metrics` 的 `jemalloc.resident` 应相差在 10% 左右以内，重启后过一天再看一次（2026-10-05：重启 51 分钟后 511 MiB 对 499 MiB）。
