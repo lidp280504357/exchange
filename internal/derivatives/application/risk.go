@@ -227,8 +227,8 @@ func reload(ctx context.Context, r ports.Repos, p domain.Position) (domain.Posit
 // takeOver hands positions to the liquidation engine: their orders are
 // canceled (every cross order of the user on contracts of the same
 // settlement asset for cross positions, the position's own for an
-// isolated one) and each is marked liquidating, which refuses the user's
-// orders on it.
+// isolated one; a take-profit's or stop-loss's order too, review C65 ②)
+// and each is marked liquidating, which refuses the user's orders on it.
 func (s *Service) takeOver(ctx context.Context, positions []domain.Position, contracts map[string]domain.Contract,
 	marks map[string]decimal.Decimal, balance, maintenance decimal.Decimal,
 ) error {
@@ -262,7 +262,7 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 				} else if cur.MarginMode == domain.Cross {
 					mine = false
 				}
-				if !mine || o.Kind != domain.KindUser || o.CancelRequested {
+				if !mine || !canceled(o) {
 					continue
 				}
 				if _, err := s.requestCancel(ctx, r, o); err != nil {
@@ -357,6 +357,9 @@ func (s *Service) deleverage(ctx context.Context, c domain.Contract, p domain.Po
 		if !left.IsPositive() {
 			break
 		}
+		if err := s.cancelClosing(ctx, cp); err != nil {
+			return err
+		}
 		q := decimal.Min(left, cp.Qty.Abs())
 		now := s.Now()
 		mine := domain.ADLOrder(uuid.Must(uuid.NewV7()).String(), c, cur, q, price, now)
@@ -390,6 +393,33 @@ func (s *Service) deleverage(ctx context.Context, c domain.Contract, p domain.Po
 		return fmt.Errorf("auto-deleveraging %s of %s left %s without counterparties", cur.ID, c.Symbol, left)
 	}
 	return nil
+}
+
+// cancelClosing asks the engine to cancel the user's closing orders on a
+// position's side (its own, a take-profit's or a stop-loss's) before
+// auto-deleveraging takes from the position (review C65 ②, as Binance
+// cancels the orders of a position it closes): one filled after the
+// position shrank would open the other way. The fill's own check
+// (trimClosing) catches what comes in meanwhile.
+func (s *Service) cancelClosing(ctx context.Context, p domain.Position) error {
+	return s.Store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.LockUser(ctx, p.UserID); err != nil {
+			return err
+		}
+		active, err := r.Orders().Active(ctx, p.UserID, p.Symbol)
+		if err != nil {
+			return err
+		}
+		for _, o := range active {
+			if o.PositionSide != p.Side || !o.Closing() || !canceled(o) {
+				continue
+			}
+			if _, err := s.requestCancel(ctx, r, o); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // liquidationEvent is the event a settled fill of a taken-over position,

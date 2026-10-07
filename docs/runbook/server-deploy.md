@@ -162,7 +162,7 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 | 构建缓存 | 14 GB，全部记录"在用"（`docker buildx du` 的 Reclaimable 为 0），`docker builder prune -af` 删不掉 | 重启 dockerd（`sudo systemctl restart docker`，全部容器停约 40 秒后按重启策略自动起来）后 `docker builder prune -af` 回收 13.7 GB。部署前后各把缓存删到 2 GB 以内（`--max-used-space 2gb`；Docker 29 已没有 `--keep-storage`）。又攒到删不掉时重复这一步，并按 [运维锁](#日常更新) 先拿锁 |
 | `matching.wal` | 5.8 GB（约 90 个交易对的参考簿每秒约 220 条，保留两三个小时） | 现货引擎保留 30 分钟、每 10 分钟清理（[matching.md](matching.md)）；已有的大表要 `VACUUM FULL matching.wal` 才把空间还给磁盘 |
 | 各服务 outbox | 账本 540 MB 等，共约 1 GB | 已发布的行测试服保留 6 小时（`OUTBOX_RETENTION`，[events.md](events.md)）；同样要 `VACUUM FULL <schema>.outbox` 才变小 |
-| Redpanda | 6.8 GB，其中 `market.candle.events` 4 GB（7 天）、`market.depth` 约 1 GB | 派生行情流保留 1 小时、K 线流 1 天，`topics.sh` 每次部署都重设（[events.md](events.md)） |
+| Redpanda | 6.8 GB，其中 `market.candle.events` 4 GB（7 天）、`market.depth` 约 1 GB | 派生行情流保留 6 小时、每分区至多 6 GiB，K 线流 3 天、每分区至多 12 GiB，业务主题每分区至多 20 GiB（2026-10-07 用户批准，审查 C56 ③；磁盘扩到 150 GB 之后，预计 Redpanda 约 45 GB），`topics.sh` 每次部署都重设（[events.md](events.md)） |
 
 做完后 `matching.wal` 482 MB、库 1.5 GB、根分区 45%（27 GB 空闲）。`VACUUM FULL` 独占整张表：WAL 表几秒到一分钟，期间引擎排队；要在运维锁里做。
 

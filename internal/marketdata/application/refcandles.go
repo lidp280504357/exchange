@@ -416,15 +416,22 @@ func (rc *ReferenceCandles) initializer() {
 		rc.queue = slices.Delete(rc.queue, next, next+1)
 		mapped, known := rc.refs.cached()[req.ref]
 		done := rc.open[req.ref][req.interval] != nil // seeded by a chart request meanwhile
+		var start time.Time                           // the open candle the followed minute is in
+		if m := rc.open[req.ref][domain.Minute1]; m != nil {
+			start = req.interval.Start(m.minute.OpenTime)
+		}
 		rc.mu.Unlock()
-		if !known || done {
+		if !known || done || start.IsZero() {
 			rc.forget(req)
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), initTimeout)
-		got, err := rc.history.Klines(ctx, mapped, req.interval, time.Time{}, 1)
-		if err == nil && len(got) > 0 {
-			got[len(got)-1], err = rc.withTouched(ctx, req.ref, req.interval, got[len(got)-1])
+		// The minutes a price event touched first (review C66): a store
+		// that cannot answer costs the source no request.
+		touched, err := rc.touchedIn(ctx, req.ref, req.interval, start)
+		var got []domain.Candle
+		if err == nil {
+			got, err = rc.history.Klines(ctx, mapped, req.interval, time.Time{}, 1)
 		}
 		cancel()
 		rc.mu.Lock()
@@ -436,30 +443,34 @@ func (rc *ReferenceCandles) initializer() {
 			}
 			continue // the next update asks again
 		}
-		rc.seedLocked(req.ref, req.interval, got[len(got)-1])
+		b := got[len(got)-1]
+		if b.OpenTime.Equal(start) {
+			b = domain.MergeOverlaid([]domain.Candle{b}, req.interval, touched)[0]
+		}
+		rc.seedLocked(req.ref, req.interval, b)
 		rc.mu.Unlock()
 	}
 }
 
-// withTouched lays the minutes a price event touched, as stored, over an
-// open candle read from the source, as the charts' history has them
-// (review C64): the source knows the reference market's prices only, so an
-// interval whose open candle is read after an event's spike - a restart's
-// initializer reaches the longer intervals minutes later - would chart
-// without the spike until it closed, while the shorter ones had it. Read
-// before rc.mu, as Candles reads them; a failed read fails the seed as a
-// failed read of the source does, and the next update asks again (review
-// C65 ①: seeded without the spike, a month's candle would lack it for up
-// to a month).
-func (rc *ReferenceCandles) withTouched(ctx context.Context, symbol string, i domain.Interval, b domain.Candle) (domain.Candle, error) {
+// touchedIn reads the minutes a price event touched, as stored, in the
+// open candle of interval i that starts at start, to lay over the one read
+// from the source as the charts' history has them (review C64): the source
+// knows the reference market's prices only, so an interval whose open
+// candle is read after an event's spike - a restart's initializer reaches
+// the longer intervals minutes later - would chart without the spike until
+// it closed, while the shorter ones had it. Read before rc.mu, as Candles
+// reads them; a failed read fails the seed as a failed read of the source
+// does, and the next update asks again (review C65 ①: seeded without the
+// spike, a month's candle would lack it for up to a month).
+func (rc *ReferenceCandles) touchedIn(ctx context.Context, symbol string, i domain.Interval, start time.Time) ([]domain.Candle, error) {
 	if rc.overlaid == nil {
-		return b, nil
+		return nil, nil
 	}
-	touched, err := rc.overlaid(ctx, symbol, b.OpenTime, i.Next(b.OpenTime))
+	touched, err := rc.overlaid(ctx, symbol, start, i.Next(start))
 	if err != nil {
-		return b, fmt.Errorf("a price event's minutes: %w", err)
+		return nil, fmt.Errorf("a price event's minutes: %w", err)
 	}
-	return domain.MergeOverlaid([]domain.Candle{b}, i, touched)[0], nil
+	return touched, nil
 }
 
 func (rc *ReferenceCandles) forget(req initRequest) {

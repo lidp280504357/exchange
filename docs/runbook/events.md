@@ -11,7 +11,7 @@
 5. 指标：`kafka_consumer_records_total{group,topic,result=ok|retry|dlq|skipped}`、`kafka_consumer_handle_seconds`、`kafka_consumer_lag`（每 30 秒）。
 6. 批量消费者（两个撮合引擎、账本结算、行情成交、analytics）另有 `kafka_consumer_assigned_partitions{group}` 与 `kafka_consumer_last_poll_timestamp_seconds{group}`：它闲着时也每 30 秒从轮询返回一次；连续 2 分钟没从轮询返回（处理函数卡在一直失败的下游），或启动、失去分区后 2 分钟仍一个分区都没有（被踢出消费组、没回来），服务的 `/readyz` 就不就绪（检查名 `kafka group <组名>`）。告警 `KafkaConsumerUnassigned`（5 分钟没有分区，严重）、`KafkaConsumerStalled`（3 分钟没轮询）。2026-10-02 Redpanda 重建后所有批量消费者都卡住、生产者的 ping 却是绿的，靠的就是这两样发现。
 
-派生状态的主题不走 outbox、没有 `.retry`/`.dlq`，只保留 1 小时（`topics.sh` 每次部署都对已存在的这些 topic 重设一遍，手工用 `rpk` 改的会被覆盖，要改就改 `topics.sh`；`market.candle.events` 在测试服保留 1 天，它也只被实时跟读），丢一条由下一条补上：`order.references`、`derivatives.order.references`（HOUSE 的参考簿，market-maker 直接发；分区数必须与 `order.commands` 相同）、`market.depth`、`derivatives.market.depth`、`market.trades`（公共盘口与成交，market-data-service 发）、`market.depth.internal`、`derivatives.market.depth.internal`（引擎自己的深度）。见 ADR-0015 与 [market-data.md](market-data.md)。
+派生状态的主题不走 outbox、没有 `.retry`/`.dlq`，只保留 6 小时、每分区至多 6 GiB（用户 2026-10-07 21:17 批准，审查 C56 ③；`topics.sh` 每次部署都对已存在的这些 topic 重设一遍，手工用 `rpk` 改的会被覆盖，要改就改 `topics.sh`；`market.candle.events` 在测试服保留 3 天、每分区至多 12 GiB（用户 2026-10-07 21:09 决定，磁盘扩到 150 GB 之后；约 8 GB/天），它也只被实时跟读；业务与可重放的主题时间不变，每分区再加 20 GiB 作灾难保险；预计 Redpanda 共约 45 GB），丢一条由下一条补上：`order.references`、`derivatives.order.references`（HOUSE 的参考簿，market-maker 直接发；分区数必须与 `order.commands` 相同）、`market.depth`、`derivatives.market.depth`、`market.trades`（公共盘口与成交，market-data-service 发）、`market.depth.internal`、`derivatives.market.depth.internal`（引擎自己的深度）。见 ADR-0015 与 [market-data.md](market-data.md)。
 
 Redpanda 停机时 API 照常工作，事件留在各服务的 outbox；恢复后自动重连并补发，消费组从已提交位点继续（`scripts/fault/redpanda-outage.sh` 验证）。
 

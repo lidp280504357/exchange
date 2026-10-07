@@ -8,6 +8,8 @@ set -euo pipefail
 INFRA_DIR="${INFRA_DIR:-/opt/exchange/infra}"
 NS="${KAFKA_NAMESPACE:-}"
 DAY_MS=86400000
+HOUR_MS=3600000
+GIB=$((1024 * 1024 * 1024))
 
 rpk() {
   sudo docker compose -f "$INFRA_DIR/docker-compose.yml" --env-file "$INFRA_DIR/.env" exec -T redpanda rpk "$@"
@@ -71,18 +73,19 @@ ensure "${NS}market.liquidations.dlq" 1 30
 ensure "${NS}order.commands" 3 30
 ensure "${NS}derivatives.order.commands" 3 30
 
-# 派生状态只保留 1 小时，没有 retry/dlq，丢了由下一份补上（ADR-0015）：
+# 派生状态只保留 6 小时（每分区至多 6 GiB），没有 retry/dlq，丢了由下一份补上（ADR-0015）：
 #   - 引擎的第二个输入：虚拟流动性的参考簿（分区数必须与 order.commands 相同，同一交易对落在同一分区号）；
 #   - 公共深度（market-data-service 发布）与引擎自己的深度（*.internal）；
 #   - 公共成交（market.trades，现货与合约共用）；
 #   - 杠杆账户的当前状态（margin.accounts，margin 频道的 ACCOUNT 推送）。
-for t in "${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth" \
-  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades" "${NS}margin.accounts"; do
+DERIVED=("${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth"
+  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades" "${NS}margin.accounts")
+for t in "${DERIVED[@]}"; do
   if grep -qx "$t" <<<"$existing"; then
     echo "exists : $t"
   else
-    rpk topic create "$t" -p 3 -r 1 -c "retention.ms=3600000" >/dev/null
-    echo "created: $t (partitions=3, retention=1h)"
+    rpk topic create "$t" -p 3 -r 1 -c "retention.ms=$((6 * HOUR_MS))" -c "retention.bytes=$((6 * GIB))" >/dev/null
+    echo "created: $t (partitions=3, retention=6h)"
   fi
 done
 
@@ -91,14 +94,26 @@ for t in "${NS}trade.events" "${NS}order.commands" "${NS}derivatives.trade.event
   rpk topic alter-config "$t" --set "retention.ms=$((30 * DAY_MS))" >/dev/null && echo "retention: $t = 30d"
 done
 
-# 派生状态的保留期也对已存在的 topic 生效：早于上面"创建时 1 小时"规则建的 topic 还是 7 天，
-# 2026-10-02 测试服磁盘因此到 85%（market.depth 约 1 GB、order.references 约 0.7 GB）。它们只被实时跟读（tail），
-# 1 小时足够。行情 K 线与 ticker（market.candle.events）同样只被跟读（衍生品服务的标记价、网关推送），测试服保留 1 天。
-for t in "${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth" \
-  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades" "${NS}margin.accounts"; do
-  rpk topic alter-config "$t" --set "retention.ms=3600000" >/dev/null && echo "retention: $t = 1h"
+# 保留期与大小上限（用户 2026-10-07 21:17 批准的方案，审查 C56 ③），对已存在的 topic 也生效；时间与每分区字节数
+# 哪个先到就删最旧的段：
+#   - 业务与可重放的 topic（含 .retry/.dlq、order.commands）：时间照上面不变，每分区再加 20 GiB 作灾难保险；
+#   - 派生状态：6 小时、每分区 6 GiB。它们只被实时跟读（tail），没人回放；实测每个约 0.6–0.7 GB/小时，
+#     四个盘口类 topic 留一天要约 63 GB，不值得（2026-10-02 曾因留 7 天把磁盘写到 85%）；
+#   - 行情 K 线与 ticker（market.candle.events）：同样只被跟读（衍生品服务的标记价、网关推送），按用户决定
+#     （2026-10-07 21:09，测试服磁盘扩到 150 GB 后）留最近 3 天，约 8 GB/天，每分区 12 GiB。
+# 预计 Redpanda 共约 45 GB。
+business=("${NS}market.liquidations" "${NS}market.liquidations.retry" "${NS}market.liquidations.dlq"
+  "${NS}order.commands" "${NS}derivatives.order.commands")
+for entry in "${BUSINESS[@]}"; do
+  read -r name _ <<<"$entry"
+  business+=("$NS$name" "$NS$name.retry" "$NS$name.dlq")
 done
-rpk topic alter-config "${NS}market.candle.events" --set "retention.ms=$DAY_MS" >/dev/null && echo "retention: ${NS}market.candle.events = 1d"
+rpk topic alter-config "${business[@]}" --set "retention.bytes=$((20 * GIB))" >/dev/null &&
+  echo "retention: ${#business[@]} business topics, at most 20 GiB per partition"
+rpk topic alter-config "${DERIVED[@]}" --set "retention.ms=$((6 * HOUR_MS))" --set "retention.bytes=$((6 * GIB))" >/dev/null &&
+  echo "retention: ${#DERIVED[@]} derived topics, 6h and at most 6 GiB per partition"
+rpk topic alter-config "${NS}market.candle.events" --set "retention.ms=$((3 * DAY_MS))" --set "retention.bytes=$((12 * GIB))" >/dev/null &&
+  echo "retention: ${NS}market.candle.events = 3d, at most 12 GiB per partition"
 
 echo
 rpk topic list

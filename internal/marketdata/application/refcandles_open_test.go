@@ -103,8 +103,8 @@ func TestEveryIntervalsOpenCandleHasTheSpike(t *testing.T) {
 }
 
 // A failed read of the touched minutes leaves an interval unseeded rather
-// than seeded without the spike: the next update asks again (review C65
-// ①).
+// than seeded without the spike, and costs the source no request: the next
+// update asks again (reviews C65 ①, C66).
 func TestAnOpenCandleWaitsForTheTouchedMinutes(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()
@@ -124,10 +124,14 @@ func TestAnOpenCandleWaitsForTheTouchedMinutes(t *testing.T) {
 		}
 		return store.Read().References().Overlaid(ctx, "binance", symbol, from, to)
 	}
+	h := rc.history.(*history)
 	rc.Observe(minute("2026-10-07T04:02:00Z", "84040", "84060", "84020", "84050", "2"))
 	rc.wg.Wait()
 	if o := rc.open["BTC-USDT"][domain.Hour4]; o != nil {
 		t.Fatalf("seeded without the touched minutes %+v", o.c)
+	}
+	if n := h.count(domain.Hour4); n != 0 {
+		t.Fatalf("the source asked %d times while the store could not answer (review C66)", n)
 	}
 	mu.Lock()
 	down = false
