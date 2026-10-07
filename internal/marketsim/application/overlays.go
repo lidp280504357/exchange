@@ -723,7 +723,7 @@ func (o *Overlays) push(ctx context.Context, r *overlayRun, f float64, now time.
 			return false
 		}
 		quiet := now.Sub(r.pushedAt)
-		if quiet > overlayAhead && !r.dipped {
+		if quiet >= overlayAhead && !r.dipped { // the last success's factor ran out (review C59 ①)
 			r.dipped = true
 			r.dips++
 		}

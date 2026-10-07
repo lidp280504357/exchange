@@ -465,15 +465,15 @@ func TestAnEventWhosePushesFailIsCanceled(t *testing.T) {
 		t.Fatalf("after the restart, in its hold: %s", last.Factor)
 	}
 	r.market.failPush = true
-	r.seconds(4)
+	r.seconds(3)
 	if !r.o.Has(id) {
-		t.Fatal("canceled before the second run reached five")
+		t.Fatal("canceled before its factor ran out a second time")
 	}
-	r.seconds(1)
+	r.seconds(1) // 4 s without a success: the last push's factor ran out (review C59 ①)
 	e := r.store.event(id)
 	if r.o.Has(id) || e.Status != domain.EventDone || e.Result != domain.ResultCanceled || e.EndedBy != "system:market-sim" ||
 		!slices.Equal(r.market.clears, []string{"BTC-USDT"}) {
-		t.Fatalf("after five failures: %+v, clears %v", e, r.market.clears)
+		t.Fatalf("after a second dip: %+v, clears %v", e, r.market.clears)
 	}
 	if a := r.store.audits[len(r.store.audits)-1]; a.Action != "market.sim.event_ended" || a.Reason == "" {
 		t.Fatalf("audit %+v", a)
@@ -511,6 +511,34 @@ func TestAnEventWhosePushesFailIsCanceled(t *testing.T) {
 	r.seconds(1)
 	if e := r.store.event(made[0].Event.ID); r.o.Has(e.ID) || e.Status != domain.EventDone || e.Result != domain.ResultCanceled {
 		t.Fatalf("a pair no longer followed: %+v", e)
+	}
+}
+
+// Four seconds without a success are a dip even when the fifth push gets
+// through: the last success's factor ran out meanwhile (review C59 ①). A
+// second such run cancels the event.
+func TestFourFailedSecondsAreADip(t *testing.T) {
+	r := newOverlayRig(t)
+	req := btcSpike(10)
+	req.Hold = 5 * time.Minute
+	made, err := r.o.Create(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := made[0].Event.ID
+	for run := range 2 {
+		r.market.failPush = true
+		r.seconds(4)
+		r.market.failPush = false
+		if run == 0 {
+			r.seconds(1)
+			if !r.o.Has(id) {
+				t.Fatal("canceled for one dip")
+			}
+		}
+	}
+	if e := r.store.event(id); r.o.Has(id) || e.Result != domain.ResultCanceled {
+		t.Fatalf("two runs of four failed seconds: %+v", e)
 	}
 }
 

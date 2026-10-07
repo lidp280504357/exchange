@@ -175,7 +175,11 @@ func setup(ctx context.Context, a *app.App) error {
 	overlay := application.NewOverlay(flagClient, refs.FollowsPair, a.Metrics())
 	overlay.WithTicks(refs.Tick)     // the scaled prices on each pair's and contract's tick
 	overlay.WithListing(refs.Loaded) // a push before the listing is read: not "not followed"
-	refs.Get(ctx)                    // read it before serving when instrument-service answers
+	// The listing read before serving when instrument-service answers, in
+	// 10 seconds at most (C59): later reads fill it in.
+	preload, done := context.WithTimeout(ctx, 10*time.Second)
+	refs.Get(preload)
+	done()
 	books.WithOverlay(overlay)
 	overlaySigned := &svcsign.Verifier{Keys: map[string][]byte{}}
 	if err := svcsign.CheckSecret(cfg.OverlayAPISecret); err != nil {
