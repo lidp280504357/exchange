@@ -350,7 +350,11 @@ func (s *Service) executeHouseCaps(ctx context.Context, a domain.Approval, p Pri
 
 // auditHouseCaps audits an approved change of the caps as
 // admin.house.caps_changed: each cap before and after, the version it
-// made, and whether an earlier attempt whose answer was lost set it.
+// made, and whether an earlier attempt whose answer was lost set it. It
+// runs within DecideApproval's transaction, but s.audit commits apart on
+// a connection of its own: the change market-maker made is audited even
+// when the decision's transaction fails after it, and a decision holds two
+// of the pool's connections meanwhile (review FZ, A75 ④).
 func (s *Service) auditHouseCaps(ctx context.Context, a domain.Approval, p Principal, caps map[string]string, version int64, earlier bool) {
 	var previous map[string]string
 	_ = json.Unmarshal([]byte(a.Payload["previous"]), &previous)

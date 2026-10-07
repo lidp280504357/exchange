@@ -148,6 +148,23 @@ func TestLaunchChecklist(t *testing.T) {
 	if v := c.Items[slicesIndex(c, "app_downloads")].Value; len(v) != 2 || v["android"] != nil || v["ios"] != nil {
 		t.Fatalf("the apps %+v", v)
 	}
+	// What each platform offers, by its lower-case name (A77 ②): a link,
+	// an app uploaded; a link switched off offers nothing.
+	android, ios := apps.apps[domain.AppAndroid], apps.apps[domain.AppIOS]
+	android.Mode, android.LinkURL, android.Enabled = "LINK", "https://example.com/astras.apk", true
+	ios.Mode, ios.Enabled, ios.Current = "FILE", true, &ports.StoredAppFile{FileID: "0192a000-0000-7000-8000-000000000001", Kind: domain.AppKindApp}
+	c2, err := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := c2.Items[slicesIndex(c2, "app_downloads")]; it.Status != LaunchOK || it.Value["android"] != "LINK" || it.Value["ios"] != "FILE" {
+		t.Fatalf("the apps offered %+v", it)
+	}
+	android.Enabled = false
+	if c2, _ = h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); c2.Items[slicesIndex(c2, "app_downloads")].Value["android"] != nil {
+		t.Fatalf("a link switched off %+v", c2.Items[slicesIndex(c2, "app_downloads")])
+	}
+	android.Mode, android.LinkURL, ios.Mode, ios.Enabled, ios.Current = "OFF", "", "OFF", false, nil
 	apps.down = true
 	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["app_downloads"] != LaunchUnknown {
 		t.Fatalf("the apps unreadable %v", launchStatuses(c))

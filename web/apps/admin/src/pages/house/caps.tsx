@@ -1,24 +1,33 @@
-import { ApiError, dec, errorText } from "@exchange/core";
+import { ApiError, dec, errorText, formatDecimal } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, ErrorState, Input, Skeleton } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { Num, TimeText } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
-import { direction, HOUSE_CAPS, inRange, stepOK, type CapName } from "./capsRules";
+import { direction, holdings, HOUSE_CAPS, inRange, over, stepOK, stepRange, type CapName, type Holding } from "./capsRules";
 
 // HOUSE's caps at run time (user 2026-10-07, A69; market-maker review C45):
 // what HOUSE quotes within - each cap with its unit, current and first
 // value, allowed range, purpose and what lowering or raising it does (user
-// 06:0x) - with the request that waits and the latest changes; a change is
+// 06:0x), the per-asset and total caps beside what HOUSE holds now (review
+// R18) - with the request that waits and the latest changes; a change is
 // a HOUSE_CAPS request a second administrator approves, its dialog listing
-// each cap from and to with what that does.
+// each cap from and to with what that does, in red where HOUSE would stop
+// buying.
 
 type View = AdminSchemas["HouseCapsView"];
 type Caps = AdminSchemas["HouseCaps"];
+type Held = ReturnType<typeof holdings>;
+
+/** shareOf is a holding's absolute value as a share of a cap, e.g. "25.3%"; empty without a cap. */
+function shareOf(value: string, cap: string): string {
+  if (!dec.isDecimal(cap) || !dec.gt(cap, "0")) return "";
+  return `${dec.div(dec.mul(dec.abs(value), "100"), cap, 1)}%`;
+}
 
 export const houseCapsKey = ["admin", "house", "caps"];
 
@@ -74,19 +83,24 @@ export function HouseCapsChange({ a }: { a: Approval }) {
   );
 }
 
-/** HouseCapsCard shows HOUSE's caps, each with what it is for, and asks to change them. */
-export function HouseCapsCard({ admin }: { admin: Admin }) {
+/**
+ * HouseCapsCard shows HOUSE's caps, each with what it is for, and asks to
+ * change them; assets is HOUSE's inventory valued at the last prices (the
+ * page's GET /admin/v1/house), what the per-asset and total caps hold.
+ */
+export function HouseCapsCard({ admin, assets }: { admin: Admin; assets?: readonly { asset: string; value_usdt?: string | null }[] }) {
   const { t } = useTranslation();
   const q = useQuery({
     queryKey: houseCapsKey,
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/house/caps")),
     refetchInterval: 30_000,
   });
+  const held = useMemo(() => (assets ? holdings(assets) : undefined), [assets]);
   const v = q.data;
   return (
     <Card
       title={t("admin.house.caps.title")}
-      extra={v && can(admin, "ledger.adjust.request") && !v.pending && <RequestCaps caps={v.caps} />}
+      extra={v && can(admin, "ledger.adjust.request") && !v.pending && <RequestCaps caps={v.caps} held={held} />}
     >
       <p className="mb-3 text-xs text-fg-3">{t("admin.house.caps.hint")}</p>
       {q.isError ? (
@@ -97,7 +111,7 @@ export function HouseCapsCard({ admin }: { admin: Admin }) {
         <div className="flex flex-col gap-3">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="house-caps">
             {HOUSE_CAPS.map((f) => (
-              <CapCell key={f} name={f} value={v.caps[f]} initial={v.initial?.[f]} />
+              <CapCell key={f} name={f} value={v.caps[f]} initial={v.initial?.[f]} held={held} />
             ))}
           </div>
           <p className="text-xs text-fg-3">
@@ -115,8 +129,21 @@ export function HouseCapsCard({ admin }: { admin: Admin }) {
   );
 }
 
+/** HeldText is a holding (an asset's, or the total) in USDT with its share of a cap, red at or beyond it. */
+function HeldText({ asset, value, cap }: { asset?: string; value: string; cap: string }) {
+  const share = shareOf(value, cap);
+  const beyond = dec.isDecimal(cap) && dec.gt(cap, "0") && dec.gte(dec.abs(value), cap);
+  return (
+    <span className={beyond ? "text-danger-strong" : undefined}>
+      {asset && <span className="mr-1 font-medium">{asset}</span>}
+      <Num value={value} decimals={2} unit="USDT" className={beyond ? "text-danger-strong" : undefined} />
+      {share && <span className="ml-1">({share})</span>}
+    </span>
+  );
+}
+
 /** CapCell is one cap: its name, unit, value now and first, range, purpose and what moving it does. */
-function CapCell({ name, value, initial }: { name: CapName; value: string; initial: string | undefined }) {
+function CapCell({ name, value, initial, held }: { name: CapName; value: string; initial: string | undefined; held: Held | undefined }) {
   const { t } = useTranslation();
   const item = (k: string) => t(`admin.house.caps.items.${name}.${k}`);
   return (
@@ -137,6 +164,26 @@ function CapCell({ name, value, initial }: { name: CapName; value: string; initi
         <dd>{initial === undefined ? <span className="text-fg-3">{t("admin.house.caps.initialUnknown")}</span> : <CapValue name={name} value={initial} />}</dd>
         <dt className="text-fg-3">{t("admin.house.caps.range")}</dt>
         <dd>{item("range")}</dd>
+        {held && name === "symbol" && (
+          <>
+            <dt className="text-fg-3" title={t("admin.house.caps.heldHint")}>
+              {t("admin.house.caps.largest")}
+            </dt>
+            <dd data-testid="house-cap-symbol-held">
+              {held.list[0] ? <HeldText asset={held.list[0].asset} value={held.list[0].value} cap={value} /> : <span className="text-fg-3">{t("admin.house.caps.noHolding")}</span>}
+            </dd>
+          </>
+        )}
+        {held && name === "total" && (
+          <>
+            <dt className="text-fg-3" title={t("admin.house.caps.heldHint")}>
+              {t("admin.house.caps.together")}
+            </dt>
+            <dd data-testid="house-cap-total-held">
+              <HeldText value={held.total} cap={value} />
+            </dd>
+          </>
+        )}
       </dl>
       <p className="text-xs text-fg-2" data-testid={`house-cap-${name}-purpose`}>
         {item("purpose")}
@@ -216,8 +263,12 @@ function History({ changes, audit }: { changes: View["changes"]; audit: boolean 
   );
 }
 
-/** RequestCaps asks a second administrator to change the caps that differ, each from and to with what that does. */
-function RequestCaps({ caps }: { caps: Caps }) {
+/**
+ * RequestCaps asks a second administrator to change the caps that differ,
+ * each from and to with what that does, in red where the per-asset or
+ * total cap would be below what HOUSE holds (review R18: it stops buying).
+ */
+function RequestCaps({ caps, held }: { caps: Caps; held: Held | undefined }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const initial = () => Object.fromEntries(HOUSE_CAPS.map((f) => [f, caps[f]])) as Record<CapName, string>;
@@ -225,6 +276,13 @@ function RequestCaps({ caps }: { caps: Caps }) {
   const ok = (f: CapName) => inRange(f, values[f]) && stepOK(caps[f], values[f]);
   const changed = HOUSE_CAPS.filter((f) => ok(f) && !dec.eq(values[f].trim(), caps[f]));
   const bad = HOUSE_CAPS.some((f) => !ok(f));
+  const symbolOver: Holding[] = held && changed.includes("symbol") ? over(held.list, values.symbol) : [];
+  const totalOver = held && changed.includes("total") && dec.gt(held.total, values.total.trim());
+  // How far one change can move a cap from its value now.
+  const stepError = (f: CapName) => {
+    const r = stepRange(f, caps[f]);
+    return r ? t("admin.house.caps.stepTo", { min: formatDecimal(r.min), max: formatDecimal(r.max) }) : t("admin.house.caps.step");
+  };
   return (
     <FundAction
       trigger={(open) => (
@@ -273,7 +331,7 @@ function RequestCaps({ caps }: { caps: Caps }) {
                 !inRange(f, values[f])
                   ? t("admin.house.caps.outOfRange", { range: t(`admin.house.caps.items.${f}.range`) })
                   : !stepOK(caps[f], values[f])
-                    ? t("admin.house.caps.step")
+                    ? stepError(f)
                     : undefined
               }
               onValueChange={(v) => setValues({ ...values, [f]: v })}
@@ -282,6 +340,9 @@ function RequestCaps({ caps }: { caps: Caps }) {
           </label>
         ))}
       </div>
+      <p className="text-xs text-fg-3" data-testid="house-caps-step-hint">
+        {t("admin.house.caps.stepHint")}
+      </p>
       {!bad && changed.length === 0 ? (
         <p className="text-xs text-fg-3">{t("admin.house.caps.nothingChanges")}</p>
       ) : (
@@ -293,6 +354,22 @@ function RequestCaps({ caps }: { caps: Caps }) {
             ))}
           </div>
         )
+      )}
+      {symbolOver.length > 0 && (
+        <div role="alert" className="flex flex-col gap-1 rounded-2 border border-danger bg-danger/10 px-3 py-2 text-xs text-danger-strong" data-testid="house-caps-over-symbol">
+          <span className="font-medium">{t("admin.house.caps.symbolOver")}</span>
+          <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+            {symbolOver.map((h) => (
+              <HeldText key={h.asset} asset={h.asset} value={h.value} cap={values.symbol.trim()} />
+            ))}
+          </span>
+        </div>
+      )}
+      {totalOver && held && (
+        <div role="alert" className="flex flex-col gap-1 rounded-2 border border-danger bg-danger/10 px-3 py-2 text-xs text-danger-strong" data-testid="house-caps-over-total">
+          <span className="font-medium">{t("admin.house.caps.totalOver")}</span>
+          <HeldText value={held.total} cap={values.total.trim()} />
+        </div>
       )}
     </FundAction>
   );

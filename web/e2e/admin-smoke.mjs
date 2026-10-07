@@ -456,9 +456,14 @@ try {
   await page.waitForSelector("[data-testid=house-caps] [data-testid=house-cap-contract_leverage]", { timeout: 20000 });
   await waitText("每个盘口每一档最多报出的数量");
   await waitText("极端行情下合约权益可能被打穿");
+  // Beside the per-asset and total caps, what HOUSE holds now (review R18).
+  await page.waitForSelector("[data-testid=house-cap-symbol-held]", { timeout: 20000 });
+  await page.waitForSelector("[data-testid=house-cap-total-held]");
   if (await page.$("[data-testid=house-caps-request]")) {
     await page.click("[data-testid=house-caps-request]");
     await page.waitForSelector('[role=dialog] input[aria-label="safety"]');
+    // The ten-times step covers the leverage too (review R18 ①).
+    await page.waitForFunction(() => /10 → 100 → 125/.test(document.querySelector("[data-testid=house-caps-step-hint]")?.textContent ?? ""), { timeout: 10000 });
     const safety = await page.$eval('[role=dialog] input[aria-label="safety"]', (el) => el.value);
     await page.$eval('[role=dialog] input[aria-label="safety"]', (el) => el.select());
     await page.type('[role=dialog] input[aria-label="safety"]', String(Number(safety) + 1));

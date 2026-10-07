@@ -33,6 +33,48 @@ export function stepOK(before: string, after: string): boolean {
 }
 
 /**
+ * stepRange is how far one change can move a cap from before (stepOK)
+ * within its range: a tenth to ten times, the leverage within 1 to 125 (10
+ * to 125 takes 10 → 100 → 125); null where no step applies (before not
+ * above zero: a level cap of zero is no cap).
+ */
+export function stepRange(name: CapName, before: string): { min: string; max: string } | null {
+  if (!dec.isDecimal(before) || !dec.gt(before, "0")) return null;
+  const min = dec.div(before, "10", dec.decimalsOf(before) + 1);
+  const max = dec.mul(before, "10");
+  if (name === "contract_leverage") return { min: dec.max(min, "1"), max: dec.min(max, "125") };
+  return { min, max: dec.min(max, "1000000000000000") };
+}
+
+/** Holding is HOUSE's holding of an asset in USDT; below zero for an internal asset it sold. */
+export type Holding = { asset: string; value: string };
+
+/**
+ * holdings reads HOUSE's inventory as market-maker holds it against the
+ * caps (its SpotRooms): every asset but USDT that has a price, largest
+ * absolute value first, and their absolute values together (the total
+ * cap's measure).
+ */
+export function holdings(assets: readonly { asset: string; value_usdt?: string | null }[]): { list: Holding[]; total: string } {
+  const list = assets
+    .filter((a) => a.asset !== "USDT" && a.value_usdt != null && dec.isDecimal(a.value_usdt) && !dec.isZero(a.value_usdt))
+    .map((a) => ({ asset: a.asset, value: a.value_usdt as string }))
+    .sort((a, b) => dec.cmp(dec.abs(b.value), dec.abs(a.value)) || a.asset.localeCompare(b.asset));
+  return { list, total: list.reduce((sum, h) => dec.add(sum, dec.abs(h.value)), "0") };
+}
+
+/**
+ * over lists the holdings a per-asset cap would leave beyond it, either
+ * way: HOUSE stops buying those (selling, the ones sold below zero) on
+ * every pair. None for a value that is not a cap (inRange).
+ */
+export function over(list: readonly Holding[], cap: string): Holding[] {
+  const v = cap.trim();
+  if (!inRange("symbol", v)) return [];
+  return list.filter((h) => dec.gt(dec.abs(h.value), v));
+}
+
+/**
  * direction says whether a change lowers or raises a cap - a level cap of
  * zero is no cap, above any other - or null when it stays (or a value is
  * not a decimal).

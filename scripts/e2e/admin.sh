@@ -2074,6 +2074,11 @@ else
       as ADMIN GET /admin/v1/platform/apps "" >/dev/null
       for id in $(jq -r --arg p "$p" '.apps[] | select(.platform == $p) | .files[] | select(.name | startswith("e2e")) | .file_id' <<<"$BODY"); do
         as ADMIN DELETE "/admin/v1/platform/apps/$p/files/$id" '{"reason":"e2e cleanup"}' >/dev/null
+        # A file left would hold one of the platform's ten places (review GF, A76 ④).
+        if [[ $STATUS != 200 ]]; then
+          echo "FAIL $p's e2e file $id is not deleted ($STATUS): delete it in 平台设置 → App 下载" >&2
+          EXIT_FAILED=1
+        fi
       done
       was=$(app_of "$p" "$APPS_BEFORE")
       as ADMIN PUT "/admin/v1/platform/apps/$p" "$(app_write "$p" "$(jq -r .mode <<<"$was")" "$(jq -r .link_url <<<"$was")" \

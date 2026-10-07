@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { direction, inRange, stepOK } from "./capsRules";
+import { direction, holdings, inRange, over, stepOK, stepRange } from "./capsRules";
 
 describe("HOUSE's caps", () => {
   it("keeps each cap within its range", () => {
@@ -28,6 +28,42 @@ describe("HOUSE's caps", () => {
     expect(stepOK("500", "0")).toBe(true);
     expect(stepOK("0", "500000")).toBe(true);
     expect(stepOK("100", "x")).toBe(true);
+  });
+
+  it("tells how far one change can move a cap", () => {
+    expect(stepRange("total", "500000000")).toEqual({ min: "50000000", max: "5000000000" });
+    expect(stepRange("safety", "12.5")).toEqual({ min: "1.25", max: "125" });
+    expect(stepRange("symbol", "500000000000000")).toEqual({ min: "50000000000000", max: "1000000000000000" });
+    // The leverage too: 10 to 125 takes two changes.
+    expect(stepRange("contract_leverage", "10")).toEqual({ min: "1", max: "100" });
+    expect(stepRange("contract_leverage", "100")).toEqual({ min: "10", max: "125" });
+    expect(stepRange("level", "0")).toBe(null);
+    expect(stepRange("level", "x")).toBe(null);
+    for (const [name, before] of [["total", "500000000"], ["safety", "12.5"], ["contract_leverage", "10"]] as const) {
+      const r = stepRange(name, before);
+      expect(r && stepOK(before, r.min) && stepOK(before, r.max) && inRange(name, r.min) && inRange(name, r.max)).toBe(true);
+    }
+  });
+
+  it("reads HOUSE's holdings as the caps count them", () => {
+    const { list, total } = holdings([
+      { asset: "USDT", value_usdt: "900000000" },
+      { asset: "BTC", value_usdt: "1200000.5" },
+      { asset: "ASTRA", value_usdt: "-3000000" },
+      { asset: "ETH", value_usdt: "800000" },
+      { asset: "NOPRICE", value_usdt: null },
+      { asset: "DUST", value_usdt: "0" },
+    ]);
+    expect(list).toEqual([
+      { asset: "ASTRA", value: "-3000000" },
+      { asset: "BTC", value: "1200000.5" },
+      { asset: "ETH", value: "800000" },
+    ]);
+    expect(total).toBe("5000000.5");
+    expect(over(list, "1000000").map((h) => h.asset)).toEqual(["ASTRA", "BTC"]);
+    expect(over(list, "3000000")).toEqual([]);
+    expect(over(list, "0")).toEqual([]);
+    expect(over(list, "")).toEqual([]);
   });
 
   it("says which way a change moves a cap, a level cap of zero being none", () => {

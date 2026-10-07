@@ -38,6 +38,22 @@ type fakeApp struct {
 	Files        []ports.StoredAppFile `json:"files"`
 	Version      int64                 `json:"version"`
 	UpdatedBy    string                `json:"updated_by"`
+	// Public is what the sites are offered, nil for nothing (offer).
+	Public *fakePublic `json:"public"`
+}
+
+type fakePublic struct {
+	Mode string `json:"mode"`
+}
+
+// offer sets what the sites are offered as instrument-service has it
+// (domain.PlatformApp.Public): enabled, with a link or a current app.
+func (a *fakeApp) offer() *fakeApp {
+	a.Public = nil
+	if a.Enabled && (a.Mode == "LINK" && a.LinkURL != "" || a.Mode == "FILE" && a.Current != nil) {
+		a.Public = &fakePublic{Mode: a.Mode}
+	}
+	return a
 }
 
 func newFakeApps() *fakeApps {
@@ -54,11 +70,11 @@ func (f *fakeApps) Apps(context.Context) (json.RawMessage, error) {
 	if f.down {
 		return nil, errInstrumentDown
 	}
-	return json.Marshal(map[string]any{"apps": []*fakeApp{f.apps[domain.AppAndroid], f.apps[domain.AppIOS]}})
+	return json.Marshal(map[string]any{"apps": []*fakeApp{f.apps[domain.AppAndroid].offer(), f.apps[domain.AppIOS].offer()}})
 }
 
 func (f *fakeApps) answer(a *fakeApp, key string, file *ports.StoredAppFile) (json.RawMessage, error) {
-	out := map[string]any{"app": a}
+	out := map[string]any{"app": a.offer()}
 	if key != "" {
 		out[key] = file
 	}

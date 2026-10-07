@@ -108,7 +108,7 @@ export default function HousePage({ admin }: { admin: Admin }) {
           <Exposure assets={h?.assets} />
         </Card>
       </div>
-      <HouseCapsCard admin={admin} />
+      <HouseCapsCard admin={admin} assets={h?.assets} />
       <Assets assets={h?.assets} loading={q.isPending} />
       <Pairs pairs={h?.pairs} loading={q.isPending} />
       <Card title={t("admin.house.contracts")} extra={contractsQ.data && <span className="text-xs text-fg-3">{t("admin.house.positionsCount", { open, all: contracts.length })}</span>}>
