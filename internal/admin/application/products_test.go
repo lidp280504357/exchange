@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ type productServices struct {
 	lines  map[string]ports.ProductLine
 	errs   map[string]error
 	asked  []string
-	cancel int
+	cancel ports.ProductCanceled
 	err    error
 }
 
@@ -58,7 +59,7 @@ func (s *productServices) Line(_ context.Context, product string) (ports.Product
 	return s.lines[product], nil
 }
 
-func (s *productServices) CancelOpen(_ context.Context, product, actor, reason string) (int, error) {
+func (s *productServices) CancelOpen(_ context.Context, product, actor, reason string) (ports.ProductCanceled, error) {
 	s.asked = append(s.asked, product+" by "+actor+": "+reason)
 	return s.cancel, s.err
 }
@@ -82,7 +83,7 @@ func TestProductLines(t *testing.T) {
 		"product.spot":   {Key: "product.spot", Enabled: true, Version: 1, UpdatedBy: "migration config 00002", UpdatedAt: &seeded},
 		"product.usdt_m": {Key: "product.usdt_m", Enabled: true, Version: 1, UpdatedBy: "migration config 00002", UpdatedAt: &seeded},
 	}}
-	svcs := &productServices{cancel: 4, lines: map[string]ports.ProductLine{
+	svcs := &productServices{cancel: ports.ProductCanceled{Orders: 4}, lines: map[string]ports.ProductLine{
 		"spot": {OpenOrders: 4}, "usdt_m": {OpenOrders: 7, OpenPositions: 7}, "coin_m": {OpenOrders: 5, OpenPositions: 5},
 	}}
 	h.svc.Flags, h.svc.ProductLines = pf, svcs
@@ -137,7 +138,7 @@ func TestProductLines(t *testing.T) {
 	}
 	// ...but orders still open (a cancel that failed) are canceled again.
 	svcs.lines["coin_m"] = ports.ProductLine{OpenOrders: 2, OpenPositions: 5}
-	svcs.cancel = 2
+	svcs.cancel = ports.ProductCanceled{Orders: 2}
 	if ps, err := h.svc.SetProduct(ctx, boss, "coin_m", false, "cancel what is left"); err != nil || ps.Cancel == nil ||
 		*ps.Cancel != (ProductCancel{Status: CancelDone, Canceled: 2}) || len(svcs.asked) != 2 ||
 		pf.flags["product.coin_m"].Version != 1 || len(h.auditsOf("admin.products.orders_canceled")) != 1 {
@@ -150,7 +151,7 @@ func TestProductLines(t *testing.T) {
 		ps.Lines[2].ClosedAt != nil || ps.Cancel != nil || len(svcs.asked) != 2 {
 		t.Fatalf("opened %+v %v", ps, err)
 	}
-	svcs.err, svcs.cancel = ports.ErrProductLineMissing, 0
+	svcs.err, svcs.cancel = ports.ErrProductLineMissing, ports.ProductCanceled{}
 	if ps, err := h.svc.SetProduct(ctx, boss, "spot", false, "close spot"); err != nil || ps.Lines[0].Enabled || ps.Cancel == nil ||
 		*ps.Cancel != (ProductCancel{Status: CancelUnavailable}) {
 		t.Fatalf("closed without the service's cancel %+v %v", ps, err)
@@ -158,30 +159,53 @@ func TestProductLines(t *testing.T) {
 	if got := h.auditsOf("admin.products.toggled"); len(got) != 3 || !strings.Contains(got[2], `"cancel":"unavailable"`) {
 		t.Fatalf("audited %v", got)
 	}
-	svcs.err = errors.New("trading down")
+	// A refusal says the service's code and message; a cancel past its
+	// time or not reached says only that (A87: the console shows it, no
+	// address of ours), the audit the failure in full.
+	svcs.err = apperr.New(apperr.KindConflict, apperr.CodeConflict, "the product line is open")
 	if _, err := h.svc.SetProduct(ctx, boss, "spot", true, "open spot"); err != nil {
 		t.Fatal(err)
 	}
 	ps, err = h.svc.SetProduct(ctx, boss, "spot", false, "close spot again")
-	if err != nil || ps.Cancel == nil || ps.Cancel.Status != CancelFailed || ps.Cancel.Canceled != 0 || !strings.Contains(ps.Cancel.Error, "trading down") {
-		t.Fatalf("a failed cancel %+v %v", ps.Cancel, err)
+	if err != nil || ps.Cancel == nil || *ps.Cancel != (ProductCancel{Status: CancelFailed, Reason: CancelRefused, Error: "COMMON_CONFLICT: the product line is open"}) {
+		t.Fatalf("a refused cancel %+v %v", ps.Cancel, err)
 	}
-	if got := h.auditsOf("admin.products.toggled"); !strings.Contains(got[len(got)-1], `"cancel":"failed"`) || !strings.Contains(got[len(got)-1], "trading down") {
-		t.Fatalf("a failed cancel audited %v", got)
+	if got := h.auditsOf("admin.products.toggled"); !strings.Contains(got[len(got)-1], `"cancel":"failed"`) ||
+		!strings.Contains(got[len(got)-1], `"cancel_reason":"REFUSED"`) || !strings.Contains(got[len(got)-1], "the product line is open") {
+		t.Fatalf("a refused cancel audited %v", got)
 	}
-	// A cancel failing part way says what it canceled; a closed line whose
-	// count is unknown is asked again all the same.
-	svcs.cancel, svcs.err = 3, apperr.Unavailable(errors.New("a user's lock"))
+	inner := `Post "http://spot-trading-service:8088/internal/products/spot/cancel-open": context deadline exceeded`
+	for _, tc := range []struct {
+		sentinel error
+		reason   string
+	}{{ports.ErrProductCancelTimeout, CancelTimeout}, {ports.ErrProductCancelUnreachable, CancelUnreachable}} {
+		svcs.err = fmt.Errorf("%w: %w", tc.sentinel, apperr.Wrap(errors.New(inner), apperr.KindUnavailable, apperr.CodeUnavailable, "service unreachable"))
+		svcs.lines["spot"] = ports.ProductLine{OpenOrders: 1}
+		ps, err = h.svc.SetProduct(ctx, boss, "spot", false, "cancel the rest")
+		if err != nil || ps.Cancel == nil || *ps.Cancel != (ProductCancel{Status: CancelFailed, Reason: tc.reason}) {
+			t.Fatalf("%s: %+v %v", tc.reason, ps.Cancel, err)
+		}
+		if got := h.auditsOf("admin.products.orders_canceled"); !strings.Contains(got[len(got)-1], `"cancel_reason":"`+tc.reason+`"`) ||
+			!strings.Contains(got[len(got)-1], "spot-trading-service:8088") {
+			t.Fatalf("%s audited %v", tc.reason, got)
+		}
+	}
+	// A cancel failing part way says what it canceled and for how many users
+	// it could not; a closed line whose count is unknown is asked again all
+	// the same.
+	svcs.cancel, svcs.err = ports.ProductCanceled{Orders: 3, FailedUsers: 2}, apperr.Unavailable(errors.New("a user's lock"))
 	svcs.errs = map[string]error{"spot": errors.New("trading slow")}
 	ps, err = h.svc.SetProduct(ctx, boss, "spot", false, "cancel the rest")
-	if err != nil || ps.Cancel == nil || ps.Cancel.Status != CancelFailed || ps.Cancel.Canceled != 3 || ps.Lines[0].OpenOrders != nil {
+	if err != nil || ps.Cancel == nil || *ps.Cancel != (ProductCancel{
+		Status: CancelFailed, Canceled: 3, FailedUsers: 2, Reason: CancelPartial, Error: "COMMON_UNAVAILABLE: service temporarily unavailable",
+	}) || ps.Lines[0].OpenOrders != nil {
 		t.Fatalf("a cancel failing part way %+v %v", ps.Cancel, err)
 	}
-	if got := h.auditsOf("admin.products.orders_canceled"); len(got) != 2 || !strings.Contains(got[1], `"canceled_orders":3`) ||
-		!strings.Contains(got[1], `"cancel":"failed"`) {
+	if got := h.auditsOf("admin.products.orders_canceled"); len(got) != 4 || !strings.Contains(got[3], `"canceled_orders":3`) ||
+		!strings.Contains(got[3], `"cancel":"failed"`) || !strings.Contains(got[3], `"failed_users":2`) || !strings.Contains(got[3], `"cancel_reason":"PARTIAL"`) {
 		t.Fatalf("audited %v", got)
 	}
-	svcs.cancel, svcs.err, svcs.errs = 0, nil, nil
+	svcs.cancel, svcs.err, svcs.errs = ports.ProductCanceled{}, nil, nil
 
 	// A line whose service cannot count is null and named partial, the
 	// others as counted.

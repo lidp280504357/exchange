@@ -1414,13 +1414,29 @@ type MarketPrices interface {
 // touches now (GET /internal/products/{line}: its open orders, conditional
 // ones included, and positions, HOUSE's and the market makers' left out);
 // CancelOpen cancels its open orders (POST
-// /internal/products/{line}/cancel-open; the service audits each cancel).
-// ErrProductLineMissing while a service has no such endpoint yet (deployed
-// before K1a or K1b).
+// /internal/products/{line}/cancel-open; the service audits each cancel),
+// with an error what it did before failing. ErrProductLineMissing while a
+// service has no such endpoint yet (deployed before K1a or K1b); a cancel
+// that did not answer in time is ErrProductCancelTimeout, one that could
+// not reach its service ErrProductCancelUnreachable (each wrapping the
+// cause).
 type ProductLines interface {
 	Line(ctx context.Context, product string) (ProductLine, error)
-	CancelOpen(ctx context.Context, product, actor, reason string) (int, error)
+	CancelOpen(ctx context.Context, product, actor, reason string) (ProductCanceled, error)
 }
+
+// ProductCanceled is what a line's cancel-open did: the orders it canceled
+// and, failing part way, the users it could not cancel for (both services'
+// 503 names them: C60, A86, A87).
+type ProductCanceled struct {
+	Orders, FailedUsers int
+}
+
+// The ways a cancel-open fails without the service's own answer.
+var (
+	ErrProductCancelTimeout     = errors.New("the service did not answer in time")
+	ErrProductCancelUnreachable = errors.New("the service could not be reached")
+)
 
 // ProductLine is what closing a product line touches now.
 type ProductLine struct {

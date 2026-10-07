@@ -5102,15 +5102,25 @@ export interface components {
         ProductCancel: {
             /**
              * @description DONE: the service canceled what the closed line no longer takes.
-             *     UNAVAILABLE: the service has no endpoint for it yet. FAILED: it
-             *     could not be reached, did not answer within 15 seconds, or
-             *     failed part way.
+             *     UNAVAILABLE: the service has no endpoint for it yet. FAILED: see
+             *     reason.
              * @enum {string}
              */
             status: "DONE" | "UNAVAILABLE" | "FAILED";
             /** @description The orders the service said it canceled (with FAILED, those before it failed, when it said so). */
             canceled: number;
-            /** @description Why it failed; null unless FAILED. */
+            /** @description With reason PARTIAL, the users whose orders the service could not cancel (a lock it could not take); 0 otherwise. */
+            failed_users: number;
+            /**
+             * @description Why it FAILED (A87): TIMEOUT, no answer within 15 seconds (the
+             *     service may still be canceling); UNREACHABLE, the service could
+             *     not be reached; PARTIAL, it canceled for every user but
+             *     failed_users (503 with details canceled and failed_users);
+             *     REFUSED, it answered another error. Null unless FAILED.
+             * @enum {string|null}
+             */
+            reason: "TIMEOUT" | "UNREACHABLE" | "PARTIAL" | "REFUSED" | null;
+            /** @description With PARTIAL and REFUSED, the service's error code and message (never an internal address; the audit keeps the failure in full); null otherwise. */
             error: string | null;
         };
         LaunchChecklist: {

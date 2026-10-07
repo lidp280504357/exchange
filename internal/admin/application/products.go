@@ -53,23 +53,31 @@ type Products struct {
 	Cancel  *ProductCancel
 }
 
-// ProductCancel is how canceling a closed line's open orders went (A85):
-// CancelDone; CancelUnavailable, its service having no endpoint for it
-// yet; or CancelFailed, the service unreachable, not answering in time or
-// failing part way (Canceled counts what it said it canceled), with Error.
-// The line stays closed either way, and closing it again cancels what is
-// left.
+// ProductCancel is how canceling a closed line's open orders went (A85,
+// A87): CancelDone; CancelUnavailable, its service having no endpoint for
+// it yet; or CancelFailed, with why (Reason) - not answering in time, not
+// reached, failing for some users (FailedUsers) or refusing - Canceled
+// counting what the service said it canceled, and Error the service's own
+// code and message (never an address of ours: the console shows it). The
+// line stays closed either way, and closing it again cancels what is left.
 type ProductCancel struct {
-	Status   string
-	Canceled int
-	Error    string
+	Status      string
+	Canceled    int
+	FailedUsers int
+	Reason      string
+	Error       string
 }
 
-// How a cancel went.
+// How a cancel went, and why one failed.
 const (
 	CancelDone        = "DONE"
 	CancelUnavailable = "UNAVAILABLE"
 	CancelFailed      = "FAILED"
+
+	CancelTimeout     = "TIMEOUT"
+	CancelUnreachable = "UNREACHABLE"
+	CancelPartial     = "PARTIAL"
+	CancelRefused     = "REFUSED"
 )
 
 // Products returns the product lines with what closing each would touch.
@@ -171,8 +179,8 @@ func (s *Service) SetProduct(ctx context.Context, p Principal, product string, e
 			// Closed already: its orders still open are canceled (none
 			// counted, nothing is asked; a count unknown asks anyway).
 			if counts, err := s.productLine(ctx, product); err != nil || counts.OpenOrders > 0 {
-				c := s.cancelProduct(ctx, p, product, reason)
-				s.auditProduct(ctx, p, "admin.products.orders_canceled", product, false, false, c, reason)
+				c, cause := s.cancelProduct(ctx, p, product, reason)
+				s.auditProduct(ctx, p, "admin.products.orders_canceled", product, false, false, c, cause, reason)
 				return s.productsAfter(ctx, c)
 			}
 		}
@@ -182,34 +190,52 @@ func (s *Service) SetProduct(ctx context.Context, p Principal, product string, e
 		return Products{}, err
 	}
 	var c *ProductCancel
+	var cause error
 	if !enabled {
-		c = s.cancelProduct(ctx, p, product, reason)
+		c, cause = s.cancelProduct(ctx, p, product, reason)
 	}
-	s.auditProduct(ctx, p, "admin.products.toggled", product, was.Enabled, enabled, c, reason)
+	s.auditProduct(ctx, p, "admin.products.toggled", product, was.Enabled, enabled, c, cause, reason)
 	return s.productsAfter(ctx, c)
 }
 
 // cancelProduct asks the line's service to cancel its open orders and
-// says how it went; a failure is logged (and audited by the caller), the
-// switch standing.
-func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reason string) *ProductCancel {
+// says how it went, with the failure in full (logged here, audited by the
+// caller); the switch stands.
+func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reason string) (*ProductCancel, error) {
 	if s.ProductLines == nil {
-		return &ProductCancel{Status: CancelUnavailable}
+		return &ProductCancel{Status: CancelUnavailable}, ports.ErrProductLineMissing
 	}
 	n, err := s.ProductLines.CancelOpen(ctx, product, p.Admin.Email, reason)
+	c := &ProductCancel{Status: CancelFailed, Canceled: n.Orders, FailedUsers: n.FailedUsers}
 	switch {
 	case err == nil:
-		return &ProductCancel{Status: CancelDone, Canceled: n}
+		return &ProductCancel{Status: CancelDone, Canceled: n.Orders}, nil
 	case errors.Is(err, ports.ErrProductLineMissing):
-		return &ProductCancel{Status: CancelUnavailable, Canceled: n}
+		return &ProductCancel{Status: CancelUnavailable, Canceled: n.Orders}, err
+	case errors.Is(err, ports.ErrProductCancelTimeout):
+		c.Reason = CancelTimeout
+	case errors.Is(err, ports.ErrProductCancelUnreachable):
+		c.Reason = CancelUnreachable
+	case n.FailedUsers > 0:
+		c.Reason = CancelPartial
+	default:
+		c.Reason = CancelRefused
 	}
-	s.Log.WarnContext(ctx, "product line: its open orders not all canceled", "product", product, "canceled", n, "error", err)
-	return &ProductCancel{Status: CancelFailed, Canceled: n, Error: err.Error()}
+	// What the service said, if it answered: its code and message.
+	if e := apperr.From(err); e != nil && (c.Reason == CancelPartial || c.Reason == CancelRefused) {
+		c.Error = e.Code + ": " + e.Message
+	}
+	s.Log.WarnContext(ctx, "product line: its open orders not all canceled", "product", product, "canceled", n.Orders,
+		"failed_users", n.FailedUsers, "error", err)
+	return c, err
 }
 
 // auditProduct audits a switch (or a cancel of a closed line's orders):
-// the line, from and to, the orders canceled and why not all could be.
-func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, c *ProductCancel, reason string) {
+// the line, from and to, the orders canceled and why not all could be (the
+// failure in full).
+func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, c *ProductCancel, cause error,
+	reason string,
+) {
 	d := map[string]any{"product": product, "flag": productFlag(product), "from": from, "to": to, "canceled_orders": 0}
 	if c != nil {
 		d["canceled_orders"] = c.Canceled
@@ -217,7 +243,10 @@ func (s *Service) auditProduct(ctx context.Context, p Principal, action, product
 		case CancelUnavailable:
 			d["cancel"] = "unavailable"
 		case CancelFailed:
-			d["cancel"], d["cancel_error"] = "failed", c.Error
+			d["cancel"], d["cancel_reason"], d["failed_users"] = "failed", c.Reason, c.FailedUsers
+			if cause != nil {
+				d["cancel_error"] = cause.Error()
+			}
 		}
 	}
 	details, _ := json.Marshal(d)

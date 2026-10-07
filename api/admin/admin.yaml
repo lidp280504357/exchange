@@ -8145,22 +8145,33 @@ components:
         How canceling a closed line's open orders through its service went
         (A85). The line stays closed whatever it says; closing it again
         cancels what is left.
-      required: [status, canceled, error]
+      required: [status, canceled, failed_users, reason, error]
       properties:
         status:
           type: string
           enum: [DONE, UNAVAILABLE, FAILED]
           description: |
             DONE: the service canceled what the closed line no longer takes.
-            UNAVAILABLE: the service has no endpoint for it yet. FAILED: it
-            could not be reached, did not answer within 15 seconds, or
-            failed part way.
+            UNAVAILABLE: the service has no endpoint for it yet. FAILED: see
+            reason.
         canceled:
           type: integer
           description: The orders the service said it canceled (with FAILED, those before it failed, when it said so).
+        failed_users:
+          type: integer
+          description: With reason PARTIAL, the users whose orders the service could not cancel (a lock it could not take); 0 otherwise.
+        reason:
+          type: [string, 'null']
+          enum: [TIMEOUT, UNREACHABLE, PARTIAL, REFUSED, null]
+          description: |
+            Why it FAILED (A87): TIMEOUT, no answer within 15 seconds (the
+            service may still be canceling); UNREACHABLE, the service could
+            not be reached; PARTIAL, it canceled for every user but
+            failed_users (503 with details canceled and failed_users);
+            REFUSED, it answered another error. Null unless FAILED.
         error:
           type: [string, 'null']
-          description: Why it failed; null unless FAILED.
+          description: With PARTIAL and REFUSED, the service's error code and message (never an internal address; the audit keeps the failure in full); null otherwise.
     LaunchChecklist:
       type: object
       required: [ready, items, checked_at]

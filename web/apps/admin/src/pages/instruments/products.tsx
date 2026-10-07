@@ -87,7 +87,9 @@ function ProductLine({ p, control }: { p: ProductState; control: boolean }) {
 function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
   const { t } = useTranslation();
   const closing = p.enabled;
-  const left = !p.enabled && (p.open_orders ?? 0) > 0;
+  // A closed line's orders left, or not known (A87): cancel them again.
+  const unknown = p.open_orders === null || p.open_orders === undefined;
+  const left = !p.enabled && (unknown || (p.open_orders ?? 0) > 0);
   const put = async (enabled: boolean, reason: string) =>
     adminData(await adminApi.PUT("/admin/v1/products", { body: { product: p.product, enabled, reason } }));
   // What a close (or a cancel of what is left) did: a cancel that did not
@@ -96,7 +98,8 @@ function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
     const c = (res as { cancel?: ProductCancel | null }).cancel;
     if (!c || c.status === "DONE") return t(done, { n: c?.canceled ?? 0 });
     if (c.status === "UNAVAILABLE") return { info: t("admin.products.cancelUnavailable") };
-    return { info: t("admin.products.cancelFailed", { n: c.canceled, why: c.error ?? "—" }) };
+    const why = c.reason ? t(`admin.products.why.${c.reason}`, { users: c.failed_users, error: c.error ?? "—" }) : (c.error ?? "—");
+    return { info: t("admin.products.cancelFailed", { n: c.canceled, why }) };
   };
   return (
     <span className="flex flex-wrap gap-2">
@@ -138,7 +141,7 @@ function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
             </Button>
           )}
           title={t("admin.products.cancelLeftTitle", { line: name })}
-          description={t("admin.products.cancelLeftHint", { orders: p.open_orders ?? 0 })}
+          description={unknown ? t("admin.products.cancelLeftUnknown") : t("admin.products.cancelLeftHint", { orders: p.open_orders ?? 0 })}
           target={<span className="font-medium">{name}</span>}
           confirmWord={p.product}
           run={(reason) => put(false, reason)}

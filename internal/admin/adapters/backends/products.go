@@ -3,6 +3,8 @@ package backends
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -69,29 +71,43 @@ func (c ProductLines) Line(ctx context.Context, product string) (ports.ProductLi
 	return ports.ProductLine{OpenOrders: body.OpenOrders, OpenPositions: body.OpenPositions}, nil
 }
 
-// CancelOpen cancels a line's open orders: how many it canceled - with an
-// error, those the service said it canceled before failing
-// (derivatives-service's 503 names them, C60).
-func (c ProductLines) CancelOpen(ctx context.Context, product, actor, reason string) (int, error) {
+// CancelOpen cancels a line's open orders: how many it canceled - failing,
+// what the service said it did before (both services' 503 after a user
+// they could not cancel for names the orders canceled and the users
+// failed: C60, A86, A87). No answer in time is
+// ports.ErrProductCancelTimeout, a service not reached
+// ports.ErrProductCancelUnreachable.
+func (c ProductLines) CancelOpen(ctx context.Context, product, actor, reason string) (ports.ProductCanceled, error) {
 	ctx, cancel := bounded(ctx, c.CancelTimeout, DefaultLineCancelTimeout)
 	defer cancel()
 	raw, err := c.do(ctx, http.MethodPost, c.lineURL(product)+"/cancel-open", map[string]string{"actor": actor, "reason": reason}, nil)
 	if err != nil {
-		n := 0
+		var out ports.ProductCanceled
 		if e := apperr.From(err); e != nil {
-			if v, ok := e.Details["canceled"].(float64); ok {
-				n = int(v)
-			}
+			out.Orders, out.FailedUsers = detailInt(e, "canceled"), detailInt(e, "failed_users")
 		}
-		return n, lineMissing(err)
+		var transport *url.Error
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			return out, fmt.Errorf("%w: %w", ports.ErrProductCancelTimeout, err)
+		case errors.As(err, &transport):
+			return out, fmt.Errorf("%w: %w", ports.ErrProductCancelUnreachable, err)
+		}
+		return out, lineMissing(err)
 	}
 	var out struct {
 		Canceled int `json:"canceled"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return 0, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the service answered badly")
+		return ports.ProductCanceled{}, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the service answered badly")
 	}
-	return out.Canceled, nil
+	return ports.ProductCanceled{Orders: out.Canceled}, nil
+}
+
+// detailInt is a number among an error answer's details, 0 without it.
+func detailInt(e *apperr.Error, key string) int {
+	v, _ := e.Details[key].(float64)
+	return int(v)
 }
 
 // lineMissing is ports.ErrProductLineMissing for a service without the
