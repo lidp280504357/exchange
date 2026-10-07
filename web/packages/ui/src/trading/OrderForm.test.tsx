@@ -189,6 +189,22 @@ describe("OrderForm", () => {
     expect(onSubmit).toHaveBeenCalledWith({ side: "BUY", type: "market", quoteAmount: "250" });
   });
 
+  it("keeps one amount for a market order, the slider under it (B157)", () => {
+    render(<Harness onSubmit={() => {}} initialType="market" />);
+    // The price row says 市价 and takes nothing; a buy has the total only.
+    expect(field("Price").disabled).toBe(true);
+    const total = field("Total");
+    const slider = screen.getByRole("slider");
+    expect(total.compareDocumentPosition(slider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "50%" }));
+    expect(total.value).toBe("500");
+    // A sell has the quantity only, sized from the base it holds.
+    fireEvent.click(screen.getByRole("radio", { name: "Sell" }));
+    expect(screen.queryByLabelText("Total")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "50%" }));
+    expect(field("Amount").value).toBe("0.266");
+  });
+
   it("fills a percentage of the balance from the slider", () => {
     render(<Harness onSubmit={() => {}} initialSide="SELL" />);
     fireEvent.click(screen.getByRole("button", { name: "25%" }));

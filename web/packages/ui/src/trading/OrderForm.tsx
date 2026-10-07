@@ -209,6 +209,21 @@ export function OrderForm({
 
   const availAsset = buy ? pair.quote : pair.base;
   const availValue = buy ? available?.quote : available?.base;
+  // A market order has one amount, the slider under it as Binance has it
+  // (B157): a buy spends a total of the quote, a sell sells a quantity of
+  // the base. A limit order has both, the total under the slider.
+  const totalInput = (
+    <NumberInput
+      aria-label={t("common.total")}
+      prefix={<span className="text-xs">{t("common.total")}</span>}
+      unit={pair.quote}
+      align="right"
+      value={total}
+      onValueChange={changeTotal}
+      decimals={totalDecimals}
+      error={show("total", total)}
+    />
+  );
 
   return (
     <form noValidate onSubmit={submit} className={cn("flex flex-col gap-3", className)}>
@@ -260,7 +275,9 @@ export function OrderForm({
           disabled
         />
       )}
-      {!byTotal && (
+      {byTotal ? (
+        totalInput
+      ) : (
         <NumberInput
           aria-label={t("common.amount")}
           prefix={<span className="text-xs">{t("common.amount")}</span>}
@@ -288,18 +305,7 @@ export function OrderForm({
         disabled={!signedIn || !usable(max)}
         aria-label={`${t("common.available")} %`}
       />
-      {(limit || byTotal) && (
-        <NumberInput
-          aria-label={t("common.total")}
-          prefix={<span className="text-xs">{t("common.total")}</span>}
-          unit={pair.quote}
-          align="right"
-          value={total}
-          onValueChange={changeTotal}
-          decimals={totalDecimals}
-          error={show("total", total)}
-        />
-      )}
+      {limit && totalInput}
       <div className="flex flex-col gap-1.5 text-xs">
         <div className="flex items-center justify-between gap-2">
           <span className="text-fg-3">{availableLabel ?? t("common.available")}</span>
