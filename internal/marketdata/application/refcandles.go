@@ -251,6 +251,15 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol string, ref port
 		if err != nil {
 			return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "reference candles are unavailable")
 		}
+		// The minutes a price event touched, read before rc.mu: the feed's
+		// updates (Observe) wait on it.
+		if rc.overlaid != nil && len(got) > 0 {
+			touched, err := rc.overlaid(ctx, ref.Symbol, got[0].OpenTime, i.Next(got[len(got)-1].OpenTime))
+			if err != nil {
+				return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "reference candles are unavailable")
+			}
+			got = domain.MergeOverlaid(slices.Clone(got), i, touched)
+		}
 		ttl := referenceCacheTTL
 		if !to.IsZero() && !to.After(now) {
 			ttl = referencePastCacheTTL
@@ -260,13 +269,6 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol string, ref port
 			if !now.Before(v.until) {
 				delete(rc.cache, k)
 			}
-		}
-		if rc.overlaid != nil && len(got) > 0 {
-			touched, err := rc.overlaid(ctx, ref.Symbol, got[0].OpenTime, i.Next(got[len(got)-1].OpenTime))
-			if err != nil {
-				return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "reference candles are unavailable")
-			}
-			got = domain.MergeOverlaid(slices.Clone(got), i, touched)
 		}
 		rc.cache[key] = cachedCandles{candles: got, until: now.Add(ttl)}
 		rc.mu.Unlock()
