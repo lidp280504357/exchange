@@ -147,6 +147,9 @@ order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$
 expect 202 - "a buy that rests"
 RESTING=$(jq -r .order_id <<<"$BODY")
 eventually 40 "the engine opens it" status_is "$RESTING" OPEN
+# Older than the 5-second sweep's reach (orders from 10 s before the line
+# closed): this one is cancel-open's to take.
+sleep 11
 SPOT_CLOSED=""
 spot_back() {
   [[ -n $SPOT_CLOSED ]] || return 0
