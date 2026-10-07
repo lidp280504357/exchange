@@ -210,6 +210,40 @@ func AutoRepayPostings(t Trade, accounts map[AccountKey]Account) []Posting {
 	return out
 }
 
+// ReleaseRepayKey is the ledger key of RepayReleasedPosting's journal:
+// under the automatic repayments' prefix, so margin-service records it as
+// one (B160).
+func ReleaseRepayKey(orderID string) string { return "trade-repay:release:" + orderID }
+
+// RepayReleasedPosting repays, as an order on a margin account that
+// borrowed for its freeze ends (B160), up to upTo of the account's debt of
+// asset from its available balance — interest first, at most what is owed
+// and what is available — in a MARGIN_REPAY journal of its own, memo
+// "auto-repay order <order> release" (margin-service reads the order from
+// it). accounts holds the asset, debt and interest rows as locked. ok is
+// false when nothing is owed or available.
+func RepayReleasedPosting(ref MarginRef, asset, orderID string, upTo decimal.Decimal, accounts map[AccountKey]Account) (p Posting, ok bool) {
+	interest := decimal.Max(accounts[ref.InterestRow(asset)].Available.Neg(), decimal.Zero)
+	principal := decimal.Max(accounts[ref.DebtRow(asset)].Available.Neg(), decimal.Zero)
+	paid := decimal.Min(upTo, interest.Add(principal), decimal.Max(accounts[ref.Assets(asset)].Available, decimal.Zero))
+	if !paid.IsPositive() {
+		return Posting{}, false
+	}
+	toInterest := decimal.Min(paid, interest)
+	p = Posting{
+		IdemKey: ReleaseRepayKey(orderID), EntryType: EntryMarginRepay,
+		Memo:  fmt.Sprintf("auto-repay order %s release", orderID),
+		Lines: []Line{{Account: ref.Assets(asset), Amount: paid.Neg(), Kind: Available}},
+	}
+	if toInterest.IsPositive() {
+		p.Lines = append(p.Lines, Line{Account: ref.InterestRow(asset), Amount: toInterest, Kind: Available})
+	}
+	if rest := paid.Sub(toInterest); rest.IsPositive() {
+		p.Lines = append(p.Lines, Line{Account: ref.DebtRow(asset), Amount: rest, Kind: Available})
+	}
+	return p, true
+}
+
 // Idempotency keys of a trade's journals.
 func settleKey(id string) string  { return "trade:" + id }
 func feeKey(id string) string     { return "trade-fee:" + id }

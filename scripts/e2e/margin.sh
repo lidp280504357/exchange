@@ -16,7 +16,10 @@
 # loan is what the freeze lacked, the SOL lands on the margin account), and
 # a sell with AUTO_REPAY repays the loan and its interest from what it
 # brings (the settlement's automatic repayment, margin-service's loans
-# following it); invariant 5 counts the margin trades. Batch E3: with
+# following it); invariant 5 counts the margin trades. B160: a market buy
+# by quantity with AUTO_BORROW borrows its freeze, the band above the
+# market included, and about 10 s after it fills the loan is down to what
+# the fill cost beyond the free USDT. Batch E3: with
 # 50 USDT in, 0.6 SOL bought with AUTO_BORROW, an administrators'
 # liquidation (exchangectl margin liquidate, as an approved request) sells
 # to HOUSE as much SOL as the loan and the 2% fee need (review DD C19),
@@ -229,6 +232,31 @@ call GET "/v1/margin/accounts" "" "${AUTH[@]}"
 check '.cross.total_liability == "0" and .cross.margin_level == null' "nothing owed"
 LEFT=$(jq -r '[.cross.balances[] | select(.asset == "USDT")][0].free' <<<"$BODY")
 call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"$LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out4"
+expect 200 - "the $LEFT USDT left back to SPOT"
+
+echo "== a market buy by quantity borrows what its fill cost, not its band (B160)"
+call POST /v1/margin/transfer '{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"20"}' "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-in-b160"
+expect 200 - "20 USDT into the cross account"
+eventually 30 "$SYMBOL shows a two-sided book" book
+# About 30 USDT of SOL, more than the 20 free: the buy borrows, and its
+# freeze (the quantity at the protection price, the band above the market)
+# borrows the band too, which comes back as the order ends.
+BYQ=$(jq -r '30 / (.asks[0][0] | tonumber) * 1000 | floor / 1000' <<<"$BODY")
+place "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"$BYQ\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_BORROW\"}"
+eventually 40 "the market buy by quantity is FILLED against HOUSE" status_is "$ORDER" FILLED
+COST=$(jq -r .filled_quote <<<"$BODY")
+cost_borrowed() { # the loan: what the fill cost beyond the 20 free (its first hour's interest paid first)
+  call GET /v1/margin/loans "" "${AUTH[@]}" && [[ $STATUS == 200 ]] &&
+    jq -e --argjson cost "$COST" '[.items[] | select(.asset == "USDT")][0] | (.principal | tonumber) <= $cost - 20 + 0.001' <<<"$BODY" >/dev/null
+}
+eventually 45 "the band repaid about 10 s after the fill: the loan is what $COST USDT cost beyond the 20 free" cost_borrowed
+SOLD=$(jq -rn --argjson q "$BYQ" '$q * 0.999 * 1000 | floor / 1000')
+place "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"$SOLD\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_REPAY\"}"
+eventually 40 "the SOL sold with AUTO_REPAY" status_is "$ORDER" FILLED
+eventually 40 "the proceeds repaid the rest of the loan" repaid
+call GET "/v1/margin/accounts" "" "${AUTH[@]}"
+LEFT=$(jq -r '[.cross.balances[] | select(.asset == "USDT")][0].free' <<<"$BODY")
+call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"$LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out-b160"
 expect 200 - "the $LEFT USDT left back to SPOT"
 
 echo "== a liquidation (E3), as an administrators' approved request"

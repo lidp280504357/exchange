@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/ledger/domain"
@@ -152,6 +153,63 @@ func (s *Service) FreezeScoped(ctx context.Context, idemKey, entryType, userID, 
 		return Result{}, err
 	}
 	return s.Post(ctx, p)
+}
+
+// RepayReleased repays, as an order on a margin account that borrowed
+// for its freeze ends (B160), up to upTo of the account's debt of asset
+// from its available balance, interest first (domain.RepayReleasedPosting),
+// once per order: a repeat returns the first journal. The zero Result and
+// a zero amount when nothing was owed or available (nothing is kept then,
+// so a later call may still repay).
+func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountType, scope, asset string, upTo decimal.Decimal) (Result, decimal.Decimal, error) {
+	if _, err := uuid.Parse(orderID); err != nil {
+		return Result{}, decimal.Zero, apperr.Invalid("order_id must be a UUID")
+	}
+	ref, err := domain.ParseMarginRef(userID, accountType, scope)
+	if err != nil {
+		return Result{}, decimal.Zero, err
+	}
+	if !upTo.IsPositive() {
+		return Result{}, decimal.Zero, apperr.Invalid("up_to must be positive")
+	}
+	decimals, err := s.Assets.Decimals(ctx, asset)
+	if err != nil {
+		return Result{}, decimal.Zero, err
+	}
+	// A fill's quote may carry more decimals than the asset (tick x lot).
+	if upTo = upTo.Truncate(decimals); !upTo.IsPositive() {
+		return Result{}, decimal.Zero, nil
+	}
+	var res Result
+	repaid := decimal.Zero
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		res, repaid = Result{}, decimal.Zero
+		if j, err := r.Journals().ByIdemKey(ctx, domain.ReleaseRepayKey(orderID)); err != nil || j != nil {
+			if j != nil {
+				res = Result{JournalID: j.ID, Seq: j.Seq, Replayed: true}
+			}
+			return err
+		}
+		keys := []domain.AccountKey{ref.Assets(asset), ref.DebtRow(asset), ref.InterestRow(asset)}
+		accounts, err := r.Accounts().Lock(ctx, keys)
+		if err != nil {
+			return err
+		}
+		byKey := make(map[domain.AccountKey]domain.Account, len(accounts))
+		for _, a := range accounts {
+			byKey[a.Key] = a
+		}
+		p, ok := domain.RepayReleasedPosting(ref, asset, orderID, upTo, byKey)
+		if !ok {
+			return nil
+		}
+		if res, err = s.post(ctx, r, p); err != nil {
+			return err
+		}
+		repaid = p.Lines[0].Amount.Neg()
+		return nil
+	})
+	return res, repaid, err
 }
 
 // UnfreezeScoped is Unfreeze on the accounts FreezeScoped freezes.

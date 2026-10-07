@@ -36,6 +36,22 @@ func (c *Client) Unfreeze(ctx context.Context, key string, a domain.Account, ass
 	return err
 }
 
+// RepayReleased repays what an order borrowed, up to upTo, as it ends
+// (B160; ledger-service RepayReleased).
+func (c *Client) RepayReleased(ctx context.Context, a domain.Account, asset string, upTo decimal.Decimal, orderID string) (decimal.Decimal, error) {
+	resp, err := c.c.RepayReleased(ctx, &ledgerv1.RepayReleasedRequest{
+		OrderId: orderID, UserId: a.UserID, AccountType: accountType(a), Scope: a.Scope, Asset: asset, UpTo: upTo.String(),
+	})
+	if err != nil {
+		return decimal.Zero, err
+	}
+	repaid, err := decimal.NewFromString(resp.GetRepaid())
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("the ledger's repayment %q: %w", resp.GetRepaid(), err)
+	}
+	return repaid, nil
+}
+
 // MarginDebt returns what the margin account owes of asset, the principal
 // and the interest (GetMarginBalances).
 func (c *Client) MarginDebt(ctx context.Context, a domain.Account, asset string) (decimal.Decimal, error) {

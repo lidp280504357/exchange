@@ -106,6 +106,15 @@ service LedgerService {
   // ListMarginDebts returns every margin account's debt of every asset it
   // owes anything of (margin-service's reconciliation, invariant 7).
   rpc ListMarginDebts(ListMarginDebtsRequest) returns (ListMarginDebtsResponse);
+  // RepayReleased repays, as an order on a margin account that borrowed
+  // for its freeze ends (B160), up to up_to of the account's debt of the
+  // asset from what it holds available, interest first, at most what is
+  // owed: a MARGIN_REPAY journal keyed trade-repay:release:<order_id> (memo
+  // "auto-repay order <order_id> release"), which margin-service follows as
+  // an automatic repayment, as it does a trade's. Once per order: a repeat
+  // returns the first outcome. Nothing is posted when nothing is owed or
+  // available.
+  rpc RepayReleased(RepayReleasedRequest) returns (RepayReleasedResponse);
 }
 
 message FreezeRequest {
@@ -534,4 +543,25 @@ message ListMarginDebtsRequest {}
 
 message ListMarginDebtsResponse {
   repeated MarginDebt debts = 1;
+}
+
+message RepayReleasedRequest {
+  string order_id = 1;
+  string user_id = 2;
+  // MARGIN_CROSS, or MARGIN_ISOLATED with scope = its pair.
+  string account_type = 3;
+  string scope = 4;
+  string asset = 5;
+  // The most to repay (decimal string): what the order borrowed, at most
+  // what came back of its freeze.
+  string up_to = 6;
+}
+
+message RepayReleasedResponse {
+  // The repayment's journal; unset when nothing was repaid.
+  Posting posting = 1;
+  // What this call repaid, principal and interest: "0" when nothing was
+  // owed or available, or when it repeats an earlier call (posting
+  // replayed).
+  string repaid = 2;
 }

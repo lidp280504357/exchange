@@ -42,6 +42,7 @@ const (
 	LedgerService_AccrueMarginInterest_FullMethodName = "/exchange.ledger.v1.LedgerService/AccrueMarginInterest"
 	LedgerService_GetMarginBalances_FullMethodName    = "/exchange.ledger.v1.LedgerService/GetMarginBalances"
 	LedgerService_ListMarginDebts_FullMethodName      = "/exchange.ledger.v1.LedgerService/ListMarginDebts"
+	LedgerService_RepayReleased_FullMethodName        = "/exchange.ledger.v1.LedgerService/RepayReleased"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -152,6 +153,15 @@ type LedgerServiceClient interface {
 	// ListMarginDebts returns every margin account's debt of every asset it
 	// owes anything of (margin-service's reconciliation, invariant 7).
 	ListMarginDebts(ctx context.Context, in *ListMarginDebtsRequest, opts ...grpc.CallOption) (*ListMarginDebtsResponse, error)
+	// RepayReleased repays, as an order on a margin account that borrowed
+	// for its freeze ends (B160), up to up_to of the account's debt of the
+	// asset from what it holds available, interest first, at most what is
+	// owed: a MARGIN_REPAY journal keyed trade-repay:release:<order_id> (memo
+	// "auto-repay order <order_id> release"), which margin-service follows as
+	// an automatic repayment, as it does a trade's. Once per order: a repeat
+	// returns the first outcome. Nothing is posted when nothing is owed or
+	// available.
+	RepayReleased(ctx context.Context, in *RepayReleasedRequest, opts ...grpc.CallOption) (*RepayReleasedResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -392,6 +402,16 @@ func (c *ledgerServiceClient) ListMarginDebts(ctx context.Context, in *ListMargi
 	return out, nil
 }
 
+func (c *ledgerServiceClient) RepayReleased(ctx context.Context, in *RepayReleasedRequest, opts ...grpc.CallOption) (*RepayReleasedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RepayReleasedResponse)
+	err := c.cc.Invoke(ctx, LedgerService_RepayReleased_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -500,6 +520,15 @@ type LedgerServiceServer interface {
 	// ListMarginDebts returns every margin account's debt of every asset it
 	// owes anything of (margin-service's reconciliation, invariant 7).
 	ListMarginDebts(context.Context, *ListMarginDebtsRequest) (*ListMarginDebtsResponse, error)
+	// RepayReleased repays, as an order on a margin account that borrowed
+	// for its freeze ends (B160), up to up_to of the account's debt of the
+	// asset from what it holds available, interest first, at most what is
+	// owed: a MARGIN_REPAY journal keyed trade-repay:release:<order_id> (memo
+	// "auto-repay order <order_id> release"), which margin-service follows as
+	// an automatic repayment, as it does a trade's. Once per order: a repeat
+	// returns the first outcome. Nothing is posted when nothing is owed or
+	// available.
+	RepayReleased(context.Context, *RepayReleasedRequest) (*RepayReleasedResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -578,6 +607,9 @@ func (UnimplementedLedgerServiceServer) GetMarginBalances(context.Context, *GetM
 }
 func (UnimplementedLedgerServiceServer) ListMarginDebts(context.Context, *ListMarginDebtsRequest) (*ListMarginDebtsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMarginDebts not implemented")
+}
+func (UnimplementedLedgerServiceServer) RepayReleased(context.Context, *RepayReleasedRequest) (*RepayReleasedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RepayReleased not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -1014,6 +1046,24 @@ func _LedgerService_ListMarginDebts_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_RepayReleased_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RepayReleasedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).RepayReleased(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_RepayReleased_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).RepayReleased(ctx, req.(*RepayReleasedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1112,6 +1162,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMarginDebts",
 			Handler:    _LedgerService_ListMarginDebts_Handler,
+		},
+		{
+			MethodName: "RepayReleased",
+			Handler:    _LedgerService_RepayReleased_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

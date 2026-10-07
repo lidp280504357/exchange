@@ -3572,6 +3572,149 @@ func (x *ListMarginDebtsResponse) GetDebts() []*MarginDebt {
 	return nil
 }
 
+type RepayReleasedRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrderId string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId  string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// MARGIN_CROSS, or MARGIN_ISOLATED with scope = its pair.
+	AccountType string `protobuf:"bytes,3,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Scope       string `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
+	Asset       string `protobuf:"bytes,5,opt,name=asset,proto3" json:"asset,omitempty"`
+	// The most to repay (decimal string): what the order borrowed, at most
+	// what came back of its freeze.
+	UpTo          string `protobuf:"bytes,6,opt,name=up_to,json=upTo,proto3" json:"up_to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RepayReleasedRequest) Reset() {
+	*x = RepayReleasedRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RepayReleasedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RepayReleasedRequest) ProtoMessage() {}
+
+func (x *RepayReleasedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RepayReleasedRequest.ProtoReflect.Descriptor instead.
+func (*RepayReleasedRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *RepayReleasedRequest) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *RepayReleasedRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RepayReleasedRequest) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *RepayReleasedRequest) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *RepayReleasedRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *RepayReleasedRequest) GetUpTo() string {
+	if x != nil {
+		return x.UpTo
+	}
+	return ""
+}
+
+type RepayReleasedResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The repayment's journal; unset when nothing was repaid.
+	Posting *Posting `protobuf:"bytes,1,opt,name=posting,proto3" json:"posting,omitempty"`
+	// What this call repaid, principal and interest: "0" when nothing was
+	// owed or available, or when it repeats an earlier call (posting
+	// replayed).
+	Repaid        string `protobuf:"bytes,2,opt,name=repaid,proto3" json:"repaid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RepayReleasedResponse) Reset() {
+	*x = RepayReleasedResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RepayReleasedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RepayReleasedResponse) ProtoMessage() {}
+
+func (x *RepayReleasedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RepayReleasedResponse.ProtoReflect.Descriptor instead.
+func (*RepayReleasedResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *RepayReleasedResponse) GetPosting() *Posting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+func (x *RepayReleasedResponse) GetRepaid() string {
+	if x != nil {
+		return x.Repaid
+	}
+	return ""
+}
+
 var File_exchange_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
@@ -3839,7 +3982,17 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\binterest\x18\x06 \x01(\tR\binterest\"\x18\n" +
 	"\x16ListMarginDebtsRequest\"O\n" +
 	"\x17ListMarginDebtsResponse\x124\n" +
-	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts2\xbf\x12\n" +
+	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts\"\xae\x01\n" +
+	"\x14RepayReleasedRequest\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\faccount_type\x18\x03 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x14\n" +
+	"\x05asset\x18\x05 \x01(\tR\x05asset\x12\x13\n" +
+	"\x05up_to\x18\x06 \x01(\tR\x04upTo\"f\n" +
+	"\x15RepayReleasedResponse\x125\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\x12\x16\n" +
+	"\x06repaid\x18\x02 \x01(\tR\x06repaid2\xa5\x13\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +
@@ -3864,7 +4017,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"PostMargin\x12%.exchange.ledger.v1.PostMarginRequest\x1a&.exchange.ledger.v1.PostMarginResponse\x12y\n" +
 	"\x14AccrueMarginInterest\x12/.exchange.ledger.v1.AccrueMarginInterestRequest\x1a0.exchange.ledger.v1.AccrueMarginInterestResponse\x12p\n" +
 	"\x11GetMarginBalances\x12,.exchange.ledger.v1.GetMarginBalancesRequest\x1a-.exchange.ledger.v1.GetMarginBalancesResponse\x12j\n" +
-	"\x0fListMarginDebts\x12*.exchange.ledger.v1.ListMarginDebtsRequest\x1a+.exchange.ledger.v1.ListMarginDebtsResponseB\xd1\x01\n" +
+	"\x0fListMarginDebts\x12*.exchange.ledger.v1.ListMarginDebtsRequest\x1a+.exchange.ledger.v1.ListMarginDebtsResponse\x12d\n" +
+	"\rRepayReleased\x12(.exchange.ledger.v1.RepayReleasedRequest\x1a).exchange.ledger.v1.RepayReleasedResponseB\xd1\x01\n" +
 	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
@@ -3879,7 +4033,7 @@ func file_exchange_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 	return file_exchange_ledger_v1_ledger_proto_rawDescData
 }
 
-var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
+var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
 var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
 	(*FreezeRequest)(nil),                // 0: exchange.ledger.v1.FreezeRequest
 	(*UnfreezeRequest)(nil),              // 1: exchange.ledger.v1.UnfreezeRequest
@@ -3937,6 +4091,8 @@ var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
 	(*MarginDebt)(nil),                   // 53: exchange.ledger.v1.MarginDebt
 	(*ListMarginDebtsRequest)(nil),       // 54: exchange.ledger.v1.ListMarginDebtsRequest
 	(*ListMarginDebtsResponse)(nil),      // 55: exchange.ledger.v1.ListMarginDebtsResponse
+	(*RepayReleasedRequest)(nil),         // 56: exchange.ledger.v1.RepayReleasedRequest
+	(*RepayReleasedResponse)(nil),        // 57: exchange.ledger.v1.RepayReleasedResponse
 }
 var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
@@ -3964,57 +4120,60 @@ var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 22: exchange.ledger.v1.AccrueMarginInterestResponse.posting:type_name -> exchange.ledger.v1.Posting
 	50, // 23: exchange.ledger.v1.GetMarginBalancesResponse.balances:type_name -> exchange.ledger.v1.MarginBalance
 	53, // 24: exchange.ledger.v1.ListMarginDebtsResponse.debts:type_name -> exchange.ledger.v1.MarginDebt
-	0,  // 25: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
-	1,  // 26: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
-	2,  // 27: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
-	8,  // 28: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
-	10, // 29: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
-	12, // 30: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
-	14, // 31: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
-	16, // 32: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
-	18, // 33: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
-	20, // 34: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
-	23, // 35: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
-	26, // 36: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
-	28, // 37: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
-	32, // 38: exchange.ledger.v1.LedgerService.PlaceHold:input_type -> exchange.ledger.v1.PlaceHoldRequest
-	34, // 39: exchange.ledger.v1.LedgerService.ReleaseHold:input_type -> exchange.ledger.v1.ReleaseHoldRequest
-	36, // 40: exchange.ledger.v1.LedgerService.ListHolds:input_type -> exchange.ledger.v1.ListHoldsRequest
-	38, // 41: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:input_type -> exchange.ledger.v1.ReleaseUnclaimedRequest
-	42, // 42: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:input_type -> exchange.ledger.v1.GetUnclaimedReleaseRequest
-	40, // 43: exchange.ledger.v1.LedgerService.CreditUnclaimed:input_type -> exchange.ledger.v1.CreditUnclaimedRequest
-	45, // 44: exchange.ledger.v1.LedgerService.PostMargin:input_type -> exchange.ledger.v1.PostMarginRequest
-	48, // 45: exchange.ledger.v1.LedgerService.AccrueMarginInterest:input_type -> exchange.ledger.v1.AccrueMarginInterestRequest
-	51, // 46: exchange.ledger.v1.LedgerService.GetMarginBalances:input_type -> exchange.ledger.v1.GetMarginBalancesRequest
-	54, // 47: exchange.ledger.v1.LedgerService.ListMarginDebts:input_type -> exchange.ledger.v1.ListMarginDebtsRequest
-	4,  // 48: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
-	5,  // 49: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
-	6,  // 50: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
-	9,  // 51: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
-	11, // 52: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
-	13, // 53: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
-	15, // 54: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
-	17, // 55: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
-	19, // 56: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
-	21, // 57: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
-	25, // 58: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
-	27, // 59: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
-	30, // 60: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
-	33, // 61: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
-	35, // 62: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
-	37, // 63: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
-	39, // 64: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:output_type -> exchange.ledger.v1.ReleaseUnclaimedResponse
-	43, // 65: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:output_type -> exchange.ledger.v1.GetUnclaimedReleaseResponse
-	41, // 66: exchange.ledger.v1.LedgerService.CreditUnclaimed:output_type -> exchange.ledger.v1.CreditUnclaimedResponse
-	46, // 67: exchange.ledger.v1.LedgerService.PostMargin:output_type -> exchange.ledger.v1.PostMarginResponse
-	49, // 68: exchange.ledger.v1.LedgerService.AccrueMarginInterest:output_type -> exchange.ledger.v1.AccrueMarginInterestResponse
-	52, // 69: exchange.ledger.v1.LedgerService.GetMarginBalances:output_type -> exchange.ledger.v1.GetMarginBalancesResponse
-	55, // 70: exchange.ledger.v1.LedgerService.ListMarginDebts:output_type -> exchange.ledger.v1.ListMarginDebtsResponse
-	48, // [48:71] is the sub-list for method output_type
-	25, // [25:48] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	3,  // 25: exchange.ledger.v1.RepayReleasedResponse.posting:type_name -> exchange.ledger.v1.Posting
+	0,  // 26: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
+	1,  // 27: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
+	2,  // 28: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
+	8,  // 29: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
+	10, // 30: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
+	12, // 31: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
+	14, // 32: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
+	16, // 33: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
+	18, // 34: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
+	20, // 35: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
+	23, // 36: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
+	26, // 37: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
+	28, // 38: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
+	32, // 39: exchange.ledger.v1.LedgerService.PlaceHold:input_type -> exchange.ledger.v1.PlaceHoldRequest
+	34, // 40: exchange.ledger.v1.LedgerService.ReleaseHold:input_type -> exchange.ledger.v1.ReleaseHoldRequest
+	36, // 41: exchange.ledger.v1.LedgerService.ListHolds:input_type -> exchange.ledger.v1.ListHoldsRequest
+	38, // 42: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:input_type -> exchange.ledger.v1.ReleaseUnclaimedRequest
+	42, // 43: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:input_type -> exchange.ledger.v1.GetUnclaimedReleaseRequest
+	40, // 44: exchange.ledger.v1.LedgerService.CreditUnclaimed:input_type -> exchange.ledger.v1.CreditUnclaimedRequest
+	45, // 45: exchange.ledger.v1.LedgerService.PostMargin:input_type -> exchange.ledger.v1.PostMarginRequest
+	48, // 46: exchange.ledger.v1.LedgerService.AccrueMarginInterest:input_type -> exchange.ledger.v1.AccrueMarginInterestRequest
+	51, // 47: exchange.ledger.v1.LedgerService.GetMarginBalances:input_type -> exchange.ledger.v1.GetMarginBalancesRequest
+	54, // 48: exchange.ledger.v1.LedgerService.ListMarginDebts:input_type -> exchange.ledger.v1.ListMarginDebtsRequest
+	56, // 49: exchange.ledger.v1.LedgerService.RepayReleased:input_type -> exchange.ledger.v1.RepayReleasedRequest
+	4,  // 50: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
+	5,  // 51: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
+	6,  // 52: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
+	9,  // 53: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
+	11, // 54: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
+	13, // 55: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
+	15, // 56: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
+	17, // 57: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
+	19, // 58: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
+	21, // 59: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
+	25, // 60: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
+	27, // 61: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
+	30, // 62: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
+	33, // 63: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
+	35, // 64: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
+	37, // 65: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
+	39, // 66: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:output_type -> exchange.ledger.v1.ReleaseUnclaimedResponse
+	43, // 67: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:output_type -> exchange.ledger.v1.GetUnclaimedReleaseResponse
+	41, // 68: exchange.ledger.v1.LedgerService.CreditUnclaimed:output_type -> exchange.ledger.v1.CreditUnclaimedResponse
+	46, // 69: exchange.ledger.v1.LedgerService.PostMargin:output_type -> exchange.ledger.v1.PostMarginResponse
+	49, // 70: exchange.ledger.v1.LedgerService.AccrueMarginInterest:output_type -> exchange.ledger.v1.AccrueMarginInterestResponse
+	52, // 71: exchange.ledger.v1.LedgerService.GetMarginBalances:output_type -> exchange.ledger.v1.GetMarginBalancesResponse
+	55, // 72: exchange.ledger.v1.LedgerService.ListMarginDebts:output_type -> exchange.ledger.v1.ListMarginDebtsResponse
+	57, // 73: exchange.ledger.v1.LedgerService.RepayReleased:output_type -> exchange.ledger.v1.RepayReleasedResponse
+	50, // [50:74] is the sub-list for method output_type
+	26, // [26:50] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_exchange_ledger_v1_ledger_proto_init() }
@@ -4028,7 +4187,7 @@ func file_exchange_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_ledger_v1_ledger_proto_rawDesc), len(file_exchange_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   56,
+			NumMessages:   58,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

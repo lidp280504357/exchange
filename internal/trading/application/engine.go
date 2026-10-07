@@ -38,8 +38,17 @@ func (s *Service) OnUpdate(ctx context.Context, u domain.Update) error {
 	return s.release(ctx, o)
 }
 
+// repayGrace is how long after an order that borrowed ends its repayment
+// waits (B160): its trades' settlement gives back what a limit price held
+// beyond the trade prices, and the ledger settles them on its own.
+// RecoverReleases repays it, past this (its cutoff is as long).
+const repayGrace = 10 * time.Second
+
 // release unfreezes a finished order's unused funds (the key makes a
-// retry harmless) and marks the order released.
+// retry harmless) and marks the order released. An order on a margin
+// account that borrowed for its freeze first repays, once its trades had
+// repayGrace to settle, what came back of the freeze, up to what it
+// borrowed (B160; the ledger's key makes that once per order).
 func (s *Service) release(ctx context.Context, o domain.Order) error {
 	if o.FreezeState != domain.FreezeDone {
 		return nil // nothing was frozen
@@ -50,6 +59,21 @@ func (s *Service) release(ctx context.Context, o domain.Order) error {
 		cancel()
 		if err != nil {
 			return err
+		}
+	}
+	if repay := o.BorrowToRepay(); repay.IsPositive() {
+		if s.Now().Sub(o.UpdatedAt) < repayGrace {
+			return nil // RecoverReleases repays it, and marks it released
+		}
+		call, cancel := s.bounded(ctx)
+		repaid, err := s.Ledger.RepayReleased(call, o.Account(), o.FrozenAsset, repay, o.ID)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if repaid.IsPositive() {
+			s.Log.InfoContext(ctx, "an order's borrow repaid as it ended", "order_id", o.ID, "asset", o.FrozenAsset,
+				"repaid", repaid.String(), "up_to", repay.String())
 		}
 	}
 	return s.Store.Tx(ctx, func(r ports.Repos) error {

@@ -110,6 +110,24 @@ func (s *Server) GetMarginBalances(ctx context.Context, req *ledgerv1.GetMarginB
 	return resp, nil
 }
 
+// RepayReleased repays what an order on a margin account borrowed, up to
+// up_to, as the order ends (B160).
+func (s *Server) RepayReleased(ctx context.Context, req *ledgerv1.RepayReleasedRequest) (*ledgerv1.RepayReleasedResponse, error) {
+	upTo, err := amount(req.GetUpTo())
+	if err != nil {
+		return nil, err
+	}
+	res, repaid, err := s.svc.RepayReleased(ctx, req.GetOrderId(), req.GetUserId(), req.GetAccountType(), req.GetScope(), req.GetAsset(), upTo)
+	if err != nil {
+		return nil, err
+	}
+	resp := &ledgerv1.RepayReleasedResponse{Repaid: repaid.String()}
+	if res.JournalID != "" {
+		resp.Posting = posting(res)
+	}
+	return resp, nil
+}
+
 // ListMarginDebts returns every margin account's debt of each asset it
 // owes.
 func (s *Server) ListMarginDebts(ctx context.Context, _ *ledgerv1.ListMarginDebtsRequest) (*ledgerv1.ListMarginDebtsResponse, error) {

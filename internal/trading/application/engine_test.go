@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/trading/domain"
 )
 
@@ -185,5 +186,68 @@ func TestFills(t *testing.T) {
 	}
 	if _, _, err := svc.UserFills(ctx, "u1", "", "not-a-trade", 10); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("bad cursor: %v", err)
+	}
+}
+
+// An order on a margin account that borrowed for its freeze repays, once
+// its trades had repayGrace to settle, what came back of the freeze, up to
+// what it borrowed (B160): a market buy by quantity also what its
+// protection price held beyond the fills' prices. RecoverReleases does it
+// and marks the order released, once. A limit buy filled whole keeps its
+// borrow (its price improvement freed at settlement stays, as the margin
+// e2e has it); a canceled one repays its unused freeze, up to its borrow.
+func TestABorrowingOrderRepaysWhatCameBackAsItEnds(t *testing.T) {
+	svc, _, led, c := newService()
+	ctx := context.Background()
+	svc.Margin = &fakeMargin{borrowed: "50"}
+	svc.Features = switches{flags.KeyMarginEnabled: true, flags.KeyMarginAutoBorrow: true}
+	svc.Prices = fixedAnchor{d("60000")}
+	place := func(id string, market bool) domain.Order {
+		r := marginBuy(id, domain.AccountMarginCross, domain.SideEffectAutoBorrow)
+		if market {
+			r.Type, r.Price = domain.TypeMarket, decimal.Zero
+		}
+		o, err := svc.Place(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	byQty := place("by-qty", true) // 0.001 at the protection 66000: 66 frozen, 50 of it borrowed
+	// Filled at 60000: 60 spent, 6 back at settlement, nothing to unfreeze.
+	if err := svc.OnUpdate(ctx, update(byQty.ID, 3, domain.StatusFilled, "0.001", "60", "")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Get(ctx, "u1", byQty.ID); len(led.repays) != 0 || got.Released {
+		t.Fatalf("repaid or released before its trades had time to settle: %v %v", led.repays, got.Released)
+	}
+	whole := place("whole", false) // a limit buy at 60000: 60 frozen
+	if err := svc.OnUpdate(ctx, update(whole.ID, 4, domain.StatusFilled, "0.001", "59", "")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Get(ctx, "u1", whole.ID); !got.Released || len(led.repays) != 0 {
+		t.Fatalf("a limit buy filled whole: released %v, repays %v", got.Released, led.repays)
+	}
+	canceled := place("canceled", false)
+	if err := svc.OnUpdate(ctx, update(canceled.ID, 5, domain.StatusCanceled, "0", "0", "USER")); err != nil {
+		t.Fatal(err)
+	}
+	c.t = c.t.Add(repayGrace + time.Second)
+	if n, err := svc.RecoverReleases(ctx); err != nil || n != 2 {
+		t.Fatalf("recover: %d %v", n, err)
+	}
+	sort.Strings(led.repays)
+	want := []string{"MARGIN_CROSS " + byQty.ID + " 6 USDT", "MARGIN_CROSS " + canceled.ID + " 50 USDT"}
+	sort.Strings(want)
+	if len(led.repays) != 2 || led.repays[0] != want[0] || led.repays[1] != want[1] {
+		t.Fatalf("repays %v, want %v", led.repays, want)
+	}
+	for _, o := range []domain.Order{byQty, canceled} {
+		if got, _ := svc.Get(ctx, "u1", o.ID); !got.Released {
+			t.Fatalf("%s not released", o.ClientOrderID)
+		}
+	}
+	if n, err := svc.RecoverReleases(ctx); err != nil || n != 0 || len(led.repays) != 2 {
+		t.Fatalf("again: %d %v %v", n, err, led.repays)
 	}
 }

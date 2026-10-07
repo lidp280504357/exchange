@@ -273,6 +273,10 @@ func (freezeOK) MarginDebt(context.Context, domain.Account, string) (decimal.Dec
 
 func (freezeOK) MarginBorrowers(context.Context) (int, error) { return 0, nil }
 
+func (freezeOK) RepayReleased(context.Context, domain.Account, string, decimal.Decimal, string) (decimal.Decimal, error) {
+	return decimal.Zero, nil
+}
+
 type onePair struct{}
 
 func (onePair) Pair(context.Context, string) (domain.Pair, error) { return pair, nil }

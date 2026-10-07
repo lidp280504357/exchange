@@ -288,7 +288,9 @@ export interface operations {
                      */
                     time_in_force?: "GTC" | "IOC" | "FOK" | "POST_ONLY";
                     price?: components["schemas"]["Decimal"];
+                    /** @description The base to trade; a market buy gives it or quote_amount, not both (B157). */
                     quantity?: components["schemas"]["Decimal"];
+                    /** @description Market buys only, instead of quantity - the quote to spend. */
                     quote_amount?: components["schemas"]["Decimal"];
                     client_order_id?: string;
                     /**

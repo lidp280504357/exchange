@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/ledger/domain"
 	"github.com/skill/exchange/internal/platform/apperr"
@@ -173,5 +174,74 @@ func TestMarginPostings(t *testing.T) {
 		if len(r.Mismatches) > 0 {
 			t.Errorf("%s: %v", r.Check, r.Mismatches)
 		}
+	}
+}
+
+// RepayReleased (B160): what an order that borrowed for its freeze gives
+// back repays the account's debt of the asset, interest first, at most
+// what is owed and what is available (to the asset's decimals), once per
+// order, under the automatic repayments' key prefix with the order in the
+// memo (margin-service records it from there); nothing is posted without
+// a debt.
+func TestRepayReleased(t *testing.T) {
+	svc, _, db := setup(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	if err := svc.OnUserRegistered(ctx, uuid.NewString(), user, "SG"); err != nil {
+		t.Fatal(err)
+	}
+	cross := domain.MarginRef{UserID: user, AccountType: domain.AccountMarginCross}
+	for _, req := range []domain.MarginRequest{
+		{IdemKey: "in", Account: cross, Reference: "in", Moves: []domain.MarginMove{{Type: domain.MarginTransferIn, Asset: "USDT", Amount: d("100")}}},
+		{IdemKey: "b", Account: cross, Reference: "b", Moves: []domain.MarginMove{
+			{Type: domain.MarginBorrow, Asset: "USDT", Amount: d("50")}, {Type: domain.MarginInterest, Asset: "USDT", Amount: d("0.05")},
+		}},
+	} {
+		if _, err := svc.PostMargin(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := func() (assets, debt, interest decimal.Decimal) {
+		t.Helper()
+		list, err := svc.MarginBalances(ctx, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return marginRow(t, list, cross.Assets("USDT")).Available, marginRow(t, list, cross.DebtRow("USDT")).Available,
+			marginRow(t, list, cross.InterestRow("USDT")).Available
+	}
+	order := uuid.NewString()
+	// 6.0000004 down to USDT's 6 decimals; the interest first.
+	res, repaid, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("6.0000004"))
+	if err != nil || res.JournalID == "" || !repaid.Equal(d("6")) {
+		t.Fatalf("repay: %+v %s %v", res, repaid, err)
+	}
+	if a, debt, interest := rows(); !a.Equal(d("144")) || !debt.Equal(d("-44.05")) || !interest.IsZero() {
+		t.Fatalf("after: assets %s, debt %s, interest %s", a, debt, interest)
+	}
+	var memo, entry string
+	if err := db.QueryRow(ctx, `SELECT memo, entry_type FROM journals WHERE idem_key = $1`, "trade-repay:release:"+order).Scan(&memo, &entry); err != nil ||
+		memo != "auto-repay order "+order+" release" || entry != domain.EntryMarginRepay {
+		t.Fatalf("journal: %q %q %v", memo, entry, err)
+	}
+	// Once per order.
+	again, repaid, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("10"))
+	if err != nil || !again.Replayed || again.JournalID != res.JournalID || !repaid.IsZero() {
+		t.Fatalf("again: %+v %s %v", again, repaid, err)
+	}
+	// At most what is owed.
+	if _, repaid, err := svc.RepayReleased(ctx, uuid.NewString(), user, domain.AccountMarginCross, "", "USDT", d("1000")); err != nil || !repaid.Equal(d("44.05")) {
+		t.Fatalf("all of it: %s %v", repaid, err)
+	}
+	if a, debt, _ := rows(); !a.Equal(d("99.95")) || !debt.IsZero() {
+		t.Fatalf("paid off: assets %s, debt %s", a, debt)
+	}
+	// Nothing owed: nothing posted, and the order may still repay later.
+	none, repaid, err := svc.RepayReleased(ctx, uuid.NewString(), user, domain.AccountMarginCross, "", "USDT", d("5"))
+	if err != nil || none.JournalID != "" || !repaid.IsZero() {
+		t.Fatalf("nothing owed: %+v %s %v", none, repaid, err)
+	}
+	if _, _, err := svc.RepayReleased(ctx, "not-a-uuid", user, domain.AccountMarginCross, "", "USDT", d("1")); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a bad order id: %v", err)
 	}
 }

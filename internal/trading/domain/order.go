@@ -223,6 +223,22 @@ func (o Order) Unused() decimal.Decimal {
 	return decimal.Max(o.FrozenAmount.Sub(consumed), decimal.Zero)
 }
 
+// BorrowToRepay is what a finished order on a margin account that
+// borrowed for its freeze gives back to repay (B160): what its freeze did
+// not use, and for a market buy by quantity also what its protection price
+// held beyond the fills' prices (settlement released it per trade), at
+// most what it borrowed.
+func (o Order) BorrowToRepay() decimal.Decimal {
+	if !o.AccountType.Margin() || !o.Borrowed.IsPositive() {
+		return decimal.Zero
+	}
+	back := o.Unused()
+	if o.BuysByQuantity() {
+		back = decimal.Max(o.FrozenAmount.Sub(o.FilledQuote), decimal.Zero)
+	}
+	return decimal.Min(back, o.Borrowed)
+}
+
 // BuysByQuantity reports a market buy sized in the base (B157): frozen,
 // matched and released as a limit buy at its protection price.
 func (o Order) BuysByQuantity() bool {

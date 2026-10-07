@@ -192,7 +192,8 @@ type fakeLedger struct {
 	releases    []string
 	accounts    []domain.Account
 	debts       map[string]string
-	debtErr     error // MarginDebt's answer when set
+	debtErr     error    // MarginDebt's answer when set
+	repays      []string // RepayReleased's calls: "account order up-to asset"
 }
 
 func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset string) (decimal.Decimal, error) {
@@ -206,6 +207,11 @@ func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset strin
 }
 
 func (l *fakeLedger) MarginBorrowers(context.Context) (int, error) { return len(l.debts), nil }
+
+func (l *fakeLedger) RepayReleased(_ context.Context, a domain.Account, asset string, upTo decimal.Decimal, orderID string) (decimal.Decimal, error) {
+	l.repays = append(l.repays, string(a.Type)+" "+orderID+" "+upTo.String()+" "+asset)
+	return upTo, nil
+}
 
 func (l *fakeLedger) Unfreeze(_ context.Context, key string, a domain.Account, asset string, amount decimal.Decimal, _ string) error {
 	if l.unfreezeErr != nil {
