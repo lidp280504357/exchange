@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/skill/exchange/internal/platform/httpx"
 	"github.com/skill/exchange/internal/platform/testenv"
 )
 
@@ -67,6 +68,17 @@ func TestIdempotencyReplaysAndConflicts(t *testing.T) {
 	status = http.StatusCreated
 	if rec := send("key-00002", `{}`); rec.Code != 201 || rec.Header().Get(headerReplayed) != "" {
 		t.Fatalf("retry after a 5xx: %d %v", rec.Code, rec.Header())
+	}
+	// So does a request the client gave up on (499, review B155): a retry
+	// reaches the service instead of replaying an empty answer.
+	status = httpx.StatusClientClosedRequest
+	if rec := send("key-00004", `{}`); rec.Code != httpx.StatusClientClosedRequest {
+		t.Fatalf("client gone: %d", rec.Code)
+	}
+	status = http.StatusCreated
+	before := calls.Load()
+	if rec := send("key-00004", `{}`); rec.Code != 201 || rec.Header().Get(headerReplayed) != "" || calls.Load() != before+1 {
+		t.Fatalf("retry after a 499: %d %v, calls %d", rec.Code, rec.Header(), calls.Load()-before)
 	}
 
 	// A key still in flight is refused.

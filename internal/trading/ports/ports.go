@@ -50,7 +50,8 @@ type OrderRepo interface {
 	// ActiveUsers returns the users with active orders stored at or after
 	// since.
 	ActiveUsers(ctx context.Context, since time.Time) ([]string, error)
-	// CountOpen counts the active orders but those of the except users.
+	// CountOpen counts the active orders but liquidations and those of the
+	// except users.
 	CountOpen(ctx context.Context, except []string) (int, error)
 	// List returns a page of the user's orders, newest first.
 	List(ctx context.Context, userID string, f ListFilter) ([]domain.Order, error)

@@ -133,7 +133,7 @@ export interface components {
             enabled: boolean;
             /**
              * Format: date-time
-             * @description When an operator closed it; only while closed.
+             * @description When an operator closed it (the switch's last change, so an edit of a closed switch moves it); only while closed.
              */
             closed_at?: string;
         };

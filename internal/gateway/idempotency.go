@@ -128,11 +128,12 @@ func (i *Idempotency) replay(w http.ResponseWriter, r *http.Request, rkey, hash 
 	}
 }
 
-// finish keeps the response for replays; server errors release the key so
-// the client may retry.
+// finish keeps the response for replays; server errors and requests the
+// client gave up on (499: the service's answer never came back, review
+// B155) release the key so the client may retry.
 func (i *Idempotency) finish(ctx context.Context, rkey, hash string, rec *capture) {
 	ctx = context.WithoutCancel(ctx)
-	if rec.status >= 500 || rec.overflow {
+	if rec.status >= 500 || rec.status == httpx.StatusClientClosedRequest || rec.overflow {
 		if err := i.Redis.Del(ctx, rkey).Err(); err != nil {
 			i.Log.WarnContext(ctx, "releasing an idempotency key failed", "error", err)
 		}

@@ -139,7 +139,7 @@ func (r memOrders) ActiveUsers(_ context.Context, since time.Time) ([]string, er
 func (r memOrders) CountOpen(_ context.Context, except []string) (int, error) {
 	n := 0
 	for _, o := range r.s.orders {
-		if o.Status.Active() && !slices.Contains(except, o.UserID) {
+		if o.Status.Active() && o.LiquidationID == "" && !slices.Contains(except, o.UserID) {
 			n++
 		}
 	}
@@ -1011,7 +1011,7 @@ func (l *lines) Refresh(context.Context) error {
 // CancelOpen cancels the open orders of both kinds of account, each
 // audited, once the line is closed; the sweep keeps the repayments.
 func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
-	svc, store, led, _ := newService()
+	svc, store, led, c := newService()
 	ctx := context.Background()
 	svc.Margin = &fakeMargin{}
 	svc.Features = switches{flags.KeyMarginEnabled: true}
@@ -1129,9 +1129,18 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 	if n, err := svc.SweepClosed(ctx); err != nil || n != 0 {
 		t.Fatalf("sweep: %d %v", n, err)
 	}
-	if got, _ := store.Read().Orders().Get(ctx, repay.ID); got.CancelRequested {
-		t.Fatal("the sweep took the repayment")
+	// Run again, cancel-open keeps it too (review B155).
+	if again, err := svc.CancelOpen(ctx, "ops@example.com", "closing spot again"); err != nil || len(again) != 0 {
+		t.Fatalf("cancel-open again: %+v %v", again, err)
 	}
+	if got, _ := store.Read().Orders().Get(ctx, repay.ID); got.CancelRequested {
+		t.Fatal("the repayment was canceled")
+	}
+	// The borrowers are counted at most every 15 seconds.
+	if _, _, borrowers, err := svc.SpotLine(ctx); err != nil || borrowers != 0 {
+		t.Fatalf("borrowers within 15 s: %d %v", borrowers, err)
+	}
+	c.t = c.t.Add(borrowersEvery)
 	if _, _, borrowers, err := svc.SpotLine(ctx); err != nil || borrowers != 1 {
 		t.Fatalf("borrowers: %d %v", borrowers, err)
 	}
@@ -1145,8 +1154,10 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 // from ten seconds before it closed on (an order a stale copy of the flag
 // let in), as system:spot-trading-service; older ones are CancelOpen's.
 func TestTheSweepTakesWhatSlippedInAsSpotClosed(t *testing.T) {
-	svc, store, _, c := newService()
+	svc, store, led, c := newService()
 	ctx := context.Background()
+	svc.Margin = &fakeMargin{}
+	svc.Features = switches{flags.KeyMarginEnabled: true}
 	products := &lines{closed: map[string]bool{}}
 	svc.Products = products
 	old, err := svc.Place(ctx, buy("old"))
@@ -1157,23 +1168,39 @@ func TestTheSweepTakesWhatSlippedInAsSpotClosed(t *testing.T) {
 		t.Fatalf("sweep while open: %d %v", n, err)
 	}
 	c.t = c.t.Add(time.Minute)
-	late, err := svc.Place(ctx, buy("late")) // let in by a copy of the flag that was behind
-	if err != nil {
-		t.Fatal(err)
+	// Let in by a copy of the flag that was behind: a spot order, a
+	// repayment (the account owes the BTC a buy brings) and an AUTO_REPAY
+	// sell bringing USDT, which it does not owe (review B155).
+	led.debts = map[string]string{"MARGIN_CROSS  BTC": "0.002"}
+	place := func(id string, account domain.AccountType, effect domain.SideEffect, side domain.Side) domain.Order {
+		r := marginBuy(id, account, effect)
+		r.Side = side
+		o, err := svc.Place(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
 	}
+	late := place("late", domain.AccountSpot, domain.SideEffectNone, domain.SideBuy)
+	repay := place("repay", domain.AccountMarginCross, domain.SideEffectAutoRepay, domain.SideBuy)
+	owesNothing := place("sell", domain.AccountMarginCross, domain.SideEffectAutoRepay, domain.SideSell)
+	audits := len(store.events)
 	products.closed[flags.KeyProductSpot], products.closedAt = true, c.t.Add(5*time.Second)
-	if n, err := svc.SweepClosed(ctx); err != nil || n != 1 {
+	if n, err := svc.SweepClosed(ctx); err != nil || n != 2 {
 		t.Fatalf("sweep: %d %v", n, err)
 	}
-	if got, _ := store.Read().Orders().Get(ctx, old.ID); got.CancelRequested {
-		t.Fatal("the sweep took an order from before the line closed")
+	for _, o := range []struct {
+		order    domain.Order
+		canceled bool
+	}{{old, false}, {late, true}, {repay, false}, {owesNothing, true}} {
+		if got, _ := store.Read().Orders().Get(ctx, o.order.ID); got.CancelRequested != o.canceled {
+			t.Fatalf("%s: canceled %v", o.order.ClientOrderID, got.CancelRequested)
+		}
 	}
-	if got, _ := store.Read().Orders().Get(ctx, late.ID); !got.CancelRequested {
-		t.Fatal("the sweep left the order that slipped in")
-	}
-	last, _ := store.events[len(store.events)-1].msg.(*auditv1.AdminActionPerformed)
-	if last.GetActor() != SweepActor || last.GetAction() != "admin.orders.canceled" || !strings.Contains(last.GetDetails(), late.ID) {
-		t.Fatalf("audit %+v", last)
+	for _, e := range store.events[audits:] {
+		if a, ok := e.msg.(*auditv1.AdminActionPerformed); ok && (a.GetActor() != SweepActor || a.GetAction() != "admin.orders.canceled") {
+			t.Fatalf("audit %+v", a)
+		}
 	}
 	if n, err := svc.SweepClosed(ctx); err != nil || n != 0 {
 		t.Fatalf("sweep again: %d %v", n, err)
@@ -1189,6 +1216,20 @@ func TestAnOrderOnItsWayInWhenSpotClosesIsRefused(t *testing.T) {
 	_, err := svc.Place(context.Background(), buy("c1"))
 	if !apperr.Is(err, flags.CodeProductClosed) || len(store.orders) != 0 || len(store.events) != 0 {
 		t.Fatalf("%v, %d orders, %d events", err, len(store.orders), len(store.events))
+	}
+	// A repayment too: its debt was not checked, the line open when it
+	// came in (review B155); a retry goes through the check.
+	svc, store, led, _ := newService()
+	svc.Margin = &fakeMargin{}
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	led.debts = map[string]string{"MARGIN_CROSS  BTC": "1"}
+	svc.Products = &lines{closed: map[string]bool{}, closing: 2}
+	_, err = svc.Place(context.Background(), marginBuy("r1", domain.AccountMarginCross, domain.SideEffectAutoRepay))
+	if !apperr.Is(err, flags.CodeProductClosed) || len(store.orders) != 0 {
+		t.Fatalf("a repayment: %v, %d orders", err, len(store.orders))
+	}
+	if _, err := svc.Place(context.Background(), marginBuy("r1", domain.AccountMarginCross, domain.SideEffectAutoRepay)); err != nil {
+		t.Fatalf("the repayment again: %v", err)
 	}
 }
 

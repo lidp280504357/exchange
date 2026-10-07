@@ -246,7 +246,8 @@ func (r orders) CountOpen(ctx context.Context, except []string) (int, error) {
 		except = []string{} // NULL would match no order at all
 	}
 	var n int
-	err := r.q.QueryRow(ctx, `SELECT count(*) FROM orders WHERE `+activeWhere+` AND NOT (user_id::text = ANY($1))`, except).Scan(&n)
+	err := r.q.QueryRow(ctx, `SELECT count(*) FROM orders WHERE `+activeWhere+` AND liquidation_id IS NULL AND NOT (user_id::text = ANY($1))`,
+		except).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count open orders: %w", err)
 	}
