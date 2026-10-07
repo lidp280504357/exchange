@@ -191,6 +191,21 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - 文案在两站的 `src/i18n/profile.ts`（命名空间 `pcProfile`/`mProfile`），随个人资料页加载；顶栏、左栏与设置页用 core 的 `nav.profile`、`common.uid`。
 - 冒烟（两站第 8b 步）：新注册用户的用户名是 `user_` 加 8 位、头像是内置的（PC 顶栏菜单与个人资料页，手机「我的」）；改名后立即显示且进入 7 天冷却；在页面里画一张图（PC 900×600 PNG、手机 600×900 JPEG）上传，个人资料页显示服务端的 256 px WebP、PC 顶栏换成 64 px 的、手机「我的」显示上传的；「恢复默认」后回到内置头像。上传、改名与删除的响应也按契约校验。
 
+## App 下载（App 下载页设计 2026-10-07 §4，批次 H3）
+
+两个平台的 App 由后台「系统 → App 下载」设置（外部链接或上传的安装包，见 [admin.md](admin.md)），站点读公开接口 `GET /v1/platform/apps`（某平台不提供时为 null；core `@exchange/core/platform/apps` 的 `usePlatformApps`，每分钟重读）。两个平台都不提供时，下载页显示「暂未提供 App」，下面的入口都不出现（`useAppsOffered`）。
+
+| 位置 | PC 站 | 手机站 |
+|---|---|---|
+| 下载页 `/download`（公开） | 每个平台一张卡片：二维码、版本与构建号、更新时间、大小、系统要求（Android 按 API 级别写版本，如 24 → 7.0）、SHA-256（可复制）、更新说明、按钮（APK「下载 APK」、链接「前往下载」/「前往 App Store」；企业签名的 iOS 只能在 iPhone/iPad 上装，不给按钮，二维码下写明用 iPhone 扫码在 Safari 中安装）、安装说明（APK 的未知来源、iOS 的信任企业级开发者）、iOS 的配置描述文件 | 本机平台在前并标「本机」，主按钮（iOS 企业签名为「安装」，即 `itms-services` 链接）、安装说明默认展开；另一个平台在后；不显示二维码 |
+| 入口 | 顶栏语言按钮左边的下载图标（悬停或键盘聚焦弹出每个平台的二维码与「更多下载方式」，点击去下载页）；页脚「关于」列「下载 App」 | 「我的」的「其他」组与设置页底部「下载 App」 |
+
+- 二维码里放什么（core `qrUrl`）：链接方式放链接本身（商店直接打开）；上传的安装包放下载页地址加 `?platform=`——手机扫了会被分流到手机站的下载页，那里有安装按钮与说明（`itms-services` 链接放进二维码打不开，Android 也需要未知来源的说明）。`?platform=` 让该平台排在前面。
+- 手机站按 UA 判断本机平台（core `devicePlatform`：iPhone/iPad/iPod，或自称 Macintosh 但有触屏的 iPad；Android）。
+- 体积：二维码库（qrcode.react）、顶栏的二维码面板（`features/download/lazyQrs.ts`，指针或焦点第一次到下载图标时开始加载，连同文案）与下载页各自成块，不在首屏；顶栏只多一个读 `/v1/platform/apps` 的查询与图标（PC 入口 172.6 → 174.0 KB，手机 150.9 → 151.0 KB）。
+- 文案在两站的 `src/i18n/download.ts`（`pcDownload`/`mDownload`）；顶栏、页脚与「我的」用 core 的 `nav.download`、`nav.downloadApp`。
+- 冒烟（两站第 8c 步）：先按测试服当时的设置检查（都不提供时：「暂未提供 App」，PC 顶栏与页脚、手机「我的」都没有入口；有提供时：对应的卡片），再用 `lib.mjs` 的 `withApps` 把这一页的 `/v1/platform/apps` 换成一个上传的 Android 安装包加一个 App Store 链接（`APPS_OFFERED`，不改测试服的设置）：PC 两张卡片各有二维码、APK 的大小与系统要求、按钮与商店链接，顶栏下载面板两个二维码，页脚有链接；手机（冒烟用 iPhone 的 UA）iOS 在前且标「本机」、APK 卡片有安装说明，「我的」出现「下载 App」。
+
 ## 无障碍与状态
 
 - 减少动效：系统开了"减少动态效果"时，两个用户站的 `MotionConfig` 带 `skipAnimations={prefersReducedMotion()}`（`packages/ui/src/lib/motion.ts`），motion 的淡入、错开入场一并跳过（只设 `reducedMotion="user"` 时不透明度动画仍在）；全局 CSS 把动画与过渡的时长和延迟都清零（`packages/ui/src/styles/index.css`），`Drawer`、`Sheet` 也各自用 `useReducedMotion`。
