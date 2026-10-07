@@ -29,6 +29,10 @@ import (
 	"github.com/skill/exchange/internal/marketdata/ports"
 )
 
+// errBadRequest is Binance's HTTP 400: a parameter it does not take, such
+// as a symbol it no longer lists (-1121).
+var errBadRequest = errors.New("HTTP 400")
+
 // Source implements ports.ReferenceSource and ports.ReferenceHistory.
 type Source struct {
 	rest   string
@@ -156,6 +160,8 @@ func (s *Source) getAt(ctx context.Context, what, base, path string, q url.Value
 	case http.StatusTooManyRequests, http.StatusTeapot:
 		s.backOff(resp)
 		return fmt.Errorf("binance %s: HTTP %d, backing off", what, resp.StatusCode)
+	case http.StatusBadRequest:
+		return fmt.Errorf("binance %s: %w", what, errBadRequest)
 	default:
 		return fmt.Errorf("binance %s: HTTP %d", what, resp.StatusCode)
 	}
@@ -300,7 +306,13 @@ func (s *Source) Tickers(ctx context.Context, refs []ports.Reference) ([]domain.
 		q.Set("symbols", string(list))
 	}
 	var rows []tickerRow
-	if err := s.getAt(ctx, "tickers", rest, prefix+"/ticker/24hr", q, &rows); err != nil {
+	err = s.getAt(ctx, "tickers", rest, prefix+"/ticker/24hr", q, &rows)
+	if errors.Is(err, errBadRequest) && q.Has("symbols") {
+		// One symbol Binance no longer knows (-1121) fails the whole list
+		// (review GB, C53): every spot ticker instead, the others kept.
+		err = s.getAt(ctx, "tickers", rest, prefix+"/ticker/24hr", url.Values{}, &rows)
+	}
+	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.Ticker, 0, len(refs))

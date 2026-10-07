@@ -491,8 +491,11 @@ func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, str
 // confirmQuiet confirms, every quietRefresh while the session lasts, the
 // prices its stream has not brought for that long by the REST tickers
 // (one request): Binance streams nothing for a symbol without trades.
+// A symbol Binance does not answer for (delisted) goes stale and is
+// warned of once a session.
 func (f *ReferenceFeed) confirmQuiet(ctx context.Context, refs []ports.Reference, session time.Time) {
 	market := refs[0].Market
+	warned := map[string]bool{}
 	for {
 		sleep(ctx, quietRefresh)
 		if ctx.Err() != nil {
@@ -510,9 +513,18 @@ func (f *ReferenceFeed) confirmQuiet(ctx context.Context, refs []ports.Reference
 			}
 			continue
 		}
+		answered := make(map[string]bool, len(tickers))
 		for _, t := range tickers {
+			answered[t.Symbol] = true
 			f.setTicker(t)
 			f.confirmPrice(t.Symbol, t.Last, market, session, asked)
+		}
+		for _, ref := range quiet {
+			if !answered[ref.Symbol] && !warned[ref.Symbol] {
+				warned[ref.Symbol] = true
+				f.log.WarnContext(ctx, "reference symbol missing from the tickers: delisted on the reference market?", "symbol", ref.Symbol,
+					"remote", ref.Remote)
+			}
 		}
 	}
 }

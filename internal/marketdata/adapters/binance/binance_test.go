@@ -147,6 +147,33 @@ func TestMultiplierConvertsPricesAndQuantities(t *testing.T) {
 	}
 }
 
+// A symbol Binance no longer lists fails a ticker list with 400 (-1121):
+// every spot ticker is read instead and the known ones kept (review GB,
+// C53), so one delisting does not leave every quiet pair unconfirmed.
+func TestAGoneSymbolDoesNotFailTheTickers(t *testing.T) {
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		symbols := r.URL.Query().Get("symbols")
+		asked = append(asked, symbols)
+		if strings.Contains(symbols, "GONEUSDT") {
+			http.Error(w, `{"code":-1121,"msg":"Invalid symbol."}`, http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"symbol":"BTCUSDT","lastPrice":"84000","openPrice":"83000","highPrice":"85000","lowPrice":"82000",
+			"volume":"1","quoteVolume":"84000","bidPrice":"83999","askPrice":"84001","count":1,"closeTime":1790617150999},
+			{"symbol":"ETHUSDT","lastPrice":"2700","openPrice":"2600","highPrice":"2800","lowPrice":"2500",
+			"volume":"1","quoteVolume":"2700","bidPrice":"2699","askPrice":"2701","count":1,"closeTime":1790617150999}]`))
+	}))
+	defer srv.Close()
+	s := New(srv.URL, "", srv.Client())
+	s.gap = 0
+	gone := ports.Reference{Symbol: "GONE-USDT", Remote: "GONEUSDT", Multiplier: decimal.NewFromInt(1)}
+	tickers, err := s.Tickers(context.Background(), []ports.Reference{btc, gone})
+	if err != nil || len(tickers) != 1 || tickers[0].Symbol != "BTC-USDT" || len(asked) != 2 || asked[1] != "" {
+		t.Fatalf("tickers %+v %v, asked %q", tickers, err, asked)
+	}
+}
+
 func TestRateLimitedRequestsBackOff(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "2")
