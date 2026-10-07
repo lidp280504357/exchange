@@ -15,6 +15,8 @@ export const marginZh = {
       },
       check: {
         MARGIN_ROWS_SIGNED: "杠杆行符号", MARGIN_INTEREST_CONSERVED: "利息守恒", HOUSE_BACKED_NON_NEGATIVE: "HOUSE 背书资产不为负",
+        // B145: every journal line listed by type (the users' ledger filtered by type reads that list).
+        LINE_TYPES_LISTED: "分录类型索引完整",
       },
     },
     funds: {
@@ -57,6 +59,7 @@ export const marginEn = {
       },
       check: {
         MARGIN_ROWS_SIGNED: "Margin rows signed", MARGIN_INTEREST_CONSERVED: "Interest conserved", HOUSE_BACKED_NON_NEGATIVE: "HOUSE's backed assets not negative",
+        LINE_TYPES_LISTED: "Every journal line listed by type",
       },
     },
     funds: {
