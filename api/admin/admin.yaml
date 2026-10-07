@@ -2507,6 +2507,83 @@ paths:
                 $ref: '#/components/schemas/Withdrawal'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/products:
+    get:
+      operationId: getProducts
+      summary: The product lines, each with its switch and what closing it touches
+      description: |
+        Design 2026-10-07 (product switches) §1 #5, batch K0: spot trading
+        and the USDT- and coin-margined contracts, each with its switch
+        (the flags product.spot, product.usdt_m and product.coin_m, seeded
+        open and never deleted; one not stored counts as open), when and
+        by whom it was last switched, and what closing it would touch now:
+        the open orders (spot: open orders; contracts: open and conditional
+        orders) and the open positions (contracts; spot holds none). A
+        count that cannot be read is null and its line named in `partial`.
+        Needs instruments.read.
+      tags: [instruments]
+      responses:
+        '200':
+          description: The product lines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Products'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: setProduct
+      summary: Open or close a product line
+      description: |
+        Switches one product line, by one administrator (no funds move).
+        Closing it hides it from the sites within a minute (GET
+        /v1/platform/products), refuses new orders other than reduce-only
+        closes and cancels (PRODUCT_CLOSED), refuses transfers into its
+        FUTURES accounts (USDT's for usdt_m; BTC's, ETH's and ASTRA's for
+        coin_m), stops HOUSE quoting it and pauses the simulated market's
+        bots on it, and cancels its open orders (spot: spot-trading-service;
+        contracts, conditional ones included: derivatives-service), each
+        cancel audited; positions, funding, liquidations and the
+        reconciliation go on. Opening it again restores all of it; the
+        canceled orders stay canceled. Switching to the state it is in
+        changes nothing and cancels nothing. Audited as
+        admin.products.toggled (product, from, to, canceled orders,
+        reason). Needs instruments.trading (ADMIN).
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product, enabled, reason]
+              properties:
+                product:
+                  $ref: '#/components/schemas/ProductName'
+                enabled:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The product lines after the change, with the orders canceled by it.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Products'
+                  - type: object
+                    required: [canceled_orders]
+                    properties:
+                      canceled_orders:
+                        type: integer
+                        description: The open orders the change canceled (0 when it opened a line or changed nothing).
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/instruments:
     get:
       operationId: listInstruments
@@ -7961,8 +8038,11 @@ components:
         key:
           type: string
           enum: [welcome_credits, test_mode, registration, admin_totp, two_person, test_assets, custodian, withdraw, brand, coin_profile, legal,
-            third_party, admins, domain, house, margin, insurance, coin_m, app_downloads]
+            third_party, admins, domain, house, margin, insurance, coin_m, app_downloads, products]
           description: |
+            products (product switches design 2026-10-07 §1 #5, K0): for
+            information, OK whatever is open (value: spot, usdt_m and coin_m,
+            each its enabled and closed_at).
             insurance (coin-margined design 2026-10-06 §2.7): the insurance
             fund of the settlement asset of every contract in TRADING holds
             something (value: balances by asset, contracts by asset, short:
@@ -7978,6 +8058,55 @@ components:
           type: object
           additionalProperties: true
           description: What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...).
+    ProductName:
+      type: string
+      enum: [spot, usdt_m, coin_m]
+      description: A product line (design 2026-10-07, product switches); its flag is product.<name>.
+    ProductState:
+      type: object
+      required: [product, enabled, flag, version, open_orders, open_positions]
+      properties:
+        product:
+          $ref: '#/components/schemas/ProductName'
+        enabled:
+          type: boolean
+        flag:
+          type: string
+          examples: [product.spot]
+        version:
+          type: integer
+          description: The flag's version, 0 while it is not stored (open).
+        switched_at:
+          type: [string, 'null']
+          format: date-time
+          description: When it was last switched; null while never.
+        switched_by:
+          type: [string, 'null']
+          description: Who switched it last (an administrator's actor, or the seed's migration); null while never.
+        closed_at:
+          type: [string, 'null']
+          format: date-time
+          description: When it was closed, while it is; null while open.
+        open_orders:
+          type: [integer, 'null']
+          description: The orders closing it would cancel now (contracts' conditional orders included); null when it could not be read.
+        open_positions:
+          type: [integer, 'null']
+          description: The contracts' open positions that would stay (spot holds none, 0); null when it could not be read.
+    Products:
+      type: object
+      required: [products, partial]
+      properties:
+        products:
+          type: array
+          description: spot, usdt_m and coin_m, in that order.
+          items:
+            $ref: '#/components/schemas/ProductState'
+        partial:
+          type: array
+          description: The lines whose counts could not be read.
+          items:
+            $ref: '#/components/schemas/ProductName'
     LaunchChecklist:
       type: object
       required: [ready, items, checked_at]

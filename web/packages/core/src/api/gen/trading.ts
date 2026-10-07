@@ -41,6 +41,12 @@ export interface paths {
          *     (403) and nothing is stored, and so does side_effect AUTO_BORROW
          *     while margin.auto_borrow is off (details flag: margin.auto_borrow).
          *     A side effect other than NONE on SPOT is COMMON_INVALID_ARGUMENT.
+         *
+         *     Product lines (design 2026-10-07, product switches): while an
+         *     operator has spot trading closed (the flag product.spot; GET
+         *     /v1/platform/products) every new order fails with PRODUCT_CLOSED
+         *     (403, details product: spot) and nothing is stored; cancels go on,
+         *     and the orders open when it closed were canceled then.
          */
         post: operations["createOrder"];
         /**

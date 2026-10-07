@@ -195,6 +195,15 @@ paths:
         DERIV_CONTRACTS_NOT_INTEGER (a fraction of a contract) and, while
         derivatives.coin_m is off for the caller, USER_NOT_ELIGIBLE. A
         client_order_id repeated with the same order returns that order.
+
+        Product lines (design 2026-10-07, product switches): while an
+        operator has the contract's line closed (product.usdt_m for a
+        USDT-margined contract, product.coin_m for a coin-margined one;
+        GET /v1/platform/products) only reduce-only orders that close a
+        position are taken; any other fails with PRODUCT_CLOSED (403,
+        details product: usdt_m or coin_m). Cancels go on; the open and
+        conditional orders were canceled when it closed; positions,
+        funding and liquidations go on.
       tags: [derivatives]
       parameters:
         - name: Idempotency-Key

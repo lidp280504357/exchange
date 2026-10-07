@@ -92,10 +92,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/platform/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product lines and whether each is open
+         * @description Design 2026-10-07 (product switches) §1 #6: spot trading and the
+         *     USDT- and coin-margined contracts, each open unless an operator
+         *     closed it in the console (the flags product.spot, product.usdt_m
+         *     and product.coin_m; seeded open, never deleted). The sites read it
+         *     at start and every minute: a closed line leaves their menus, lists,
+         *     searches and boards, its terminals say it is not open, and a user
+         *     who still holds its positions or orders keeps a way to close them.
+         *     Orders other than cancels and reduce-only closes are refused with
+         *     PRODUCT_CLOSED (details.product). Cacheable for 30 seconds; the
+         *     ETag is the three flags' versions in the order spot, usdt_m, coin_m
+         *     ("3-1-1"; 0 for one not stored), a strong tag that If-None-Match
+         *     matches weakened too, and answers 304 while none changed. No
+         *     WebSocket push. Batch K0.
+         */
+        get: operations["getPlatformProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ProductLine: {
+            /** @description Open (true) or closed by an operator. */
+            enabled: boolean;
+            /**
+             * Format: date-time
+             * @description When an operator closed it; only while closed.
+             */
+            closed_at?: string;
+        };
+        PlatformProducts: {
+            spot: components["schemas"]["ProductLine"];
+            usdt_m: components["schemas"]["ProductLine"];
+            coin_m: components["schemas"]["ProductLine"];
+        };
         /** @enum {string} */
         PlatformImageKind: "logo_light" | "logo_dark" | "favicon" | "apple_touch_icon";
         /** @description A text by language; zh-CN is the fallback of a language without one. zh-TW (Traditional Chinese, design 2026-10-06 繁体中文 §2.1) is absent or empty until operators write it. */
@@ -377,6 +423,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformApps"];
+                };
+            };
+            /** @description Not changed since the ETag sent. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlatformProducts: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product lines. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProducts"];
                 };
             };
             /** @description Not changed since the ETag sent. */

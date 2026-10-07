@@ -142,8 +142,69 @@ paths:
           description: Not changed since the ETag sent.
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/platform/products:
+    get:
+      operationId: getPlatformProducts
+      summary: The product lines and whether each is open
+      description: |
+        Design 2026-10-07 (product switches) §1 #6: spot trading and the
+        USDT- and coin-margined contracts, each open unless an operator
+        closed it in the console (the flags product.spot, product.usdt_m
+        and product.coin_m; seeded open, never deleted). The sites read it
+        at start and every minute: a closed line leaves their menus, lists,
+        searches and boards, its terminals say it is not open, and a user
+        who still holds its positions or orders keeps a way to close them.
+        Orders other than cancels and reduce-only closes are refused with
+        PRODUCT_CLOSED (details.product). Cacheable for 30 seconds; the
+        ETag is the three flags' versions in the order spot, usdt_m, coin_m
+        ("3-1-1"; 0 for one not stored), a strong tag that If-None-Match
+        matches weakened too, and answers 304 while none changed. No
+        WebSocket push. Batch K0.
+      tags: [platform]
+      security: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The product lines.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformProducts'
+        '304':
+          description: Not changed since the ETag sent.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
   schemas:
+    ProductLine:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: Open (true) or closed by an operator.
+        closed_at:
+          type: string
+          format: date-time
+          description: When an operator closed it; only while closed.
+    PlatformProducts:
+      type: object
+      required: [spot, usdt_m, coin_m]
+      properties:
+        spot:
+          $ref: '#/components/schemas/ProductLine'
+        usdt_m:
+          $ref: '#/components/schemas/ProductLine'
+        coin_m:
+          $ref: '#/components/schemas/ProductLine'
     PlatformImageKind:
       type: string
       enum: [logo_light, logo_dark, favicon, apple_touch_icon]

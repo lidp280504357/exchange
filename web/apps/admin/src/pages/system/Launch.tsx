@@ -25,7 +25,7 @@ const FIX: Record<Key, string | null> = {
   welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
   third_party: null, admins: "/admins", domain: "/platform", house: "/house", margin: "/risk", insurance: "/derivatives",
-  coin_m: "/risk", app_downloads: "/platform/apps",
+  coin_m: "/risk", app_downloads: "/platform/apps", products: "/instruments",
 };
 
 export const launchKey = ["admin", "launch-checklist"];

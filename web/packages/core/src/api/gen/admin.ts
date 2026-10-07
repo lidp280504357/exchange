@@ -1565,6 +1565,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product lines, each with its switch and what closing it touches
+         * @description Design 2026-10-07 (product switches) §1 #5, batch K0: spot trading
+         *     and the USDT- and coin-margined contracts, each with its switch
+         *     (the flags product.spot, product.usdt_m and product.coin_m, seeded
+         *     open and never deleted; one not stored counts as open), when and
+         *     by whom it was last switched, and what closing it would touch now:
+         *     the open orders (spot: open orders; contracts: open and conditional
+         *     orders) and the open positions (contracts; spot holds none). A
+         *     count that cannot be read is null and its line named in `partial`.
+         *     Needs instruments.read.
+         */
+        get: operations["getProducts"];
+        /**
+         * Open or close a product line
+         * @description Switches one product line, by one administrator (no funds move).
+         *     Closing it hides it from the sites within a minute (GET
+         *     /v1/platform/products), refuses new orders other than reduce-only
+         *     closes and cancels (PRODUCT_CLOSED), refuses transfers into its
+         *     FUTURES accounts (USDT's for usdt_m; BTC's, ETH's and ASTRA's for
+         *     coin_m), stops HOUSE quoting it and pauses the simulated market's
+         *     bots on it, and cancels its open orders (spot: spot-trading-service;
+         *     contracts, conditional ones included: derivatives-service), each
+         *     cancel audited; positions, funding, liquidations and the
+         *     reconciliation go on. Opening it again restores all of it; the
+         *     canceled orders stay canceled. Switching to the state it is in
+         *     changes nothing and cancels nothing. Audited as
+         *     admin.products.toggled (product, from, to, canceled orders,
+         *     reason). Needs instruments.trading (ADMIN).
+         */
+        put: operations["setProduct"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/instruments": {
         parameters: {
             query?: never;
@@ -4965,7 +5010,10 @@ export interface components {
         };
         LaunchItem: {
             /**
-             * @description insurance (coin-margined design 2026-10-06 §2.7): the insurance
+             * @description products (product switches design 2026-10-07 §1 #5, K0): for
+             *     information, OK whatever is open (value: spot, usdt_m and coin_m,
+             *     each its enabled and closed_at).
+             *     insurance (coin-margined design 2026-10-06 §2.7): the insurance
              *     fund of the settlement asset of every contract in TRADING holds
              *     something (value: balances by asset, contracts by asset, short:
              *     the assets without); coin_m: derivatives.coin_m off, or on by
@@ -4975,13 +5023,48 @@ export interface components {
              *     each LINK, FILE or null for nothing offered).
              * @enum {string}
              */
-            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m" | "app_downloads";
+            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m" | "app_downloads" | "products";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
             value: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * @description A product line (design 2026-10-07, product switches); its flag is product.<name>.
+         * @enum {string}
+         */
+        ProductName: "spot" | "usdt_m" | "coin_m";
+        ProductState: {
+            product: components["schemas"]["ProductName"];
+            enabled: boolean;
+            /** @example product.spot */
+            flag: string;
+            /** @description The flag's version, 0 while it is not stored (open). */
+            version: number;
+            /**
+             * Format: date-time
+             * @description When it was last switched; null while never.
+             */
+            switched_at?: string | null;
+            /** @description Who switched it last (an administrator's actor, or the seed's migration); null while never. */
+            switched_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When it was closed, while it is; null while open.
+             */
+            closed_at?: string | null;
+            /** @description The orders closing it would cancel now (contracts' conditional orders included); null when it could not be read. */
+            open_orders: number | null;
+            /** @description The contracts' open positions that would stay (spot holds none, 0); null when it could not be read. */
+            open_positions: number | null;
+        };
+        Products: {
+            /** @description spot, usdt_m and coin_m, in that order. */
+            products: components["schemas"]["ProductState"][];
+            /** @description The lines whose counts could not be read. */
+            partial: components["schemas"]["ProductName"][];
         };
         LaunchChecklist: {
             /** @description Every item is OK. */
@@ -9017,6 +9100,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Withdrawal"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getProducts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product lines. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Products"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    product: components["schemas"]["ProductName"];
+                    enabled: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The product lines after the change, with the orders canceled by it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Products"] & {
+                        /** @description The open orders the change canceled (0 when it opened a line or changed nothing). */
+                        canceled_orders: number;
+                    };
                 };
             };
             default: components["responses"]["Error"];

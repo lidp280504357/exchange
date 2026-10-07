@@ -36,6 +36,12 @@ export interface paths {
          *     the same transfer, or the same error for a transfer that failed
          *     (LEDGER_INSUFFICIENT_BALANCE, whose details carry transfer_id); the
          *     same key with another body fails with COMMON_IDEMPOTENCY_CONFLICT.
+         *     While an operator has the product line of the FUTURES account
+         *     closed (design 2026-10-07, product switches: USDT's FUTURES
+         *     account is the USDT-margined contracts', product.usdt_m; BTC's,
+         *     ETH's and ASTRA's the coin-margined ones', product.coin_m) a
+         *     transfer into it fails with PRODUCT_CLOSED (403, details product)
+         *     and nothing is stored; transfers out stay open.
          */
         post: operations["createTransfer"];
         delete?: never;
