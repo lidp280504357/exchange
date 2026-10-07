@@ -25,6 +25,7 @@ check '[.contracts[] | select(.symbol | IN("BTC-USDT-PERP","ETH-USDT-PERP")) | .
 call GET /v1/market/contracts/btc-usdt-perp ""
 expect 200 - "one contract (symbol is case-insensitive)"
 check '.index_symbol == "BTC-USDT" and .funding_interval_hours == 8' "its index and funding interval"
+btc_cap=$(jq -r .funding_cap <<<"$BODY")
 check '[.risk_tiers[] | [.max_notional, .max_leverage, .mmr]] == [["50000",125,"0.004"],["250000",100,"0.005"],["1000000",50,"0.01"],["5000000",20,"0.025"],["20000000",10,"0.05"],["50000000",5,"0.1"],["100000000",2,"0.125"]]' "the risk limit ladder: 125x to 50,000 USDT, down to 2x"
 call GET /v1/market/contracts/BTC-USDT ""
 expect 404 COMMON_NOT_FOUND "a pair is not a contract"
@@ -47,6 +48,16 @@ check '.reference_symbol == "BTCUSD_PERP" and (.risk_tiers | length) == 10 and .
 call GET /v1/market/contracts/ETH-USD-PERP ""
 check '.max_leverage == 100 and .risk_tiers[0].max_notional == "15" and .tick_size == "0.01"' "ETH's: 100x to 15 ETH, the linear contract's tick"
 
+echo "== funding and prices as Binance's (G1c: gen-contracts.go, house.sh follow-marks)"
+call GET "/v1/market/contracts?margin_type=ALL" ""
+check '[.contracts[] | select(.funding_interval_hours == 4)] | length > 0' "some contracts fund every 4 hours, as Binance funds them"
+check 'all(.contracts[]; .interest_rate == {"8": "0.0001", "4": "0.00005", "1": "0.0000125"}[.funding_interval_hours | tostring])' "0.03% of interest a day, per funding interval"
+call GET /v1/market/contracts/HYPE-USDT-PERP ""
+check '.reference_symbol == "HYPEUSDT" and .funding_interval_hours == 4' "HYPE's perpetual funds every 4 hours, as Binance's"
+call GET /v1/market/HYPE-USDT-PERP/mark-price ""
+expect 200 - "HYPE-USDT-PERP's mark price"
+check '.source == "BINANCE" and ((.next_funding_time | fromdateiso8601) - now) <= 4 * 3600' "its prices follow Binance's and its next settlement is at most 4 hours away"
+
 echo "== mark price and funding"
 marked() {
   call GET /v1/market/BTC-USDT-PERP/mark-price "" && [[ $STATUS == 200 ]] &&
@@ -55,7 +66,7 @@ marked() {
 eventually 30 "BTC-USDT-PERP has a mark price" marked
 check '.index_symbol == "BTC-USDT" and (.next_funding_time | test("T(00|08|16):00:00Z$"))' "the next settlement is on the 8-hour grid"
 check '((.mark_price | tonumber) - (.index_price | tonumber)) / (.index_price | tonumber) | . >= -0.01 and . <= 0.01' "the mark price is within 1% of the index"
-check '(.funding_rate | tonumber) | . >= -0.0075 and . <= 0.0075' "the funding estimate is within the cap"
+check "(.funding_rate | tonumber) as \$r | \$r >= -$btc_cap and \$r <= $btc_cap" "the funding estimate is within the contract's cap ($btc_cap)"
 call GET /v1/market/BTC-USDT/mark-price ""
 expect 404 COMMON_NOT_FOUND "a pair has no mark price"
 call GET "/v1/market/BTC-USDT-PERP/funding-rates?limit=5" ""
