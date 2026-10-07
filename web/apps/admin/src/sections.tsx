@@ -31,6 +31,7 @@ import {
   ShieldAlert,
   Siren,
   SlidersHorizontal,
+  Smartphone,
   SlidersVertical,
   Stamp,
   UserCog,
@@ -122,6 +123,8 @@ export const sections: Section[] = [
   { path: "reports", key: "reports", group: "system", perm: "reports.read", icon: ChartColumn, page: pages.reports },
   { path: "health", key: "health", group: "system", perm: "reports.read", icon: HeartPulse, page: pages.health },
   { path: "platform", key: "platform", group: "system", perm: "reports.read", icon: Building2, page: pages.platform },
+  // The apps to download (design 2026-10-07, App download page; H2).
+  { path: "platform/apps", key: "appDownloads", group: "system", perm: "reports.read", icon: Smartphone, page: pages["platform/apps"] },
   { path: "launch", key: "launch", group: "system", perm: "reports.read", icon: Rocket, page: pages.launch },
   { path: "settings", key: "settings", group: "system", icon: Settings, page: pages.settings },
 ];

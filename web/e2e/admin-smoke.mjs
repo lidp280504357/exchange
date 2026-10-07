@@ -28,6 +28,10 @@
 //
 // APP is the console (https://admin.astras.vip by default). scripts/e2e/
 // web.sh creates a throwaway administrator for it.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ok, sleep, start } from "./lib.mjs";
 
 const APP = process.env.APP ?? "https://admin.astras.vip";
@@ -524,6 +528,49 @@ try {
   await waitText("繁體中文（可选）");
   await page.waitForFunction(() => /平台资料|读不到/.test(document.querySelector("main")?.innerText ?? ""), { timeout: 20000 });
   ok("the launch checklist with its verdict, and the platform settings");
+  // 平台设置 → App 下载 (design 2026-10-07 §3, H2): both platforms with the
+  // OTA hint; Android's mode switched and left unsaved; a minimal .apk
+  // (scripts/e2e/appfixture) uploaded in parts, checked by the server and
+  // listed, then deleted - Android goes back to off or its link.
+  await go("/platform/apps");
+  await page.waitForSelector("[data-testid=app-ANDROID] [data-testid=app-settings-ANDROID]", { timeout: 20000 });
+  await page.waitForSelector("[data-testid=app-IOS] [data-testid=app-settings-IOS]");
+  await page.waitForSelector("[data-testid=apps-ota-hint]");
+  const androidMode = '[data-testid=app-settings-ANDROID] [role=radiogroup]';
+  await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === "外部链接")?.click(), androidMode);
+  await page.waitForFunction(() => document.querySelector("[data-testid=app-save-ANDROID]")?.innerText.includes("保存"), { timeout: 5000 });
+  const root = new URL("../..", import.meta.url).pathname;
+  const fixtures = JSON.parse(
+    execFileSync("go", ["run", "./scripts/e2e/appfixture", "-out", mkdtempSync(join(tmpdir(), "smoke-apps-")), "-version", "9.9.9"], { cwd: root }).toString(),
+  );
+  const fileInput = await page.$("[data-testid=app-upload-file-ANDROID-APP]");
+  await fileInput.uploadFile(fixtures.apk.path);
+  const appDialog = '[role=dialog]:has(textarea[id$="-reason"])';
+  await page.waitForSelector(appDialog, { timeout: 20000 });
+  await waitText(fixtures.apk.sha256);
+  await page.type(`${appDialog} textarea[id$="-reason"]`, "smoke test: an app uploaded and deleted");
+  await page.type(`${appDialog} input[id$="-word"]`, "android");
+  await clickButton("确认", appDialog);
+  await page.waitForFunction((sel) => !document.querySelector(sel), { timeout: 60000 }, appDialog);
+  const uploadedRow = await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("[data-testid=app-ANDROID] [data-testid=app-file-row]")]
+        .find((r) => r.innerText.includes("e2e.apk") && r.innerText.includes("9.9.9"))
+        ?.querySelector("[data-testid^=app-delete-]")
+        ?.getAttribute("data-testid"),
+    { timeout: 20000 },
+  );
+  const deleteId = await uploadedRow.jsonValue();
+  await waitText("vip.astras.e2e");
+  await t.shot("4b-apps");
+  await page.click(`[data-testid=${deleteId}]`);
+  await page.waitForSelector(appDialog);
+  await page.type(`${appDialog} textarea[id$="-reason"]`, "smoke test: the app deleted");
+  await page.type(`${appDialog} input[id$="-word"]`, deleteId.slice(-4));
+  await clickButton("确认", appDialog);
+  await page.waitForFunction((sel) => !document.querySelector(sel), { timeout: 20000 }, appDialog);
+  await page.waitForFunction((tid) => !document.querySelector(`[data-testid=${tid}]`), { timeout: 20000 }, deleteId);
+  ok("the App downloads: both platforms, the mode switched unsaved, a minimal .apk uploaded in parts, checked, listed and deleted");
   // The fixed pages: the six legal pages and the home hero, each with what
   // the sites show; the hero's editor opens from its default (closed unsaved).
   await go("/pages");

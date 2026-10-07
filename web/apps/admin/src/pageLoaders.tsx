@@ -95,6 +95,7 @@ export const pages = {
   reports: page(() => import("./pages/Reports")),
   health: page(() => import("./pages/system/Health")),
   platform: page(() => import("./pages/system/Platform")),
+  "platform/apps": page(() => import("./pages/system/Apps")),
   launch: page(() => import("./pages/system/Launch")),
   settings: page(() => import("./pages/system/Settings")),
   account: page(() => import("./pages/system/Account")),

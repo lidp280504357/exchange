@@ -1,5 +1,6 @@
 import { i18n } from "@exchange/core";
 import { merge } from "./i18n";
+import { appsEn, appsZh } from "./messages/apps";
 import { attemptsEn, attemptsZh } from "./messages/attempts";
 import { coinmEn, coinmZh } from "./messages/coinm";
 import { contentEn, contentZh } from "./messages/content";
@@ -25,11 +26,11 @@ import { walletEn, walletZh } from "./messages/wallet";
 const pageMessages = {
   "zh-CN": merge(
     {}, usersZh, walletZh, moneyZh, tradingZh, instrumentsZh, systemZh, changesZh, contentZh, reportsZh, profileZh, simZh, attemptsZh, unownedZh,
-    custodyZh, houseZh, simTargetZh, platformZh, pagesZh, marginZh, coinmZh,
+    custodyZh, houseZh, simTargetZh, platformZh, pagesZh, marginZh, coinmZh, appsZh,
   ),
   en: merge(
     {}, usersEn, walletEn, moneyEn, tradingEn, instrumentsEn, systemEn, changesEn, contentEn, reportsEn, profileEn, simEn, attemptsEn, unownedEn,
-    custodyEn, houseEn, simTargetEn, platformEn, pagesEn, marginEn, coinmEn,
+    custodyEn, houseEn, simTargetEn, platformEn, pagesEn, marginEn, coinmEn, appsEn,
   ),
 };
 

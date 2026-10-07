@@ -38,6 +38,14 @@ export function loadContracts() {
     docs[f] = doc;
     ajv.addSchema(doc, f);
   }
+  // admin.yaml names some public schemas as ../openapi/<file> (the apps to
+  // download's public answer, H0), which resolves to openapi/<file> from
+  // its id: the public files are there too, their own refs among them.
+  for (const [f] of files) {
+    const alias = structuredClone(docs[f]);
+    alias.$id = `openapi/${f}`;
+    ajv.addSchema(alias, alias.$id);
+  }
   const routes = [];
   for (const [file, doc] of Object.entries(docs)) {
     for (const [path, item] of Object.entries(doc.paths ?? {})) {

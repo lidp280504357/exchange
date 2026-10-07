@@ -11,6 +11,7 @@ import { Card, Page } from "../../kit/Page";
 import { platformKey, usePlatformProfile } from "../../kit/profile";
 import { launchKey } from "./Launch";
 import { ReadOnly } from "../../kit/ReadOnly";
+import { TextsField } from "../../kit/texts";
 
 // The platform's settings (design 2026-10-04 §4.1, §4.2, §5; D2): the
 // profile the sites show (name, colours, footer, contact, test mode and
@@ -21,7 +22,6 @@ import { ReadOnly } from "../../kit/ReadOnly";
 type Profile = AdminSchemas["PlatformProfileAdmin"];
 type Write = AdminSchemas["PlatformProfileWrite"];
 type Draft = Omit<Write, "expected_version">;
-type Texts = AdminSchemas["PlatformTexts"];
 type SocialKind = Write["social"][number]["kind"];
 type ImageKind = keyof Profile["images"];
 type Setting = AdminSchemas["WelcomeCreditsSetting"];
@@ -68,54 +68,6 @@ export default function Platform({ admin }: { admin: Admin }) {
       {q.data && <Images profile={q.data} edit={edit} />}
       <Welcome edit={edit} />
     </Page>
-  );
-}
-
-/**
- * TextsField edits a text in Simplified Chinese, Traditional Chinese
- * (G7b; empty, the sites show the Simplified) and English.
- */
-function TextsField({ label, value, onChange, disabled, long }: { label: string; value: Texts; onChange: (v: Texts) => void; disabled: boolean; long?: boolean }) {
-  const { t } = useTranslation();
-  const box = (lang: "zh-CN" | "zh-TW" | "en") =>
-    long ? (
-      <textarea
-        value={value[lang] ?? ""}
-        disabled={disabled}
-        rows={2}
-        placeholder={lang === "zh-TW" ? t("admin.platform.zhTWEmpty") : undefined}
-        onChange={(e) => onChange({ ...value, [lang]: e.target.value })}
-        className="w-full rounded-1 border border-line-1 bg-bg-1 px-2.5 py-1.5 text-sm text-fg-1 disabled:opacity-60"
-        aria-label={`${label} ${lang}`}
-      />
-    ) : (
-      <Input
-        size="sm"
-        value={value[lang] ?? ""}
-        disabled={disabled}
-        placeholder={lang === "zh-TW" ? t("admin.platform.zhTWEmpty") : undefined}
-        onValueChange={(v) => onChange({ ...value, [lang]: v })}
-        aria-label={`${label} ${lang}`}
-      />
-    );
-  return (
-    <FormField label={label}>
-      <div className="grid gap-2 sm:grid-cols-3">
-        <label className="flex flex-col gap-1 text-xs text-fg-3">
-          {t("admin.platform.zh")}
-          {box("zh-CN")}
-        </label>
-        {/* Optional, said where it is written (review EV): empty, the sites show the Simplified. */}
-        <label className="flex flex-col gap-1 text-xs text-fg-3">
-          {t("admin.platform.zhTWOptional")}
-          {box("zh-TW")}
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-fg-3">
-          {t("admin.platform.en")}
-          {box("en")}
-        </label>
-      </div>
-    </FormField>
   );
 }
 
