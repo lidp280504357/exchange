@@ -156,6 +156,12 @@ func (f *switches) Enabled(key string, _ flags.Subject) bool {
 	return !f.off[key]
 }
 
+func (f *switches) Closed(key string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.off[key]
+}
+
 func (f *switches) set(key string, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

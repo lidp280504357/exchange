@@ -82,7 +82,11 @@ export interface paths {
          *     the account owes anything only what keeps the margin level at or
          *     above the warning level (MARGIN_LEVEL_TOO_LOW, details
          *     max_transferable; MARGIN_PRICE_UNAVAILABLE without prices). A frozen
-         *     or liquidating account moves nothing (MARGIN_FROZEN).
+         *     or liquidating account moves nothing (MARGIN_FROZEN). While spot
+         *     trading is closed (product.spot; GET /v1/platform/products) IN takes
+         *     only an asset the account owes (principal or interest), whatever
+         *     the amount, so a debt stays payable; any other fails with
+         *     PRODUCT_CLOSED (403, details product: spot). OUT goes on.
          */
         post: operations["marginTransfer"];
         delete?: never;

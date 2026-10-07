@@ -293,14 +293,31 @@ func (eligible) Check(context.Context, string, string, string) (bool, string, er
 }
 
 type features struct {
-	mu sync.Mutex
-	on map[string]bool
+	mu     sync.Mutex
+	on     map[string]bool
+	closed map[string]bool // the product lines an operator closed
 }
 
 func (f *features) Enabled(key string, _ flags.Subject) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.on[key]
+}
+
+func (f *features) Closed(key string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed[key]
+}
+
+// shut closes the product line of key, or opens it again.
+func (f *features) shut(key string, closed bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed == nil {
+		f.closed = map[string]bool{}
+	}
+	f.closed[key] = closed
 }
 
 func (f *features) set(key string, on bool) {

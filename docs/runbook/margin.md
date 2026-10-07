@@ -59,6 +59,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 写账本前先记 `PENDING`（`borrows`、`repays`、`transfers`）；账本超时或不可用时接口返回 `COMMON_UNAVAILABLE`，恢复循环每 5 秒用同一个键重发（账本只记一次），客户端用同一个 `Idempotency-Key` 重试拿到结果。账本拒绝的写记为 `FAILED`，失败原因存成 `[类别] 错误码: 说明`（类别如 `UNPROCESSABLE`、`INVALID`），同键重试原样返回，HTTP 状态也和第一次一样。客户端的 `Idempotency-Key` 不能以 `order:`、`trade-repay:`、`liquidation:` 开头（本服务自己的写用这些键，审查 CR：客户端用 `trade-repay:...` 会让同键的自动还款被当成已记过）。
 - **在途的写也算**（审查 CK ①）：借币、划出与杠杆下单检查额度时，用的是账本余额加上该用户还在 `PENDING` 的写——在途借币当作已借到（可用、本金、首小时利息都加上），在途划出当作已划走，在途的整点利息当作已欠；在途的划入与还款要等账本记上才算。`PENDING` 先于账本余额读取：读的间隙里落账的写会被算两次而不会漏算，算两次也只会更保守。所以两个并发的借币，或者一边借一边划出，合起来也不会越过倍数与预警线。
 - 资格与开关：margin-service 在划入与借币时查 `margin.enabled` 与 user-service 的 `MARGIN_TRADE` 资格（只限 ACTIVE 账户、同样受 `margin.enabled` 的规则约束，两站据此显示杠杆入口；审查 CO 的 C9，此前用 `SPOT_TRADE`），下单要自动借币时也查；杠杆下单另由交易服务先查开关与 `MARGIN_TRADE`（编码会话 8f568ccd）。划出与还币只降风险，两样都不查。账本的 `PostMargin` 只管记账，不查资格。
+- 现货产品线关闭时（`product.spot`，产品线开关设计 §1 #7）：划入只收该杠杆账户欠着的资产（本金或利息，在用户锁下按含在途的余额判断），不按欠款截量——用户要还债就得能把钱转进来，与关闭期间只放行还款单同口径；其余划入答 403 `PRODUCT_CLOSED`（`details.product` 为 `spot`），不会因此新建逐仓账户；划出照常（单测 `TestClosedSpotTakesOnlyWhatPaysADebt`）。杠杆账户的下单由 spot-trading-service 按同一开关把关（只放行撤单、还款单与强平单）。
 
 ## 杠杆账户下单（E2）
 

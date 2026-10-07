@@ -690,4 +690,7 @@ type Eligibility interface {
 // Features answers feature-flag checks.
 type Features interface {
 	Enabled(key string, s flags.Subject) bool
+	// Closed reports whether an operator closed the product line of key
+	// (flags.Client.Closed: its flag stored and off).
+	Closed(key string) bool
 }

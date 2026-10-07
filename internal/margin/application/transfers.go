@@ -12,6 +12,7 @@ import (
 	"github.com/skill/exchange/internal/margin/domain"
 	"github.com/skill/exchange/internal/margin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // TransferInput moves an asset between SPOT and a margin account.
@@ -36,7 +37,10 @@ func (in TransferInput) hash() []byte {
 // allows — what is free of orders and of the asset's own debt, keeping
 // the margin level at or above the warning level — and, lowering no one's
 // risk but the user's, asks neither; a frozen or liquidating account
-// moves nothing.
+// moves nothing. While spot trading is closed (product.spot, design
+// 2026-10-07 product switches §1 #7) IN takes only an asset the account
+// owes (principal or interest), however much: what repays a debt goes in,
+// anything else is PRODUCT_CLOSED.
 func (s *Service) Transfer(ctx context.Context, in TransferInput) (ports.Transfer, error) {
 	if err := checkKey(in.IdemKey); err != nil {
 		return ports.Transfer{}, err
@@ -106,6 +110,9 @@ func (s *Service) planTransfer(ctx context.Context, r ports.Repos, in TransferIn
 	}
 	now := s.Now()
 	if in.Direction == domain.DirectionIn {
+		if err := s.spotOpenTo(ctx, r, in); err != nil {
+			return ports.Transfer{}, err
+		}
 		if !in.Account.IsCross() {
 			// A new isolated account needs its pair open to them.
 			if _, exists, err := r.Accounts().Get(ctx, in.UserID, in.Account); err != nil {
@@ -141,6 +148,24 @@ func (s *Service) planTransfer(ctx context.Context, r ports.Repos, in TransferIn
 		Amount: in.Amount, IdemKey: in.IdemKey, RequestHash: in.hash(), Status: ports.OpPending, CreatedAt: now,
 	}
 	return t, r.Transfers().Insert(ctx, t)
+}
+
+// spotOpenTo refuses a transfer in while spot trading is closed, unless
+// the account owes the asset: a debt must stay payable (as a repayment
+// order is the one order taken then). Read under the user's lock with the
+// writes on their way counted, as a borrow or a repayment sees them.
+func (s *Service) spotOpenTo(ctx context.Context, r ports.Repos, in TransferInput) error {
+	if s.Features == nil || !s.Features.Closed(flags.KeyProductSpot) {
+		return nil
+	}
+	st, err := s.standingOf(ctx, r, in.UserID)
+	if err != nil {
+		return err
+	}
+	if holding(st.of(in.Account), in.Asset).Debt().IsPositive() {
+		return nil
+	}
+	return flags.ErrProductClosed(flags.KeyProductSpot)
 }
 
 // checkOut refuses a transfer out beyond MaxTransferOut, the account
