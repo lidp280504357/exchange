@@ -202,12 +202,15 @@ export function OrderForm({
   // The other field's estimate at the last price (a market order).
   const estQuantity = market && drive === "total" ? quantityForTotal(total, last, pair.lotSize) : "";
   const estTotal = market && drive === "quantity" && usable(totalOf(last, quantity)) ? dec.normalize(dec.round(totalOf(last, quantity), totalDecimals)) : "";
-  // The most one may buy or sell: a market buy by quantity is frozen at the
-  // band above the last price.
-  const max = maxQuantity(side, limit ? price : marketBuyPrice(last, pair.priceBand), available, pair.lotSize);
+  // The most one may buy or sell, and the share of the balance a draft
+  // takes: a market buy by quantity is frozen at the band above the last
+  // price, so both are worked out there; by total it spends the quote
+  // itself (B161).
+  const buyAt = limit ? price : drive === "quantity" ? marketBuyPrice(last, pair.priceBand) : last;
+  const max = maxQuantity(side, buyAt, available, pair.lotSize);
   const spends = market && buy ? (available?.quote ?? "") : max;
   const pctFromValues = buy
-    ? ratioPercent(limit ? totalOf(price, quantity) : drive === "total" ? total : totalOf(last, quantity), available?.quote)
+    ? ratioPercent(market && drive === "total" ? total : totalOf(buyAt, quantity), available?.quote)
     : ratioPercent(market && drive === "total" ? estQuantity : quantity, available?.base);
   const pct = dragPct ?? pctFromValues;
 

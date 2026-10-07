@@ -205,6 +205,17 @@ describe("OrderForm", () => {
     expect(screen.getByText("Exceeds your available balance")).toBeTruthy();
   });
 
+  it("sizes a market buy's max and slider at the band by quantity, at the price by total (B161)", () => {
+    render(<Harness onSubmit={() => {}} initialType="market" />);
+    // By total: 1000 USDT at 50000.
+    expect(screen.getByText(/0\.0200 BTC/)).toBeTruthy();
+    // By quantity: at 55000 (the 10 % band), 1000 / 55000 down to the lot.
+    fireEvent.change(field("Amount"), { target: { value: "0.009" } });
+    expect(screen.getByText(/0\.0181 BTC/)).toBeTruthy();
+    // 0.009 x 55000 = 495 of 1000: the slider at 49.5 %.
+    expect(Number(screen.getByRole("slider").getAttribute("aria-valuenow"))).toBeCloseTo(49.5, 1);
+  });
+
   it("sells by total at the last price (B157), the slider sizing the quantity", () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} initialType="market" initialSide="SELL" />);

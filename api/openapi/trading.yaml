@@ -96,8 +96,10 @@ paths:
                 price:
                   $ref: './market.yaml#/components/schemas/Decimal'
                 quantity:
+                  description: The base to trade; a market buy gives it or quote_amount, not both (B157).
                   $ref: './market.yaml#/components/schemas/Decimal'
                 quote_amount:
+                  description: Market buys only, instead of quantity - the quote to spend.
                   $ref: './market.yaml#/components/schemas/Decimal'
                 client_order_id:
                   type: string
