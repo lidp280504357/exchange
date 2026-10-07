@@ -35,14 +35,21 @@
 //     its top leverage and maintenance rate;
 //   - the impact notional is 10,000 USD: 10,000 USDT, or 10,000 / the face
 //     value in contracts (as BTC's and ETH's);
-//   - funding every 8 hours on the platform's grid, interest 0.01%, a cap
-//     of 0.75%, the perp fee tier;
+//   - funding as Binance's fundingInfo has it: its interval (4 or 1 hours,
+//     8 on the platform's grid without an entry), interest 0.03% a day
+//     (0.01% per 8 hours, per interval), its adjusted cap (0.75% without
+//     an entry); the perp fee tier;
 //   - new contracts are listed PREPARE (-status TRADING lists them open;
 //     apply never changes a listed contract's status): they open in
 //     batches once HOUSE is seeded for them and the reference streams
 //     carry them (the contract backend's part of G1c, instruments
 //     runbook); a listed contract keeps its whole entry (operators may
-//     have changed it in the console).
+//     have changed it in the console) but its funding interval, interest
+//     and cap, which follow Binance's fundingInfo as above: a contract
+//     takes Binance's funding rate only for periods that end when
+//     Binance's do (market-data runbook; Binance moved 23 of the coins'
+//     USDⓈ-M perpetuals to 4 hours). The console's changes still win at
+//     apply.
 package main
 
 import (
@@ -51,6 +58,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -102,15 +110,33 @@ type bracket struct {
 	MaxLeverage int     `json:"maxOpenPosLeverage"`
 }
 
+// fundingRule is a perpetual's funding on Binance (fundingInfo): its
+// interval and the cap of its rate (the floor is its negative).
+type fundingRule struct {
+	Hours int32
+	Cap   decimal.Decimal
+}
+
+// defaultFunding is a perpetual's funding without an entry of its own.
+var defaultFunding = fundingRule{Hours: 8, Cap: decimal.RequireFromString("0.0075")}
+
+// interest is the interest rate of a funding interval: 0.03% a day.
+func (f fundingRule) interest() decimal.Decimal {
+	return decimal.RequireFromString("0.0003").Mul(decimal.NewFromInt32(f.Hours)).Div(decimal.NewFromInt(24))
+}
+
 // snapshot is what a run reads from Binance, kept to the symbols the
-// file's coins could list: the entries of the two exchangeInfo answers and
-// of the risk brackets of the site, each as Binance wrote it.
+// file's coins could list: the entries of the two exchangeInfo answers, of
+// the risk brackets of the site and of the two fundingInfo answers, each
+// as Binance wrote it.
 type snapshot struct {
 	TakenAt         string            `json:"taken_at"`
 	Linear          []json.RawMessage `json:"fapi_exchange_info"`
 	Inverse         []json.RawMessage `json:"dapi_exchange_info"`
 	LinearBrackets  []json.RawMessage `json:"future_brackets"`
 	InverseBrackets []json.RawMessage `json:"delivery_brackets"`
+	LinearFunding   []json.RawMessage `json:"fapi_funding_info"`
+	InverseFunding  []json.RawMessage `json:"dapi_funding_info"`
 }
 
 func get(url string, out any) error {
@@ -162,6 +188,53 @@ func siteBrackets(url string) []json.RawMessage {
 		log.Fatalf("brackets %s: none", url)
 	}
 	return body.Data.Brackets
+}
+
+// fundingInfo is the entries of a market's fundingInfo: one a perpetual
+// whose funding Binance adjusted. USDⓈ-M's lists the COIN-M perpetuals
+// too (BTCUSD_PERP's cap 0.3%, every 8 hours); COIN-M's is empty today.
+func fundingInfo(url string) []json.RawMessage {
+	var entries []json.RawMessage
+	if err := get(url, &entries); err != nil {
+		log.Fatalf("funding info: %v", err)
+	}
+	return entries
+}
+
+// fundingRules are the funding rules among a market's fundingInfo
+// entries, by symbol. One the instruments cannot take (an interval other
+// than 1, 4 or 8 hours, a cap past 5%) is left out, logged: its contract
+// funds by the default rule and does not take Binance's rate.
+func fundingRules(entries []json.RawMessage) map[string]fundingRule {
+	out := map[string]fundingRule{}
+	for _, e := range entries {
+		var f struct {
+			Symbol string `json:"symbol"`
+			Cap    string `json:"adjustedFundingRateCap"`
+			Floor  string `json:"adjustedFundingRateFloor"`
+			Hours  int32  `json:"fundingIntervalHours"`
+		}
+		if err := json.Unmarshal(e, &f); err != nil {
+			log.Fatalf("funding info %s: %v", symbolOf(e), err)
+		}
+		limit, err1 := decimal.NewFromString(f.Cap)
+		floor, err2 := decimal.NewFromString(f.Floor)
+		if err1 != nil || err2 != nil {
+			log.Fatalf("funding info %s: cap %q, floor %q", f.Symbol, f.Cap, f.Floor)
+		}
+		// One cap bounds both ways: the wider side, so Binance's rate is
+		// never cut.
+		limit = decimal.Max(limit, floor.Neg())
+		switch {
+		case !slices.Contains([]int32{1, 4, 8}, f.Hours):
+			log.Printf("funding of %s: every %d hours, which the instruments do not take: the default rule", f.Symbol, f.Hours)
+		case !limit.IsPositive() || limit.GreaterThan(decimal.RequireFromString("0.05")):
+			log.Printf("funding of %s: a cap of %s, which the instruments do not take: the default rule", f.Symbol, limit)
+		default:
+			out[f.Symbol] = fundingRule{Hours: f.Hours, Cap: limit}
+		}
+	}
+	return out
 }
 
 // symbolOf is the symbol an entry of Binance's is about.
@@ -238,7 +311,9 @@ func writeSnapshot(path string, s snapshot) {
 	writeList(&buf, "fapi_exchange_info", lines(s.Linear), false)
 	writeList(&buf, "dapi_exchange_info", lines(s.Inverse), false)
 	writeList(&buf, "future_brackets", lines(s.LinearBrackets), false)
-	writeList(&buf, "delivery_brackets", lines(s.InverseBrackets), true)
+	writeList(&buf, "delivery_brackets", lines(s.InverseBrackets), false)
+	writeList(&buf, "fapi_funding_info", lines(s.LinearFunding), false)
+	writeList(&buf, "dapi_funding_info", lines(s.InverseFunding), true)
 	buf.WriteString("}\n")
 	if !json.Valid(buf.Bytes()) {
 		log.Fatalf("the snapshot does not parse")
@@ -312,13 +387,40 @@ func main() {
 			Inverse:         keep(exchangeInfo(*dapi+"/dapi/v1/exchangeInfo"), wanted),
 			LinearBrackets:  keep(siteBrackets(*web+"/bapi/futures/v1/friendly/future/common/brackets"), wanted),
 			InverseBrackets: keep(siteBrackets(*web+"/bapi/futures/v1/friendly/delivery/common/brackets"), wanted),
+			LinearFunding:   keep(fundingInfo(*fapi+"/fapi/v1/fundingInfo"), wanted),
+			InverseFunding:  keep(fundingInfo(*dapi+"/dapi/v1/fundingInfo"), wanted),
 		}
 		writeSnapshot(*snap, in)
 	}
 	linear, inverse := perpetuals(in.Linear), perpetuals(in.Inverse)
 	linearTiers, inverseTiers := brackets(in.LinearBrackets), brackets(in.InverseBrackets)
+	funding := fundingRules(in.LinearFunding)
+	maps.Copy(funding, fundingRules(in.InverseFunding))
+	fundingOf := func(symbol string) fundingRule {
+		if f, ok := funding[symbol]; ok {
+			return f
+		}
+		return defaultFunding
+	}
 
+	// A listed contract's funding follows Binance's (the rules above).
 	contracts := slices.Clone(doc.Contracts)
+	refreshed := 0
+	for _, c := range contracts {
+		ref, _ := c["reference_symbol"].(string)
+		if ref == "" {
+			continue
+		}
+		f := fundingOf(ref)
+		hours, interest, limit := float64(f.Hours), f.interest().String(), f.Cap.String()
+		if c["funding_interval_hours"] == hours && c["interest_rate"] == interest && c["funding_cap"] == limit {
+			continue
+		}
+		log.Printf("%-18s funding every %v hours, interest %v, cap %v -> every %d hours, interest %s, cap %s",
+			c["symbol"], c["funding_interval_hours"], c["interest_rate"], c["funding_cap"], f.Hours, interest, limit)
+		c["funding_interval_hours"], c["interest_rate"], c["funding_cap"] = hours, interest, limit
+		refreshed++
+	}
 	added := 0
 	for _, p := range doc.Pairs {
 		base, quote := p["base_asset"].(string), p["quote_asset"].(string)
@@ -326,7 +428,7 @@ func main() {
 			continue
 		}
 		if r, ok := linear[base+"USDT"]; ok && r.QuoteAsset == "USDT" && r.MarginAsset == "USDT" {
-			if c := contract(r, base, decimal.Zero, decimalsOf[base], linearTiers[r.Symbol]); c != nil && !listed[c["symbol"].(string)] {
+			if c := contract(r, base, decimal.Zero, decimalsOf[base], linearTiers[r.Symbol], fundingOf(r.Symbol)); c != nil && !listed[c["symbol"].(string)] {
 				c["status"] = *status
 				contracts, added = append(contracts, c), added+1
 			}
@@ -338,7 +440,7 @@ func main() {
 		}
 		if r, ok := inverse[base+"USD_PERP"]; ok && r.MarginAsset == base && r.ContractSize > 0 {
 			size := decimal.NewFromFloat(r.ContractSize)
-			if c := contract(r, base, size, decimalsOf[base], inverseTiers[r.Symbol]); c != nil && !listed[c["symbol"].(string)] {
+			if c := contract(r, base, size, decimalsOf[base], inverseTiers[r.Symbol], fundingOf(r.Symbol)); c != nil && !listed[c["symbol"].(string)] {
 				c["status"] = *status
 				contracts, added = append(contracts, c), added+1
 			}
@@ -363,13 +465,13 @@ func main() {
 	for _, c := range contracts {
 		n[c["margin_type"].(string)]++
 	}
-	log.Printf("%s: %d contracts (%d USDT-margined, %d coin-margined), %d new", *file, len(contracts), n["USDT"], n["COIN"], added)
+	log.Printf("%s: %d contracts (%d USDT-margined, %d coin-margined), %d new, %d with their funding refreshed", *file, len(contracts), n["USDT"], n["COIN"], added, refreshed)
 }
 
 // contract is the entry of Binance's perpetual r on base: a linear one
-// (size zero) or a coin-margined one of face value size; nil when its
-// rules cannot be kept (logged).
-func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tiers []bracket) map[string]any {
+// (size zero) or a coin-margined one of face value size, funding by fund;
+// nil when its rules cannot be kept (logged).
+func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tiers []bracket, fund fundingRule) map[string]any {
 	inverse := size.IsPositive()
 	tick := decimal.RequireFromString(r.filter("PRICE_FILTER").TickSize)
 	lot, minQty := decimal.NewFromInt(1), decimal.NewFromInt(1)
@@ -417,7 +519,7 @@ func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tie
 		"symbol": symbol, "type": "PERPETUAL", "base_asset": base, "quote_asset": quote, "index_symbol": base + "-USDT",
 		"tick_size": tick.String(), "lot_size": lot.String(), "min_quantity": minQty.String(), "max_quantity": maxQty.String(),
 		"min_notional": minNotional.String(), "price_band": band.String(), "risk_tiers": riskTiers,
-		"funding_interval_hours": 8, "interest_rate": "0.0001", "funding_cap": "0.0075", "impact_notional": impact.String(),
+		"funding_interval_hours": fund.Hours, "interest_rate": fund.interest().String(), "funding_cap": fund.Cap.String(), "impact_notional": impact.String(),
 		"fee_tier": "perp", "status": "PREPARE", "margin_type": margin, "settle_asset": settle, "contract_size": size.String(),
 		"reference_symbol": r.Symbol,
 	}
