@@ -154,16 +154,26 @@ func TestPlatformApps(t *testing.T) {
 	// The download entries' switch (H5): off in an operator's name, the
 	// sites told within the answer and its ETag; the state it is in
 	// changes nothing; the console reads it with the platforms.
-	if _, err := apps.SetEntry(ctx, false, "", "no actor"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, _, err := apps.SetEntry(ctx, false, "", "no actor"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("without an actor: %v", err)
 	}
-	e, err := apps.SetEntry(ctx, false, "admin:ops@example.com", "hide the entries")
-	if err != nil || e.Visible || e.Version != 2 || e.UpdatedBy != "admin:ops@example.com" {
-		t.Fatalf("hidden %+v %v", e, err)
+	// Through the internal endpoint: the switch as saved and as it was
+	// (A89), the console's audit reads from and to there.
+	req := httptest.NewRequestWithContext(ctx, http.MethodPut, "/internal/platform/download-entry",
+		strings.NewReader(`{"visible":false,"actor":"admin:ops@example.com","reason":"hide the entries"}`))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var switched struct {
+		Entry, Previous httpapi.AppEntryJSON
 	}
-	if again, err := apps.SetEntry(ctx, false, "admin:b@example.com", "hide them again"); err != nil || again.Version != 2 ||
-		again.UpdatedBy != "admin:ops@example.com" {
-		t.Fatalf("hidden again %+v %v", again, err)
+	if err := json.Unmarshal(w.Body.Bytes(), &switched); err != nil || w.Code != http.StatusOK || switched.Entry.Visible ||
+		switched.Entry.Version != 2 || switched.Entry.UpdatedBy != "admin:ops@example.com" || !switched.Previous.Visible ||
+		switched.Previous.Version != 1 {
+		t.Fatalf("hidden %d %s", w.Code, w.Body)
+	}
+	if again, was, err := apps.SetEntry(ctx, false, "admin:b@example.com", "hide them again"); err != nil || again.Version != 2 ||
+		again.UpdatedBy != "admin:ops@example.com" || was != again {
+		t.Fatalf("hidden again %+v %+v %v", again, was, err)
 	}
 	after := fmt.Sprintf(`"4-2-%d-2"`, prof.Version+1)
 	w = get("/v1/platform/apps", tag(4, 2, prof.Version+1))

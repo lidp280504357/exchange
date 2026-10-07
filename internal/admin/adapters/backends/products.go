@@ -88,7 +88,9 @@ func (c ProductLines) CancelOpen(ctx context.Context, product, actor, reason str
 		}
 		var transport *url.Error
 		switch {
-		case errors.Is(err, context.DeadlineExceeded):
+		// Past its bound, or the caller gone (A88): the service may still
+		// be canceling, so not "unreachable".
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			return out, fmt.Errorf("%w: %w", ports.ErrProductCancelTimeout, err)
 		case errors.As(err, &transport):
 			return out, fmt.Errorf("%w: %w", ports.ErrProductCancelUnreachable, err)

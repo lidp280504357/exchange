@@ -24,7 +24,8 @@ import (
 type fakeApps struct {
 	apps map[string]*fakeApp
 	// entry is the download entries' switch (H5).
-	entry fakeEntry
+	entry          fakeEntry
+	switchedBefore bool
 	// down fails every call; lose keeps a file but loses the answer.
 	down, lose bool
 }
@@ -81,16 +82,23 @@ func (f *fakeApps) Apps(context.Context) (json.RawMessage, error) {
 	return json.Marshal(map[string]any{"apps": []*fakeApp{f.apps[domain.AppAndroid].offer(), f.apps[domain.AppIOS].offer()}, "entry": f.entry})
 }
 
-// SetAppEntry switches the download entries as instrument-service does:
-// the state it is in keeps its version.
+// SetAppEntry switches the download entries as instrument-service does,
+// answering the switch as saved and as it was (A89): the state it is in
+// keeps its version. switchedBefore is another administrator's switch
+// landing just before this one.
 func (f *fakeApps) SetAppEntry(_ context.Context, visible bool, actor, _ string) (json.RawMessage, error) {
 	if f.down {
 		return nil, errInstrumentDown
 	}
+	if f.switchedBefore {
+		f.entry = fakeEntry{Visible: !f.entry.Visible, Version: f.entry.Version + 1, UpdatedBy: "other@example.com"}
+		f.switchedBefore = false
+	}
+	was := f.entry
 	if f.entry.Visible != visible {
 		f.entry = fakeEntry{Visible: visible, Version: f.entry.Version + 1, UpdatedBy: actor}
 	}
-	return json.Marshal(f.entry)
+	return json.Marshal(map[string]fakeEntry{"entry": f.entry, "previous": was})
 }
 
 func (f *fakeApps) answer(a *fakeApp, key string, file *ports.StoredAppFile) (json.RawMessage, error) {
@@ -402,6 +410,14 @@ func TestDownloadEntry(t *testing.T) {
 	if _, err := h.svc.SetDownloadEntry(ctx, boss, false, "hide them again"); err != nil || apps.entry.Version != 2 ||
 		len(h.auditsOf("admin.platform.download_entry")) != 1 {
 		t.Fatalf("hidden again %+v %v", apps.entry, err)
+	}
+	// Another administrator shows them just before this one shows them too:
+	// this switch changes nothing, and is not audited as one (A89: from and
+	// to as instrument-service saw them, not as read before).
+	apps.switchedBefore = true
+	if raw, err := h.svc.SetDownloadEntry(ctx, boss, true, "show the entries"); err != nil || apps.entry.Version != 3 ||
+		!strings.Contains(string(raw), `"visible":true`) || len(h.auditsOf("admin.platform.download_entry")) != 1 {
+		t.Fatalf("shown by another first %s %+v %v", raw, apps.entry, err)
 	}
 	apps.down = true
 	if _, err := h.svc.SetDownloadEntry(ctx, boss, true, "show the entries"); code(err) != apperr.CodeUnavailable {

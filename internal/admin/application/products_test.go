@@ -160,8 +160,9 @@ func TestProductLines(t *testing.T) {
 		t.Fatalf("audited %v", got)
 	}
 	// A refusal says the service's code and message; a cancel past its
-	// time or not reached says only that (A87: the console shows it, no
-	// address of ours), the audit the failure in full.
+	// time or not reached says only that, in the answer and the audit alike
+	// (A87, A88: the console shows both, no address of ours; the log keeps
+	// the failure in full).
 	svcs.err = apperr.New(apperr.KindConflict, apperr.CodeConflict, "the product line is open")
 	if _, err := h.svc.SetProduct(ctx, boss, "spot", true, "open spot"); err != nil {
 		t.Fatal(err)
@@ -186,7 +187,7 @@ func TestProductLines(t *testing.T) {
 			t.Fatalf("%s: %+v %v", tc.reason, ps.Cancel, err)
 		}
 		if got := h.auditsOf("admin.products.orders_canceled"); !strings.Contains(got[len(got)-1], `"cancel_reason":"`+tc.reason+`"`) ||
-			!strings.Contains(got[len(got)-1], "spot-trading-service:8088") {
+			strings.Contains(got[len(got)-1], "spot-trading-service") || strings.Contains(got[len(got)-1], "cancel_error") {
 			t.Fatalf("%s audited %v", tc.reason, got)
 		}
 	}

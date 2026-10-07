@@ -5157,15 +5157,16 @@ export interface components {
             /** @description With reason PARTIAL, the users whose orders the service could not cancel (a lock it could not take); 0 otherwise. */
             failed_users: number;
             /**
-             * @description Why it FAILED (A87): TIMEOUT, no answer within 15 seconds (the
-             *     service may still be canceling); UNREACHABLE, the service could
-             *     not be reached; PARTIAL, it canceled for every user but
-             *     failed_users (503 with details canceled and failed_users);
-             *     REFUSED, it answered another error. Null unless FAILED.
+             * @description Why it FAILED (A87): TIMEOUT, no answer within 15 seconds or the
+             *     request gone before it (the service may still be canceling);
+             *     UNREACHABLE, the service could not be reached; PARTIAL, it
+             *     canceled for every user but failed_users (503 with details
+             *     canceled and failed_users); REFUSED, it answered another error.
+             *     Null unless FAILED.
              * @enum {string|null}
              */
             reason: "TIMEOUT" | "UNREACHABLE" | "PARTIAL" | "REFUSED" | null;
-            /** @description With PARTIAL and REFUSED, the service's error code and message (never an internal address; the audit keeps the failure in full); null otherwise. */
+            /** @description With PARTIAL and REFUSED, the service's error code and message, also in the audit's cancel_error (never an internal address: the failure in full is in admin-service's log only, A88); null otherwise. */
             error: string | null;
         };
         LaunchChecklist: {

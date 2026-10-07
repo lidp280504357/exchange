@@ -78,6 +78,13 @@ func TestProductLines(t *testing.T) {
 	if _, err := c.CancelOpen(ctx, "slow", "boss@example.com", "close it"); !errors.Is(err, ports.ErrProductCancelTimeout) {
 		t.Fatalf("a cancel too slow: %v", err)
 	}
+	// The caller gone is no unreachable service either (A88).
+	callerGone, stop := context.WithCancel(ctx)
+	stop()
+	if _, err := c.CancelOpen(callerGone, "spot", "boss@example.com", "close spot"); !errors.Is(err, ports.ErrProductCancelTimeout) ||
+		errors.Is(err, ports.ErrProductCancelUnreachable) {
+		t.Fatalf("the caller gone: %v", err)
+	}
 	gone := ProductLines{REST: c.REST, Trading: "http://127.0.0.1:1", Derivatives: srv.URL}
 	if _, err := gone.CancelOpen(ctx, "spot", "boss@example.com", "close spot"); !errors.Is(err, ports.ErrProductCancelUnreachable) ||
 		errors.Is(err, ports.ErrProductCancelTimeout) {

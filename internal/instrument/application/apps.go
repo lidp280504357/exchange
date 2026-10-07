@@ -117,18 +117,20 @@ func (a *Apps) Entry(ctx context.Context) (domain.AppEntry, error) {
 }
 
 // SetEntry shows or hides the sites' download entries in actor's name,
-// keeping the state before and after in the history; switching it to the
-// state it is in changes nothing.
-func (a *Apps) SetEntry(ctx context.Context, visible bool, actor, reason string) (domain.AppEntry, error) {
+// keeping the state before and after in the history, and returns it as
+// saved and as it was under its row lock (the console audits from that,
+// A89); switching it to the state it is in changes nothing (the two the
+// same).
+func (a *Apps) SetEntry(ctx context.Context, visible bool, actor, reason string) (saved, previous domain.AppEntry, err error) {
 	if err := validChange(actor, reason); err != nil {
-		return domain.AppEntry{}, err
+		return domain.AppEntry{}, domain.AppEntry{}, err
 	}
-	var saved domain.AppEntry
-	err := a.Store.Tx(ctx, func(r ports.Repos) error {
+	err = a.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Apps().EntryForUpdate(ctx)
 		if err != nil {
 			return err
 		}
+		previous = cur
 		if cur.Visible == visible {
 			saved = cur
 			return nil
@@ -142,10 +144,10 @@ func (a *Apps) SetEntry(ctx context.Context, visible bool, actor, reason string)
 		return r.Record(ctx, "DOWNLOAD_ENTRY", "ENTRY", saved.Version, change, actor, reason, SourceConsole)
 	})
 	if err != nil {
-		return domain.AppEntry{}, err
+		return domain.AppEntry{}, domain.AppEntry{}, err
 	}
 	a.drop()
-	return saved, nil
+	return saved, previous, nil
 }
 
 // Set changes a platform's mode, link, notes and switch as of the version

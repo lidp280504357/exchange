@@ -179,8 +179,8 @@ func (s *Service) SetProduct(ctx context.Context, p Principal, product string, e
 			// Closed already: its orders still open are canceled (none
 			// counted, nothing is asked; a count unknown asks anyway).
 			if counts, err := s.productLine(ctx, product); err != nil || counts.OpenOrders > 0 {
-				c, cause := s.cancelProduct(ctx, p, product, reason)
-				s.auditProduct(ctx, p, "admin.products.orders_canceled", product, false, false, c, cause, reason)
+				c := s.cancelProduct(ctx, p, product, reason)
+				s.auditProduct(ctx, p, "admin.products.orders_canceled", product, false, false, c, reason)
 				return s.productsAfter(ctx, c)
 			}
 		}
@@ -190,28 +190,28 @@ func (s *Service) SetProduct(ctx context.Context, p Principal, product string, e
 		return Products{}, err
 	}
 	var c *ProductCancel
-	var cause error
 	if !enabled {
-		c, cause = s.cancelProduct(ctx, p, product, reason)
+		c = s.cancelProduct(ctx, p, product, reason)
 	}
-	s.auditProduct(ctx, p, "admin.products.toggled", product, was.Enabled, enabled, c, cause, reason)
+	s.auditProduct(ctx, p, "admin.products.toggled", product, was.Enabled, enabled, c, reason)
 	return s.productsAfter(ctx, c)
 }
 
 // cancelProduct asks the line's service to cancel its open orders and
-// says how it went, with the failure in full (logged here, audited by the
-// caller); the switch stands.
-func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reason string) (*ProductCancel, error) {
+// says how it went; a failure is logged here in full (the service's
+// address among it), the answer and the audit keep its reason and what
+// the service said (A88). The switch stands.
+func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reason string) *ProductCancel {
 	if s.ProductLines == nil {
-		return &ProductCancel{Status: CancelUnavailable}, ports.ErrProductLineMissing
+		return &ProductCancel{Status: CancelUnavailable}
 	}
 	n, err := s.ProductLines.CancelOpen(ctx, product, p.Admin.Email, reason)
 	c := &ProductCancel{Status: CancelFailed, Canceled: n.Orders, FailedUsers: n.FailedUsers}
 	switch {
 	case err == nil:
-		return &ProductCancel{Status: CancelDone, Canceled: n.Orders}, nil
+		return &ProductCancel{Status: CancelDone, Canceled: n.Orders}
 	case errors.Is(err, ports.ErrProductLineMissing):
-		return &ProductCancel{Status: CancelUnavailable, Canceled: n.Orders}, err
+		return &ProductCancel{Status: CancelUnavailable, Canceled: n.Orders}
 	case errors.Is(err, ports.ErrProductCancelTimeout):
 		c.Reason = CancelTimeout
 	case errors.Is(err, ports.ErrProductCancelUnreachable):
@@ -227,15 +227,14 @@ func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reaso
 	}
 	s.Log.WarnContext(ctx, "product line: its open orders not all canceled", "product", product, "canceled", n.Orders,
 		"failed_users", n.FailedUsers, "error", err)
-	return c, err
+	return c
 }
 
 // auditProduct audits a switch (or a cancel of a closed line's orders):
-// the line, from and to, the orders canceled and why not all could be (the
-// failure in full).
-func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, c *ProductCancel, cause error,
-	reason string,
-) {
+// the line, from and to, the orders canceled and why not all could be -
+// the reason and what the service said, never its address (the console
+// shows the details; the log has the failure in full, A88).
+func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, c *ProductCancel, reason string) {
 	d := map[string]any{"product": product, "flag": productFlag(product), "from": from, "to": to, "canceled_orders": 0}
 	if c != nil {
 		d["canceled_orders"] = c.Canceled
@@ -244,8 +243,8 @@ func (s *Service) auditProduct(ctx context.Context, p Principal, action, product
 			d["cancel"] = "unavailable"
 		case CancelFailed:
 			d["cancel"], d["cancel_reason"], d["failed_users"] = "failed", c.Reason, c.FailedUsers
-			if cause != nil {
-				d["cancel_error"] = cause.Error()
+			if c.Error != "" {
+				d["cancel_error"] = c.Error
 			}
 		}
 	}

@@ -198,8 +198,10 @@ type appEntry struct {
 // SetDownloadEntry shows or hides the sites' download entries (design
 // 2026-10-07, App download page §1.2 #8, user 19:3x, H5): one ADMIN
 // (settings.write) with a reason, audited as admin.platform.download_entry
-// with from and to; switching it to the state it is in changes nothing
-// (instrument-service keeps its version) and is not audited.
+// with from and to as instrument-service saw them under the switch's lock
+// (A89: two administrators at once audit what each did); switching it to
+// the state it is in changes nothing (its version stays) and is not
+// audited.
 func (s *Service) SetDownloadEntry(ctx context.Context, p Principal, visible bool, reason string) (json.RawMessage, error) {
 	if err := p.require(domain.PermSettingsEdit); err != nil {
 		return nil, err
@@ -210,30 +212,24 @@ func (s *Service) SetDownloadEntry(ctx context.Context, p Principal, visible boo
 	if err := s.appsReady(); err != nil {
 		return nil, err
 	}
-	raw, err := s.Apps.Apps(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var before struct {
-		Entry *appEntry `json:"entry"`
-	}
-	if json.Unmarshal(raw, &before) != nil || before.Entry == nil {
-		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service has no download entry yet")
-	}
 	reason = strings.TrimSpace(reason)
-	saved, err := s.Apps.SetAppEntry(ctx, visible, p.Admin.Email, reason)
+	raw, err := s.Apps.SetAppEntry(ctx, visible, p.Admin.Email, reason)
 	if err != nil {
 		return nil, err
+	}
+	var out struct {
+		Entry    json.RawMessage `json:"entry"`
+		Previous *appEntry       `json:"previous"`
 	}
 	var after appEntry
-	if err := json.Unmarshal(saved, &after); err != nil {
+	if json.Unmarshal(raw, &out) != nil || out.Previous == nil || json.Unmarshal(out.Entry, &after) != nil {
 		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service answered the download entry in another shape")
 	}
-	if after.Version == before.Entry.Version {
-		return saved, nil
+	if after.Version == out.Previous.Version {
+		return out.Entry, nil
 	}
-	details, _ := json.Marshal(map[string]any{"from": before.Entry.Visible, "to": after.Visible, "version": after.Version})
-	return saved, s.audit(ctx, p, "app:download_entry", "admin.platform.download_entry", reason, string(details))
+	details, _ := json.Marshal(map[string]any{"from": out.Previous.Visible, "to": after.Visible, "version": after.Version})
+	return out.Entry, s.audit(ctx, p, "app:download_entry", "admin.platform.download_entry", reason, string(details))
 }
 
 // upload returns an upload of the platform still open; 404 otherwise.

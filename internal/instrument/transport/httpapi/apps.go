@@ -209,7 +209,8 @@ func (h *Handler) internalApps(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"apps": out, "entry": appEntryJSONOf(entry)})
 }
 
-// setAppEntry shows or hides the sites' download entries (H5).
+// setAppEntry shows or hides the sites' download entries (H5): the switch
+// as saved and as it was, {entry, previous} (A89).
 func (h *Handler) setAppEntry(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Visible *bool  `json:"visible"`
@@ -224,12 +225,12 @@ func (h *Handler) setAppEntry(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("visible is required"))
 		return
 	}
-	e, err := h.Apps.SetEntry(r.Context(), *body.Visible, body.Actor, body.Reason)
+	e, was, err := h.Apps.SetEntry(r.Context(), *body.Visible, body.Actor, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, appEntryJSONOf(e))
+	httpx.WriteJSON(w, http.StatusOK, map[string]AppEntryJSON{"entry": appEntryJSONOf(e), "previous": appEntryJSONOf(was)})
 }
 
 // writeApp answers a platform as the console sees it, with the file a

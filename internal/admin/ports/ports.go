@@ -1581,7 +1581,8 @@ type PlatformApps interface {
 	// entries' switch: {"apps": [...], "entry": {...}}.
 	Apps(ctx context.Context) (json.RawMessage, error)
 	// SetAppEntry shows or hides the sites' download entries (H5): the
-	// switch as saved (admin.yaml's AppEntryAdmin).
+	// switch as saved and as it was under its lock, {"entry": ...,
+	// "previous": ...} (each admin.yaml's AppEntryAdmin; A89).
 	SetAppEntry(ctx context.Context, visible bool, actor, reason string) (json.RawMessage, error)
 	// SetApp changes a platform's mode, link, notes and switch; write
 	// carries expected_version, a stale one is refused.

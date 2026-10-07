@@ -2322,13 +2322,17 @@ else
     # put_part PATH FILE: a part's PUT, sent again after a transfer that
     # broke off (curl's exit 16, an HTTP/2 stream the Mac's path to
     # Cloudflare dropped mid-way on 2026-10-07; call retries only what
-    # never left): a part sent again replaces itself, and while the broken
-    # one still holds the upload (PLATFORM_APP_UPLOAD_BUSY) it waits.
+    # never left) or that the way there answered with a 5xx (502, 520,
+    # 524 from Cloudflare or nginx, A90): a part sent again replaces
+    # itself, and while the broken one still holds the upload
+    # (PLATFORM_APP_UPLOAD_BUSY) it waits.
     put_part() {
       local try
       for try in 1 2 3 4 5 6; do
         if acall PUT "$1" "" -b "$WORK/ADMIN.jar" "${CSRF[@]}" -H 'Content-Type: application/octet-stream' --data-binary "@$2"; then
-          [[ $STATUS == 409 && $(jq -r '.code // ""' <<<"$BODY" 2>/dev/null) == PLATFORM_APP_UPLOAD_BUSY ]] || return 0
+          if ((STATUS < 500)) && ! [[ $STATUS == 409 && $(jq -r '.code // ""' <<<"$BODY" 2>/dev/null) == PLATFORM_APP_UPLOAD_BUSY ]]; then
+            return 0
+          fi
         fi
         echo "note: $1 again (try $try)" >&2
         sleep 3

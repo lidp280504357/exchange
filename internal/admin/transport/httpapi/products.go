@@ -71,6 +71,13 @@ func (h *Handler) setProduct(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	httpx.WriteJSON(w, http.StatusOK, productsChangeJSON(ps))
+}
+
+// productsChangeJSON is a switch's answer: the lines after it, the orders
+// it canceled and how its cancel went (null when it asked none; a reason
+// and an error only when it FAILED).
+func productsChangeJSON(ps application.Products) map[string]any {
 	out := productsJSON(ps)
 	out["canceled_orders"], out["cancel"] = 0, nil
 	if c := ps.Cancel; c != nil {
@@ -79,7 +86,7 @@ func (h *Handler) setProduct(w http.ResponseWriter, r *http.Request) {
 			Status: c.Status, Canceled: c.Canceled, FailedUsers: c.FailedUsers, Reason: optional(c.Reason), Error: optional(c.Error),
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	return out
 }
 
 // ProductCancelJSON is how canceling a closed line's open orders went (A85,
