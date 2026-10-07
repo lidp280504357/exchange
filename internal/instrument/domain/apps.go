@@ -122,6 +122,16 @@ type AppSetting struct {
 	Enabled bool
 }
 
+// AppEntry is the console's switch for the sites' download entries (batch
+// H5, user 2026-10-07 19:3x): on by default, the entries showing whether or
+// not a platform is offered; off, hidden (the download page still opens).
+type AppEntry struct {
+	Visible   bool
+	Version   int64
+	UpdatedBy string
+	UpdatedAt time.Time
+}
+
 // ValidAppPlatform reports whether p is ANDROID or IOS.
 func ValidAppPlatform(p string) bool { return slices.Contains(AppPlatforms, p) }
 

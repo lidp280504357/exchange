@@ -181,19 +181,23 @@ func launchProducts(flagged map[string]ports.Flag) (string, map[string]any) {
 }
 
 // launchApps: what the download page offers of each platform (the
-// public answer's mode, LINK or FILE, else null), for information: a
+// public answer's mode, LINK or FILE, else null) and whether the sites
+// show their download entries (entry_visible, H5), for information: a
 // launch may offer neither, so it is OK whatever it says; UNKNOWN when the
 // apps cannot be read.
 func (s *Service) launchApps(ctx context.Context) (string, map[string]any) {
 	if s.Apps == nil {
 		return LaunchPending, nil
 	}
-	states, err := s.appStates(ctx)
+	states, entry, err := s.appsWithEntry(ctx)
 	if err != nil {
 		s.Log.WarnContext(ctx, "launch checklist: the apps are unknown", "error", err)
 		return LaunchUnknown, nil
 	}
 	value := map[string]any{}
+	if entry != nil {
+		value["entry_visible"] = entry.Visible
+	}
 	for _, a := range states {
 		var offered any
 		if a.Public != nil {

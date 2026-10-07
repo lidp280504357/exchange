@@ -2281,7 +2281,9 @@ export interface paths {
          *     and the files kept on the server, what the sites show now, its
          *     version and who changed it last. instrument-service keeps the
          *     settings; the files are on the server's disk, nginx serves them
-         *     under /downloads/ on the three sites. Every administrator reads
+         *     under /downloads/ on the three sites. With them the switch for the
+         *     sites' download entries (`entry`, H5; PUT
+         *     /admin/v1/platform/download-entry). Every administrator reads
          *     them. Batch H0.
          */
         get: operations["listPlatformApps"];
@@ -2478,6 +2480,34 @@ export interface paths {
          *     name, size and SHA-256.
          */
         delete: operations["deleteAppFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/download-entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Show or hide the sites' download entries
+         * @description Design 2026-10-07 (App download page) §1.2 #8, user 19:3x, batch
+         *     H5: the switch 显示下载入口, on by default. On, the sites show their
+         *     download entries whether or not a platform is offered (the page and
+         *     the QR panel then say none is offered yet); off, the entries are
+         *     hidden and /download still opens when visited. The sites read it
+         *     from GET /v1/platform/apps (`entry`) within a minute. One ADMIN
+         *     (settings.write) alone; audited as admin.platform.download_entry
+         *     (from, to). Switching it to the state it is in changes nothing (no
+         *     version, no audit).
+         */
+        put: operations["setDownloadEntry"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4840,6 +4870,20 @@ export interface components {
             version: number;
             reason: string;
         };
+        /** @description The switch for the sites' download entries (batch H5) with its version and last change. */
+        AppEntryAdmin: {
+            /** @description On by default; the sites read it as GET /v1/platform/apps's entry.visible. */
+            visible: boolean;
+            /**
+             * Format: int64
+             * @description Goes up with every switch; the public answer's ETag carries it.
+             */
+            version: number;
+            /** @description Who switched it last (system:migration for the default). */
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         /** @description One platform's download as the console sets it (design 2026-10-07, App download page): what the sites show is public (null while OFF, disabled or incomplete; as api/openapi/platform.yaml's AppDownload). */
         PlatformAppAdmin: {
             /** @enum {string} */
@@ -5041,7 +5085,8 @@ export interface components {
              *     rules, never for everyone (value: flag, enabled, rules);
              *     app_downloads (App download design 2026-10-07 §5, H4): for
              *     information, OK whatever is offered (value: android and ios,
-             *     each LINK, FILE or null for nothing offered).
+             *     each LINK, FILE or null for nothing offered; entry_visible,
+             *     the download entries' switch, since H5).
              * @enum {string}
              */
             key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m" | "app_downloads" | "products";
@@ -10100,7 +10145,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Both platforms, Android first. */
+            /** @description Both platforms, Android first, and the entries' switch. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10108,6 +10153,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         apps: components["schemas"]["PlatformAppAdmin"][];
+                        entry: components["schemas"]["AppEntryAdmin"];
                     };
                 };
             };
@@ -10295,6 +10341,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformAppAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setDownloadEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    visible: boolean;
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The switch as saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppEntryAdmin"];
                 };
             };
             default: components["responses"]["Error"];

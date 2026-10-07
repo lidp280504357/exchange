@@ -22,8 +22,9 @@ import (
 
 // The apps to download (design 2026-10-07): the seeded rows (OFF, version
 // 1), a link on the version read, files kept and deleted with the history,
-// and what the sites and the console read - the ETag the two versions
-// (review FM ②), 304 for it weakened, a change raising it.
+// the download entries' switch (H5: on, version 1), and what the sites and
+// the console read - the ETag the versions (review FM ②), 304 for it
+// weakened, a change raising it.
 func TestPlatformApps(t *testing.T) {
 	_, db := setup(t)
 	ctx := context.Background()
@@ -52,9 +53,10 @@ func TestPlatformApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tag := func(android, ios, profile int64) string { return fmt.Sprintf(`"%d-%d-%d"`, android, ios, profile) }
+	tag := func(android, ios, profile int64) string { return fmt.Sprintf(`"%d-%d-%d-1"`, android, ios, profile) }
 	w := get("/v1/platform/apps", "")
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"android":null,"ios":null}` || w.Header().Get("ETag") != tag(1, 1, prof.Version) ||
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"android":null,"entry":{"visible":true},"ios":null}` ||
+		w.Header().Get("ETag") != tag(1, 1, prof.Version) ||
 		w.Header().Get("Cache-Control") != "public, max-age=60" {
 		t.Fatalf("nothing shown %d %s %s", w.Code, w.Body, w.Header().Get("ETag"))
 	}
@@ -147,5 +149,42 @@ func TestPlatformApps(t *testing.T) {
 	}
 	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'PLATFORM_APP'`); n != 4 {
 		t.Fatalf("%d history rows", n)
+	}
+
+	// The download entries' switch (H5): off in an operator's name, the
+	// sites told within the answer and its ETag; the state it is in
+	// changes nothing; the console reads it with the platforms.
+	if _, err := apps.SetEntry(ctx, false, "", "no actor"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("without an actor: %v", err)
+	}
+	e, err := apps.SetEntry(ctx, false, "admin:ops@example.com", "hide the entries")
+	if err != nil || e.Visible || e.Version != 2 || e.UpdatedBy != "admin:ops@example.com" {
+		t.Fatalf("hidden %+v %v", e, err)
+	}
+	if again, err := apps.SetEntry(ctx, false, "admin:b@example.com", "hide them again"); err != nil || again.Version != 2 ||
+		again.UpdatedBy != "admin:ops@example.com" {
+		t.Fatalf("hidden again %+v %v", again, err)
+	}
+	after := fmt.Sprintf(`"4-2-%d-2"`, prof.Version+1)
+	w = get("/v1/platform/apps", tag(4, 2, prof.Version+1))
+	var shown struct {
+		Entry struct {
+			Visible *bool `json:"visible"`
+		} `json:"entry"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &shown); err != nil || w.Code != http.StatusOK || w.Header().Get("ETag") != after ||
+		shown.Entry.Visible == nil || *shown.Entry.Visible {
+		t.Fatalf("the entries hidden: %d %s %s", w.Code, w.Header().Get("ETag"), w.Body)
+	}
+	w = get("/internal/platform/apps", "")
+	var withEntry struct {
+		Entry httpapi.AppEntryJSON `json:"entry"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &withEntry); err != nil || withEntry.Entry.Visible || withEntry.Entry.Version != 2 ||
+		withEntry.Entry.UpdatedBy != "admin:ops@example.com" {
+		t.Fatalf("the console's entry %s", w.Body)
+	}
+	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'DOWNLOAD_ENTRY'`); n != 1 {
+		t.Fatalf("%d entry history rows", n)
 	}
 }

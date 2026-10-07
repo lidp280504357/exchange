@@ -17,6 +17,7 @@ import (
 
 func (h *Handler) appRoutes(r chi.Router) {
 	r.Get("/platform/apps", h.platformApps)
+	r.Put("/platform/download-entry", h.setDownloadEntry)
 	r.Put("/platform/apps/{platform}", h.setPlatformApp)
 	r.Post("/platform/apps/{platform}/uploads", h.startAppUpload)
 	r.Get("/platform/apps/{platform}/uploads/{upload_id}", h.appUpload)
@@ -82,6 +83,28 @@ func (h *Handler) setPlatformApp(w http.ResponseWriter, r *http.Request) {
 		"mode": body.Mode, "link_url": body.LinkURL, "notes": body.Notes, "enabled": *body.Enabled, "expected_version": *body.ExpectedVersion,
 	})
 	raw, err := h.Svc.SetPlatformApp(r.Context(), principal(r), chi.URLParam(r, "platform"), write, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+// setDownloadEntry shows or hides the sites' download entries (H5).
+func (h *Handler) setDownloadEntry(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Visible *bool  `json:"visible"`
+		Reason  string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if body.Visible == nil {
+		httpx.WriteError(w, r, apperr.Invalid("visible is required"))
+		return
+	}
+	raw, err := h.Svc.SetDownloadEntry(r.Context(), principal(r), *body.Visible, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

@@ -2110,8 +2110,9 @@ check '[.items[] | select(.key == "products")] | all(.status == "UNKNOWN" or (.s
   and all(.value.spot, .value.usdt_m, .value.coin_m; (.enabled | type) == "boolean")))' \
   "the product lines' item says which are open, OK whatever is"
 check '[.items[] | select(.key == "app_downloads")] | all(.status == "UNKNOWN" or (.status == "OK"
-  and all(.value.android, .value.ios; . == null or IN("LINK", "FILE"))))' \
-  "the App downloads item says what each platform offers, OK whatever it is"
+  and all(.value.android, .value.ios; . == null or IN("LINK", "FILE"))
+  and ((.value | has("entry_visible") | not) or (.value.entry_visible | type) == "boolean")))' \
+  "the App downloads item says what each platform offers and whether the entries show, OK whatever it is"
 # An item whose source did not answer is UNKNOWN, its value without the
 # fields: not a failure of the item's logic (review ER ④).
 check '[.items[] | select(.key == "coin_m")] | all(.status == "UNKNOWN" or (.value.flag == "derivatives.coin_m" and (.value.enabled | type) == "boolean"
@@ -2265,10 +2266,47 @@ else
   expect 200 - "the sites read the apps"
   check '.ios.mode == "LINK" and .ios.url == "https://apps.apple.com/app/id6400000000"' "iOS's link"
   APPS_TAG=$(grep -i '^etag:' "$WORK/apps.headers" | cut -d' ' -f2- | tr -d '\r')
-  [[ $APPS_TAG =~ ^(W/)?\"[0-9]+-[0-9]+-[0-9]+\"$ ]] || { echo "FAIL the apps' ETag: $APPS_TAG" >&2; exit 1; }
+  # Four numbers since H5 (the download entries' switch), three before.
+  [[ $APPS_TAG =~ ^(W/)?\"[0-9]+-[0-9]+-[0-9]+(-[0-9]+)?\"$ ]] || { echo "FAIL the apps' ETag: $APPS_TAG" >&2; exit 1; }
   call GET /v1/platform/apps "" -H "If-None-Match: $APPS_TAG"
   [[ $STATUS == 304 ]] || { echo "FAIL the apps with their ETag: $STATUS" >&2; exit 1; }
-  echo "ok   the ETag is the two platforms' and the profile's versions ($APPS_TAG); 304 with it"
+  echo "ok   the ETag is the two platforms', the profile's and the entries' versions ($APPS_TAG); 304 with it"
+
+  # The download entries' switch (App download page §1.2 #8, H5): on by
+  # default; an ADMIN turns it the other way, the sites see it within a
+  # minute, the state it is in changes nothing, and it goes back.
+  if [[ $(jq -r '.entry.visible | type' <<<"$APPS_BEFORE") != boolean ]]; then
+    echo "skip the download entries' switch: this admin-service is from before H5"
+  else
+    ENTRY_WAS=$(jq .entry.visible <<<"$APPS_BEFORE")
+    ENTRY_TO=$([[ $ENTRY_WAS == true ]] && echo false || echo true)
+    restore_entry() { as ADMIN PUT /admin/v1/platform/download-entry "{\"visible\":$ENTRY_WAS,\"reason\":\"e2e cleanup\"}" >/dev/null; }
+    at_exit restore_entry
+    as OPERATOR PUT /admin/v1/platform/download-entry "{\"visible\":$ENTRY_TO,\"reason\":\"e2e: an operator\"}"
+    expect 403 ADMIN_FORBIDDEN "only an ADMIN switches the download entries"
+    as ADMIN PUT /admin/v1/platform/download-entry '{"reason":"e2e: no state"}'
+    expect 400 COMMON_INVALID_ARGUMENT "the switch needs its state"
+    ENTRY_V=$(jq .entry.version <<<"$APPS_BEFORE")
+    as ADMIN PUT /admin/v1/platform/download-entry "{\"visible\":$ENTRY_TO,\"reason\":\"e2e: the download entries switched\"}"
+    expect 200 - "ADMIN switches the download entries ($ENTRY_WAS to $ENTRY_TO)"
+    check ".visible == $ENTRY_TO and .version == $((ENTRY_V + 1)) and .updated_by == \"$EMAIL_ADMIN\"" "switched in the ADMIN's name, its version raised"
+    entry_shown() { # entry_shown true|false: the sites' answer says it (cached a minute)
+      call GET "/v1/platform/apps?t=$RANDOM" ""
+      [[ $STATUS == 200 ]] && jq -e --argjson on "$1" '.entry.visible == $on' <<<"$BODY" >/dev/null
+    }
+    eventually 140 "the sites see the switch within a minute" entry_shown "$ENTRY_TO"
+    as ADMIN PUT /admin/v1/platform/download-entry "{\"visible\":$ENTRY_TO,\"reason\":\"e2e: the same again\"}"
+    expect 200 - "switching it to the state it is in"
+    check ".visible == $ENTRY_TO and .version == $((ENTRY_V + 1))" "changes nothing"
+    as ADMIN PUT /admin/v1/platform/download-entry "{\"visible\":$ENTRY_WAS,\"reason\":\"e2e: the download entries back\"}"
+    expect 200 - "and back"
+    eventually 140 "the sites see it back within a minute" entry_shown "$ENTRY_WAS"
+    entry_audited() {
+      as AUDITOR GET "/admin/v1/audit-logs?target=app:download_entry&limit=10" ""
+      [[ $STATUS == 200 ]] && jq -e '[.items[] | select(.payload.action == "admin.platform.download_entry")] | length >= 2' <<<"$BODY" >/dev/null
+    }
+    eventually 40 "both switches in the audit trail (ClickHouse, seconds behind)" entry_audited
+  fi
 
   ANDROID_FILES=$(app_of ANDROID "$APPS_BEFORE" | jq '[.files[] | select(.name | startswith("e2e") | not)] | length')
   IOS_FILES=$(app_of IOS "$APPS_BEFORE" | jq '[.files[] | select(.name | startswith("e2e") | not)] | length')

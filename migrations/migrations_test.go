@@ -211,6 +211,17 @@ func TestInstrumentSchema(t *testing.T) {
 	rejects(t, db, "a link of 501", `UPDATE platform_apps SET link_url = 'https://example.com/' || repeat('a', 481) WHERE platform = 'IOS'`)
 	rejects(t, db, "a version from 1", `UPDATE platform_apps SET version = 0 WHERE platform = 'IOS'`)
 	rejects(t, db, "the notes are an object", `UPDATE platform_apps SET notes = '["zh-CN"]' WHERE platform = 'IOS'`)
+	// The download entries' switch (H5): one row, on, version 1; its
+	// switches go to the history.
+	var seeded int
+	if err := db.QueryRow(context.Background(), `SELECT count(*) FROM platform_download_entry WHERE visible AND version = 1`).Scan(&seeded); err != nil ||
+		seeded != 1 {
+		t.Fatalf("the download entry seeded: %d %v", seeded, err)
+	}
+	accepts(t, db, `UPDATE platform_download_entry SET visible = false, version = 2`)
+	rejects(t, db, "one switch", `INSERT INTO platform_download_entry (id, visible, version, updated_by, updated_at) VALUES (2, true, 1, 'x', now())`)
+	rejects(t, db, "a version from 1", `UPDATE platform_download_entry SET version = 0`)
+	accepts(t, db, `INSERT INTO config_history (entity, key, version, value, actor, reason) VALUES ('DOWNLOAD_ENTRY', 'ENTRY', 2, '{}', 'x', 'x')`)
 }
 
 func TestLedgerSchema(t *testing.T) {

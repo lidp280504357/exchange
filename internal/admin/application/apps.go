@@ -100,17 +100,25 @@ func (s *Service) appsReady() error {
 
 // appStates reads both platforms as instrument-service keeps them.
 func (s *Service) appStates(ctx context.Context) ([]appState, error) {
+	list, _, err := s.appsWithEntry(ctx)
+	return list, err
+}
+
+// appsWithEntry reads both platforms and the download entries' switch
+// (nil from an instrument-service before H5).
+func (s *Service) appsWithEntry(ctx context.Context) ([]appState, *appEntry, error) {
 	raw, err := s.Apps.Apps(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var list struct {
-		Apps []appState `json:"apps"`
+		Apps  []appState `json:"apps"`
+		Entry *appEntry  `json:"entry"`
 	}
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service answered the apps in another shape")
+		return nil, nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service answered the apps in another shape")
 	}
-	return list.Apps, nil
+	return list.Apps, list.Entry, nil
 }
 
 func (s *Service) appState(ctx context.Context, platform string) (appState, error) {
@@ -179,6 +187,53 @@ func (s *Service) SetPlatformApp(ctx context.Context, p Principal, platform stri
 	}
 	details, _ := json.Marshal(map[string]any{"platform": platform, "changes": changes, "version": after.Version})
 	return out.App, s.audit(ctx, p, appTarget(platform), "admin.platform.app_updated", strings.TrimSpace(reason), string(details))
+}
+
+// appEntry is what admin-service reads of the download entries' switch.
+type appEntry struct {
+	Visible bool  `json:"visible"`
+	Version int64 `json:"version"`
+}
+
+// SetDownloadEntry shows or hides the sites' download entries (design
+// 2026-10-07, App download page §1.2 #8, user 19:3x, H5): one ADMIN
+// (settings.write) with a reason, audited as admin.platform.download_entry
+// with from and to; switching it to the state it is in changes nothing
+// (instrument-service keeps its version) and is not audited.
+func (s *Service) SetDownloadEntry(ctx context.Context, p Principal, visible bool, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermSettingsEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if err := s.appsReady(); err != nil {
+		return nil, err
+	}
+	raw, err := s.Apps.Apps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var before struct {
+		Entry *appEntry `json:"entry"`
+	}
+	if json.Unmarshal(raw, &before) != nil || before.Entry == nil {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service has no download entry yet")
+	}
+	reason = strings.TrimSpace(reason)
+	saved, err := s.Apps.SetAppEntry(ctx, visible, p.Admin.Email, reason)
+	if err != nil {
+		return nil, err
+	}
+	var after appEntry
+	if err := json.Unmarshal(saved, &after); err != nil {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service answered the download entry in another shape")
+	}
+	if after.Version == before.Entry.Version {
+		return saved, nil
+	}
+	details, _ := json.Marshal(map[string]any{"from": before.Entry.Visible, "to": after.Visible, "version": after.Version})
+	return saved, s.audit(ctx, p, "app:download_entry", "admin.platform.download_entry", reason, string(details))
 }
 
 // upload returns an upload of the platform still open; 404 otherwise.

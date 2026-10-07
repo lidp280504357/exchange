@@ -11,9 +11,10 @@ import (
 
 // Apps keeps the apps to download (design 2026-10-07, App download page):
 // each platform's mode, link, notes and switch as the console sets them,
-// and the files admin-service uploaded and stored. The sites read them on
-// their pages, so they are served from memory for profileTTL; a change
-// made here drops them at once.
+// the files admin-service uploaded and stored, and the switch for the
+// sites' download entries (H5). The sites read them on their pages, so
+// they are served from memory for profileTTL; a change made here drops
+// them at once.
 type Apps struct {
 	Store ports.Store
 	// Now is the clock; time.Now when nil.
@@ -22,6 +23,8 @@ type Apps struct {
 	mu       sync.Mutex
 	cached   []domain.PlatformApp
 	cachedAt time.Time
+	entry    *domain.AppEntry
+	entryAt  time.Time
 }
 
 func (a *Apps) now() time.Time {
@@ -87,11 +90,62 @@ func (a *Apps) change(ctx context.Context, platform string, expected int64, acto
 	return saved, nil
 }
 
-// drop forgets the cached platforms after a change.
+// drop forgets the cached platforms and entry after a change.
 func (a *Apps) drop() {
 	a.mu.Lock()
-	a.cached = nil
+	a.cached, a.entry = nil, nil
 	a.mu.Unlock()
+}
+
+// Entry returns the switch for the sites' download entries, read at most
+// profileTTL ago.
+func (a *Apps) Entry(ctx context.Context) (domain.AppEntry, error) {
+	a.mu.Lock()
+	if a.entry != nil && a.now().Sub(a.entryAt) < profileTTL {
+		defer a.mu.Unlock()
+		return *a.entry, nil
+	}
+	a.mu.Unlock()
+	e, err := a.Store.Read().Apps().Entry(ctx)
+	if err != nil {
+		return domain.AppEntry{}, err
+	}
+	a.mu.Lock()
+	a.entry, a.entryAt = &e, a.now()
+	a.mu.Unlock()
+	return e, nil
+}
+
+// SetEntry shows or hides the sites' download entries in actor's name,
+// keeping the state before and after in the history; switching it to the
+// state it is in changes nothing.
+func (a *Apps) SetEntry(ctx context.Context, visible bool, actor, reason string) (domain.AppEntry, error) {
+	if err := validChange(actor, reason); err != nil {
+		return domain.AppEntry{}, err
+	}
+	var saved domain.AppEntry
+	err := a.Store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Apps().EntryForUpdate(ctx)
+		if err != nil {
+			return err
+		}
+		if cur.Visible == visible {
+			saved = cur
+			return nil
+		}
+		next := cur
+		next.Visible, next.UpdatedBy, next.UpdatedAt = visible, actor, a.now().UTC()
+		if saved, err = r.Apps().SaveEntry(ctx, next); err != nil {
+			return err
+		}
+		change := map[string]any{"old": map[string]any{"visible": cur.Visible}, "new": map[string]any{"visible": saved.Visible}}
+		return r.Record(ctx, "DOWNLOAD_ENTRY", "ENTRY", saved.Version, change, actor, reason, SourceConsole)
+	})
+	if err != nil {
+		return domain.AppEntry{}, err
+	}
+	a.drop()
+	return saved, nil
 }
 
 // Set changes a platform's mode, link, notes and switch as of the version

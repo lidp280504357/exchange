@@ -23,8 +23,16 @@ import (
 // configuration profile replacing the one before.
 type fakeApps struct {
 	apps map[string]*fakeApp
+	// entry is the download entries' switch (H5).
+	entry fakeEntry
 	// down fails every call; lose keeps a file but loses the answer.
 	down, lose bool
+}
+
+type fakeEntry struct {
+	Visible   bool   `json:"visible"`
+	Version   int64  `json:"version"`
+	UpdatedBy string `json:"updated_by"`
 }
 
 type fakeApp struct {
@@ -57,7 +65,7 @@ func (a *fakeApp) offer() *fakeApp {
 }
 
 func newFakeApps() *fakeApps {
-	f := &fakeApps{apps: map[string]*fakeApp{}}
+	f := &fakeApps{apps: map[string]*fakeApp{}, entry: fakeEntry{Visible: true, Version: 1, UpdatedBy: "system:migration"}}
 	for _, p := range []string{domain.AppAndroid, domain.AppIOS} {
 		f.apps[p] = &fakeApp{Platform: p, Mode: "OFF", Notes: map[string]string{}, Files: []ports.StoredAppFile{}, Version: 1}
 	}
@@ -70,7 +78,19 @@ func (f *fakeApps) Apps(context.Context) (json.RawMessage, error) {
 	if f.down {
 		return nil, errInstrumentDown
 	}
-	return json.Marshal(map[string]any{"apps": []*fakeApp{f.apps[domain.AppAndroid].offer(), f.apps[domain.AppIOS].offer()}})
+	return json.Marshal(map[string]any{"apps": []*fakeApp{f.apps[domain.AppAndroid].offer(), f.apps[domain.AppIOS].offer()}, "entry": f.entry})
+}
+
+// SetAppEntry switches the download entries as instrument-service does:
+// the state it is in keeps its version.
+func (f *fakeApps) SetAppEntry(_ context.Context, visible bool, actor, _ string) (json.RawMessage, error) {
+	if f.down {
+		return nil, errInstrumentDown
+	}
+	if f.entry.Visible != visible {
+		f.entry = fakeEntry{Visible: visible, Version: f.entry.Version + 1, UpdatedBy: actor}
+	}
+	return json.Marshal(f.entry)
 }
 
 func (f *fakeApps) answer(a *fakeApp, key string, file *ports.StoredAppFile) (json.RawMessage, error) {
@@ -344,6 +364,49 @@ func (h *harness) appsOf(t *testing.T) (*fakeApps, *fakeAppFiles, *memUploads) {
 	h.svc.Apps, h.svc.AppFiles, h.svc.AppUploads = apps, files, uploads
 	h.svc.Platform = newFakePlatform()
 	return apps, files, uploads
+}
+
+// The download entries' switch (App download page §1.2 #8, H5): every
+// administrator reads it with the platforms, only an ADMIN switches it with
+// a reason, audited with from and to; the state it is in is not audited.
+func TestDownloadEntry(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	boss, ops, auditor := h.login(t, "boss@example.com"), h.login(t, "ops@example.com"), h.login(t, "audit@example.com")
+	if _, err := h.svc.SetDownloadEntry(ctx, boss, false, "hide the entries"); code(err) != apperr.CodeUnavailable {
+		t.Fatalf("without the downloads: %v", err)
+	}
+	apps, _, _ := h.appsOf(t)
+	if raw, err := h.svc.PlatformApps(ctx, auditor); err != nil || !strings.Contains(string(raw), `"entry":{"visible":true,"version":1`) {
+		t.Fatalf("read with the platforms %s %v", raw, err)
+	}
+	if _, err := h.svc.SetDownloadEntry(ctx, ops, false, "hide the entries"); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("an OPERATOR: %v", err)
+	}
+	if _, err := h.svc.SetDownloadEntry(ctx, boss, false, " "); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("no reason: %v", err)
+	}
+	raw, err := h.svc.SetDownloadEntry(ctx, boss, false, " hide the entries ")
+	if err != nil || apps.entry != (fakeEntry{Visible: false, Version: 2, UpdatedBy: "boss@example.com"}) ||
+		!strings.Contains(string(raw), `"visible":false`) {
+		t.Fatalf("hidden %s %v %+v", raw, err, apps.entry)
+	}
+	if got := h.auditsOf("admin.platform.download_entry"); len(got) != 1 ||
+		!strings.HasPrefix(got[0], "app:download_entry hide the entries ") || !strings.Contains(got[0], `"from":true`) ||
+		!strings.Contains(got[0], `"to":false`) {
+		t.Fatalf("audited %v", got)
+	}
+	if _, err := h.svc.SetDownloadEntry(ctx, boss, false, "hide them again"); err != nil || apps.entry.Version != 2 ||
+		len(h.auditsOf("admin.platform.download_entry")) != 1 {
+		t.Fatalf("hidden again %+v %v", apps.entry, err)
+	}
+	apps.down = true
+	if _, err := h.svc.SetDownloadEntry(ctx, boss, true, "show the entries"); code(err) != apperr.CodeUnavailable {
+		t.Fatalf("instrument-service down: %v", err)
+	}
 }
 
 func TestAppUploads(t *testing.T) {

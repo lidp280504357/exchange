@@ -18,6 +18,12 @@ func (p Platform) Apps(ctx context.Context) (json.RawMessage, error) {
 	return p.do(ctx, http.MethodGet, p.Instruments+"/internal/platform/apps", nil, nil)
 }
 
+// SetAppEntry shows or hides the sites' download entries.
+func (p Platform) SetAppEntry(ctx context.Context, visible bool, actor, reason string) (json.RawMessage, error) {
+	body := map[string]any{"visible": visible, "actor": actor, "reason": reason}
+	return p.do(ctx, http.MethodPut, p.Instruments+"/internal/platform/download-entry", body, nil)
+}
+
 // SetApp changes a platform's mode, link, notes and switch.
 func (p Platform) SetApp(ctx context.Context, platform string, write json.RawMessage, actor, reason string) (json.RawMessage, error) {
 	var body map[string]json.RawMessage

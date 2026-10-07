@@ -74,14 +74,18 @@ export interface paths {
          *     the console set it — a link (an app store, TestFlight, another
          *     page) or a file uploaded in the console and served from
          *     /downloads/ on each of the sites — while it is enabled and
-         *     complete; null otherwise (the sites leave the platform out, and
-         *     hide the download entries while both are null). Cacheable for a
-         *     minute; the ETag is the two platforms' versions, Android's then
-         *     iOS's, and the profile's ("3-5-7": every change raises one of them,
-         *     a new domain moving the files' addresses included), a strong tag
-         *     that If-None-Match matches weakened too (W/"3-5-7", as Cloudflare
-         *     sends it) and answers 304 while it has not changed. Batch H0; built
-         *     in H1.
+         *     complete; null otherwise (the sites leave the platform out). Since
+         *     H5, `entry` is the console's switch for the sites' download
+         *     entries (on by default, user 2026-10-07 19:3x): on, the entries
+         *     show whether or not a platform is offered (the download page and
+         *     the QR panel then say none is offered yet); off, they are hidden
+         *     and /download still opens when visited. Cacheable for a minute;
+         *     the ETag is the two platforms' versions, Android's then iOS's, the
+         *     profile's and the entry's ("3-5-7-2": every change raises one of
+         *     them, a new domain moving the files' addresses included; three
+         *     numbers before H5), a strong tag that If-None-Match matches
+         *     weakened too (W/"3-5-7-2", as Cloudflare sends it) and answers 304
+         *     while it has not changed. Batch H0; built in H1; entry in H5.
          */
         get: operations["getPlatformApps"];
         put?: never;
@@ -230,6 +234,17 @@ export interface components {
         PlatformApps: {
             android: components["schemas"]["AppDownload"] | null;
             ios: components["schemas"]["AppDownload"] | null;
+            entry?: components["schemas"]["AppEntry"];
+        };
+        /**
+         * @description The sites' download entries (the PC top bar's 下载 and its QR
+         *     panel, the footer's 下载 App, the mobile 我的 and settings items),
+         *     as the console's switch says (batch H5). Every answer since H5 has
+         *     it; one from before (a cache) has none: take that as visible.
+         */
+        AppEntry: {
+            /** @description Show the entries, even while neither platform is offered (their page then says none is offered yet). */
+            visible: boolean;
         };
         /**
          * @description One platform's app. A link (mode LINK) has no file facts (null);

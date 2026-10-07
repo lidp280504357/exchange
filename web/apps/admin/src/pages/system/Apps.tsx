@@ -57,9 +57,70 @@ export default function AppsPage({ admin }: { admin: Admin }) {
       ) : !q.data ? (
         <Skeleton className="h-96 w-full" />
       ) : (
-        q.data.apps.map((a) => <AppCard key={a.platform} app={a} edit={edit} audit={can(admin, "audit.read")} />)
+        <>
+          <EntryCard entry={q.data.entry} edit={edit} audit={can(admin, "audit.read")} />
+          {q.data.apps.map((a) => (
+            <AppCard key={a.platform} app={a} edit={edit} audit={can(admin, "audit.read")} />
+          ))}
+        </>
       )}
     </Page>
+  );
+}
+
+/**
+ * EntryCard is the switch for the sites' download entries (design
+ * 2026-10-07, App download page §1.2 #8, user 19:3x; H5): on by default,
+ * the entries showing even while no platform is offered; off, hidden, the
+ * download page still open to a visit.
+ */
+function EntryCard({ entry, edit, audit }: { entry: AdminSchemas["AppEntryAdmin"]; edit: boolean; audit: boolean }) {
+  const { t } = useTranslation();
+  const hiding = entry.visible;
+  return (
+    <Card
+      title={
+        <span className="flex items-center gap-2">
+          {t("admin.apps.entry.title")}
+          <Badge tone={entry.visible ? "success" : "neutral"}>{t(entry.visible ? "admin.apps.entry.on" : "admin.apps.entry.off")}</Badge>
+        </span>
+      }
+      extra={
+        <span className="flex items-center gap-3 text-xs">
+          <span className="font-mono text-fg-3">
+            v{entry.version} · {entry.updated_by} · <TimeText value={entry.updated_at} />
+          </span>
+          {audit && (
+            <Link to="/audit?target=app%3Adownload_entry" className="text-brand">
+              {t("admin.apps.audit")}
+            </Link>
+          )}
+        </span>
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3" data-testid="apps-entry" data-state={entry.visible ? "on" : "off"}>
+        <p className="max-w-3xl text-xs text-fg-2">{t("admin.apps.entry.hint")}</p>
+        {edit && (
+          <DangerAction
+            trigger={(open) => (
+              <Button size="sm" variant={hiding ? "secondary" : "primary"} onClick={open} data-testid="apps-entry-switch">
+                {t(hiding ? "admin.apps.entry.hide" : "admin.apps.entry.show")}
+              </Button>
+            )}
+            danger={hiding}
+            title={t(hiding ? "admin.apps.entry.hideTitle" : "admin.apps.entry.showTitle")}
+            description={t(hiding ? "admin.apps.entry.hideHint" : "admin.apps.entry.showHint")}
+            target={<span className="font-medium">{t("admin.apps.entry.title")}</span>}
+            confirmWord="entry"
+            run={async (reason) =>
+              adminData(await adminApi.PUT("/admin/v1/platform/download-entry", { body: { visible: !entry.visible, reason } }))
+            }
+            success={t(hiding ? "admin.apps.entry.hidden" : "admin.apps.entry.shown")}
+            invalidate={[appsKey, launchKey]}
+          />
+        )}
+      </div>
+    </Card>
   );
 }
 

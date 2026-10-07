@@ -276,6 +276,12 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
           {t("admin.apps.platform.ANDROID")}：{offered("android")}
           <span className="text-fg-3"> · </span>
           {t("admin.apps.platform.IOS")}：{offered("ios")}
+          {typeof v.entry_visible === "boolean" && (
+            <>
+              <span className="text-fg-3"> · </span>
+              {t("admin.apps.entry.title")}：{t(v.entry_visible ? "admin.apps.entry.on" : "admin.apps.entry.off")}
+            </>
+          )}
         </>
       );
       break;

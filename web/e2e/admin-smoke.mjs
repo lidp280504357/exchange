@@ -562,6 +562,13 @@ try {
   await page.waitForSelector("[data-testid=app-ANDROID] [data-testid=app-settings-ANDROID]", { timeout: 20000 });
   await page.waitForSelector("[data-testid=app-IOS] [data-testid=app-settings-IOS]");
   await page.waitForSelector("[data-testid=apps-ota-hint]");
+  // The download entries' switch (H5): its state, and its confirmation
+  // opened and canceled (admin.sh switches it).
+  await page.waitForSelector("[data-testid=apps-entry][data-state]");
+  await page.click("[data-testid=apps-entry-switch]");
+  await page.waitForFunction(() => /下载入口/.test(document.querySelector("[role=dialog]")?.textContent ?? ""));
+  await clickButton("取消", "[role=dialog]");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   const androidMode = '[data-testid=app-settings-ANDROID] [role=radiogroup]';
   await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === "外部链接")?.click(), androidMode);
   await page.waitForFunction(() => document.querySelector("[data-testid=app-save-ANDROID]")?.innerText.includes("保存"), { timeout: 5000 });
@@ -596,7 +603,9 @@ try {
   await clickButton("确认", appDialog);
   await page.waitForFunction((sel) => !document.querySelector(sel), { timeout: 20000 }, appDialog);
   await page.waitForFunction((tid) => !document.querySelector(`[data-testid=${tid}]`), { timeout: 20000 }, deleteId);
-  ok("the App downloads: both platforms, the mode switched unsaved, a minimal .apk uploaded in parts, checked, listed and deleted");
+  ok(
+    "the App downloads: the download entries' switch (confirmation canceled), both platforms, the mode switched unsaved, a minimal .apk uploaded in parts, checked, listed and deleted",
+  );
   // The fixed pages: the six legal pages and the home hero, each with what
   // the sites show; the hero's editor opens from its default (closed unsaved).
   await go("/pages");

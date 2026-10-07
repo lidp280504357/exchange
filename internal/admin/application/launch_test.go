@@ -143,9 +143,9 @@ func TestLaunchChecklist(t *testing.T) {
 	if v := c.Items[slicesIndex(c, "admins")].Value; v["active_admins"] != 1 {
 		t.Fatalf("the administrators %+v", v)
 	}
-	// The apps to download (H4): for information, nothing offered is OK;
-	// unreadable is UNKNOWN.
-	if v := c.Items[slicesIndex(c, "app_downloads")].Value; len(v) != 2 || v["android"] != nil || v["ios"] != nil {
+	// The apps to download (H4): for information, nothing offered is OK,
+	// with the download entries' switch (H5); unreadable is UNKNOWN.
+	if v := c.Items[slicesIndex(c, "app_downloads")].Value; len(v) != 3 || v["android"] != nil || v["ios"] != nil || v["entry_visible"] != true {
 		t.Fatalf("the apps %+v", v)
 	}
 	// What each platform offers, by its lower-case name (A77 ②): a link,

@@ -94,9 +94,11 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 
 - 每次改动（设置、记入文件、删除文件）版本加 1，`config_history` 记一行 `PLATFORM_APP`（键为平台，前后两份，文件按 ID）。
 - 地址：文件的 `url` 为 `https://<平台资料的域名>/downloads/<stored_as>`，域名为空时用上传时的站点；iOS 的 `install_url` 为 `itms-services://?action=download-manifest&url=<清单地址>`（清单里写死上传时的地址，改域名后要重新上传 .ipa）。
-- 公开接口（经网关）：`GET /v1/platform/apps` → `{android, ios}`，未启用、关闭、链接为空或安装包不在的平台为 `null`；缓存 60 秒，`ETag` 为 `"<Android 版本>-<iOS 版本>-<平台资料版本>"`（文件地址随资料里的域名变；强标签，`If-None-Match` 带 `W/` 也认），没变时 304。
+- 下载入口开关（H5）：表 `platform_download_entry`（迁移 instrument 00014，一行，初始为开、版本 1）：两站的下载入口显示还是隐藏；切换时版本加 1，`config_history` 记一行 `DOWNLOAD_ENTRY`（键 `ENTRY`，前后两份），切到当前状态什么都不改。
+- 公开接口（经网关）：`GET /v1/platform/apps` → `{android, ios, entry: {visible}}`，未启用、关闭、链接为空或安装包不在的平台为 `null`；缓存 60 秒，`ETag` 为 `"<Android 版本>-<iOS 版本>-<平台资料版本>-<下载入口版本>"`（文件地址随资料里的域名变；H5 之前是三个数；强标签，`If-None-Match` 带 `W/` 也认），没变时 304。
 - 内部接口（后台调用，网关不转发 `/internal`）：
-  - `GET /internal/platform/apps` → `{apps: [Android, iOS]}`，即后台的 `PlatformAppAdmin`（另带每个文件的 `stored_as`、`manifest`，供 admin-service 删除文件）。
+  - `GET /internal/platform/apps` → `{apps: [Android, iOS], entry}`，即后台的 `PlatformAppAdmin`（另带每个文件的 `stored_as`、`manifest`，供 admin-service 删除文件）与 `AppEntryAdmin`（`visible`、`version`、`updated_by`、`updated_at`）。
+  - `PUT /internal/platform/download-entry`：`{visible, actor, reason}` → 下载入口开关（同上）。
   - `PUT /internal/platform/apps/{platform}`：`{mode, link_url, notes, enabled, expected_version, actor, reason}`；版本过期 409 `INSTRUMENT_PLATFORM_CHANGED`，`FILE` 没有安装包时 400。
   - `POST /internal/platform/apps/{platform}/files`：`{file: {file_id, kind, name, size, sha256, stored_as, manifest, origin, package, version, build, min_os, uploaded_at, uploaded_by}, actor, reason}` → `{app, replaced}`：安装包成为当前文件、模式改为 `FILE`；配置描述文件替换旧的（`replaced` 为被替换的，文件由调用方删除）；超过 10 个 409 `PLATFORM_APP_FILES_FULL`。
   - `DELETE /internal/platform/apps/{platform}/files/{file_id}`：`{actor, reason}` → `{app, removed}`：删的是当前安装包时有链接回到 `LINK`，否则 `OFF`；文件由调用方删除。

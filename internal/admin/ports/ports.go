@@ -1577,8 +1577,12 @@ type Platform interface {
 // instrument-service's internal API (design 2026-10-07, App download page
 // §7 #9); its answers are the console's (admin.yaml's PlatformAppAdmin).
 type PlatformApps interface {
-	// Apps returns both platforms, {"apps": [...]}, Android first.
+	// Apps returns both platforms, Android first, and the download
+	// entries' switch: {"apps": [...], "entry": {...}}.
 	Apps(ctx context.Context) (json.RawMessage, error)
+	// SetAppEntry shows or hides the sites' download entries (H5): the
+	// switch as saved (admin.yaml's AppEntryAdmin).
+	SetAppEntry(ctx context.Context, visible bool, actor, reason string) (json.RawMessage, error)
 	// SetApp changes a platform's mode, link, notes and switch; write
 	// carries expected_version, a stale one is refused.
 	SetApp(ctx context.Context, platform string, write json.RawMessage, actor, reason string) (json.RawMessage, error)

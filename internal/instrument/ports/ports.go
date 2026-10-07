@@ -114,6 +114,13 @@ type AppRepo interface {
 	// Save writes a platform as of a.UpdatedBy and a.UpdatedAt, raising
 	// its version by one.
 	Save(ctx context.Context, a domain.PlatformApp) (domain.PlatformApp, error)
+	// Entry returns the switch for the sites' download entries;
+	// EntryForUpdate with its row locked.
+	Entry(ctx context.Context) (domain.AppEntry, error)
+	EntryForUpdate(ctx context.Context) (domain.AppEntry, error)
+	// SaveEntry writes the switch as of e.UpdatedBy and e.UpdatedAt,
+	// raising its version by one.
+	SaveEntry(ctx context.Context, e domain.AppEntry) (domain.AppEntry, error)
 }
 
 // Ledger reads the welcome credits ledger-service grants (design

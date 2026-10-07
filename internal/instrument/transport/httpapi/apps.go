@@ -16,11 +16,12 @@ import (
 // The apps to download (design 2026-10-07, App download page; H0 contract
 // in api/openapi/platform.yaml and api/admin/admin.yaml): the sites' public
 // read, and the admin console's reads and changes on /internal (the
-// gateway does not route those) - its settings, and the files
-// admin-service stored and deletes.
+// gateway does not route those) - its settings, the files admin-service
+// stored and deletes, and the switch for the sites' download entries (H5).
 func (h *Handler) appRoutes(r chi.Router) {
 	r.Get("/v1/platform/apps", h.publicApps)
 	r.Get("/internal/platform/apps", h.internalApps)
+	r.Put("/internal/platform/download-entry", h.setAppEntry)
 	r.Put("/internal/platform/apps/{platform}", h.setApp)
 	r.Post("/internal/platform/apps/{platform}/files", h.addAppFile)
 	r.Delete("/internal/platform/apps/{platform}/files/{file_id}", h.deleteAppFile)
@@ -127,50 +128,68 @@ func platformAppJSONOf(a domain.PlatformApp, siteDomain string) PlatformAppJSON 
 	return out
 }
 
-// appsETag is the two platforms' versions, Android's then iOS's, and the
-// profile's, whose domain the files' addresses use: every change raises
-// one of them (review FM ②: a sum could come back to a value it had; FX:
-// a new domain moves the addresses). A strong tag; notModified takes it
-// weakened too.
-func appsETag(list []domain.PlatformApp, profileVersion int64) string {
+// AppEntryJSON is the switch for the sites' download entries as the
+// console sees it (admin.yaml's AppEntryAdmin; the sites get visible
+// alone, platform.yaml's AppEntry).
+type AppEntryJSON struct {
+	Visible   bool   `json:"visible"`
+	Version   int64  `json:"version"`
+	UpdatedBy string `json:"updated_by"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func appEntryJSONOf(e domain.AppEntry) AppEntryJSON {
+	return AppEntryJSON{Visible: e.Visible, Version: e.Version, UpdatedBy: e.UpdatedBy, UpdatedAt: httpx.FormatTime(e.UpdatedAt)}
+}
+
+// appsETag is the two platforms' versions, Android's then iOS's, the
+// profile's, whose domain the files' addresses use, and the download
+// entry's (H5): every change raises one of them (review FM ②: a sum could
+// come back to a value it had; FX: a new domain moves the addresses). A
+// strong tag; notModified takes it weakened too.
+func appsETag(list []domain.PlatformApp, profileVersion, entryVersion int64) string {
 	v := map[string]int64{}
 	for _, a := range list {
 		v[a.Platform] = a.Version
 	}
-	return fmt.Sprintf(`"%d-%d-%d"`, v[domain.AppAndroid], v[domain.AppIOS], profileVersion)
+	return fmt.Sprintf(`"%d-%d-%d-%d"`, v[domain.AppAndroid], v[domain.AppIOS], profileVersion, entryVersion)
 }
 
 // apps returns the platforms with the profile, whose domain their files'
-// addresses use.
-func (h *Handler) apps(r *http.Request) ([]domain.PlatformApp, domain.PlatformProfile, error) {
+// addresses use, and the switch for the download entries.
+func (h *Handler) apps(r *http.Request) ([]domain.PlatformApp, domain.PlatformProfile, domain.AppEntry, error) {
 	list, err := h.Apps.List(r.Context())
 	if err != nil {
-		return nil, domain.PlatformProfile{}, err
+		return nil, domain.PlatformProfile{}, domain.AppEntry{}, err
 	}
 	p, err := h.Platform.Profile(r.Context())
 	if err != nil {
-		return nil, domain.PlatformProfile{}, err
+		return nil, domain.PlatformProfile{}, domain.AppEntry{}, err
 	}
-	return list, p, nil
+	e, err := h.Apps.Entry(r.Context())
+	if err != nil {
+		return nil, domain.PlatformProfile{}, domain.AppEntry{}, err
+	}
+	return list, p, e, nil
 }
 
 // publicApps serves the apps to the sites: cacheable for a minute, 304 for
 // the ETag they hold.
 func (h *Handler) publicApps(w http.ResponseWriter, r *http.Request) {
-	list, prof, err := h.apps(r)
+	list, prof, entry, err := h.apps(r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	siteDomain := prof.Domain
-	tag := appsETag(list, prof.Version)
+	tag := appsETag(list, prof.Version, entry.Version)
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.Header().Set("ETag", tag)
 	if notModified(r, tag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	out := map[string]*AppDownloadJSON{"android": nil, "ios": nil}
+	out := map[string]any{"android": (*AppDownloadJSON)(nil), "ios": (*AppDownloadJSON)(nil), "entry": map[string]bool{"visible": entry.Visible}}
 	for _, a := range list {
 		out[strings.ToLower(a.Platform)] = appDownloadJSONOf(a.Public(siteDomain))
 	}
@@ -178,7 +197,7 @@ func (h *Handler) publicApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) internalApps(w http.ResponseWriter, r *http.Request) {
-	list, prof, err := h.apps(r)
+	list, prof, entry, err := h.apps(r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -187,7 +206,30 @@ func (h *Handler) internalApps(w http.ResponseWriter, r *http.Request) {
 	for _, a := range list {
 		out = append(out, platformAppJSONOf(a, prof.Domain))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"apps": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"apps": out, "entry": appEntryJSONOf(entry)})
+}
+
+// setAppEntry shows or hides the sites' download entries (H5).
+func (h *Handler) setAppEntry(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Visible *bool  `json:"visible"`
+		Actor   string `json:"actor"`
+		Reason  string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if body.Visible == nil {
+		httpx.WriteError(w, r, apperr.Invalid("visible is required"))
+		return
+	}
+	e, err := h.Apps.SetEntry(r.Context(), *body.Visible, body.Actor, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, appEntryJSONOf(e))
 }
 
 // writeApp answers a platform as the console sees it, with the file a

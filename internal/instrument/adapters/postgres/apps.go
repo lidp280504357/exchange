@@ -151,3 +151,38 @@ func (r apps) Save(ctx context.Context, a domain.PlatformApp) (domain.PlatformAp
 	}
 	return saved, nil
 }
+
+const entryColumns = `visible, version, updated_by, updated_at`
+
+func scanEntry(row pgx.Row) (domain.AppEntry, error) {
+	var e domain.AppEntry
+	if err := row.Scan(&e.Visible, &e.Version, &e.UpdatedBy, &e.UpdatedAt); err != nil {
+		return domain.AppEntry{}, err
+	}
+	return e, nil
+}
+
+func (r apps) Entry(ctx context.Context) (domain.AppEntry, error) {
+	e, err := scanEntry(r.q.QueryRow(ctx, `SELECT `+entryColumns+` FROM platform_download_entry`))
+	if err != nil {
+		return domain.AppEntry{}, fmt.Errorf("read the download entry: %w", err)
+	}
+	return e, nil
+}
+
+func (r apps) EntryForUpdate(ctx context.Context) (domain.AppEntry, error) {
+	e, err := scanEntry(r.q.QueryRow(ctx, `SELECT `+entryColumns+` FROM platform_download_entry FOR UPDATE`))
+	if err != nil {
+		return domain.AppEntry{}, fmt.Errorf("read the download entry: %w", err)
+	}
+	return e, nil
+}
+
+func (r apps) SaveEntry(ctx context.Context, e domain.AppEntry) (domain.AppEntry, error) {
+	saved, err := scanEntry(r.q.QueryRow(ctx, `UPDATE platform_download_entry SET visible = $1, version = version + 1, updated_by = $2,
+		updated_at = $3 RETURNING `+entryColumns, e.Visible, e.UpdatedBy, e.UpdatedAt))
+	if err != nil {
+		return domain.AppEntry{}, fmt.Errorf("save the download entry: %w", err)
+	}
+	return saved, nil
+}

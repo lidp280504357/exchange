@@ -3678,22 +3678,26 @@ paths:
         and the files kept on the server, what the sites show now, its
         version and who changed it last. instrument-service keeps the
         settings; the files are on the server's disk, nginx serves them
-        under /downloads/ on the three sites. Every administrator reads
+        under /downloads/ on the three sites. With them the switch for the
+        sites' download entries (`entry`, H5; PUT
+        /admin/v1/platform/download-entry). Every administrator reads
         them. Batch H0.
       tags: [platform]
       responses:
         '200':
-          description: Both platforms, Android first.
+          description: Both platforms, Android first, and the entries' switch.
           content:
             application/json:
               schema:
                 type: object
-                required: [apps]
+                required: [apps, entry]
                 properties:
                   apps:
                     type: array
                     items:
                       $ref: '#/components/schemas/PlatformAppAdmin'
+                  entry:
+                    $ref: '#/components/schemas/AppEntryAdmin'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/platform/apps/{platform}:
@@ -3908,6 +3912,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlatformAppAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/download-entry:
+    put:
+      operationId: setDownloadEntry
+      summary: Show or hide the sites' download entries
+      description: |
+        Design 2026-10-07 (App download page) §1.2 #8, user 19:3x, batch
+        H5: the switch 显示下载入口, on by default. On, the sites show their
+        download entries whether or not a platform is offered (the page and
+        the QR panel then say none is offered yet); off, the entries are
+        hidden and /download still opens when visited. The sites read it
+        from GET /v1/platform/apps (`entry`) within a minute. One ADMIN
+        (settings.write) alone; audited as admin.platform.download_entry
+        (from, to). Switching it to the state it is in changes nothing (no
+        version, no audit).
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [visible]
+                  properties:
+                    visible:
+                      type: boolean
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The switch as saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppEntryAdmin'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/platform/welcome-credits:
@@ -7707,6 +7747,24 @@ components:
         reason:
           type: string
           minLength: 3
+    AppEntryAdmin:
+      description: The switch for the sites' download entries (batch H5) with its version and last change.
+      type: object
+      required: [visible, version, updated_by, updated_at]
+      properties:
+        visible:
+          type: boolean
+          description: On by default; the sites read it as GET /v1/platform/apps's entry.visible.
+        version:
+          type: integer
+          format: int64
+          description: Goes up with every switch; the public answer's ETag carries it.
+        updated_by:
+          type: string
+          description: Who switched it last (system:migration for the default).
+        updated_at:
+          type: string
+          format: date-time
     PlatformAppAdmin:
       description: >-
         One platform's download as the console sets it (design 2026-10-07, App download page): what the sites show
@@ -8076,7 +8134,8 @@ components:
             rules, never for everyone (value: flag, enabled, rules);
             app_downloads (App download design 2026-10-07 §5, H4): for
             information, OK whatever is offered (value: android and ios,
-            each LINK, FILE or null for nothing offered).
+            each LINK, FILE or null for nothing offered; entry_visible,
+            the download entries' switch, since H5).
         status:
           type: string
           enum: [OK, FAIL, PENDING, UNKNOWN]
