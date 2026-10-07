@@ -60,11 +60,14 @@ source "$(dirname "$0")/lib/remote.sh"
 
 CSRF=(-H 'X-Admin-CSRF: 1')
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
-# acall is call on the console's domain.
+# acall is call on the console's domain, over HTTP/1.1: on 2026-10-07 the
+# Mac's curl (8.7.1) failed three answers the console had sent (nginx
+# logged them 200) with an HTTP/2 framing error, exit 16, which call does
+# not retry - a GET, a POST and a part's PUT, hours apart.
 acall() {
   local user_base=$BASE rc=0
   BASE=$ADMIN_BASE
-  call "$@" || rc=$?
+  call "$@" --http1.1 || rc=$?
   BASE=$user_base
   return $rc
 }
