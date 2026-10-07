@@ -132,15 +132,22 @@ await f.step("1", "every link of the tab bar, the home page and the me page open
   if (broken.length) throw new Error(`dead links: ${broken.join(", ")}`);
 });
 
-await f.step("1", "a page that needs the account sends a visitor to sign in, and back after", async () => {
+await f.step("1", "every page that needs the account sends a visitor to sign in, and back after", async () => {
   const V = await f.open({ name: "visitor", device: phone(390) });
   try {
-    await V.go("/assets/history");
-    await V.page.waitForFunction(() => location.pathname === "/login" && new URLSearchParams(location.search).get("next") === "/assets/history", { timeout: 15000 });
+    for (const p of PRIVATE) {
+      await V.go(p);
+      await V.page.waitForFunction(
+        (want) => location.pathname === "/login" && new URLSearchParams(location.search).get("next") === want,
+        { timeout: 15000 },
+        p,
+      );
+    }
+    const last = PRIVATE.at(-1);
     await V.typeInto('input[autocomplete="username"]', user.email);
     await V.typeInto('input[autocomplete="current-password"]', user.password);
     await V.page.keyboard.press("Enter");
-    await V.waitPath("/assets/history", 30000);
+    await V.waitPath(last, 30000);
   } finally {
     await V.close();
   }
