@@ -125,13 +125,6 @@ try {
 
   // 3. Markets: every market listed, the search narrows them.
   await page.waitForFunction(() => document.body.innerText.includes("BTC") && document.body.innerText.includes("ETH"), { timeout: 20000 });
-  // The pairs come first and the contracts after them (core
-  // useFuturesMarketRows): measure once the rail counts the contracts, or
-  // the table turns virtual under the measurement (a page-scrolled header
-  // read -298px off on 78a1acf).
-  await page.waitForFunction(() => [...document.querySelectorAll("main nav button")].some((b) => /^合约\s*[1-9]\d*$/.test(b.textContent.trim())), {
-    timeout: 20000,
-  });
   // The page scrolls the table (it has no scroll box of its own, which left
   // a blank under it), and its header sticks right under the top bar. From
   // 200 rows (Markets.tsx VIRTUAL_FROM: 全部 has the 91 pairs and the 109
@@ -155,7 +148,8 @@ try {
     });
   // The contracts come with their own request after the pairs: the table
   // switches to its box when they arrive, so the check waits for them (the
-  // rail's 合约 count).
+  // rail's 合约 count; measured before, a page-scrolled header read -298px
+  // off on 78a1acf).
   await page.waitForFunction(
     () => Number([...document.querySelectorAll("main nav button")].find((b) => b.innerText.trim().startsWith("合约"))?.innerText.match(/(\d+)\s*$/)?.[1] ?? 0) > 0,
     { timeout: 20000 },
