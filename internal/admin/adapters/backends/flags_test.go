@@ -3,6 +3,7 @@ package backends_test
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"testing"
 
 	"github.com/skill/exchange/internal/admin/adapters/backends"
@@ -31,6 +32,13 @@ func TestFlags(t *testing.T) {
 		t.Fatalf("%d flags listed, want the %d known ones", len(list), len(flags.Known))
 	}
 	for _, fl := range list {
+		if slices.Contains(flags.ProductKeys, fl.Key) {
+			// The product lines are seeded open (migration config 00002).
+			if !fl.Enabled || fl.Version != 1 || fl.UpdatedAt == nil {
+				t.Fatalf("a product line not seeded open: %+v", fl)
+			}
+			continue
+		}
 		if fl.Enabled || fl.Version != 0 || fl.UpdatedAt != nil {
 			t.Fatalf("a flag never set is not off: %+v", fl)
 		}
@@ -50,8 +58,8 @@ func TestFlags(t *testing.T) {
 		t.Fatalf("switched off: %+v, %v", off, err)
 	}
 	var changes, audits int
-	if err := db.QueryRow(ctx, `SELECT (SELECT count(*) FROM flag_changes), (SELECT count(*) FROM outbox WHERE topic = 'audit.events')`).
-		Scan(&changes, &audits); err != nil {
+	if err := db.QueryRow(ctx, `SELECT (SELECT count(*) FROM flag_changes WHERE key = $1), (SELECT count(*) FROM outbox WHERE topic = 'audit.events')`,
+		flags.KeyReferenceKline).Scan(&changes, &audits); err != nil {
 		t.Fatal(err)
 	}
 	if changes != 2 || audits != 2 {

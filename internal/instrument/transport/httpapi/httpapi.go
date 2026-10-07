@@ -26,6 +26,9 @@ type Handler struct {
 	// Apps serves the apps to download (apps.go) with Platform's domain;
 	// nil leaves their routes out.
 	Apps *application.Apps
+	// Products serves the product lines open (products.go); nil leaves
+	// its route out.
+	Products ProductFlags
 }
 
 // Routes mounts the endpoints on r.
@@ -35,6 +38,9 @@ func (h *Handler) Routes(r chi.Router) {
 		if h.Apps != nil {
 			h.appRoutes(r)
 		}
+	}
+	if h.Products != nil {
+		h.productRoutes(r)
 	}
 	r.Get("/v1/market/assets", h.assets)
 	r.Get("/v1/market/assets/{code}/logo", h.logo)

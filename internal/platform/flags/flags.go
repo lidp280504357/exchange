@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/pg"
 )
 
@@ -96,6 +97,38 @@ const (
 // control, J0): off, every overlay is back to 1 at once.
 const KeyOverlay = "market.overlay"
 
+// The product lines (design 2026-10-07, product switches, K0): spot
+// trading, the USDT-margined and the coin-margined contracts. Each is open
+// unless an operator closes it, and none is ever deleted: the flags are
+// seeded on (migration config 00002), and one that is not stored counts as
+// open (Client.Closed), so losing the flags closes nothing. They take no
+// rules: a line is open or closed for everyone (users and regions have
+// their eligibility flags). Closed, a line is gone from the sites and
+// takes no new orders (PRODUCT_CLOSED) while cancels and reduce-only
+// closes go on; its open orders are canceled as it closes.
+const (
+	KeyProductSpot  = "product.spot"
+	KeyProductUSDTM = "product.usdt_m"
+	KeyProductCoinM = "product.coin_m"
+)
+
+// ProductKeys are the product lines' flags in the order the API lists
+// them; ProductNames their names there.
+var (
+	ProductKeys  = []string{KeyProductSpot, KeyProductUSDTM, KeyProductCoinM}
+	ProductNames = map[string]string{KeyProductSpot: "spot", KeyProductUSDTM: "usdt_m", KeyProductCoinM: "coin_m"}
+)
+
+// CodeProductClosed refuses what a closed product line no longer takes.
+const CodeProductClosed = "PRODUCT_CLOSED"
+
+// ErrProductClosed refuses an order (or a transfer in) on the product line
+// of key, naming it in the details (product: spot, usdt_m or coin_m).
+func ErrProductClosed(key string) error {
+	return apperr.New(apperr.KindForbidden, CodeProductClosed, "this product is closed: orders other than reduce-only closes are not taken").
+		WithDetail("product", ProductNames[key])
+}
+
 // Known describes the known flags.
 var Known = map[string]string{
 	KeyRegistrationSMS:   "SMS as a registration and login channel (high-risk regions stay email-only)",
@@ -127,6 +160,9 @@ var Known = map[string]string{
 	KeyCoinM:             "Coin-margined perpetuals (BTC-USD-PERP and the others, settled in their base asset): orders, positions and the FUTURES accounts of BTC, ETH and ASTRA, by user or region (eligibility COIN_M_TRADE; design 2026-10-06 §2)",
 	KeyReferenceMark:     "Mark price, index price and funding rate from the Binance contract the contract follows instead of the platform's own computation, which stays the fallback when the stream stalls, per symbol (design 2026-10-06 §3.1)",
 	KeyFuturesData:       "Reading the futures statistics from Binance (open interest, long and short ratios, taker volume, basis, funding history) and its liquidation stream; off, what is stored is still served (design 2026-10-06 §3.3)",
+	KeyProductSpot:       "Spot trading as a product line: closed, the sites hide it and new spot orders are refused (PRODUCT_CLOSED) while cancels go on, its open orders are canceled and HOUSE stops quoting it; seeded on, never deleted (design 2026-10-07, product switches)",
+	KeyProductUSDTM:      "The USDT-margined contracts as a product line: closed, the sites hide them, only reduce-only closes and cancels are taken, open and conditional orders are canceled, transfers in are refused and HOUSE stops quoting them; positions, funding and liquidations go on; seeded on, never deleted (design 2026-10-07, product switches)",
+	KeyProductCoinM:      "The coin-margined contracts as a product line, closed as the USDT-margined ones are; seeded on, never deleted (design 2026-10-07, product switches)",
 	KeyOverlay:           "Price events on followed pairs: market-data multiplies a pair's reference book, trades, ticker and candles (and, with risk, its perpetuals' index and mark) by the factor market-sim pushes each second; off, every factor is 1 at once (design 2026-10-07, general price control)",
 }
 
@@ -373,6 +409,16 @@ func (c *Client) Enabled(key string, s Subject) bool {
 	f, ok := c.flags[key]
 	c.mu.RUnlock()
 	return ok && f.Allows(s)
+}
+
+// Closed reports whether an operator closed the product line of key: its
+// flag is stored and off. A flag that is not stored is an open line
+// (ProductKeys).
+func (c *Client) Closed(key string) bool {
+	c.mu.RLock()
+	f, ok := c.flags[key]
+	c.mu.RUnlock()
+	return ok && !f.Enabled
 }
 
 // Get returns the local copy of key.

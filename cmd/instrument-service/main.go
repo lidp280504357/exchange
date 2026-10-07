@@ -68,8 +68,13 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	instrumentv1.RegisterInstrumentServiceServer(srv, grpcapi.NewServer(svc))
+	// The product lines' switches, for GET /v1/platform/products.
+	products, err := bootstrap.Flags(ctx, a, cfg.Postgres)
+	if err != nil {
+		return err
+	}
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Platform: plat, Apps: &application.Apps{Store: store, Now: time.Now}}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Platform: plat, Apps: &application.Apps{Store: store, Now: time.Now}, Products: products}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 

@@ -2,12 +2,15 @@ package flags_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/migrate"
 	"github.com/skill/exchange/internal/platform/pg"
@@ -133,6 +136,38 @@ func TestClientRefreshes(t *testing.T) {
 	}
 	if f, ok := c.Get(flags.KeyWithdraw); !ok || f.Version != 1 {
 		t.Fatalf("Get = %+v %v", f, ok)
+	}
+}
+
+// TestProductLinesSeededOpen: the product lines are seeded on (migration
+// config 00002), a closed one says so, and one that is not stored counts as
+// open (design 2026-10-07, product switches).
+func TestProductLinesSeededOpen(t *testing.T) {
+	db := setup(t)
+	c := flags.NewClient(db, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	ctx := context.Background()
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range flags.ProductKeys {
+		if f, ok := c.Get(key); !ok || !f.Enabled || c.Closed(key) {
+			t.Fatalf("%s seeded: %+v %v", key, f, ok)
+		}
+	}
+	if c.Closed("product.unknown") {
+		t.Fatal("a product line that is not stored is open")
+	}
+	set(t, db, flags.Flag{Key: flags.KeyProductSpot, Enabled: false}, "close spot")
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Closed(flags.KeyProductSpot) || c.Closed(flags.KeyProductUSDTM) {
+		t.Fatal("only spot is closed")
+	}
+	err := flags.ErrProductClosed(flags.KeyProductSpot)
+	var e *apperr.Error
+	if !errors.As(err, &e) || e.Code != flags.CodeProductClosed || e.Details["product"] != "spot" || e.Kind.HTTPStatus() != http.StatusForbidden {
+		t.Fatalf("closed: %v", err)
 	}
 }
 
