@@ -152,6 +152,12 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 
 演练 `scripts/fault/market-sim-down.sh`：停掉 market-sim，挂单留在簿上，1 分钟后交易对与永续停牌，心跳年龄过 60 秒；再启动，30 秒后两者恢复交易、每侧 8 档以上，价格带看门狗不介入。`scripts/fault/reference-outage.sh` 另查币安断流时模拟市场的 BTC/ETH 参考价变为不新鲜（市场因子保持）而 ASTRA-USDT 照常成交，恢复后重新跟随。
 
+## 产品线开关（设计 2026-10-07）
+
+- 现货关闭（`product.spot`）时整个模拟市场暂停，与 `sim.enabled` 关闭、交易对不在交易时一样：撤掉机器人在现货与永续上的挂单，目标价不再走，心跳照常上报；重开后从原来的价格继续。永续也停，是因为它们的指数取平台现货（设计稿 §3 风险一条：关闭现货时 ASTRA 永续按指数来源规则进入只减仓）。spot-trading-service 的撤单接口同时撤掉全部现货挂单（见 [trading.md](trading.md#现货产品线开关设计-2026-10-07-产品线开关批次-k1a)）。
+- U 本位（`product.usdt_m`）或币本位（`product.coin_m`）关闭时只停该产品线的永续（ASTRA-USDT-PERP 属 U 本位，ASTRA-USD-PERP 属币本位，按合约的 `contract_size` 判断），现货与另一条线照常。
+- 开关读 market-sim 自己每 5 秒刷新的副本，没存的产品线按开处理。单测 `TestClosedProductLinesStopTheirBots`。
+
 ## 机器人（设计 §4）
 
 | 角色 | 测试服数量 | 行为 |

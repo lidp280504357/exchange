@@ -48,6 +48,14 @@
 - `DELETE /v1/orders?symbol=`：对该用户（某交易对）的全部活跃订单逐个请求撤单，返回请求数。
 - 订单最终变为 CANCELED（`cancel_reason` USER）并解冻剩余部分，以引擎的 `order.events` 为准。
 
+## 现货产品线开关（设计 2026-10-07 产品线开关，批次 K1a）
+
+- 开关 `product.spot`（默认开，见 [feature-flags.md](feature-flags.md)）。关闭后 `SPOT` 账户的新单一律返回 403 `PRODUCT_CLOSED`（`details.product` 为 `spot`），不落库：在幂等键与 `client_order_id` 之后、交易对与资格之前检查，存单前在同一用户的锁下再查一次；撤单照常。杠杆账户的订单不归它管（杠杆交易有自己的开关 `margin.enabled`，设计 §1 #7），强平单也不受影响。
+- 关闭时由 admin-service（后台「产品线」卡，批次 K3）调内部接口 `POST /internal/products/spot/cancel-open`（`{actor, reason}`；只在 compose 网络内，带 `X-User-Id` 的请求 404）：先重读开关，还开着就返回 409 `COMMON_CONFLICT`；然后对全部用户 `SPOT` 账户的活跃订单逐个请求撤单（每个用户一个事务），每单在同一事务里经 outbox 发审计 `admin.orders.canceled`（目标 `user:<用户ID>`，details 含 `order_id`、`symbol`、`product`；ClickHouse `audit_logs` 的 `actor_id` 是调用方给的 `actor`）；1 秒后再扫一遍，收走关闭那一刻正在下的单。返回 202 `{canceled, orders: [{order_id, user_id, symbol}]}`，已请求过撤单的不再计入。重开不回放撤掉的单。
+- 关闭期间行情照常；market-sim 的平台币机器人整体暂停（永续的指数来自现货，见 [market-sim.md](market-sim.md#产品线开关设计-2026-10-07)）；向合约账户的划入归合约产品线管（见 [ledger.md](ledger.md#接口)）。
+- 手动：`exchangectl flags set product.spot --off --reason ...` 关、`--on` 开。只改开关不撤单，撤单用上面的接口（后台切换时一并完成）。
+- 端到端：`scripts/e2e/trading.sh` 最后一节把现货关闭约半分钟——新单被拒、撤单接口收走自己的挂单并留下审计、重开后订单回到自己的检查；中途失败时退出前把开关打开（打不开就报 FAIL 并给出手动命令）。它撤的是全部用户的现货挂单，与运营关闭时一样；market-sim 的机器人在重开后几秒内重新挂单。
+
 ## 引擎事件与解冻
 
 交易服务消费 `order.events`（跳过自己发的 OrderAccepted 和无 sequence 的 OrderRejected）与 `trade.events`，消费组为 `spot-trading-service`：
