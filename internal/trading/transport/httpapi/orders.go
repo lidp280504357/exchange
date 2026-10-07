@@ -174,9 +174,9 @@ func (h *Handler) cancelAccount(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]int{"requested": n})
 }
 
-// cancelOpen cancels the SPOT accounts' active orders once spot trading
-// is closed (design 2026-10-07, product switches; admin-service calls it
-// after closing product.spot).
+// cancelOpen cancels the active orders of spot trading's line (spot and
+// margin accounts) once it is closed (design 2026-10-07, product switches;
+// admin-service calls it after closing product.spot).
 func (h *Handler) cancelOpen(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Actor  string `json:"actor"`
@@ -206,16 +206,16 @@ func (h *Handler) cancelOpen(w http.ResponseWriter, r *http.Request) {
 }
 
 // spotLine answers the console's count of what closing spot trading
-// touches (design 2026-10-07, product switches §1 #3): the open orders on
-// SPOT accounts, the market-making accounts' left out; spot holds no
-// positions.
+// touches (design 2026-10-07, product switches §1 #3 and #7): the open
+// orders on spot and margin accounts, the market-making accounts' left
+// out, and as positions the margin accounts that owe anything.
 func (h *Handler) spotLine(w http.ResponseWriter, r *http.Request) {
-	closed, open, err := h.Svc.SpotLine(r.Context())
+	closed, open, borrowers, err := h.Svc.SpotLine(r.Context())
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"product": "spot", "closed": closed, "open_orders": open, "open_positions": 0})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"product": "spot", "closed": closed, "open_orders": open, "open_positions": borrowers})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

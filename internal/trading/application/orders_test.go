@@ -125,10 +125,10 @@ func (r memOrders) Active(_ context.Context, userID, symbol string) ([]domain.Or
 	return out, nil
 }
 
-func (r memOrders) ActiveUsers(_ context.Context, account domain.AccountType, since time.Time) ([]string, error) {
+func (r memOrders) ActiveUsers(_ context.Context, since time.Time) ([]string, error) {
 	var out []string
 	for _, o := range r.s.orders {
-		if o.Status.Active() && o.AccountType == account && !o.CreatedAt.Before(since) && !slices.Contains(out, o.UserID) {
+		if o.Status.Active() && !o.CreatedAt.Before(since) && !slices.Contains(out, o.UserID) {
 			out = append(out, o.UserID)
 		}
 	}
@@ -136,10 +136,10 @@ func (r memOrders) ActiveUsers(_ context.Context, account domain.AccountType, si
 	return out, nil
 }
 
-func (r memOrders) CountOpen(_ context.Context, account domain.AccountType, except []string) (int, error) {
+func (r memOrders) CountOpen(_ context.Context, except []string) (int, error) {
 	n := 0
 	for _, o := range r.s.orders {
-		if o.Status.Active() && o.AccountType == account && !slices.Contains(except, o.UserID) {
+		if o.Status.Active() && !slices.Contains(except, o.UserID) {
 			n++
 		}
 	}
@@ -183,14 +183,25 @@ func (r memOrders) PendingStats(context.Context) (int, time.Time, error) {
 }
 
 // fakeLedger answers freezes with err (nil freezes), unfreezes with
-// unfreezeErr, and records the calls and the accounts they named.
+// unfreezeErr, and records the calls and the accounts they named; debts
+// are the margin accounts' by "type scope asset" (the user's ignored).
 type fakeLedger struct {
 	err         error
 	unfreezeErr error
 	calls       []string
 	releases    []string
 	accounts    []domain.Account
+	debts       map[string]string
 }
+
+func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset string) (decimal.Decimal, error) {
+	if v, ok := l.debts[string(a.Type)+" "+a.Scope+" "+asset]; ok {
+		return d(v), nil
+	}
+	return decimal.Zero, nil
+}
+
+func (l *fakeLedger) MarginBorrowers(context.Context) (int, error) { return len(l.debts), nil }
 
 func (l *fakeLedger) Unfreeze(_ context.Context, key string, a domain.Account, asset string, amount decimal.Decimal, _ string) error {
 	if l.unfreezeErr != nil {
@@ -993,35 +1004,38 @@ func (l *lines) Refresh(context.Context) error {
 	return nil
 }
 
-// The product switches (design 2026-10-07): with spot trading closed new
-// orders on SPOT accounts are refused and nothing is stored, while orders
-// on margin accounts follow margin.enabled and cancels go on; CancelOpen
-// cancels the SPOT accounts' orders, each audited, once the line is
-// closed.
+// The product switches (design 2026-10-07, §1 #3 and #7): with spot
+// trading closed new orders are refused and nothing is stored, on margin
+// accounts too but for repayments (AUTO_REPAY bringing an asset the
+// account owes); the market-making accounts quote on and cancels go on.
+// CancelOpen cancels the open orders of both kinds of account, each
+// audited, once the line is closed; the sweep keeps the repayments.
 func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
-	svc, store, _, _ := newService()
+	svc, store, led, _ := newService()
 	ctx := context.Background()
 	svc.Margin = &fakeMargin{}
 	svc.Features = switches{flags.KeyMarginEnabled: true}
 	products := &lines{closed: map[string]bool{}}
 	svc.Products = products
+	maker := "0199b0a0-0000-7000-8000-0000000000c3"
+	svc.FeeFree = []string{maker}
 	users := []string{"0199b0a0-0000-7000-8000-0000000000c1", "0199b0a0-0000-7000-8000-0000000000c2"}
-	place := func(user, id string, account domain.AccountType) (domain.Order, error) {
-		r := marginBuy(id, account, domain.SideEffectNone)
-		r.UserID = user
+	place := func(user, id string, account domain.AccountType, effect domain.SideEffect, side domain.Side) (domain.Order, error) {
+		r := marginBuy(id, account, effect)
+		r.UserID, r.Side = user, side
 		return svc.Place(ctx, r)
 	}
 	var spot []domain.Order
 	for _, u := range users {
 		for _, id := range []string{"a", "b"} {
-			o, err := place(u, id, domain.AccountSpot)
+			o, err := place(u, id, domain.AccountSpot, domain.SideEffectNone, domain.SideBuy)
 			if err != nil {
 				t.Fatal(err)
 			}
 			spot = append(spot, o)
 		}
 	}
-	margin, err := place(users[0], "m", domain.AccountMarginCross)
+	margin, err := place(users[0], "m", domain.AccountMarginCross, domain.SideEffectNone, domain.SideBuy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1035,24 +1049,28 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 
 	products.closed[flags.KeyProductSpot] = true
 	stored := len(store.orders)
-	_, err = place(users[0], "c", domain.AccountSpot)
-	if e := apperr.From(err); e.Code != flags.CodeProductClosed || e.Details["product"] != "spot" || len(store.orders) != stored {
-		t.Fatalf("an order while closed: %v %v, %d orders", err, e.Details, len(store.orders))
+	for _, c := range []struct {
+		id      string
+		account domain.AccountType
+		effect  domain.SideEffect
+	}{
+		{"c", domain.AccountSpot, domain.SideEffectNone},
+		{"m2", domain.AccountMarginCross, domain.SideEffectNone},
+		{"m3", domain.AccountMarginCross, domain.SideEffectAutoRepay}, // owes nothing
+	} {
+		_, err := place(users[0], c.id, c.account, c.effect, domain.SideBuy)
+		if e := apperr.From(err); e.Code != flags.CodeProductClosed || e.Details["product"] != "spot" || len(store.orders) != stored {
+			t.Fatalf("%s while closed: %v %v, %d orders", c.id, err, e.Details, len(store.orders))
+		}
 	}
-	if _, err := place(users[0], "m2", domain.AccountMarginCross); err != nil {
-		t.Fatalf("a margin order while spot is closed: %v", err)
-	}
-	// The market-making accounts quote whatever the lines are.
-	maker := "0199b0a0-0000-7000-8000-0000000000c3"
-	svc.FeeFree = []string{maker}
-	quote, err := place(maker, "q", domain.AccountSpot)
+	quote, err := place(maker, "q", domain.AccountSpot, domain.SideEffectNone, domain.SideBuy)
 	if err != nil {
 		t.Fatalf("a market maker's order while spot is closed: %v", err)
 	}
 	// The four spot orders (the one being canceled is open until the engine
-	// answers), not the market maker's.
-	if closed, open, err := svc.SpotLine(ctx); err != nil || !closed || open != 4 {
-		t.Fatalf("spot line: closed %v, %d open orders, %v", closed, open, err)
+	// answers) and the margin one, not the market maker's.
+	if closed, open, borrowers, err := svc.SpotLine(ctx); err != nil || !closed || open != 5 || borrowers != 0 {
+		t.Fatalf("spot line: closed %v, %d open orders, %d borrowers, %v", closed, open, borrowers, err)
 	}
 	if _, err := svc.CancelOpen(ctx, "", "closing spot"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("no actor: %v", err)
@@ -1064,24 +1082,22 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 		}
 	}
 	canceled, err := svc.CancelOpen(ctx, "ops@example.com", "closing spot")
-	if err != nil || len(canceled) != 3 || products.refreshes != 2 { // one each time past the arguments
+	if err != nil || len(canceled) != 4 || products.refreshes != 2 { // one each time past the arguments
 		t.Fatalf("cancel-open: %+v %v, %d refreshes", canceled, err, products.refreshes)
 	}
-	for i, o := range spot {
+	for i, o := range append(slices.Clone(spot), margin) {
 		got, _ := store.Read().Orders().Get(ctx, o.ID)
 		if !got.CancelRequested {
-			t.Fatalf("spot order %d not canceled", i)
+			t.Fatalf("order %d (%s) not canceled", i, o.AccountType)
 		}
-		if i < 3 && !slices.ContainsFunc(canceled, func(c CanceledOrder) bool {
+		if i != 3 && !slices.ContainsFunc(canceled, func(c CanceledOrder) bool {
 			return c.OrderID == o.ID && c.UserID == o.UserID && c.Symbol == "BTC-USDT"
 		}) {
-			t.Fatalf("spot order %d missing from %+v", i, canceled)
+			t.Fatalf("order %d missing from %+v", i, canceled)
 		}
 	}
-	for _, o := range []domain.Order{margin, quote} {
-		if got, _ := store.Read().Orders().Get(ctx, o.ID); got.CancelRequested {
-			t.Fatalf("%s %s was canceled", o.ClientOrderID, o.AccountType)
-		}
+	if got, _ := store.Read().Orders().Get(ctx, quote.ID); got.CancelRequested {
+		t.Fatal("the market maker's order was canceled")
 	}
 	var actions []*auditv1.AdminActionPerformed
 	for _, e := range store.events {
@@ -1089,17 +1105,38 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 			actions = append(actions, a)
 		}
 	}
-	if len(actions)-audits != 3 {
-		t.Fatalf("%d audit events, want 3 more than %d", len(actions), audits)
+	if len(actions)-audits != 4 {
+		t.Fatalf("%d audit events, want 4 more than %d", len(actions), audits)
 	}
 	for _, a := range actions[audits:] {
 		if a.GetAction() != "admin.orders.canceled" || a.GetActor() != "ops@example.com" || a.GetReason() != "closing spot" ||
-			!slices.Contains(users, strings.TrimPrefix(a.GetTarget(), "user:")) || !strings.Contains(a.GetDetails(), `"product":"spot"`) {
+			!slices.Contains(users, strings.TrimPrefix(a.GetTarget(), "user:")) || !strings.Contains(a.GetDetails(), `"product":"spot"`) ||
+			!strings.Contains(a.GetDetails(), `"account_type":"`) {
 			t.Fatalf("audit %+v", a)
 		}
 	}
+
+	// Repayments go on: a buy bringing the BTC the account owes; a sell
+	// bringing USDT, which it does not owe, is refused.
+	led.debts = map[string]string{"MARGIN_CROSS  BTC": "0.002"}
+	repay, err := place(users[0], "r", domain.AccountMarginCross, domain.SideEffectAutoRepay, domain.SideBuy)
+	if err != nil {
+		t.Fatalf("a repayment while spot is closed: %v", err)
+	}
+	if _, err := place(users[0], "r2", domain.AccountMarginCross, domain.SideEffectAutoRepay, domain.SideSell); !apperr.Is(err, flags.CodeProductClosed) {
+		t.Fatalf("a sell bringing what the account does not owe: %v", err)
+	}
+	if n, err := svc.SweepClosed(ctx); err != nil || n != 0 {
+		t.Fatalf("sweep: %d %v", n, err)
+	}
+	if got, _ := store.Read().Orders().Get(ctx, repay.ID); got.CancelRequested {
+		t.Fatal("the sweep took the repayment")
+	}
+	if _, _, borrowers, err := svc.SpotLine(ctx); err != nil || borrowers != 1 {
+		t.Fatalf("borrowers: %d %v", borrowers, err)
+	}
 	// Cancels go on while the line is closed.
-	if n, err := svc.CancelAll(ctx, users[0], ""); err != nil || n != 2 {
+	if n, err := svc.CancelAll(ctx, users[0], ""); err != nil || n != 1 {
 		t.Fatalf("cancel all: %d %v", n, err)
 	}
 }

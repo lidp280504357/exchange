@@ -44,12 +44,14 @@ export interface paths {
          *
          *     Product lines (design 2026-10-07, product switches): while an
          *     operator has spot trading closed (the flag product.spot; GET
-         *     /v1/platform/products) every new order on the SPOT account fails
-         *     with PRODUCT_CLOSED (403, details product: spot) and nothing is
-         *     stored; cancels go on, and the orders open when it closed were
-         *     canceled then (and any that slipped in, within 5 seconds). Orders
-         *     on margin accounts follow margin.enabled; margin liquidations and
-         *     the market-making accounts are not refused.
+         *     /v1/platform/products) every new order fails with PRODUCT_CLOSED
+         *     (403, details product: spot) and nothing is stored, on margin
+         *     accounts too (one book) but for repayments: side_effect AUTO_REPAY
+         *     bringing an asset the account owes (a sell's quote asset, a buy's
+         *     base). Cancels go on, and the orders open when it closed were
+         *     canceled then (and any that slipped in, within 5 seconds).
+         *     margin-service's liquidations and the market-making accounts are
+         *     not refused.
          */
         post: operations["createOrder"];
         /**

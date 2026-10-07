@@ -47,12 +47,11 @@ type OrderRepo interface {
 	// Active locks and returns the user's active orders, of one symbol when
 	// symbol is set.
 	Active(ctx context.Context, userID, symbol string) ([]domain.Order, error)
-	// ActiveUsers returns the users with active orders on accounts of the
-	// type, stored at or after since.
-	ActiveUsers(ctx context.Context, account domain.AccountType, since time.Time) ([]string, error)
-	// CountOpen counts the active orders on accounts of the type but those
-	// of the except users.
-	CountOpen(ctx context.Context, account domain.AccountType, except []string) (int, error)
+	// ActiveUsers returns the users with active orders stored at or after
+	// since.
+	ActiveUsers(ctx context.Context, since time.Time) ([]string, error)
+	// CountOpen counts the active orders but those of the except users.
+	CountOpen(ctx context.Context, except []string) (int, error)
 	// List returns a page of the user's orders, newest first.
 	List(ctx context.Context, userID string, f ListFilter) ([]domain.Order, error)
 	// PendingFreeze returns orders created before cutoff whose freeze was
@@ -96,6 +95,11 @@ type Ledger interface {
 	// Unfreeze releases what a finished order no longer needs; a repeated
 	// key returns the first result.
 	Unfreeze(ctx context.Context, key string, account domain.Account, asset string, amount decimal.Decimal, orderID string) error
+	// MarginDebt returns what a margin account owes of asset, the principal
+	// and the interest (zero without a debt).
+	MarginDebt(ctx context.Context, account domain.Account, asset string) (decimal.Decimal, error)
+	// MarginBorrowers counts the margin accounts that owe anything.
+	MarginBorrowers(ctx context.Context) (int, error)
 }
 
 // Margin checks an order on a margin account before its freeze

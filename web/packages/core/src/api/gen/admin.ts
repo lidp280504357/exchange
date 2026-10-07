@@ -1579,12 +1579,13 @@ export interface paths {
          *     (the flags product.spot, product.usdt_m and product.coin_m, seeded
          *     open and never deleted; one not stored counts as open), when and
          *     by whom it was last switched, and what closing it would touch now:
-         *     the open orders (spot: open orders; contracts: open and conditional
-         *     orders) and the open positions (contracts; spot holds none), HOUSE's
-         *     and the market-making accounts' (MARKET_MAKER_USER_IDS) left out
-         *     (the services' GET /internal/products/{line}). A count that cannot
-         *     be read is null and its line named in `partial`. Needs
-         *     instruments.read.
+         *     the open orders (spot: open orders on spot and margin accounts;
+         *     contracts: open and conditional orders) and the open positions
+         *     (contracts: positions; spot: the margin accounts that owe
+         *     anything), HOUSE's and the market-making accounts'
+         *     (MARKET_MAKER_USER_IDS) left out (the services' GET
+         *     /internal/products/{line}). A count that cannot be read is null and
+         *     its line named in `partial`. Needs instruments.read.
          */
         get: operations["getProducts"];
         /**
@@ -1592,7 +1593,8 @@ export interface paths {
          * @description Switches one product line, by one administrator (no funds move).
          *     Closing it hides it from the sites within a minute (GET
          *     /v1/platform/products), refuses new orders other than reduce-only
-         *     closes and cancels (PRODUCT_CLOSED; new conditional orders too),
+         *     closes and cancels (PRODUCT_CLOSED; new conditional orders too;
+         *     spot: on margin accounts too, but for repayments),
          *     refuses transfers into its FUTURES accounts (USDT's for usdt_m;
          *     BTC's, ETH's and ASTRA's for coin_m), and cancels its open orders
          *     through the services' POST /internal/products/{line}/cancel-open

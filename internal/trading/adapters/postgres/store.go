@@ -224,9 +224,8 @@ func (r orders) Active(ctx context.Context, userID, symbol string) ([]domain.Ord
 // then takes the partial index orders_active_idx for a generic plan too.
 const activeWhere = `status IN ('NEW', 'OPEN', 'PARTIALLY_FILLED')`
 
-func (r orders) ActiveUsers(ctx context.Context, account domain.AccountType, since time.Time) ([]string, error) {
-	rows, err := r.q.Query(ctx, `SELECT DISTINCT user_id::text FROM orders WHERE `+activeWhere+` AND account_type = $1 AND created_at >= $2`,
-		string(account), since)
+func (r orders) ActiveUsers(ctx context.Context, since time.Time) ([]string, error) {
+	rows, err := r.q.Query(ctx, `SELECT DISTINCT user_id::text FROM orders WHERE `+activeWhere+` AND created_at >= $1`, since)
 	if err != nil {
 		return nil, fmt.Errorf("users with active orders: %w", err)
 	}
@@ -242,13 +241,12 @@ func (r orders) ActiveUsers(ctx context.Context, account domain.AccountType, sin
 	return out, rows.Err()
 }
 
-func (r orders) CountOpen(ctx context.Context, account domain.AccountType, except []string) (int, error) {
+func (r orders) CountOpen(ctx context.Context, except []string) (int, error) {
 	if except == nil {
 		except = []string{} // NULL would match no order at all
 	}
 	var n int
-	err := r.q.QueryRow(ctx, `SELECT count(*) FROM orders WHERE `+activeWhere+` AND account_type = $1 AND NOT (user_id::text = ANY($2))`,
-		string(account), except).Scan(&n)
+	err := r.q.QueryRow(ctx, `SELECT count(*) FROM orders WHERE `+activeWhere+` AND NOT (user_id::text = ANY($1))`, except).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count open orders: %w", err)
 	}

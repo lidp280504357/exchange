@@ -3,6 +3,7 @@ package ledger
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/shopspring/decimal"
 
@@ -33,6 +34,58 @@ func (c *Client) Unfreeze(ctx context.Context, key string, a domain.Account, ass
 		Amount: amount.String(), EntryType: "ORDER_UNFREEZE", Reference: orderID,
 	})
 	return err
+}
+
+// MarginDebt returns what the margin account owes of asset, the principal
+// and the interest (GetMarginBalances).
+func (c *Client) MarginDebt(ctx context.Context, a domain.Account, asset string) (decimal.Decimal, error) {
+	resp, err := c.c.GetMarginBalances(ctx, &ledgerv1.GetMarginBalancesRequest{UserId: a.UserID})
+	if err != nil {
+		return decimal.Zero, err
+	}
+	for _, b := range resp.GetBalances() {
+		if b.GetAccountType() != accountType(a) || b.GetScope() != a.Scope || b.GetAsset() != asset {
+			continue
+		}
+		return owed(b.GetBorrowed(), b.GetInterest())
+	}
+	return decimal.Zero, nil
+}
+
+// MarginBorrowers counts the margin accounts that owe anything
+// (ListMarginDebts).
+func (c *Client) MarginBorrowers(ctx context.Context) (int, error) {
+	resp, err := c.c.ListMarginDebts(ctx, &ledgerv1.ListMarginDebtsRequest{})
+	if err != nil {
+		return 0, err
+	}
+	owing := map[[3]string]bool{}
+	for _, d := range resp.GetDebts() {
+		debt, err := owed(d.GetBorrowed(), d.GetInterest())
+		if err != nil {
+			return 0, err
+		}
+		if debt.IsPositive() {
+			owing[[3]string{d.GetUserId(), d.GetAccountType(), d.GetScope()}] = true
+		}
+	}
+	return len(owing), nil
+}
+
+// owed adds a debt's principal and interest, empty strings counting as 0.
+func owed(borrowed, interest string) (decimal.Decimal, error) {
+	sum := decimal.Zero
+	for _, v := range []string{borrowed, interest} {
+		if v == "" {
+			continue
+		}
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			return decimal.Zero, fmt.Errorf("a margin debt of %q: %w", v, err)
+		}
+		sum = sum.Add(d)
+	}
+	return sum, nil
 }
 
 // accountType is the ledger's name of the account; orders stored before

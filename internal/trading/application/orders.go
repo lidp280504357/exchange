@@ -83,7 +83,8 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 			return domain.Order{}, err
 		}
 	}
-	if s.spotClosed(req) {
+	closed := s.spotClosed(req.UserID)
+	if closed && !req.Defaults().AccountType.Margin() {
 		return domain.Order{}, flags.ErrProductClosed(flags.KeyProductSpot)
 	}
 	pair, err := s.Instruments.Pair(ctx, req.Symbol)
@@ -94,6 +95,11 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	if d := req.Defaults(); d.AccountType.Margin() {
 		if err := s.marginOpen(req.UserID, d.SideEffect); err != nil {
 			return domain.Order{}, err
+		}
+		if closed {
+			if err := s.repays(ctx, d, pair); err != nil {
+				return domain.Order{}, err
+			}
 		}
 		// The account's symbol, as margin-service asks it: the isolated
 		// account's pair, none for the cross account.
@@ -135,7 +141,7 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		// And the line again, just before the order is stored: an order
 		// checked before CancelOpen reread the flag is stored by its second
 		// pass.
-		if s.spotClosed(req) {
+		if s.spotClosed(o.UserID) && !takenWhileClosed(o) {
 			return flags.ErrProductClosed(flags.KeyProductSpot)
 		}
 		onSymbol, total, err := r.Orders().CountActive(ctx, o.UserID, o.Symbol)
@@ -286,14 +292,49 @@ func (s *Service) CancelAccount(ctx context.Context, userID string, account doma
 	return n, err
 }
 
-// spotClosed reports an order on the SPOT account while an operator has
-// spot trading closed (design 2026-10-07, product switches §1 #3). Orders
-// on margin accounts follow margin trading's own switch, margin.enabled
-// (§1 #7), and the market-making accounts (FeeFree: the simulated market's
-// bots) quote whatever the lines are, as HOUSE does.
-func (s *Service) spotClosed(req domain.Request) bool {
-	return !req.Defaults().AccountType.Margin() && s.Products != nil && s.Products.Closed(flags.KeyProductSpot) &&
-		!slices.Contains(s.FeeFree, req.UserID)
+// spotClosed reports whether an operator has spot trading closed for the
+// user (design 2026-10-07, product switches §1 #3 and #7): for every
+// account, spot and margin alike (one book), but the market-making
+// accounts' (FeeFree: the simulated market's bots), which quote whatever
+// the lines are, as HOUSE does. margin-service's liquidations do not come
+// through Place.
+func (s *Service) spotClosed(userID string) bool {
+	return s.Products != nil && s.Products.Closed(flags.KeyProductSpot) && !slices.Contains(s.FeeFree, userID)
+}
+
+// repays lets an order on a margin account through while spot trading is
+// closed only when it repays (§1 #7, the coordinator's 16:59 correction:
+// repayment sells): AUTO_REPAY, on an account that owes the asset the
+// order brings (a sell's quote asset, a buy's base: a short closes with a
+// buy). What it brings beyond the debt stays in the account.
+func (s *Service) repays(ctx context.Context, d domain.Request, pair domain.Pair) error {
+	refused := flags.ErrProductClosed(flags.KeyProductSpot)
+	if d.SideEffect != domain.SideEffectAutoRepay {
+		return refused
+	}
+	account, brings := domain.Account{UserID: d.UserID, Type: d.AccountType}, pair.Base
+	if d.AccountType == domain.AccountMarginIsolated {
+		account.Scope = pair.Symbol
+	}
+	if d.Side == domain.SideSell {
+		brings = pair.Quote
+	}
+	call, cancel := s.bounded(ctx)
+	debt, err := s.Ledger.MarginDebt(call, account, brings)
+	cancel()
+	if err != nil {
+		return err
+	}
+	if !debt.IsPositive() {
+		return refused
+	}
+	return nil
+}
+
+// takenWhileClosed tells the orders a closed spot line still takes from
+// users: repayments on margin accounts (repays checked the debt).
+func takenWhileClosed(o domain.Order) bool {
+	return o.AccountType.Margin() && o.SideEffect == domain.SideEffectAutoRepay
 }
 
 // CanceledOrder is an order CancelOpen asked the engine to cancel.
@@ -313,15 +354,16 @@ const (
 // SweepActor is who SweepClosed's cancels are audited as.
 const SweepActor = "system:spot-trading-service"
 
-// CancelOpen asks the engine to cancel every active order on a SPOT
-// account once an operator closed spot trading (design 2026-10-07, product
-// switches; the console calls it after closing product.spot), auditing
-// each as admin.orders.canceled by actor with reason in the transaction
-// that marks it. It rereads the flag first and refuses while the line is
-// open; a second pass after sweepGap takes the orders that were on their
-// way in when it closed. Orders on margin accounts and the market-making
-// accounts' stay, and orders already being canceled are not asked again.
-// It returns the orders it asked for.
+// CancelOpen asks the engine to cancel every active order, on spot and
+// margin accounts alike, once an operator closed spot trading (design
+// 2026-10-07, product switches; the console calls it after closing
+// product.spot), auditing each as admin.orders.canceled by actor with
+// reason in the transaction that marks it. It rereads the flag first and
+// refuses while the line is open; a second pass after sweepGap takes the
+// orders that were on their way in when it closed. The market-making
+// accounts' orders and margin-service's liquidations stay, and orders
+// already being canceled are not asked again. It returns the orders it
+// asked for.
 func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]CanceledOrder, error) {
 	if actor == "" || reason == "" {
 		return nil, apperr.Invalid("actor and reason are required")
@@ -335,7 +377,7 @@ func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]Cance
 	if !s.Products.Closed(flags.KeyProductSpot) {
 		return nil, errSpotOpen
 	}
-	out, err := s.sweep(ctx, actor, reason, time.Time{}, nil)
+	out, err := s.sweep(ctx, actor, reason, time.Time{}, false, nil)
 	if err != nil {
 		return out, err
 	}
@@ -344,16 +386,16 @@ func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]Cance
 		return out, ctx.Err()
 	case <-time.After(sweepGap):
 	}
-	return s.sweep(ctx, actor, reason, time.Time{}, out)
+	return s.sweep(ctx, actor, reason, time.Time{}, false, out)
 }
 
 var errSpotOpen = apperr.New(apperr.KindConflict, apperr.CodeConflict, "spot trading is open; close it first")
 
 // SweepClosed is CancelOpen's fallback, run every few seconds: while spot
-// trading is closed it cancels the SPOT orders stored from sweepLead
-// before it closed on (taken while some copy of the flag was behind, or
-// with no CancelOpen at all), audited as SweepActor. Older orders are
-// CancelOpen's.
+// trading is closed it cancels the orders stored from sweepLead before it
+// closed on that the line no longer takes (taken while some copy of the
+// flag was behind, or with no CancelOpen at all), audited as SweepActor;
+// the repayments it takes stay. Older orders are CancelOpen's.
 func (s *Service) SweepClosed(ctx context.Context) (int, error) {
 	if s.Products == nil {
 		return 0, nil
@@ -362,24 +404,31 @@ func (s *Service) SweepClosed(ctx context.Context) (int, error) {
 	if !ok || f.Enabled {
 		return 0, nil
 	}
-	out, err := s.sweep(ctx, SweepActor, "spot trading is closed", f.UpdatedAt.Add(-sweepLead), nil)
+	out, err := s.sweep(ctx, SweepActor, "spot trading is closed", f.UpdatedAt.Add(-sweepLead), true, nil)
 	return len(out), err
 }
 
 // SpotLine is spot trading's line as the console counts it: whether it is
-// closed and the open orders closing it touches (the SPOT accounts', but
-// the market-making accounts').
-func (s *Service) SpotLine(ctx context.Context) (closed bool, openOrders int, err error) {
+// closed, the open orders closing it touches (spot and margin accounts',
+// but the market-making accounts') and the margin accounts that owe
+// anything (its positions).
+func (s *Service) SpotLine(ctx context.Context) (closed bool, openOrders, borrowers int, err error) {
 	closed = s.Products != nil && s.Products.Closed(flags.KeyProductSpot)
-	openOrders, err = s.Store.Read().Orders().CountOpen(ctx, domain.AccountSpot, s.FeeFree)
-	return closed, openOrders, err
+	if openOrders, err = s.Store.Read().Orders().CountOpen(ctx, s.FeeFree); err != nil {
+		return closed, 0, 0, err
+	}
+	call, cancel := s.bounded(ctx)
+	defer cancel()
+	borrowers, err = s.Ledger.MarginBorrowers(call)
+	return closed, openOrders, borrowers, err
 }
 
-// sweep cancels the active SPOT orders stored at or after since, but the
-// market-making accounts', one transaction per user, appending what it
-// asked for to out.
-func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Time, out []CanceledOrder) ([]CanceledOrder, error) {
-	users, err := s.Store.Read().Orders().ActiveUsers(ctx, domain.AccountSpot, since)
+// sweep cancels the active orders stored at or after since, but the
+// market-making accounts' and margin-service's liquidations (and, with
+// keepTaken, what the closed line takes), one transaction per user,
+// appending what it asked for to out.
+func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Time, keepTaken bool, out []CanceledOrder) ([]CanceledOrder, error) {
+	users, err := s.Store.Read().Orders().ActiveUsers(ctx, since)
 	if err != nil {
 		return out, err
 	}
@@ -395,13 +444,15 @@ func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Ti
 				return err
 			}
 			for _, o := range active {
-				if o.AccountType != domain.AccountSpot || o.CancelRequested || o.CreatedAt.Before(since) {
+				if o.CancelRequested || o.LiquidationID != "" || o.CreatedAt.Before(since) || (keepTaken && takenWhileClosed(o)) {
 					continue
 				}
 				if _, err := s.requestCancel(ctx, r, o); err != nil {
 					return err
 				}
-				details, _ := json.Marshal(map[string]string{"order_id": o.ID, "symbol": o.Symbol, "product": flags.ProductNames[flags.KeyProductSpot]})
+				details, _ := json.Marshal(map[string]string{
+					"order_id": o.ID, "symbol": o.Symbol, "account_type": string(o.AccountType), "product": flags.ProductNames[flags.KeyProductSpot],
+				})
 				if err := r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
 					Target: "user:" + o.UserID, Action: "admin.orders.canceled", Actor: actor, Reason: reason, Details: string(details),
 				}, "actor", actor); err != nil {
