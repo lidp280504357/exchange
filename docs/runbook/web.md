@@ -170,7 +170,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 | 行情列表「合约」类别 | 多两列持仓量（美元价值）与资金费率（可排序，`sort=oi\|funding`），≥ 1280 px 时让出 24h 高低的位置，窄屏时让出近 7 天与「交易」按钮（点行即进终端）；工具栏 U 本位/币本位切换（`margin=coin`）与「全部合约数据」链接 | 名称下一行改为「费率 … · 持仓 …」，不画 24h 走势；排序面板多三项（持仓量、资金费率高低）；同样的切换与链接 |
 
 - 共享逻辑在 core `@exchange/core/futures/index`（不进 core 的 index）：`useFuturesData`（显示时按 `nextRead` 在下一点该出来时重取：最新一点的时间加一个周期（主动买卖量记在成交周期的起点，加两个；资金费率加该合约的结算间隔）再加 90 秒（资金费率 120 秒），晚了就每分钟一次，没有点时 5 分钟一次，本机时钟慢于数据时最多等一整个间隔；标签页在后台时不取，回到前台时若下一点已到即补取一次；换周期时先显示上一周期的点并变淡，不跳动）、`useFuturesOverview`（每 30 秒，只在「合约」类别与总览页）、`useLiquidations`（REST 一天内最近 100 条 + 频道推送，按服务的主键 合约、时间、仓位方向 去重，重连后重取一次）、`METRIC_FORMS`/`METRIC_VALUES`（每项统计的图形与数值单位）、`formatValue`、列表的分组与排序（`sortFuturesRows`、`overviewRows`、`overviewTotals`）。
-- 哪些合约出现在列表与总览：取终端自己的合约列表（core `useContracts()` 的同一份查询，G4 第二部分起是 `margin_type=ALL`，两种保证金类型都有），所以列表里的合约点进去都能打开；PREPARE 的不出现；列表与总览开着时每分钟重取一次（合约分批开盘）。行情列表等交易对与合约两份都到了才显示（之前是骨架），免得表格在合约晚到时从随页面滚动跳成框内滚动（「全部」200 行起在自己的框里）。平台币的两个永续没有 `reference_symbol`：面板不发请求，直接显示"暂无数据"（控制台不出现 404 红字，同 B117）；接口答 404 `MARKET_NO_FUTURES_DATA` 时同样处理。
+- 哪些合约出现在列表与总览：取终端自己的合约列表（core `useContracts()` 的同一份查询，G4 第二部分起是 `margin_type=ALL`，两种保证金类型都有），所以列表里的合约点进去都能打开；PREPARE 的不出现；列表与总览开着时每分钟重取一次（合约分批开盘）。行情列表等交易对与合约两份都到了才显示（之前是骨架），免得表格在合约晚到时从随页面滚动跳成框内滚动（「全部」200 行起在自己的框里）；合约请求失败时骨架要多等它重试的那一次，之后交易对照常显示、合约行暂缺且页面不另提示，等每分钟的重取或下次进入页面补上（审查 R25，F8）。平台币的两个永续没有 `reference_symbol`：面板不发请求，直接显示"暂无数据"（控制台不出现 404 红字，同 B117）；接口答 404 `MARKET_NO_FUTURES_DATA` 时同样处理。
 - 图表是 ui `@exchange/ui/futures/index` 的 `SeriesChart`（SVG，不用图表库，不进 K 线图的块）：每张图一条 y 轴（右侧），持仓量是线加 10% 底色、基差是线、资金费率是按正负着色的柱、三种多空比是多（下）空（上）堆到 100% 的柱、主动买卖量是买在零轴上、卖在零轴下的镜像柱；柱宽不超过 24 px、柱间 2 px、数据端 4 px 圆角。指针、触摸（横向拖动读点，不触发手机终端的左右滑动换页）与方向键都能看每个点的全部数值；每张卡片可切到表格（`SeriesTable`，同样的点，最新在上）；用方向键走到的点由旁边的 `aria-live` 区域读出（图表是 `role="img"`，里面的内容读屏不读）。统计的说明在信息图标的弹层里（点击或轻点，手机上也能看）。涨跌色沿用站点的 `--up`/`--down`（色觉辅助靠位置：零轴上下、堆叠上下与图例）。
 - 文案在两站的 `src/i18n/futures.ts`（命名空间 `pcFutures`/`mFutures`），随合约终端、行情页与总览页加载；`vite.config.ts` 的 routePreload 里 `^/futures/data` 排在 `^/futures/` 前面（先匹配者生效）。数据面板是单独的块（ui `preloadable`），不在任何页面的首屏里。
 - 冒烟（两站第 7b 步）：合约终端「数据」页签七张图都画出、爆仓有行或写明"最近一天没有爆仓"，PC 切到 1 小时后按 `period=1h` 重取；ASTRA 永续显示"暂无数据"且没有请求；行情「合约」类别有持仓量与资金费率；`/futures/data` 列出合约并画出所选合约的面板（手机在 sheet 里）。
@@ -205,6 +205,22 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - 体积：二维码库（qrcode.react）、顶栏的二维码面板（`features/download/lazyQrs.ts`，指针或焦点第一次到下载图标时开始加载，连同文案）与下载页各自成块，不在首屏；顶栏只多一个读 `/v1/platform/apps` 的查询与图标（PC 入口 172.6 → 174.0 KB，手机 150.9 → 151.0 KB）。
 - 文案在两站的 `src/i18n/download.ts`（`pcDownload`/`mDownload`）；顶栏、页脚与「我的」用 core 的 `nav.download`、`nav.downloadApp`。
 - 冒烟（两站第 8c 步）：先按测试服当时的设置检查（都不提供时：「暂未提供 App」，PC 顶栏与页脚、手机「我的」都没有入口；有提供时：对应的卡片），再用 `lib.mjs` 的 `withApps` 把这一页的 `/v1/platform/apps` 换成一个上传的 Android 安装包加一个 App Store 链接（`APPS_OFFERED`，不改测试服的设置）：PC 两张卡片各有二维码、APK 的大小与系统要求、按钮与商店链接，顶栏下载面板两个二维码，页脚有链接；手机（冒烟用 iPhone 的 UA）iOS 在前且标「本机」、APK 卡片有安装说明，「我的」出现「下载 App」。
+
+## packages/ui 里这几批的组件与故事（F10）
+
+都按子路径导入、不进 ui 的 index（`DefaultAvatar` 除外），文案由站点以属性传入（三语文案不进故事），Storybook 里只看形态：
+
+| 组件 | 子路径 | 做什么 | Storybook |
+|---|---|---|---|
+| `SeriesChart` | `@exchange/ui/futures/index` | 合约数据的四种图形（线与底色、按正负着色的柱、堆到 100% 的两份、零轴上下的镜像柱），一条右轴，指针、触摸与方向键读点，`aria-live` 读出键盘走到的点 | Futures/SeriesChart（四种图形、变淡的旧周期、一个点、无点） |
+| `FuturesMetric`、`SeriesTable`、`MetricCard`/`InfoHint` | `@exchange/ui/futures/index` | 一张统计卡片：标题与说明弹层、当前值与区间变化、图表与表格切换、加载/无数据/出错 | Futures/FuturesMetric |
+| `LiquidationTape` | `@exchange/ui/futures/index` | 爆仓流：最新在上、多空按颜色与文字、价值（USD），后到的一行滑入 | Futures/LiquidationTape（流、按张、持续到来、空） |
+| `Avatar`（`seed`）、`DefaultAvatar` | `@exchange/ui` | 头像：图片加回退；`seed` 为用户 ID 时回退到 12 个内置头像之一 | Base/Avatar（首字母、坏图回退、12 个内置、按种子、上传的图） |
+| `MyAvatar` | `@exchange/ui/profile/MyAvatar` | 当前用户的头像（读资料，32 px 及以下用缩略图，`decorative` 在挨着用户名处不重复读名） | 需要会话，不单列故事 |
+| `UploadRing` | `@exchange/ui/profile/UploadRing` | 头像上传时外面那一圈：准备与保存时转动，上传时按进度填满 | Profile/UploadRing |
+| `AppCard`、`AppQrPanel` | `@exchange/ui/download/AppCard`、`…/AppQrPanel` | 下载页的平台卡片（宽：二维码在事实旁，PC；窄：数值靠右，手机）与 PC 顶栏的二维码面板；按钮、二维码与安装说明由站点决定 | Download/AppCard（APK、App Store 链接、企业签名 iOS、手机本机/另一平台、顶栏面板） |
+
+手机站的窗口化列表 `WindowList`（`apps/m/src/components/`，合约数据总览也用它）在应用里，不在 ui，不进 Storybook。
 
 ## 无障碍与状态
 
