@@ -34,6 +34,11 @@ describe("forms", () => {
     expect(assetChoices("repay", "MARGIN_CROSS", undefined, terms, { ...owner, balances: [] })).toEqual(["USDT", "BTC"]);
     expect(assetChoices("borrow", "MARGIN_ISOLATED", { base: "ETH", quote: "USDT" }, terms, undefined)).toEqual(["ETH", "USDT"]);
     expect(assetChoices("transfer", "MARGIN_ISOLATED", undefined, terms, undefined)).toEqual([]);
+    // Spot closed: a transfer in only repays what the account owes; out is as before (F20).
+    expect(assetChoices("transfer", "MARGIN_CROSS", undefined, terms, owner, { direction: "IN", repayOnly: true })).toEqual(["USDT"]);
+    expect(assetChoices("transfer", "MARGIN_CROSS", undefined, terms, { ...owner, balances: [] }, { direction: "IN", repayOnly: true })).toEqual([]);
+    expect(assetChoices("transfer", "MARGIN_CROSS", undefined, terms, owner, { direction: "OUT", repayOnly: true })).toEqual(["USDT", "ASTRA", "BTC"]);
+    expect(assetChoices("transfer", "MARGIN_CROSS", undefined, terms, owner, { direction: "IN", repayOnly: false })).toEqual(["USDT", "ASTRA", "BTC"]);
   });
 });
 

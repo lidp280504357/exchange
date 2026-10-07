@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../api/errors";
 import { availableOf, useBalances } from "../assets/hooks";
 import { checkTransfer, type TransferIssue } from "../assets/transfer";
 import * as dec from "../format/decimal";
+import { useOpenProducts } from "../platform/products";
 import { assetDecimals, useAssets } from "../trading/pairs";
 import { newIdempotencyKey } from "../trading/orders";
 import { useMarginAccounts, useMarginActions, useMarginAssets, useMarginPairs, useMaxBorrowable } from "./hooks";
@@ -67,7 +68,10 @@ export function accountOf(
  * assetChoices lists the assets a form offers: an isolated account its
  * pair's two; the cross account the margin assets that count as margin
  * (transfers) or may be borrowed (borrowing); repaying offers what the
- * account owes, or everything it could owe when it owes nothing.
+ * account owes, or everything it could owe when it owes nothing. While
+ * spot is closed (repayOnly) a transfer in takes only what the account
+ * owes, to repay it: none when it owes nothing (design 2026-10-07,
+ * product line switches §1 #7; F20).
  */
 export function assetChoices(
   kind: MarginActionKind,
@@ -75,7 +79,9 @@ export function assetChoices(
   pair: Pick<MarginPair, "base" | "quote"> | undefined,
   terms: { asset: string; borrowable: boolean; collateral: boolean }[] | undefined,
   owner: MarginAccount | undefined,
+  inward?: { direction: "IN" | "OUT"; repayOnly: boolean },
 ): string[] {
+  if (kind === "transfer" && inward?.direction === "IN" && inward.repayOnly) return (owner?.balances ?? []).filter(hasDebt).map((b) => b.asset);
   const all =
     account === "MARGIN_ISOLATED"
       ? pair
@@ -116,7 +122,22 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   const isolatedPairs = useMemo(() => (pairs.data?.items ?? []).filter((p) => p.isolated), [pairs.data]);
   const pair = isolatedPairs.find((p) => p.symbol === symbol);
   const owner = accountOf(accounts.data, account, symbol);
-  const choices = useMemo(() => assetChoices(kind, account, pair, terms.data, owner), [kind, account, pair, terms.data, owner]);
+  // Margin trades on the spot books: while spot is closed the server takes
+  // transfers in only of what the account owes, to repay it (F20).
+  const spotOpen = useOpenProducts().spot;
+  const repayOnly = kind === "transfer" && !spotOpen;
+  const owing = useMemo(() => (owner?.balances ?? []).filter(hasDebt).map((b) => b.asset), [owner]);
+  const inward = !repayOnly || owing.length > 0;
+  const choices = useMemo(
+    () => assetChoices(kind, account, pair, terms.data, owner, { direction, repayOnly }),
+    [kind, account, pair, terms.data, owner, direction, repayOnly],
+  );
+  // No transfer in to offer (the account owes nothing while spot is closed): out only; and a coin it does not owe gives way to one it does.
+  useEffect(() => {
+    if (!repayOnly || accounts.isPending) return;
+    if (!inward && direction === "IN") setDirectionState("OUT");
+    else if (direction === "IN" && owing.length > 0 && !owing.includes(asset)) setAssetState(owing[0]!);
+  }, [repayOnly, accounts.isPending, inward, direction, owing, asset]);
   const row = balanceOf(owner, asset);
   const decimals = assetDecimals(assets.data?.assets, asset, 8);
   const borrowable = useMaxBorrowable(account, symbol, asset, kind === "borrow");
@@ -208,6 +229,10 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
     all,
     fillMax,
     choices,
+    /** Whether a transfer in is offered; false while spot is closed and the account owes nothing. */
+    inward,
+    /** A transfer in only repays (spot closed): the form says so. */
+    repayOnly,
     pairs: isolatedPairs,
     pair,
     owner,

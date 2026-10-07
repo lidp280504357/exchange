@@ -34,7 +34,12 @@ export function usePlatformApps() {
  * answer yet count as on.
  */
 export function useAppEntry(): boolean {
-  return usePlatformApps().data?.entry?.visible ?? true;
+  return appEntryOf(usePlatformApps().data);
+}
+
+/** appEntryOf reads the switch from an answer: on without an answer (still pending) or without the switch in it. */
+export function appEntryOf(apps: PlatformApps | undefined): boolean {
+  return apps?.entry?.visible ?? true;
 }
 
 /** An offered app with its platform. */

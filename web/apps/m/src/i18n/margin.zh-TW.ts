@@ -39,6 +39,7 @@ export default {
       maxIn: "現貨可用 {{amount}} {{asset}}",
       maxOut: "可劃出 {{amount}} {{asset}}",
       outHint: "有負債時，只能劃出不讓風險率低於預警線的部分，被該幣種負債佔用的部分也不能劃出",
+      repayOnlyIn: "幣幣交易暫停期間只能劃入欠著的幣，用於還幣",
       maxBorrow: "最多可借 {{amount}} {{asset}}",
       limitedBy: "受{{bound}}限制",
       rate: "小時利率 {{rate}}，借幣時先收第一個小時的利息",

@@ -93,11 +93,13 @@ export function MarginDialog({ kind, init, onClose }: { kind: MarginActionKind; 
             onValueChange={(v) => f.setDirection(v as "IN" | "OUT")}
             aria-label={t("pcMargin.dialog.transferTitle")}
             items={[
-              { value: "IN", label: t("pcMargin.dialog.in") },
+              // While spot is closed a transfer in only repays: none when the account owes nothing (F20).
+              ...(f.inward ? [{ value: "IN", label: t("pcMargin.dialog.in") }] : []),
               { value: "OUT", label: t("pcMargin.dialog.out") },
             ]}
           />
         )}
+        {kind === "transfer" && f.direction === "IN" && f.repayOnly && <p className="-mt-2 text-xs text-fg-3">{t("pcMargin.dialog.repayOnlyIn")}</p>}
         <FormField label={t("pcMargin.dialog.account")}>
           <Segmented
             block

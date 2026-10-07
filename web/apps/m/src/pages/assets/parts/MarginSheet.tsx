@@ -95,11 +95,13 @@ export function MarginSheet({ kind, init, onClose }: { kind: MarginActionKind; i
             onValueChange={(v) => f.setDirection(v as "IN" | "OUT")}
             aria-label={t("mMargin.dialog.transferTitle")}
             items={[
-              { value: "IN", label: t("mMargin.dialog.in") },
+              // While spot is closed a transfer in only repays: none when the account owes nothing (F20).
+              ...(f.inward ? [{ value: "IN", label: t("mMargin.dialog.in") }] : []),
               { value: "OUT", label: t("mMargin.dialog.out") },
             ]}
           />
         )}
+        {kind === "transfer" && f.direction === "IN" && f.repayOnly && <p className="-mt-2 text-xs text-fg-3">{t("mMargin.dialog.repayOnlyIn")}</p>}
         <FormField label={t("mMargin.dialog.account")}>
           <Segmented
             block

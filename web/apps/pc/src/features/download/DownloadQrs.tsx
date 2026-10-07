@@ -9,11 +9,13 @@ import { Link } from "react-router";
  * DownloadQrs fills the top bar's download panel (design 2026-10-07, App
  * download page §4): a QR code for each app offered, and the way to the
  * download page; while none is offered (the entry follows the console's
- * switch alone, H6), that none is yet.
+ * switch alone, H6), that none is yet; when the apps cannot be read, that
+ * they could not (F21).
  */
 export function DownloadQrs() {
   const { t } = useTranslation();
-  const list = offeredApps(usePlatformApps().data);
+  const apps = usePlatformApps();
+  const list = offeredApps(apps.data);
   const page = `${globalThis.location?.origin ?? ""}${routes.download}`;
   return (
     <AppQrPanel
@@ -22,7 +24,7 @@ export function DownloadQrs() {
         const caption = t(`pcDownload.platforms.${platform}`);
         return { key: platform, value: qrUrl(platform, app, page), caption, label: t("pcDownload.qrLabel", { platform: caption }) };
       })}
-      empty={<p className="w-56 py-2 text-sm text-fg-3">{t("pcDownload.none")}</p>}
+      empty={<p className="w-56 py-2 text-sm text-fg-3">{apps.isError && !apps.data ? `${t("state.errorTitle")} · ${t("state.errorHint")}` : t("pcDownload.none")}</p>}
       footer={
         <Link
           to={routes.download}

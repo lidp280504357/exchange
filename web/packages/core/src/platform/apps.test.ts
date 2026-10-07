@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { androidVersion, appHref, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, type AppDownload } from "./apps";
+import {
+  androidVersion, appEntryOf, appHref, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, type AppDownload,
+} from "./apps";
 
 const notes = { "zh-CN": "", en: "" };
 const link: AppDownload = {
@@ -17,6 +19,14 @@ const ipa: AppDownload = {
 };
 
 describe("the apps to download", () => {
+  it("show their entries as the console's switch says, also with no app offered (H6)", () => {
+    // Pending (no answer yet), and an answer cached from before the switch: shown.
+    expect(appEntryOf(undefined)).toBe(true);
+    expect(appEntryOf({ android: null, ios: null })).toBe(true);
+    expect(appEntryOf({ android: null, ios: null, entry: { visible: true } })).toBe(true);
+    expect(appEntryOf({ android: apk, ios: link, entry: { visible: false } })).toBe(false);
+  });
+
   it("list the offered ones, the phone's own first", () => {
     expect(offeredApps(undefined)).toEqual([]);
     expect(offeredApps({ android: null, ios: null })).toEqual([]);
