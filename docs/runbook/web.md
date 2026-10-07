@@ -103,7 +103,7 @@ task web:build              # 构建全部站点
 task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性能预算见设计 §12.1）
 ```
 
-- 代理与来源：PC 站与手机站的 `/v1` 和 WebSocket 由 Vite 代理到 `https://astras.vip`，`API_ORIGIN=...` 可改；后台的 `/admin/v1` 代理到 `https://admin.astras.vip`。
+- 代理与来源：PC 站与手机站的 `/v1`、WebSocket 与上传的头像 `/uploads` 由 Vite 代理到 `https://astras.vip`，`API_ORIGIN=...` 可改；后台的 `/admin/v1` 代理到 `https://admin.astras.vip`。
 - 端口不能换：刷新令牌 Cookie 的来源白名单（auth-service `ALLOWED_ORIGINS`）和网关 WebSocket 的 `WS_ORIGINS` 默认包含 `localhost:5173` 与 `localhost:5174`，以及线上的 `astras.vip`、`m.astras.vip`。
 - Claude Code 预览：`.claude/launch.json` 的 `pc`、`m`、`admin`、`storybook`。手机站在预览里用 `preview_resize` 的 mobile 预设看。
 
@@ -174,6 +174,22 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - 图表是 ui `@exchange/ui/futures/index` 的 `SeriesChart`（SVG，不用图表库，不进 K 线图的块）：每张图一条 y 轴（右侧），持仓量是线加 10% 底色、基差是线、资金费率是按正负着色的柱、三种多空比是多（下）空（上）堆到 100% 的柱、主动买卖量是买在零轴上、卖在零轴下的镜像柱；柱宽不超过 24 px、柱间 2 px、数据端 4 px 圆角。指针、触摸（横向拖动读点，不触发手机终端的左右滑动换页）与方向键都能看每个点的全部数值；每张卡片可切到表格（`SeriesTable`，同样的点，最新在上）；用方向键走到的点由旁边的 `aria-live` 区域读出（图表是 `role="img"`，里面的内容读屏不读）。统计的说明在信息图标的弹层里（点击或轻点，手机上也能看）。涨跌色沿用站点的 `--up`/`--down`（色觉辅助靠位置：零轴上下、堆叠上下与图例）。
 - 文案在两站的 `src/i18n/futures.ts`（命名空间 `pcFutures`/`mFutures`），随合约终端、行情页与总览页加载；`vite.config.ts` 的 routePreload 里 `^/futures/data` 排在 `^/futures/` 前面（先匹配者生效）。数据面板是单独的块（ui `preloadable`），不在任何页面的首屏里。
 - 冒烟（两站第 7b 步）：合约终端「数据」页签七张图都画出、爆仓有行或写明"最近一天没有爆仓"，PC 切到 1 小时后按 `period=1h` 重取；ASTRA 永续显示"暂无数据"且没有请求；行情「合约」类别有持仓量与资金费率；`/futures/data` 列出合约并画出所选合约的面板（手机在 sheet 里）。
+
+## 头像与用户名（用户头像与用户名设计 2026-10-07，批次 I2）
+
+用户名注册时随机生成（`user_` 加 8 位），可改，7 天一次；头像可上传，没上传时是按用户 ID 选出的内置头像（接口 `GET /v1/user/profile` 的 `username`、`avatar_url`、`avatar_thumb_url`，`PUT /v1/user/username`，`POST`/`DELETE /v1/user/avatar`，见 [accounts.md](accounts.md)）。
+
+| 位置 | PC 站 | 手机站 |
+|---|---|---|
+| 个人资料页 `/account/profile`（需要登录） | 账户中心左栏第一项：头像卡片（「更换头像」或把图片拖到卡片上，上传时头像外一圈进度、可取消；「恢复默认」先确认）、用户名（「修改」打开对话框，冷却中按钮置灰并写明何时可改）、UID 与注册时间 | 「我的」身份卡的「编辑资料」与设置页顶部一行进入：点头像或「更换头像」打开相册，「恢复默认」先弹确认 sheet；用户名一行点开 sheet 修改；UID 点按复制 |
+| 其它显示位置 | 顶栏账户菜单的触发器是头像（点击去个人资料页），菜单头部是头像、用户名与 UID；账户中心左栏顶部同样 | 「我的」身份卡（标题是用户名，不再显示脱敏的邮箱/手机号）；设置页顶部（登录后） |
+
+- 头像组件：ui `Avatar` 是图片加回退（加载时是淡色圆；不用 Radix 的头像原件，它在 PC 顶栏、首屏里），带 `seed`（用户 ID）时，没有图片或图片加载失败就显示 ui `DefaultAvatar`：12 个内置头像（12 个身份色 `--id-*` 各配一个白色几何图形，无文字，内联 SVG、不发请求），按用户 ID 的 FNV-1a 哈希取模 12 选出（`defaultAvatarIndex`，单测钉住了两个 ID 的结果，后台用同一规则）；不带 `seed` 仍是首字母头像。当前用户的头像用 ui `@exchange/ui/profile/MyAvatar`：32 px 及以下用 64 px 的缩略图、更大的用 256 px 的；资料还在读时显示占位圆，免得每次打开页面先闪内置头像再换成上传的。Storybook「Base/Avatar」的 BuiltIn 列出 12 个。
+- 上传（core `@exchange/core/user/avatar`）：只收 PNG、JPEG、WebP（20 MB 以内的原图）；在浏览器里取中间的正方形、缩到不超过 512×512 再编码成 WebP（浏览器不能写 WebP 时为 PNG），所以发给服务端的远在它的限制之内（5 MB、边长 2048、每通道 8 位，审查 C52），EXIF 方向由浏览器转正、不带元数据；边长不足 64 像素的在本机就拒绝。用 XHR 发送以显示进度（令牌过期时刷新后重发一次，与 `authFetch` 相同）；服务端回来后先把新图预取进浏览器缓存，再写进资料缓存，页面上所有头像一起换，不闪内置头像。`useAvatarUpload` 给出 准备中 / 上传中（进度，1 表示服务端在保存）/ 失败 三种状态。
+- 用户名：`checkUsername` 按契约检查（3–20 个字母、数字或下划线，不以下划线开头，保留名称照 `internal/user/domain/username.go`，以服务端为准）；`nextUsernameChange` 按 `username_changed_at` 加 7 天算出何时可再改（注册时抽到的或被后台重置的为 null，可马上改）。服务端的 `USER_USERNAME_*` 显示在输入框下，五个错误码的文案在 core 的 `errors`。
+- 本机开发：两站的 Vite 把 `/uploads` 也代理到测试服（上传的头像由 nginx 直出）。
+- 文案在两站的 `src/i18n/profile.ts`（命名空间 `pcProfile`/`mProfile`），随个人资料页加载；顶栏、左栏与设置页用 core 的 `nav.profile`、`common.uid`。
+- 冒烟（两站第 8b 步）：新注册用户的用户名是 `user_` 加 8 位、头像是内置的（PC 顶栏菜单与个人资料页，手机「我的」）；改名后立即显示且进入 7 天冷却；在页面里画一张图（PC 900×600 PNG、手机 600×900 JPEG）上传，个人资料页显示服务端的 256 px WebP、PC 顶栏换成 64 px 的、手机「我的」显示上传的；「恢复默认」后回到内置头像。上传、改名与删除的响应也按契约校验。
 
 ## 无障碍与状态
 
