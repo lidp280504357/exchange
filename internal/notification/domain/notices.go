@@ -39,6 +39,11 @@ const (
 	NoticeContractWarned      = "CONTRACT_LIQUIDATION_WARNED"
 	NoticeContractLiquidating = "CONTRACT_LIQUIDATING"
 	NoticeContractDeleveraged = "CONTRACT_ADL"
+	// Profile resets (avatars and usernames design 2026-10-07 §1.6): an
+	// operator reset the username to a random one, or the avatar to the
+	// default. In the app only.
+	NoticeUsernameReset = "USERNAME_RESET"
+	NoticeAvatarReset   = "AVATAR_RESET"
 )
 
 // Notice is an in-app notification.
@@ -375,6 +380,20 @@ func RenderNotice(in NoticeInput) (title, body string) {
 			return "Account status changed", fmt.Sprintf("Your account status changed to %s at %s. Contact support if you have questions.", to, when)
 		}
 		return zh(lang, "账户状态变更"), fmt.Sprintf(zh(lang, "您的账户状态已于 %s 变更为：%s。如有疑问请联系客服。"), when, to)
+	case NoticeUsernameReset:
+		// A reset username is a random one, and choosing the next one waits
+		// for no cooldown (design §1.6).
+		if en {
+			return "Username reset", fmt.Sprintf("Your username did not meet the platform's rules and was reset to %s at %s. "+
+				"You can choose another one on your profile page now.", d["username"], when)
+		}
+		return zh(lang, "用户名已被重置"), fmt.Sprintf(zh(lang, "您的用户名不符合平台规范，已于 %s 重置为 %s。现在就可以在个人资料页改一个新的。"), when, d["username"])
+	case NoticeAvatarReset:
+		if en {
+			return "Avatar reset", fmt.Sprintf("Your avatar did not meet the platform's rules and was replaced by the default one at %s. "+
+				"You can upload another one on your profile page.", when)
+		}
+		return zh(lang, "头像已被重置"), fmt.Sprintf(zh(lang, "您的头像不符合平台规范，已于 %s 恢复为默认头像。可以在个人资料页重新上传。"), when)
 	}
 	return in.Type, ""
 }

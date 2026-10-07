@@ -103,6 +103,17 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeStatusChanged, Mail: true, Data: map[string]string{
 			"from": m.GetFromStatus(), "to": m.GetToStatus(),
 		}}, true
+	case *userv1.ProfileReset:
+		// An operator's reset of a username or avatar (avatars and usernames
+		// design 2026-10-07 §1.6): in the app only. The operator's reason
+		// stays in the audit log.
+		switch m.GetField() {
+		case "USERNAME":
+			return application.Event{UserID: m.GetUserId(), Type: domain.NoticeUsernameReset, Data: map[string]string{"username": m.GetUsername()}}, true
+		case "AVATAR":
+			return application.Event{UserID: m.GetUserId(), Type: domain.NoticeAvatarReset}, true
+		}
+		return application.Event{}, false
 	case *marginv1.MarginLevelWarned:
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeMarginWarned, Mail: true, Data: map[string]string{
 			"account_type": m.GetAccountType(), "symbol": m.GetSymbol(), "margin_level": m.GetMarginLevel(),

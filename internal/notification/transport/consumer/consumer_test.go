@@ -35,6 +35,9 @@ func TestToEvent(t *testing.T) {
 		{&authv1.TotpEnabled{UserId: "u"}, domain.NoticeTOTPChanged, true},
 		{&authv1.TotpDisabled{UserId: "u"}, domain.NoticeTOTPChanged, true},
 		{&userv1.ProfileUpdated{UserId: "u"}, "", false},
+		{&userv1.ProfileReset{UserId: "u", Field: "USERNAME", Username: "user_k3x9q2m7"}, domain.NoticeUsernameReset, false},
+		{&userv1.ProfileReset{UserId: "u", Field: "AVATAR"}, domain.NoticeAvatarReset, false},
+		{&userv1.ProfileReset{UserId: "u", Field: "BIO"}, "", false},
 		{&walletv1.DepositCredited{Deposit: &walletv1.Deposit{UserId: "u", Asset: "ETH"}}, domain.NoticeDepositCredited, false},
 		{&walletv1.DepositCredited{Deposit: &walletv1.Deposit{UserId: "u", Unclaimed: true}}, domain.NoticeDepositUnclaimed, true},
 		{&walletv1.DepositRejected{Deposit: &walletv1.Deposit{UserId: "u"}}, domain.NoticeDepositUnclaimed, true},
@@ -61,6 +64,12 @@ func TestToEvent(t *testing.T) {
 	e, _ := toEvent(&marginv1.MarginLiquidationCompleted{UserId: "u", Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}, {Asset: "BTC", Amount: "0.01"}}})
 	if e.Data["repaid"] != "100 USDT, 0.01 BTC" || e.Data["remaining"] != "" {
 		t.Fatalf("liquidation data: %v", e.Data)
+	}
+	// A reset names the new username, never the operator or the reason
+	// (they stay in the audit log).
+	e, _ = toEvent(&userv1.ProfileReset{UserId: "u", Field: "USERNAME", Username: "user_k3x9q2m7", Actor: "admin:1", Reason: "abusive"})
+	if len(e.Data) != 1 || e.Data["username"] != "user_k3x9q2m7" {
+		t.Fatalf("username reset data: %v", e.Data)
 	}
 	// A one-way position's direction is its quantity's sign; the notice
 	// shows the size without it.

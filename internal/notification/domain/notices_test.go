@@ -13,6 +13,7 @@ func TestRenderNotice(t *testing.T) {
 		NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed,
 		NoticeWithdrawalRequested, NoticeWithdrawalCompleted, NoticeWithdrawalRejected, NoticeWithdrawalCanceled, NoticeWithdrawalFailed,
 		NoticeMarginWarned, NoticeMarginLiquidating, NoticeMarginLiquidated, NoticeContractWarned, NoticeContractLiquidating, NoticeContractDeleveraged,
+		NoticeUsernameReset, NoticeAvatarReset,
 	} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
@@ -45,6 +46,22 @@ func TestRenderNotice(t *testing.T) {
 		_, body = RenderNotice(NoticeInput{Type: NoticeTOTPChanged, Language: lang, At: at, Data: map[string]string{"enabled": "true"}})
 		if strings.Contains(body, "24") {
 			t.Fatalf("%s bound: %s", lang, body)
+		}
+	}
+}
+
+// TestProfileResetNotices: an operator's reset names the new username
+// (B140); neither tells the operator's reason.
+func TestProfileResetNotices(t *testing.T) {
+	at := time.Date(2026, 10, 7, 4, 5, 6, 0, time.UTC)
+	for _, lang := range []string{"zh-CN", "zh-TW", "en"} {
+		title, body := RenderNotice(NoticeInput{Type: NoticeUsernameReset, Language: lang, At: at, Data: map[string]string{"username": "user_k3x9q2m7"}})
+		if title == "" || !strings.Contains(body, "user_k3x9q2m7") || strings.Contains(body, "%!") {
+			t.Fatalf("%s username: %q %s", lang, title, body)
+		}
+		title, body = RenderNotice(NoticeInput{Type: NoticeAvatarReset, Language: lang, At: at})
+		if title == "" || body == "" || strings.Contains(body, "%!") {
+			t.Fatalf("%s avatar: %q %s", lang, title, body)
 		}
 	}
 }

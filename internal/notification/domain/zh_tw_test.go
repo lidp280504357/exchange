@@ -44,6 +44,7 @@ func TestMessagesInTraditionalChinese(t *testing.T) {
 		NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed,
 		NoticeWithdrawalRequested, NoticeWithdrawalCompleted, NoticeWithdrawalRejected, NoticeWithdrawalCanceled, NoticeWithdrawalFailed,
 		NoticeMarginWarned, NoticeMarginLiquidating, NoticeMarginLiquidated, NoticeContractWarned, NoticeContractLiquidating, NoticeContractDeleveraged,
+		NoticeUsernameReset, NoticeAvatarReset,
 	} {
 		for _, lang := range []string{"zh-TW", "zh-HK"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Data: data})
