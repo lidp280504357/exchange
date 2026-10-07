@@ -32,5 +32,7 @@ describe("error messages", () => {
     expect(errorText(new ApiError(403, "MARGIN_DISABLED", ""))).toBe("杠杆交易暂未开放");
     // Only margin.auto_borrow is about the side effect.
     expect(errorText(new ApiError(403, "MARGIN_DISABLED", "", { flag: "margin.enabled" }))).toBe("杠杆交易暂未开放");
+    // A paused product line (design 2026-10-07, product line switches §1 #3).
+    expect(errorText(new ApiError(403, "PRODUCT_CLOSED", "", { product: "usdt_m" }))).toBe("该产品已暂停交易：只能平仓、撤单与把资金划出");
   });
 });

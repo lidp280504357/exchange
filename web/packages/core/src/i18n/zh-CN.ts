@@ -95,6 +95,7 @@ export const zhCN = {
     MARGIN_LIMIT: "超出可借额度", MARGIN_POOL_EMPTY: "平台该币种的可借余量不足", MARGIN_LEVEL_TOO_LOW: "操作后风险率会低于预警线",
     MARGIN_FROZEN: "杠杆账户正在强平或已被冻结", MARGIN_PRICE_UNAVAILABLE: "账户里有币种暂无价格，请稍后再试",
     MARGIN_REPAY_EXCEEDS_DEBT: "还款超过负债", LEDGER_DEBT_OVERPAID: "还款超过负债", MARGIN_AMOUNT_PRECISION: "数量的小数位超出资产精度",
+    PRODUCT_CLOSED: "该产品已暂停交易：只能平仓、撤单与把资金划出",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
   // Messages that name what the error's details carry (errorText).

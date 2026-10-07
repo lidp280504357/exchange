@@ -97,6 +97,7 @@ export const zhTW = {
     MARGIN_LIMIT: "超出可借額度", MARGIN_POOL_EMPTY: "平台該幣種的可借餘量不足", MARGIN_LEVEL_TOO_LOW: "操作後風險率會低於預警線",
     MARGIN_FROZEN: "槓桿帳戶正在強平或已被凍結", MARGIN_PRICE_UNAVAILABLE: "帳戶裡有幣種暫無價格，請稍後再試",
     MARGIN_REPAY_EXCEEDS_DEBT: "還款超過負債", LEDGER_DEBT_OVERPAID: "還款超過負債", MARGIN_AMOUNT_PRECISION: "數量的小數位超出資產精度",
+    PRODUCT_CLOSED: "該產品已暫停交易：只能平倉、撤單與把資金劃出",
     format: "請輸入正確的數字", zero: "數量必須大於 0", precision: "最多 {{n}} 位小數", unknown: "出錯了（{{code}}）",
   },
   // Messages that name what the error's details carry (errorText).
