@@ -68,7 +68,8 @@ func TestOrdersRoundTrip(t *testing.T) {
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	o := order(t, uuid.NewString(), limitBuy(), at)
 	market := order(t, o.UserID, domain.Request{Side: domain.SideBuy, Type: domain.TypeMarket, QuoteAmount: d("100")}, at)
-	for _, x := range []domain.Order{o, market} {
+	byQuantity := order(t, o.UserID, domain.Request{Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("0.0005")}, at)
+	for _, x := range []domain.Order{o, market, byQuantity} {
 		if err := store.Read().Orders().Insert(ctx, x); err != nil {
 			t.Fatal(err)
 		}
@@ -88,6 +89,11 @@ func TestOrdersRoundTrip(t *testing.T) {
 	m, _ := store.Read().Orders().Get(ctx, market.ID)
 	if !m.QuoteAmount.Equal(d("100")) || !m.Price.IsZero() || !m.ProtectionPrice.Equal(d("66000")) {
 		t.Fatalf("market order: %+v", m)
+	}
+	// A market buy by quantity (B157, trading 00008): frozen at its protection price.
+	q, _ := store.Read().Orders().Get(ctx, byQuantity.ID)
+	if !q.BuysByQuantity() || !q.Quantity.Equal(d("0.0005")) || !q.ProtectionPrice.Equal(d("66000")) || !q.FrozenAmount.Equal(d("33")) {
+		t.Fatalf("market buy by quantity: %+v", q)
 	}
 	if byClient, err := store.Read().Orders().ByClientID(ctx, o.UserID, o.ClientOrderID); err != nil || byClient.ID != o.ID {
 		t.Fatalf("by client id: %v %v", byClient.ID, err)

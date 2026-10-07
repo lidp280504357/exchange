@@ -324,7 +324,12 @@ func TestTradingSchema(t *testing.T) {
 	accepts(t, db, order, uuid.New(), user, "c2", "BUY", "MARKET", nil, nil, 100)
 	accepts(t, db, order, uuid.New(), user, "c3", "SELL", "MARKET", nil, 0.5, nil)
 	rejects(t, db, "a limit order needs a price", order, uuid.New(), user, "c4", "BUY", "LIMIT", nil, 0.001, nil)
-	rejects(t, db, "a market buy spends a quote amount", order, uuid.New(), user, "c5", "BUY", "MARKET", nil, 0.5, nil)
+	rejects(t, db, "a market buy by quantity has its protection price", order, uuid.New(), user, "c5", "BUY", "MARKET", nil, 0.5, nil)
+	byQuantity := `INSERT INTO orders (id, user_id, client_order_id, symbol, side, type, time_in_force, stp, quantity, quote_amount, protection_price,
+		status, frozen_asset, frozen_amount, freeze_state, maker_fee_rate, taker_fee_rate, base_decimals, quote_decimals, created_at, updated_at)
+		VALUES ($1, $2, $3, 'BTC-USDT', 'BUY', 'MARKET', 'IOC', 'CANCEL_NEWEST', $4, $5, 66000, 'NEW', 'USDT', 33, 'PENDING', 0.001, 0.001, 8, 6, now(), now())`
+	accepts(t, db, byQuantity, uuid.New(), user, "c8", 0.0005, nil)
+	rejects(t, db, "a market buy takes a quantity or a quote amount, not both", byQuantity, uuid.New(), user, "c9", 0.0005, 33)
 	rejects(t, db, "a market sell sells a quantity", order, uuid.New(), user, "c6", "SELL", "MARKET", nil, nil, 100)
 	rejects(t, db, "client order IDs are short tokens", order, uuid.New(), user, "has space", "BUY", "LIMIT", 60000, 0.001, nil)
 	rejects(t, db, "amounts are positive", order, uuid.New(), user, "c7", "BUY", "LIMIT", 60000, -1, nil)
