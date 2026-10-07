@@ -125,6 +125,7 @@ type Publisher struct {
 	// positions' worth, for the assets in coinAssets.
 	equity, worth, leverage, capsVersion    prometheus.Gauge
 	overlayQuoting                          *prometheus.GaugeVec
+	quotedShare                             *prometheus.GaugeVec
 	coinEquity, coinEquityUSD, coinExposure *prometheus.GaugeVec
 	capGauge                                *prometheus.GaugeVec
 	coinAssets                              []string
@@ -204,6 +205,11 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 		overlayQuoting: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_house_overlay_quoting", Help: "1 while HOUSE quotes a part of each level because a price event is on the symbol's book.",
 		}, []string{"symbol"}),
+		quotedShare: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_house_quoted_share",
+			Help: "HOUSE's quantity on a book's first levels over the reference market's there, both sides: below 1 with the level caps, " +
+				"about OVERLAY_QUOTE_FRACTION during a price event.",
+		}, []string{"symbol"}),
 	}
 	p.showCaps(cfg.Caps, 0)
 	// Not a number until HOUSE's contract account is read: 0 would say its
@@ -212,7 +218,7 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 	p.equity.Set(math.NaN())
 	p.worth.Set(math.NaN())
 	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures, p.equity, p.worth, p.leverage, p.coinEquity,
-		p.coinEquityUSD, p.coinExposure, p.capGauge, p.capsVersion, p.overlayQuoting)
+		p.coinEquityUSD, p.coinExposure, p.capGauge, p.capsVersion, p.overlayQuoting, p.quotedShare)
 	return p
 }
 
@@ -323,6 +329,24 @@ func (p *Publisher) showCaps(caps domain.Caps, version int64) {
 		p.capGauge.WithLabelValues(name).Set(v.InexactFloat64())
 	}
 	p.capsVersion.Set(float64(version))
+}
+
+// quotedShare is HOUSE's quantity on the first n levels of both sides over
+// the reference market's there (0 without any): what the level caps and a
+// price event's fraction leave of the book (review C57 ④).
+func quotedShare(bids, refBids, asks, refAsks []domain.Level, n int) float64 {
+	sum := func(ls []domain.Level) decimal.Decimal {
+		total := decimal.Zero
+		for _, l := range ls[:min(n, len(ls))] {
+			total = total.Add(l.Quantity)
+		}
+		return total
+	}
+	ref := sum(refBids).Add(sum(refAsks))
+	if !ref.IsPositive() {
+		return 0
+	}
+	return sum(bids).Add(sum(asks)).Div(ref).InexactFloat64()
 }
 
 // Rooms is how much HOUSE may still buy and sell of a symbol (base asset,
@@ -530,6 +554,7 @@ func (p *Publisher) round() []outgoing {
 				bids, asks = domain.Fraction(bids, p.cfg.OverlayFraction, spec), domain.Fraction(asks, p.cfg.OverlayFraction, spec)
 			}
 			p.overlayQuoting.WithLabelValues(spec.Symbol).Set(boolGauge(b.overlay))
+			p.quotedShare.WithLabelValues(spec.Symbol).Set(quotedShare(bids, b.bids, asks, b.asks, p.cfg.Levels))
 			var buy, sell decimal.Decimal
 			if spec.Contract {
 				pos, mid := p.contracts.Positions[spec.Symbol], midOf(b)

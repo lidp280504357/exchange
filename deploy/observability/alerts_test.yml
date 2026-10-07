@@ -8,6 +8,34 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
+      - series: 'node_filesystem_avail_bytes{job="node", instance="host", mountpoint="/"}'
+        values: '12e9x5 9e9x12 4e9x8'
+      - series: 'node_filesystem_avail_bytes{job="node", instance="host", mountpoint="/boot"}'
+        values: '1e8x25'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HostDiskLow
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: HostDiskLow
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: host}
+            exp_annotations:
+              summary: "the host's root partition has 8.382GiB left: the WAL tables, Redpanda and the build cache share it"
+              runbook: docs/runbook/server-deploy.md
+      - eval_time: 16m
+        alertname: HostDiskCritical
+        exp_alerts: []
+      - eval_time: 24m
+        alertname: HostDiskCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: host}
+            exp_annotations:
+              summary: "the host's root partition has 3.725GiB left: free space now (docs/runbook/server-deploy.md), a full disk stops the containers"
+              runbook: docs/runbook/server-deploy.md
+
+  - interval: 1m
+    input_series:
       - series: 'ledger_reconcile_mismatches{job="ledger-service", check="JOURNAL_BALANCED"}'
         values: '0 0 2 2'
       - series: 'ledger_reconcile_mismatches{job="ledger-service", check="ACCOUNT_MATCHES_LINES"}'

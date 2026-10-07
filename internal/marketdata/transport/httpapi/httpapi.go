@@ -160,7 +160,7 @@ func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
 			case h.Overlay != nil: // a price event moves the trading anchor too
 				f, _ = h.Overlay.Factor(s)
 			}
-			price = domain.ScalePrice(price, f)
+			price = domain.ScalePrice(price, f, h.Overlay.Tick(s))
 			out["source"], out["price"], out["fresh"] = ref.Source, price.String(), fresh
 			out["source_price"], out["overlay_factor"] = ref.Price.String(), f.String()
 			out["updated_at"] = ref.At.UTC().Format(time.RFC3339Nano)

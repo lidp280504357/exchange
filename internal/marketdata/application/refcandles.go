@@ -87,6 +87,7 @@ type ReferenceMap struct {
 	m         map[string]ports.Reference
 	pairs     map[string]bool // the listed pairs
 	contracts map[string]bool // the listed contracts
+	ticks     map[string]decimal.Decimal
 	at        time.Time
 }
 
@@ -115,23 +116,31 @@ func (r *ReferenceMap) Get(ctx context.Context) map[string]ports.Reference {
 		r.log.WarnContext(ctx, "reference mapping: contracts unavailable", "error", err)
 		return stale
 	}
-	m, listed, perps := map[string]ports.Reference{}, map[string]bool{}, map[string]bool{}
+	m, listed, perps, ticks := map[string]ports.Reference{}, map[string]bool{}, map[string]bool{}, map[string]decimal.Decimal{}
 	for _, p := range pairs {
-		listed[p.Symbol] = true
+		listed[p.Symbol], ticks[p.Symbol] = true, p.TickSize
 		if p.Reference.Remote != "" {
 			m[p.Symbol] = p.Reference
 		}
 	}
 	for _, c := range contracts {
-		perps[c.Symbol] = true
+		perps[c.Symbol], ticks[c.Symbol] = true, c.TickSize
 		if ref, ok := c.Reference(); ok {
 			m[c.Symbol] = ref // its own perpetual (coin-M design §3.2)
 		}
 	}
 	r.mu.Lock()
-	r.m, r.pairs, r.contracts, r.at = m, listed, perps, r.now()
+	r.m, r.pairs, r.contracts, r.ticks, r.at = m, listed, perps, ticks, r.now()
 	r.mu.Unlock()
 	return m
+}
+
+// Tick is a listed pair's or contract's price step as last read (zero:
+// not known).
+func (r *ReferenceMap) Tick(symbol string) decimal.Decimal {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ticks[symbol]
 }
 
 // Unreferenced lists the listed pairs and contracts no reference market

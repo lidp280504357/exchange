@@ -34,6 +34,16 @@ func Refused(err error) bool {
 	return errors.As(err, &r) && r.Refused()
 }
 
+// Code is the unified error code of a platform service's refusal err
+// carries ("" when none).
+func Code(err error) string {
+	var c interface{ ErrorCode() string }
+	if errors.As(err, &c) {
+		return c.ErrorCode()
+	}
+	return ""
+}
+
 // Trading is the platform's spot trading as a bot uses it: as the bot's
 // user, through the same paths as anyone.
 type Trading interface {

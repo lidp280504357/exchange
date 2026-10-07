@@ -232,6 +232,8 @@ type Pair struct {
 	// Reference is the market the pair's data follows; Remote is empty
 	// when it follows none.
 	Reference Reference
+	// TickSize is the pair's price step (zero: not known).
+	TickSize decimal.Decimal
 }
 
 // Instruments tells which trading pairs and contracts exist
@@ -280,6 +282,8 @@ type Contract struct {
 	// and, with market.reference_mark, its mark price follow: BTCUSDT
 	// (USDⓈ-M) or BTCUSD_PERP (COIN-M); empty when none does.
 	ReferenceSymbol string
+	// TickSize is the contract's price step (zero: not known).
+	TickSize decimal.Decimal
 }
 
 // MarginCoin is an inverse (coin-margined) contract's margin type.

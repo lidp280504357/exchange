@@ -96,7 +96,8 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 
 运行（只在持租约的实例上）：
 
-- 每秒按事件自己的时间表算 f，签名推给 market-data：`PUT /internal/market/overlay/{symbol}`，键 `sim`（`OVERLAY_API_SECRET`），`until` 为现在 + 4 秒，`seq` 为毫秒时间，`ends_at` 为按日程回到 1 的时刻（提前结束时是 3 秒的回落结束时；market-data 的 `MarketOverlayStuck` 据此判断）。推送失败就下一秒重推；market-data 5 秒收不到就回到 1（告警 `MarketSimOverlayPushFailing`）。
+- 每秒按事件自己的时间表算 f，签名推给 market-data：`PUT /internal/market/overlay/{symbol}`，键 `sim`（`OVERLAY_API_SECRET`），`until` 为现在 + 4 秒，`seq` 为毫秒时间，`ends_at` 为按日程回到 1 的时刻（提前结束时是 3 秒的回落结束时；market-data 的 `MarketOverlayStuck` 据此判断）。推送失败就下一秒重推；market-data 5 秒收不到就回到 1（告警 `MarketSimOverlayPushFailing`）。连续 5 次失败，或遇到不会自己好的拒绝（交易对不再跟随、签名不对等 4xx；`MARKET_OVERLAY_OFF` 与 `MARKET_OVERLAY_BUSY` 可能只是开关刚改、上一个事件还没收尾，照普通失败计），事件就地取消：清掉 market-data 的乘数，`DONE`/`CANCELED`，`ended_by` 为 `system:market-sim`，原因进审计——否则推送时断时续，交易对会在叠加价与币安价之间来回跳（审查 C57 ③）。
+- 每个事件各有一把锁，调度只在处理它的那一刻拿着（推送也在里面）；事件列表只在取快照时锁一下。所以 market-data 慢的时候，只有那个事件的那一秒被拖住，`End`、查询与新建都不等（审查 C57 ②）。对正在 3 秒回落中的事件再结束一次答 200 与该事件（不是 409），什么都不变。
 - **回到 1**：最后推一次 "1"，market-data 当即结束叠加；永续标记价等币安标记价连续 5 秒新鲜后回到原来源。记下这时的币安价与平台价（`end_reference_price`、`end_platform_price`），状态 `DONE`，审计 `market.sim.event_done`。
 - **峰值**：每秒读平台的显示价，记事件方向上的极值（`peak_price`）。峰值还在变时每 10 秒存一次库，停止变化时立即存。
 - **提前结束**（`POST /internal/sim/events/{id}/end`，即后台的「立即恢复」）：

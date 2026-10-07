@@ -24,8 +24,10 @@
 #                                 cancels a scheduled event, or brings a
 #                                 running one back to 1 in 3 seconds.
 #   scripts/ops/price-event.sh list [--all]
-#                                 the open events on followed pairs (--all:
-#                                 the latest 50 of any status).
+#                                 the open price events (--all: the latest
+#                                 50 of any status): the followed pairs'
+#                                 OVERLAY events and the simulated market's
+#                                 JUMP events (a request naming its pair).
 #   scripts/ops/price-event.sh overlays
 #                                 the factors market-data has now.
 #   scripts/ops/price-event.sh on|off
@@ -99,8 +101,9 @@ list)
   query=""
   [[ ${2:-} == --all ]] && query="?all=1&limit=50"
   ctl market-sim sim call GET "/internal/sim/events$query" 2>/dev/null |
-    jq '[.items[] | select(.type == "OVERLAY") | {id, symbol, status, result, target_factor, factor_now, progress, risk,
-      starts_at, base_price, peak_price, end_reference_price, end_platform_price, created_by, ended_by}]'
+    jq '[.items[] | select(.type == "OVERLAY" or .type == "JUMP") | {id, type, symbol: (.symbol // "(the simulated pair)"), status,
+      result, target_factor: (.target_factor // (if .type == "JUMP" then 1 + .size else null end)), factor_now, progress, risk,
+      starts_at, base_price: (.base_price // .from_price), peak_price, end_reference_price, end_platform_price, created_by, ended_by}]'
   ;;
 overlays)
   ssh exchange "cd $INFRA && $COMPOSE exec -T market-data-service wget -qO- http://127.0.0.1:8090/internal/market/overlay" | jq .

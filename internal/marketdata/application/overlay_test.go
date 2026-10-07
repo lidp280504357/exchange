@@ -143,17 +143,32 @@ func TestACandleKeepsTheSpike(t *testing.T) {
 	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if got, touched := oc.apply(c); !got.Close.Equal(d("94600")) || !got.High.Equal(d("94611")) || !got.Low.Equal(d("85990")) || !touched {
+	// The minute the event begins in keeps what came before it.
+	if got, touched := oc.apply(c); !got.Open.Equal(d("86000")) || !got.Close.Equal(d("94600")) || !got.High.Equal(d("94600")) ||
+		!got.Low.Equal(d("85990")) || !touched {
 		t.Fatalf("touched %+v", got)
 	}
+	// A minute that begins within the event has the scaled prices only: no
+	// wick back to the reference market's (review C57 ①).
+	*now = now.Add(time.Minute)
+	if err := o.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: now.Add(4 * time.Second), EventID: "e1", Seq: 2}); err != nil {
+		t.Fatal(err)
+	}
+	next := domain.Candle{
+		Symbol: "BTC-USDT", OpenTime: minute.Add(time.Minute), Open: d("86000"), High: d("86020"), Low: d("85980"), Close: d("86010"),
+	}
+	if got, touched := oc.apply(next); !got.Open.Equal(d("94600")) || !got.High.Equal(d("94622")) || !got.Low.Equal(d("94578")) ||
+		!got.Close.Equal(d("94611")) || !touched {
+		t.Fatalf("a minute within the event %+v", got)
+	}
 	o.Clear("BTC-USDT")
-	c.Close = d("86005")
-	if got, touched := oc.apply(c); !got.Close.Equal(d("86005")) || !got.High.Equal(d("94611")) || !touched {
+	next.Close = d("86005")
+	if got, touched := oc.apply(next); !got.Close.Equal(d("86005")) || !got.High.Equal(d("94622")) || !got.Low.Equal(d("86005")) || !touched {
 		t.Fatalf("back at 1 within the minute %+v", got)
 	}
-	c.OpenTime, c.Open, c.High, c.Low, c.Close = minute.Add(time.Minute), d("86005"), d("86006"), d("86004"), d("86005")
-	if got, touched := oc.apply(c); !got.High.Equal(d("86006")) || touched {
-		t.Fatalf("the next minute %+v", got)
+	next.OpenTime, next.Open, next.High, next.Low, next.Close = minute.Add(2*time.Minute), d("86005"), d("86006"), d("86004"), d("86005")
+	if got, touched := oc.apply(next); !got.High.Equal(d("86006")) || touched {
+		t.Fatalf("the minute after %+v", got)
 	}
 }
 

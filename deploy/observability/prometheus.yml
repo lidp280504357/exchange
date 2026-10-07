@@ -48,3 +48,7 @@ scrape_configs:
     static_configs: [{targets: ["admin-service:9094"]}]
   - job_name: margin-service
     static_configs: [{targets: ["margin-service:9099"]}]
+  # The host itself (disk, memory): a node exporter beside the agent, not
+  # on the compose network (HostDiskLow, HostDiskCritical; review C56).
+  - job_name: node
+    static_configs: [{targets: ["host.docker.internal:9100"]}]

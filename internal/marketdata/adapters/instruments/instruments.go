@@ -95,7 +95,10 @@ func (c *Client) refresh(ctx context.Context) error {
 }
 
 func toPair(p *instrumentv1.TradingPair, rank int32) (ports.Pair, error) {
-	out := ports.Pair{Symbol: p.GetSymbol(), Base: p.GetBaseAsset(), Quote: p.GetQuoteAsset(), Status: p.GetStatus(), Rank: rank}
+	out := ports.Pair{
+		Symbol: p.GetSymbol(), Base: p.GetBaseAsset(), Quote: p.GetQuoteAsset(), Status: p.GetStatus(), Rank: rank,
+		TickSize: tickOf(p.GetTickSize()),
+	}
 	if p.GetReferenceSymbol() == "" {
 		return out, nil
 	}
@@ -109,6 +112,16 @@ func toPair(p *instrumentv1.TradingPair, rank int32) (ports.Pair, error) {
 	}
 	out.Reference = ports.Reference{Symbol: p.GetSymbol(), Remote: p.GetReferenceSymbol(), Multiplier: m}
 	return out, nil
+}
+
+// tickOf is a price step as instrument-service gives it; zero when it is
+// not a positive decimal.
+func tickOf(s string) decimal.Decimal {
+	d, err := decimal.NewFromString(s)
+	if err != nil || !d.IsPositive() {
+		return decimal.Zero
+	}
+	return d
 }
 
 func contract(k *instrumentv1.Contract) (ports.Contract, error) {
@@ -131,7 +144,7 @@ func contract(k *instrumentv1.Contract) (ports.Contract, error) {
 	out := ports.Contract{
 		Symbol: k.GetSymbol(), IndexSymbol: k.GetIndexSymbol(), Status: k.GetStatus(),
 		FundingIntervalHours: k.GetFundingIntervalHours(), InterestRate: nums[0], FundingCap: nums[1], ImpactNotional: nums[2],
-		MarginType: margin, ContractSize: nums[3], ReferenceSymbol: k.GetReferenceSymbol(),
+		MarginType: margin, ContractSize: nums[3], ReferenceSymbol: k.GetReferenceSymbol(), TickSize: tickOf(k.GetTickSize()),
 	}
 	if out.Inverse() && !out.ContractSize.IsPositive() {
 		return ports.Contract{}, fmt.Errorf("contract %s: an inverse contract without a contract size", k.GetSymbol())

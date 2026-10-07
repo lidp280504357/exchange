@@ -134,18 +134,24 @@ func (b *Books) riskFactor(st *bookState) decimal.Decimal {
 	return b.overlay.RiskFactor(pair)
 }
 
-// scaled is st's best n levels a side times f.
-func scaled(st *bookState, n int, f decimal.Decimal) (bids, asks []domain.Level) {
+// scaled is st's best n levels a side times f, on the symbol's tick.
+func (b *Books) scaled(st *bookState, n int, f decimal.Decimal) (bids, asks []domain.Level) {
 	bids, asks = st.local.Top(n)
-	return domain.ScaleLevels(bids, f, true), domain.ScaleLevels(asks, f, false)
+	tick := b.overlay.Tick(st.ref.Symbol)
+	return domain.ScaleLevels(bids, f, true, tick), domain.ScaleLevels(asks, f, false, tick)
 }
 
-// scaledTrade is t with its price times f (and its quote amount with it):
-// a trade carries the factor of when it came (review GD ⑤), kept so in
-// the recent trades and published so.
-func scaledTrade(t domain.Trade, f decimal.Decimal) domain.Trade {
-	if !f.Equal(one) {
-		t.Price, t.Quote = domain.ScalePrice(t.Price, f), domain.ScalePrice(t.Quote, f)
+// scaledTrade is t with its price times f on the tick (and its quote
+// amount with it; a coin-margined trade's is a USD face value, which the
+// price does not move): a trade carries the factor of when it came (review
+// GD ⑤), kept so in the recent trades and published so.
+func (b *Books) scaledTrade(st *bookState, t domain.Trade, f decimal.Decimal) domain.Trade {
+	if f.Equal(one) {
+		return t
+	}
+	t.Price = domain.ScalePrice(t.Price, f, b.overlay.Tick(st.ref.Symbol))
+	if st.ref.Market != ports.MarketCoinM {
+		t.Quote = t.Price.Mul(t.Quantity)
 	}
 	return t
 }
@@ -529,7 +535,7 @@ func (b *Books) session(ctx context.Context, g bookGroup) error {
 			b.mu.Lock()
 			*live = b.now()
 			if st, ok := b.books[t.Symbol]; ok {
-				t = scaledTrade(t, b.shownFactor(st))
+				t = b.scaledTrade(st, t, b.shownFactor(st))
 				st.recent = append(st.recent, t)
 				if len(st.recent) > bookRecent {
 					st.recent = slices.Delete(st.recent, 0, len(st.recent)-bookRecent)
@@ -666,7 +672,7 @@ func (b *Books) Depth(symbol string, limit int) (*marketv1.DepthSnapshot, bool) 
 		return nil, false
 	}
 	f := b.shownFactor(st)
-	bids, asks := scaled(st, limit, f)
+	bids, asks := b.scaled(st, limit, f)
 	return &marketv1.DepthSnapshot{
 		Symbol: symbol, Sequence: b.seq[symbol], Bids: protoLevels(bids), Asks: protoLevels(asks),
 		TakenAt: timestamppb.New(st.updated), Reference: true, OverlayFactor: overlayField(f),
@@ -682,7 +688,7 @@ func (b *Books) Levels(symbol string, limit int) (bids, asks []domain.Level, ok 
 	if !found || !b.usable(st) {
 		return nil, nil, false
 	}
-	bids, asks = scaled(st, limit, b.riskFactor(st))
+	bids, asks = b.scaled(st, limit, b.riskFactor(st))
 	return bids, asks, true
 }
 
@@ -750,7 +756,7 @@ func (b *Books) collect() []outMsg {
 		f := b.shownFactor(st)
 		moved := st.factor.IsZero() && !f.Equal(one) || !st.factor.IsZero() && !st.factor.Equal(f)
 		if !st.shown || now.Sub(st.sentAt) >= bookSnapshotEvery || moved {
-			bids, asks := scaled(st, PublicDepth, f)
+			bids, asks := b.scaled(st, PublicDepth, f)
 			_, seq := b.nextSeq(symbol)
 			st.sent = [2][][2]string{rows(bids), rows(asks)}
 			st.shown, st.sentAt, st.beatAt, st.changed, st.factor = true, now, now, false, f
@@ -762,7 +768,7 @@ func (b *Books) collect() []outMsg {
 			var db, da [][2]string
 			if st.changed {
 				st.changed = false
-				bids, asks := scaled(st, PublicDepth, f)
+				bids, asks := b.scaled(st, PublicDepth, f)
 				next := [2][][2]string{rows(bids), rows(asks)}
 				db, da = diffRows(st.sent[0], next[0]), diffRows(st.sent[1], next[1])
 				st.sent = next

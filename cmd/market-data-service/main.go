@@ -173,6 +173,7 @@ func setup(ctx context.Context, a *app.App) error {
 	books.LoadFirst(cfg.BinanceFastDepth)
 	// The price events' factors on the followed pairs (market.overlay).
 	overlay := application.NewOverlay(flagClient, refs.FollowsPair, a.Metrics())
+	overlay.WithTicks(refs.Tick) // the scaled prices on each pair's and contract's tick
 	books.WithOverlay(overlay)
 	overlaySigned := &svcsign.Verifier{Keys: map[string][]byte{}}
 	if err := svcsign.CheckSecret(cfg.OverlayAPISecret); err != nil {

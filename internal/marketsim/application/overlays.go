@@ -59,6 +59,13 @@ const (
 	overlayPeakEvery  = 10 * time.Second
 	overlaySystem     = "system:market-sim"
 	overlayFlagActor  = "system:market.overlay"
+	// overlayPushFailures is how many pushes of an event in a row may fail
+	// (market-data down or slow) before the event is canceled: market-data
+	// puts the pair back at 1 five seconds after the last push, and an
+	// event whose pushes come and go would have it jump back and forth
+	// (review C57 ③). A refusal that will not pass (a pair no longer
+	// followed, a bad signature) cancels it at once.
+	overlayPushFailures = 5
 )
 
 // Codes of the overlays' refusals (J0 contract §3.1).
@@ -127,6 +134,9 @@ type Overlays struct {
 	// ops serializes the creations, from the checks to the save.
 	ops sync.Mutex
 
+	// mu guards the map of the open events alone, never across a request:
+	// each event has its own lock for its state (overlayRun.mu; review C57
+	// ②).
 	mu    sync.Mutex
 	open  map[string]*overlayRun // scheduled and running, by event ID
 	ready atomic.Bool
@@ -136,12 +146,22 @@ type Overlays struct {
 	saves  prometheus.Counter
 }
 
-// overlayRun is an open event as the runner keeps it.
+// overlayRun is an open event as the runner keeps it. Its pair and start
+// are set when it is made (read under Overlays.mu alone); mu guards the
+// rest: the runner holds it while it works on the event, its requests to
+// market-data included, and End while it changes the event - one event's
+// slow pushes hold up no other's, nor the lookups.
 type overlayRun struct {
+	symbol string
+	starts time.Time
+
+	mu        sync.Mutex
+	gone      bool // no longer open: done or canceled
 	e         domain.Event
 	savedPeak decimal.Decimal // its peak as stored
 	peakAt    time.Time       // when its peak was last saved
 	failing   bool            // its last push failed (logged once)
+	fails     int             // its pushes that failed in a row
 }
 
 // NewOverlays returns the overlays; market nil leaves them unconfigured
@@ -183,7 +203,7 @@ func (o *Overlays) Start(ctx context.Context) error {
 	defer o.mu.Unlock()
 	for _, e := range open {
 		if e.Type == domain.EventOverlay {
-			o.open[e.ID] = &overlayRun{e: e, savedPeak: e.PeakPrice}
+			o.open[e.ID] = newRun(e)
 		}
 	}
 	o.ready.Store(true)
@@ -297,7 +317,7 @@ func (o *Overlays) Create(ctx context.Context, req OverlayRequest) ([]OverlayCre
 	}
 	o.mu.Lock()
 	for _, e := range events {
-		o.open[e.ID] = &overlayRun{e: e}
+		o.open[e.ID] = newRun(e)
 		out = append(out, OverlayCreated{Symbol: e.Symbol, Event: e, TargetFactor: e.TargetFactor, BasePrice: e.BasePrice})
 		o.log.InfoContext(ctx, "price event created", "event", e.ID, "symbol", e.Symbol, "factor", e.TargetFactor, "by", e.CreatedBy,
 			"starts_at", e.StartsAt, "risk", e.Risk)
@@ -428,11 +448,23 @@ func (o *Overlays) openOn(symbol string) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for _, r := range o.open {
-		if r.e.Symbol == symbol {
+		if r.symbol == symbol {
 			return true
 		}
 	}
 	return false
+}
+
+func newRun(e domain.Event) *overlayRun {
+	return &overlayRun{symbol: e.Symbol, starts: e.StartsAt, e: e, savedPeak: e.PeakPrice}
+}
+
+// forget takes an event out of the open ones; r.mu is held.
+func (o *Overlays) forget(r *overlayRun) {
+	r.gone = true
+	o.mu.Lock()
+	delete(o.open, r.e.ID)
+	o.mu.Unlock()
 }
 
 // perpetualsOf are the perpetuals a pair is the index of: X-USDT-PERP and
@@ -484,9 +516,14 @@ func (o *Overlays) End(ctx context.Context, id, actor, reason string) (domain.Ev
 		return domain.Event{}, apperr.Invalid("the operator and a reason are required")
 	}
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	r, ok := o.open[id]
+	o.mu.Unlock()
 	if !ok {
+		return domain.Event{}, ErrEventNotOpen
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gone {
 		return domain.Event{}, ErrEventNotOpen
 	}
 	e := r.e
@@ -497,7 +534,8 @@ func (o *Overlays) End(ctx context.Context, id, actor, reason string) (domain.Ev
 		if err := o.store.SaveEvent(ctx, e, o.audit(ctx, e, "market.sim.event_canceled", actor, reason, now)); err != nil {
 			return domain.Event{}, err
 		}
-		delete(o.open, id)
+		r.e = e
+		o.forget(r)
 	case e.EndedAt.IsZero():
 		e.Result, e.EndedAt, e.EndedBy = domain.ResultCanceled, now, actor
 		if err := o.store.SaveEvent(ctx, e, o.audit(ctx, e, "market.sim.event_ended", actor, reason, now)); err != nil {
@@ -529,27 +567,30 @@ func (o *Overlays) Round(ctx context.Context) {
 	if o.market == nil {
 		return
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
 	now := o.now()
 	on := o.flags.Enabled(flags.KeyOverlay, flags.Subject{})
+	o.mu.Lock()
 	runs := make([]*overlayRun, 0, len(o.open))
 	for _, r := range o.open {
 		runs = append(runs, r)
 	}
-	slices.SortFunc(runs, func(a, b *overlayRun) int { return a.e.StartsAt.Compare(b.e.StartsAt) })
+	o.mu.Unlock()
+	slices.SortFunc(runs, func(a, b *overlayRun) int { return a.starts.Compare(b.starts) })
 	for _, r := range runs {
+		r.mu.Lock()
 		switch {
+		case r.gone:
 		case r.e.Status == domain.EventScheduled && r.e.StartsAt.After(now):
 		case r.e.Status == domain.EventScheduled && !on:
 			o.cancel(ctx, r, now, "market.overlay is off at its start")
 		case r.e.Status == domain.EventScheduled:
 			o.start(ctx, r, now)
 		case !on:
-			o.stop(ctx, r, now)
+			o.abort(ctx, r, now, overlayFlagActor, "market.overlay was switched off")
 		default:
 			o.step(ctx, r, now)
 		}
+		r.mu.Unlock()
 	}
 }
 
@@ -562,7 +603,8 @@ func (o *Overlays) cancel(ctx context.Context, r *overlayRun, now time.Time, why
 		o.log.WarnContext(ctx, "price event: its cancellation not saved", "event", e.ID, "error", err)
 		return
 	}
-	delete(o.open, e.ID)
+	r.e = e
+	o.forget(r)
 	o.log.WarnContext(ctx, "price event canceled", "event", e.ID, "symbol", e.Symbol, "why", why)
 }
 
@@ -609,7 +651,9 @@ func (o *Overlays) step(ctx context.Context, r *overlayRun, now time.Time) {
 		o.finish(ctx, r, now)
 		return
 	}
-	o.push(ctx, r, f, now)
+	if !o.push(ctx, r, f, now) {
+		return
+	}
 	ref, err := o.market.Followed(ctx, r.e.Symbol)
 	if err != nil || !ref.Shown.IsPositive() {
 		return
@@ -631,34 +675,56 @@ func (o *Overlays) step(ctx context.Context, r *overlayRun, now time.Time) {
 	}
 }
 
-// push sends the factor f of a running event to market-data.
-func (o *Overlays) push(ctx context.Context, r *overlayRun, f float64, now time.Time) {
-	e := r.e
+// send pushes the factor f of a running event to market-data.
+func (o *Overlays) send(ctx context.Context, e domain.Event, f float64, now time.Time) error {
 	err := o.market.Push(ctx, e.Symbol, ports.OverlayPush{
 		Factor: decimal.NewFromFloat(f).Round(8), Until: now.Add(overlayAhead), Risk: e.Risk, EventID: e.ID, Seq: now.UnixMilli(),
 		EndsAt: e.OverlayEnds(),
 	})
 	if err != nil {
 		o.pushes.WithLabelValues("failed").Inc()
+		return err
+	}
+	o.pushes.WithLabelValues("ok").Inc()
+	return nil
+}
+
+// push sends the factor f of a running event; false when the event is
+// canceled for its failures (overlayPushFailures).
+func (o *Overlays) push(ctx context.Context, r *overlayRun, f float64, now time.Time) bool {
+	e := r.e
+	if err := o.send(ctx, e, f, now); err != nil {
+		r.fails++
+		code := ports.Code(err)
+		if ports.Refused(err) && code != "MARKET_OVERLAY_OFF" && code != "MARKET_OVERLAY_BUSY" {
+			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("market-data refused its factor (%s)", code))
+			return false
+		}
+		if r.fails >= overlayPushFailures {
+			o.abort(ctx, r, now, overlaySystem, fmt.Sprintf("%d pushes of its factor in a row failed (%s)", r.fails, err))
+			return false
+		}
 		if !r.failing {
 			o.log.WarnContext(ctx, "price event: its factor not pushed; again next second", "event", e.ID, "symbol", e.Symbol, "error", err)
 		}
 		r.failing = true
-		return
+		return true
 	}
-	o.pushes.WithLabelValues("ok").Inc()
 	if r.failing {
 		o.log.InfoContext(ctx, "price event: its factor pushed again", "event", e.ID, "symbol", e.Symbol)
 	}
-	r.failing = false
+	r.failing, r.fails = false, 0
 	o.factor.WithLabelValues(e.Symbol).Set(f)
+	return true
 }
 
 // finish ends an event back at 1: the last push says so (market-data ends
 // the overlay at once), the reference and the platform's prices then are
 // its end, and it is done (CANCELED when an operator ended it).
 func (o *Overlays) finish(ctx context.Context, r *overlayRun, now time.Time) {
-	o.push(ctx, r, 1, now)
+	if err := o.send(ctx, r.e, 1, now); err != nil { // market-data drops the factor by itself in seconds
+		o.log.WarnContext(ctx, "price event: its last push failed", "event", r.e.ID, "symbol", r.e.Symbol, "error", err)
+	}
 	o.factor.DeleteLabelValues(r.e.Symbol)
 	e := r.e
 	if ref, err := o.market.Followed(ctx, e.Symbol); err == nil {
@@ -677,31 +743,34 @@ func (o *Overlays) finish(ctx context.Context, r *overlayRun, now time.Time) {
 		o.log.WarnContext(ctx, "price event: its end not saved; again next second", "event", e.ID, "error", err)
 		return
 	}
-	delete(o.open, e.ID)
+	r.e = e
+	o.forget(r)
 	o.log.InfoContext(ctx, "price event done", "event", e.ID, "symbol", e.Symbol, "result", e.Result, "base", e.BasePrice, "peak", e.PeakPrice,
 		"end_reference", e.EndReferencePrice, "end_platform", e.EndPlatformPrice)
 }
 
-// stop ends a running event when market.overlay is switched off:
-// market-data is at 1 already; the event is done, CANCELED.
-func (o *Overlays) stop(ctx context.Context, r *overlayRun, now time.Time) {
+// abort ends a running event at once for actor (market.overlay switched
+// off: market-data is at 1 already; its pushes failing): market-data's
+// overlay is cleared, the event is done, CANCELED, why audited.
+func (o *Overlays) abort(ctx context.Context, r *overlayRun, now time.Time, actor, why string) {
 	if err := o.market.Clear(ctx, r.e.Symbol); err != nil {
 		o.log.WarnContext(ctx, "price event: its overlay not cleared", "event", r.e.ID, "error", err)
 	}
 	o.factor.DeleteLabelValues(r.e.Symbol)
 	e := r.e
-	e.Status, e.Result, e.EndedBy = domain.EventDone, domain.ResultCanceled, overlayFlagActor
+	e.Status, e.Result, e.EndedBy = domain.EventDone, domain.ResultCanceled, actor
 	if e.EndedAt.IsZero() {
 		e.EndedAt = now
 	}
 	if ref, err := o.market.Followed(ctx, e.Symbol); err == nil {
 		e.EndReferencePrice, e.EndPlatformPrice = ref.Source, ref.Shown
 	}
-	if err := o.store.SaveEvent(ctx, e, o.audit(ctx, e, "market.sim.event_ended", overlayFlagActor, "market.overlay was switched off", now)); err != nil {
+	if err := o.store.SaveEvent(ctx, e, o.audit(ctx, e, "market.sim.event_ended", actor, why, now)); err != nil {
 		o.saves.Inc()
 		o.log.WarnContext(ctx, "price event: its end not saved; again next second", "event", e.ID, "error", err)
 		return
 	}
-	delete(o.open, e.ID)
-	o.log.WarnContext(ctx, "price event ended: market.overlay is off", "event", e.ID, "symbol", e.Symbol)
+	r.e = e
+	o.forget(r)
+	o.log.WarnContext(ctx, "price event canceled", "event", e.ID, "symbol", e.Symbol, "why", why)
 }

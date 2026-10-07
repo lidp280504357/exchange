@@ -44,6 +44,9 @@ type Error struct {
 
 func (e *Error) Error() string { return fmt.Sprintf("HTTP %d %s", e.Status, e.Code) }
 
+// ErrorCode is the refusal's unified error code (ports.Code).
+func (e *Error) ErrorCode() string { return e.Code }
+
 // Refused reports an answer of 4xx but a timeout or a rate limit: the
 // platform refused the request and did nothing (ports.Refused).
 func (e *Error) Refused() bool {

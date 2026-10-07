@@ -19,6 +19,9 @@ type overlayCandles struct {
 
 	mu   sync.Mutex
 	open map[string]*touched
+	// last is each symbol's latest minute an event touched: the minute
+	// after it began within the event (review C57 ①).
+	last map[string]time.Time
 }
 
 // touched is a minute a factor other than 1 reached.
@@ -28,7 +31,7 @@ type touched struct {
 }
 
 func newOverlayCandles(o *Overlay) *overlayCandles {
-	return &overlayCandles{overlay: o, open: map[string]*touched{}}
+	return &overlayCandles{overlay: o, open: map[string]*touched{}, last: map[string]time.Time{}}
 }
 
 // factor is the overlay's factor on symbol's candles: a pair's own, a
@@ -44,9 +47,14 @@ func (oc *overlayCandles) factor(symbol string) decimal.Decimal {
 
 // apply is c (a reference 1m candle as it stands) as the platform shows
 // it, and whether a price event touched its minute (then stored as such:
-// the charts lay it over the reference market's candles).
+// the charts lay it over the reference market's candles). The minute an
+// event begins in keeps the reference market's prices before it (its
+// open, high and low); a minute that began within the event has the
+// scaled prices only - the reference market's own range would show a wick
+// back to it in every such minute (review C57 ①).
 func (oc *overlayCandles) apply(c domain.Candle) (domain.Candle, bool) {
 	f := oc.factor(c.Symbol)
+	tick := oc.overlay.Tick(c.Symbol)
 	oc.mu.Lock()
 	defer oc.mu.Unlock()
 	t, ok := oc.open[c.Symbol]
@@ -58,16 +66,15 @@ func (oc *overlayCandles) apply(c domain.Candle) (domain.Candle, bool) {
 		if f.Equal(one) {
 			return c, false
 		}
-		// The minute's prices before the event, or (an event that was
-		// already on) the whole minute's, scaled by the factor now.
-		was := domain.ScalePrice(c.Open, f)
-		t = &touched{
-			minute: c.OpenTime, open: was, high: decimal.Max(c.High, domain.ScalePrice(c.High, f)),
-			low: decimal.Min(c.Low, domain.ScalePrice(c.Low, f)),
+		t = &touched{minute: c.OpenTime, open: c.Open, high: c.High, low: c.Low}
+		if last, had := oc.last[c.Symbol]; had && last.Add(time.Minute).Equal(c.OpenTime) {
+			t.open = domain.ScalePrice(c.Open, f, tick)
+			t.high, t.low = domain.ScalePrice(c.High, f, tick), domain.ScalePrice(c.Low, f, tick)
 		}
 		oc.open[c.Symbol] = t
 	}
-	p := domain.ScalePrice(c.Close, f)
+	oc.last[c.Symbol] = c.OpenTime
+	p := domain.ScalePrice(c.Close, f, tick)
 	t.high, t.low, t.close = decimal.Max(t.high, p), decimal.Min(t.low, p), p
 	c.Open, c.High, c.Low, c.Close = t.open, t.high, t.low, t.close
 	return c, true

@@ -419,7 +419,7 @@ func (m *Marks) prices(symbol string) []domain.SourcePrice {
 		if w, ok := m.weights[prices[i].Source]; ok {
 			prices[i].Weight = w
 		}
-		prices[i].Price = domain.ScalePrice(prices[i].Price, f)
+		prices[i].Price = domain.ScalePrice(prices[i].Price, f, m.overlay.Tick(symbol))
 	}
 	return prices
 }

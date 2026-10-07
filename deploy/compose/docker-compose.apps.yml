@@ -563,7 +563,9 @@ services:
   # The perpetual contracts' matching shard (implementation plan §7.3 task
   # 2): the same engine on derivatives.order.commands and
   # derivatives.order.references, schema deriv_matching, its own lease and
-  # consumer group.
+  # consumer group. HOUSE's reference books of 109 contracts write some
+  # 660,000 WAL entries an hour (2026-10-07: 730 MB of them; 2.5 GB kept at
+  # two hours, review C56): half an hour, as the spot engine.
   derivatives-engine:
     <<: *app
     command: ["/app/matching-engine"]
@@ -572,7 +574,7 @@ services:
       <<: *base-env
       GOMEMLIMIT: 200MiB
       MATCHING_SHARD: derivatives
-      MATCHING_WAL_RETENTION: 2h
+      MATCHING_WAL_RETENTION: 30m
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

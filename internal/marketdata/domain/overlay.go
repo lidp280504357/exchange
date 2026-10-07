@@ -7,8 +7,9 @@ import (
 )
 
 // Price overlays (design 2026-10-07, general price control): a price event
-// multiplies a followed pair's reference prices by a factor. A price keeps
-// the precision the reference market sent it with.
+// multiplies a followed pair's reference prices by a factor, the result on
+// the pair's tick (the reference market sends 84221.69000000: its own
+// precision would put the scaled price off the tick).
 
 var factorOne = decimal.NewFromInt(1)
 
@@ -26,21 +27,56 @@ func IndexPairOf(symbol string) string {
 	return pair
 }
 
-// places is how many decimal places p was sent with.
+// places is how many decimal places p has, its trailing zeros dropped.
 func places(p decimal.Decimal) int32 {
-	if e := p.Exponent(); e < 0 {
-		return -e
+	s := p.String()
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		return int32(len(s) - i - 1) //nolint:gosec // a decimal string's length
 	}
 	return 0
 }
 
-// ScalePrice is p times f at p's precision, rounded half away from zero (a
-// trade's price).
-func ScalePrice(p, f decimal.Decimal) decimal.Decimal {
+// The ways a scaled price goes onto the tick.
+type rounding int
+
+const (
+	roundHalf rounding = iota // a trade's, a last price
+	roundDown                 // a bid
+	roundUp                   // an ask
+)
+
+// onTick is x on the tick (when known; else at like's precision) the way
+// r says.
+func onTick(x, tick, like decimal.Decimal, r rounding) decimal.Decimal {
+	if tick.IsPositive() {
+		n := x.Div(tick)
+		switch r {
+		case roundDown:
+			n = n.Floor()
+		case roundUp:
+			n = n.Ceil()
+		default:
+			n = n.Round(0)
+		}
+		return n.Mul(tick)
+	}
+	switch places := places(like); r {
+	case roundDown:
+		return x.RoundFloor(places)
+	case roundUp:
+		return x.RoundCeil(places)
+	default:
+		return x.Round(places)
+	}
+}
+
+// ScalePrice is p times f on the tick (zero: at p's precision), rounded
+// half away from zero (a trade's price).
+func ScalePrice(p, f, tick decimal.Decimal) decimal.Decimal {
 	if f.Equal(factorOne) {
 		return p
 	}
-	return p.Mul(f).Round(places(p))
+	return onTick(p.Mul(f), tick, p, roundHalf)
 }
 
 // MergeOverlaid lays the 1m candles a price event touched over candles of
@@ -74,21 +110,20 @@ func MergeOverlaid(candles []Candle, i Interval, touched []Candle) []Candle {
 }
 
 // ScaleLevels is one side of a book (best first) with its prices times f
-// at their precision, rounded away from the other side (bids down, asks
-// up: never better than the scaled reference market), the levels that
-// meet merged, quantities as they are.
-func ScaleLevels(levels []Level, f decimal.Decimal, bids bool) []Level {
+// on the tick (zero: at their precision), rounded away from the other side
+// (bids down, asks up: never better than the scaled reference market),
+// the levels that meet merged, quantities as they are.
+func ScaleLevels(levels []Level, f decimal.Decimal, bids bool, tick decimal.Decimal) []Level {
 	if f.Equal(factorOne) || len(levels) == 0 {
 		return levels
 	}
+	way := roundUp
+	if bids {
+		way = roundDown
+	}
 	out := make([]Level, 0, len(levels))
 	for _, l := range levels {
-		p := l.Price.Mul(f)
-		if bids {
-			p = p.RoundFloor(places(l.Price))
-		} else {
-			p = p.RoundCeil(places(l.Price))
-		}
+		p := onTick(l.Price.Mul(f), tick, l.Price, way)
 		if !p.IsPositive() {
 			continue
 		}

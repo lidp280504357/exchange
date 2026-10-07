@@ -566,6 +566,9 @@ func TestHouseQuotesLessDuringAPriceEvent(t *testing.T) {
 	if len(books) != 1 || books[0].GetBids()[0].GetQuantity() != "0.025" || books[0].GetAsks()[0].GetQuantity() != "0.025" {
 		t.Fatalf("during the event: %v", books)
 	}
+	if share := gaugeOf(t, p.quotedShare.WithLabelValues("BTC-USDT")); share != 0.25 {
+		t.Fatalf("the share quoted during the event: %v", share)
+	}
 	// The rooms as published, for market-sim's loss estimate (J0 §4.2).
 	if ro, ok := p.RoomsOf("BTC-USDT"); !ok || ro.Buy.String() != books[0].GetBuyRoom() || ro.Sell.String() != books[0].GetSellRoom() ||
 		!ro.Mid.Equal(d("55000.5")) || !ro.UnitValue.Equal(d("55000.5")) {
@@ -579,6 +582,19 @@ func TestHouseQuotesLessDuringAPriceEvent(t *testing.T) {
 	if _, books = rec.take(t); len(books) != 1 || books[0].GetBids()[0].GetQuantity() != "0.1" {
 		t.Fatalf("after it: %v", books)
 	}
+	if share := gaugeOf(t, p.quotedShare.WithLabelValues("BTC-USDT")); share != 1 {
+		t.Fatalf("the share quoted after it: %v", share)
+	}
+}
+
+// gaugeOf is a gauge's value.
+func gaugeOf(t *testing.T, g prometheus.Gauge) float64 {
+	t.Helper()
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		t.Fatal(err)
+	}
+	return m.GetGauge().GetValue()
 }
 
 // A coin-margined contract (coin-margined design 2026-10-06 §2.3): HOUSE

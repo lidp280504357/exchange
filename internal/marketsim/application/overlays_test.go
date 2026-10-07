@@ -48,7 +48,18 @@ type fakeOverlayMarket struct {
 	pushes   []overlayPushed
 	clears   []string
 	failPush bool
+	pushErr  error // a push's answer instead (a refusal)
+	// hold, when set for a pair, holds its pushes until it is closed (a
+	// market-data that does not answer).
+	hold map[string]chan struct{}
 }
+
+// pushRefusal is market-data refusing a push with code.
+type pushRefusal string
+
+func (r pushRefusal) Error() string     { return "HTTP 409 " + string(r) }
+func (pushRefusal) Refused() bool       { return true }
+func (r pushRefusal) ErrorCode() string { return string(r) }
 
 type overlayPushed struct {
 	symbol string
@@ -71,9 +82,18 @@ func (f *fakeOverlayMarket) Followed(_ context.Context, symbol string) (ports.Fo
 
 func (f *fakeOverlayMarket) Push(_ context.Context, symbol string, p ports.OverlayPush) error {
 	f.mu.Lock()
+	wait := f.hold[symbol]
+	f.mu.Unlock()
+	if wait != nil {
+		<-wait
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failPush {
 		return errors.New("market-data down")
+	}
+	if f.pushErr != nil {
+		return f.pushErr
 	}
 	f.pushes = append(f.pushes, overlayPushed{symbol: symbol, OverlayPush: p})
 	f.factors[symbol] = p.Factor
@@ -417,6 +437,99 @@ func TestOverlayLossCountsThePerpetualsWithRisk(t *testing.T) {
 	if _, err := r.o.lossOf(ctx, "SOL-USDT", 1.1, true); err == nil {
 		t.Fatal("a pair HOUSE does not quote estimated")
 	}
+}
+
+// Pushes failing five times in a row cancel the event (market-data, which
+// drops a factor 5 seconds after its last push, would jump back and forth
+// as they come and go); a refusal that will not pass cancels it at once,
+// one that may (market.overlay not yet on there) counts as a failure
+// (review C57 ③).
+func TestAnEventWhosePushesFailIsCanceled(t *testing.T) {
+	r := newOverlayRig(t)
+	made, err := r.o.Create(context.Background(), btcSpike(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := made[0].Event.ID
+	r.market.failPush = true
+	r.seconds(4)
+	if !r.o.Has(id) {
+		t.Fatal("canceled after four failures")
+	}
+	r.seconds(1)
+	e := r.store.event(id)
+	if r.o.Has(id) || e.Status != domain.EventDone || e.Result != domain.ResultCanceled || e.EndedBy != "system:market-sim" ||
+		!slices.Equal(r.market.clears, []string{"BTC-USDT"}) {
+		t.Fatalf("after five failures: %+v, clears %v", e, r.market.clears)
+	}
+	if a := r.store.audits[len(r.store.audits)-1]; a.Action != "market.sim.event_ended" || a.Reason == "" {
+		t.Fatalf("audit %+v", a)
+	}
+
+	r.market.failPush = false
+	other := btcSpike(5)
+	other.Symbols = []string{"ETH-USDT"}
+	made, err = r.o.Create(context.Background(), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.market.pushErr = pushRefusal("MARKET_OVERLAY_OFF")
+	r.seconds(2)
+	if !r.o.Has(made[0].Event.ID) {
+		t.Fatal("market.overlay not yet on in market-data canceled the event at once")
+	}
+	r.market.pushErr = pushRefusal("MARKET_NOT_FOLLOWED")
+	r.seconds(1)
+	if e := r.store.event(made[0].Event.ID); r.o.Has(e.ID) || e.Status != domain.EventDone || e.Result != domain.ResultCanceled {
+		t.Fatalf("a pair no longer followed: %+v", e)
+	}
+}
+
+// A push market-data is slow to answer holds up only its own event: the
+// lookups, a new event and ending another event go on meanwhile (review
+// C57 ②).
+func TestASlowPushHoldsUpOnlyItsEvent(t *testing.T) {
+	r := newOverlayRig(t)
+	ctx := context.Background()
+	btc, err := r.o.Create(ctx, btcSpike(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eth := btcSpike(5)
+	eth.Symbols = []string{"ETH-USDT"}
+	ethMade, err := r.o.Create(ctx, eth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	r.market.mu.Lock()
+	r.market.hold = map[string]chan struct{}{"BTC-USDT": release}
+	r.market.mu.Unlock()
+	r.now = r.now.Add(time.Second)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.o.Round(ctx) // stuck in BTC-USDT's push
+	}()
+	answered := make(chan error, 1)
+	go func() {
+		if !r.o.Has(btc[0].Event.ID) {
+			answered <- errors.New("the BTC-USDT event not open")
+			return
+		}
+		_, err := r.o.End(ctx, ethMade[0].Event.ID, "ops2", "enough")
+		answered <- err
+	}()
+	select {
+	case err := <-answered:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the lookups and another event's end waited on a slow push")
+	}
+	close(release)
+	<-done
 }
 
 // A push that fails is made again the next second; market-data, which

@@ -4,11 +4,14 @@
 # BTC-USDT ramps up in 15 seconds, holds 0 and comes back in 5. While it
 # runs, the platform's reference price, ticker and book are the reference
 # market's times the event's factor, HOUSE quotes a quarter of each level
-# (market_house_overlay_quoting), BTC-USDT-PERP's index and mark follow
-# (the mark computed, PLATFORM) and so does a margin account holding BTC;
-# afterwards the event is DONE, the ticker within 0.05% of the reference
-# market, the spike in the 1m candles, the perpetual's mark back on its own
-# source 30 seconds later. A second event "without risk" moves the spot
+# (market_house_quoted_share against the reference market's book, before
+# and during), BTC-USDT-PERP's index and mark follow (the mark computed,
+# PLATFORM) and so does a margin account holding BTC; afterwards the event
+# is DONE, the ticker within 0.05% of the reference market, the spike in
+# the 1m candles, the perpetual's mark back on its own source once the
+# reference market's mark has streamed 5 seconds (the C40 rule). The
+# platform's market data after the event is read inside market-data's
+# container, as during it. A second event "without risk" moves the spot
 # pair only: the perpetual's mark and the margin account stay on the
 # reference market's price. The target is +16% unless HOUSE's worst loss
 # on it (its rooms on the pair, and on the perpetuals with risk) is beyond
@@ -107,22 +110,29 @@ expect 200 - "$QTY BTC into the cross margin account"
 
 MARK_BEFORE=$(md "/v1/market/$PERP/mark-price" | jq -r .source)
 echo "     $PERP's mark from $MARK_BEFORE"
+# HOUSE's quantity on BTC-USDT's first levels over the reference market's,
+# before any event: the share an event's quarter is compared with.
+SHARE_BEFORE=$(metric market-maker 9091 market_house_quoted_share "symbol=\"$SYMBOL\"")
+[[ $(jq -n "${SHARE_BEFORE:-0} >= 0.5") == true ]] || { echo "FAIL HOUSE quotes ${SHARE_BEFORE:-nothing} of $SYMBOL's book before the event" >&2; exit 1; }
+echo "     HOUSE quotes $SHARE_BEFORE of the reference book's first levels"
 
 # The sampler runs in market-data's container: every second the reference
 # price (again after the rest: a sample whose factor moved meanwhile is
 # not compared), the ticker, the book's top, the perpetual's mark, the
 # user's margin accounts (margin-service, as the gateway would ask) and
-# HOUSE's reduced quoting, one JSON line.
+# HOUSE's reduced quoting and share of the book, one JSON line.
 cat >"$WORK/sampler.sh" <<EOF
 for i in \$(seq 26); do
-  q=\$(wget -qO- http://market-maker:9091/metrics 2>/dev/null | grep '^market_house_overlay_quoting{symbol="$SYMBOL"}' | cut -d' ' -f2)
-  printf '{"t":%s,"ref":%s,"ticker":%s,"depth":%s,"mark":%s,"margin":%s,"ref2":%s,"quoting":"%s"}\n' "\$(date +%s)" \
+  m=\$(wget -qO- http://market-maker:9091/metrics 2>/dev/null)
+  q=\$(echo "\$m" | grep '^market_house_overlay_quoting{symbol="$SYMBOL"}' | cut -d' ' -f2)
+  s=\$(echo "\$m" | grep '^market_house_quoted_share{symbol="$SYMBOL"}' | cut -d' ' -f2)
+  printf '{"t":%s,"ref":%s,"ticker":%s,"depth":%s,"mark":%s,"margin":%s,"ref2":%s,"quoting":"%s","share":"%s"}\n' "\$(date +%s)" \
     "\$(wget -qO- http://127.0.0.1:8090/internal/market/$SYMBOL/reference || echo null)" \
     "\$(wget -qO- http://127.0.0.1:8090/v1/market/$SYMBOL/ticker || echo null)" \
     "\$(wget -qO- 'http://127.0.0.1:8090/v1/market/$SYMBOL/depth?limit=1' || echo null)" \
     "\$(wget -qO- http://127.0.0.1:8090/v1/market/$PERP/mark-price || echo null)" \
     "\$(wget -qO- --header 'X-User-Id: $USER_ID' http://margin-service:8099/v1/margin/accounts || echo null)" \
-    "\$(wget -qO- http://127.0.0.1:8090/internal/market/$SYMBOL/reference || echo null)" "\$q"
+    "\$(wget -qO- http://127.0.0.1:8090/internal/market/$SYMBOL/reference || echo null)" "\$q" "\$s"
   sleep 1
 done
 EOF
@@ -187,7 +197,8 @@ holds "$WORK/risk" "$steady | length > 0 and all($ratio / (.ref.overlay_factor |
   "the ticker is the reference market's times the factor"
 holds "$WORK/risk" "$steady | all(((.depth.bids[0][0] | tonumber) / (.ref.source_price | tonumber)) / (.ref.overlay_factor | tonumber) | . > 0.997 and . < 1.003)" \
   "the book's best bid too"
-holds "$WORK/risk" "map(select(.quoting == \"1\")) | length > 0" "HOUSE quoted a part of each level meanwhile"
+holds "$WORK/risk" "map(select(.quoting == \"1\" and .share != \"\") | .share | tonumber) | length > 0 and max <= 0.4 * $SHARE_BEFORE" \
+  "HOUSE quoted a quarter of each level meanwhile (of $SHARE_BEFORE before)"
 holds "$WORK/risk" "map(select(.mark.source == \"PLATFORM\")) | length > 0" "$PERP's mark computed during the event"
 holds "$WORK/risk" "map((.mark.index_price | tonumber) / (.ref.source_price | tonumber)) | max >= 1 + 0.7 * ($F - 1) and max <= $F + 0.004" \
   "$PERP's index followed"
@@ -203,12 +214,11 @@ check_event "(.end_platform_price | tonumber) / (.end_reference_price | tonumber
   "back at the reference price: $(jq -r .end_platform_price <<<"$EVENT_JSON") against $(jq -r .end_reference_price <<<"$EVENT_JSON")"
 check_event "(.peak_price | tonumber) / (.base_price | tonumber) >= 1 + 0.7 * ($F - 1)" "the platform's peak $(jq -r .peak_price <<<"$EVENT_JSON")"
 REF=$(md "/internal/market/$SYMBOL/reference")
-call GET "/v1/market/$SYMBOL/ticker" ""
-LAST=$(jq -r .last <<<"$BODY")
+LAST=$(md "/v1/market/$SYMBOL/ticker" | jq -r .last)
 [[ $(jq -n "($LAST / $(jq -r .source_price <<<"$REF") - 1) | fabs < 0.0005") == true && $(jq -r .overlay_factor <<<"$REF") == 1 ]] ||
   { echo "FAIL after the event: ticker $LAST, reference $REF" >&2; exit 1; }
 echo "ok   the ticker $LAST within 0.05% of the reference market"
-call GET "/v1/market/$SYMBOL/candles?interval=1m&limit=3" ""
+BODY=$(md "/v1/market/$SYMBOL/candles?interval=1m&limit=3")
 check "[.candles[].high | tonumber] | max >= $BASE * (1 + 0.7 * ($F - 1))" "the spike stays in the 1m candles"
 mark_back() { [[ $(md "/v1/market/$PERP/mark-price" | jq -r .source) == "$MARK_BEFORE" ]]; }
 eventually 120 "$PERP's mark back on $MARK_BEFORE" mark_back

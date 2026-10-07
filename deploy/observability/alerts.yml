@@ -41,6 +41,26 @@ groups:
         annotations:
           summary: "{{ $labels.job }} {{ $labels.method }} returns server errors"
 
+      # The host's root partition (node exporter, job "node"; review C56):
+      # the engines' WAL, Redpanda and the image builds share it, and a
+      # full disk drops the running containers' network endpoints. The
+      # deploy script stops below 8 GB.
+      - alert: HostDiskLow
+        expr: max by (instance) (node_filesystem_avail_bytes{job="node", mountpoint="/"}) < 10e9
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "the host's root partition has {{ $value | humanize1024 }}B left: the WAL tables, Redpanda and the build cache share it"
+          runbook: docs/runbook/server-deploy.md
+
+      - alert: HostDiskCritical
+        expr: max by (instance) (node_filesystem_avail_bytes{job="node", mountpoint="/"}) < 5e9
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "the host's root partition has {{ $value | humanize1024 }}B left: free space now (docs/runbook/server-deploy.md), a full disk stops the containers"
+          runbook: docs/runbook/server-deploy.md
+
   - name: events
     rules:
       - alert: EventsDeadLettered

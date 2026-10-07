@@ -77,6 +77,7 @@ type OverlayState struct {
 type Overlay struct {
 	flags    Flags
 	followed func(symbol string) bool
+	ticks    func(symbol string) decimal.Decimal
 	now      func() time.Time
 
 	mu    sync.Mutex
@@ -113,6 +114,20 @@ func NewOverlay(fl Flags, followed func(symbol string) bool, reg prometheus.Regi
 }
 
 func (o *Overlay) enabled() bool { return o.flags.Enabled(flags.KeyOverlay, flags.Subject{}) }
+
+// WithTicks has the scaled prices of a symbol on its price step (ticks:
+// the pairs' and contracts' as instrument-service has them). Call it
+// before serving.
+func (o *Overlay) WithTicks(ticks func(symbol string) decimal.Decimal) { o.ticks = ticks }
+
+// Tick is symbol's price step, zero when not known (the scaled prices keep
+// the reference market's precision then).
+func (o *Overlay) Tick(symbol string) decimal.Decimal {
+	if o == nil || o.ticks == nil {
+		return decimal.Zero
+	}
+	return o.ticks(symbol)
+}
 
 // Set takes a push for symbol (J0 contract §2.1).
 func (o *Overlay) Set(symbol string, p OverlayPush) error {
@@ -274,9 +289,10 @@ func (o *Overlay) Ticker(symbol string, tk domain.Ticker, f decimal.Decimal, sca
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !f.Equal(one) {
-		tk.Last = domain.ScalePrice(tk.Last, f)
+		tick := o.Tick(symbol)
+		tk.Last = domain.ScalePrice(tk.Last, f, tick)
 		if scaleQuotes {
-			tk.Bid, tk.Ask = domain.ScalePrice(tk.Bid, f), domain.ScalePrice(tk.Ask, f)
+			tk.Bid, tk.Ask = domain.ScalePrice(tk.Bid, f, tick), domain.ScalePrice(tk.Ask, f, tick)
 		}
 		event := ""
 		if s, ok := o.items[domain.IndexPairOf(symbol)]; ok {
