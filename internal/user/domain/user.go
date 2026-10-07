@@ -44,6 +44,12 @@ type User struct {
 	Version          int64
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// Username, and when the user last changed it (zero while it is the
+	// one drawn); Avatar is nil for the sites' default (design 2026-10-07,
+	// avatars and usernames).
+	Username          string
+	UsernameChangedAt time.Time
+	Avatar            *Avatar
 }
 
 // Consent is an accepted document version.
@@ -80,5 +86,5 @@ func NewUser(id, region, language, timezone string) (User, error) {
 	if _, err := time.LoadLocation(timezone); err != nil || len(timezone) > 64 {
 		return User{}, apperr.Invalid("timezone must be an IANA time zone")
 	}
-	return User{ID: id, Status: StatusActive, Region: region, Language: language, Timezone: timezone}, nil
+	return User{ID: id, Status: StatusActive, Region: region, Language: language, Timezone: timezone, Username: DrawUsername()}, nil
 }

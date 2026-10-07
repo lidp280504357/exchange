@@ -16,6 +16,7 @@ import (
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
 	"github.com/skill/exchange/internal/user/adapters/authclient"
+	"github.com/skill/exchange/internal/user/adapters/avatars"
 	"github.com/skill/exchange/internal/user/adapters/postgres"
 	"github.com/skill/exchange/internal/user/application"
 	"github.com/skill/exchange/internal/user/transport/consumer"
@@ -33,6 +34,10 @@ type settings struct {
 	Kafka    kafka.Config `koanf:",squash"`
 	// AuthAddr is auth-service's gRPC address, for step-up tokens (AUTH_GRPC_ADDR).
 	AuthAddr string `koanf:"auth_grpc_addr"`
+	// AvatarDir is where the avatars' files go (AVATAR_DIR; nginx serves it
+	// at /uploads/avatars/, design 2026-10-07, avatars and usernames);
+	// without one avatar uploads are refused.
+	AvatarDir string `koanf:"avatar_dir"`
 }
 
 func (s *settings) Validate() error {
@@ -69,6 +74,15 @@ func setup(ctx context.Context, a *app.App) error {
 		Flags:   flagClient,
 		StepUps: authclient.New(authv1.NewAuthServiceClient(authConn)),
 		Now:     time.Now,
+	}
+	if cfg.AvatarDir != "" {
+		dir, err := avatars.New(cfg.AvatarDir)
+		if err != nil {
+			return err
+		}
+		svc.Avatars = dir
+	} else {
+		a.Logger().Warn("avatar uploads are refused: set AVATAR_DIR")
 	}
 	// Reviews that risk rules enforce (risk.enforce).
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicRisk}, consumer.Handler(svc)); err != nil {

@@ -225,6 +225,11 @@ type Users interface {
 	// Stats counts all accounts, those created since, and per day for the
 	// last days.
 	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
+	// ResetUsername gives an account a new drawn username and returns the
+	// one before; ResetAvatar takes it back to the default avatar and says
+	// whether there was one (design 2026-10-07, avatars and usernames §1.6).
+	ResetUsername(ctx context.Context, userID, actor, reason string) (User, string, error)
+	ResetAvatar(ctx context.Context, userID, actor, reason string) (User, bool, error)
 }
 
 // Identity is one of an account's sign-in identities.

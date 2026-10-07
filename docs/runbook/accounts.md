@@ -50,6 +50,14 @@ ssh exchange sudo docker exec exchange-infra-user-service-1 /app/exchangectl use
 
 管理后台的账户列表与概览用 gRPC `ListUsers`（按注册时间新到旧，游标分页）与 `UserStats`（总数、某时刻以来的新增、最近若干天每日新增）。
 
+### 用户名与头像（设计 2026-10-07 头像与用户名，I0/I1）
+
+- **用户名**：注册时抽一个 `user_` + 8 位小写字母数字（`crypto/rand`，撞了换一个重来，最多 5 次）；`username_changed_at` 为空表示还是抽到的。`PUT /v1/user/username`：3–20 位字母、数字、下划线，不以下划线开头（库表 CHECK 同样约束）；不分大小写唯一（`lower(username)` 唯一索引 `users_username_lower`，撞了 409 `USER_USERNAME_TAKEN`）；保留词 400 `USER_USERNAME_INVALID`——整词：house、root、system、null、undefined、api、www、help、service、security、platform、exchange、operator、bot，含有即拒：admin、astras、support、official、staff、moderator（`internal/user/domain/username.go`）；7 天一次（409 `USER_USERNAME_COOLDOWN`，`details.next_change_at`），完全相同的名字什么也不改，大小写不同算一次改名。改名发 `ProfileUpdated{fields: [username]}` 与审计 `user.username_changed`（actor `user:<ID>`），不发邮件。登录仍用邮箱或手机。
+- **头像**：`POST /v1/user/avatar`（multipart，一个 `file` 部分，图片 ≤ 5 MB、请求 ≤ 8 MB，nginx 对这个地址放宽到 8m），`DELETE /v1/user/avatar` 回到默认。按内容判断格式，只收 PNG、JPEG、WebP，边长 ≥ 64、像素 ≤ 4096×4096（再大解码占内存太多），否则 400 `USER_AVATAR_INVALID`（`details.reason` 说明原因），超过 5 MB 413 `USER_AVATAR_TOO_LARGE`。处理（`internal/user/adapters/avatars`，同一时间只处理一张）：解码 → 取中间的正方形 → 缩放到 256 与 64（CatmullRom）→ JPEG 按 EXIF 方向转正 → 编码为无损 WebP（纯 Go 的 `github.com/HugoSmits86/nativewebp`），不保留原图与任何元数据。文件在 `AVATAR_DIR`（测试服 user-service 容器的 `/data/avatars`，即服务器 `infra/uploads/avatars`）下 `<用户 ID>/<16 位随机>.webp` 与 `_64.webp`，先写临时文件再改名，644；新头像记进库以后才删旧文件（删失败只告警，文件留着没人引用）。库里 `users.avatar` 存 `{path, thumb_path, uploaded_at, size, sha256}`，空即默认头像（两站内置 12 个，按用户 ID 选）。没配 `AVATAR_DIR` 时上传答 503。
+- **分发**：nginx `snippets/uploads.conf`（三个站点都 include）只读直出 `/uploads/avatars/<UUID>/<名>.webp`，`image/webp`、`Cache-Control: public, max-age=2592000, immutable`、`nosniff`，其它路径 404。换头像就是换地址，不用清缓存；但删除或重置后，Cloudflare 已缓存的旧地址最长 30 天内仍可访问（地址随机，只有看过的人知道）。
+- **后台重置**（单人，权限 `users.status`，审计 `admin.users.username_reset`（含新旧名）/`admin.users.avatar_reset`）：admin-service 调 user-service gRPC `ResetUsername`（重新抽名，`username_changed_at` 清空、不进 7 天冷却）、`ResetAvatar`（删文件，没有头像时什么也不做）；user-service 发 `ProfileReset{field, username, actor, reason}`（user.events）与审计 `user.username_reset`/`user.avatar_reset`，站内信 `USERNAME_RESET`/`AVATAR_RESET` 由通知服务按它发。
+- 资料接口与 gRPC `User` 都带 `username`、`username_changed_at`、`avatar_url`、`avatar_thumb_url`（站内路径，无头像为空）；后台 `UserSummary` 带 `username`、`avatar_url`、`avatar_thumb_url`。
+
 ## 用户通知
 
 notification-service 以消费组 `notification-service` 读 `auth.events`、`user.events`、钱包的充值与提现事件、`margin.events` 与 `derivatives.liquidation.events`（2026-10-07 起，币本位设计 §2.6），每个事件最多生成一条站内信（inbox 去重），同事务发 `notification.NotificationCreated`（阶段 1 任务 15 起经 WebSocket `notifications` 频道推送）。

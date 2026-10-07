@@ -24,11 +24,34 @@ type Server struct {
 func NewServer(svc *application.Service) *Server { return &Server{svc: svc} }
 
 func toProto(u domain.User) *userv1.User {
-	return &userv1.User{
+	out := &userv1.User{
 		Id: u.ID, Status: u.Status, Region: u.Region, Language: u.Language, Timezone: u.Timezone,
 		KycLevel:         int32(u.KYCLevel), //nolint:gosec // small level number
 		AntiPhishingCode: u.AntiPhishingCode, CreatedAt: timestamppb.New(u.CreatedAt),
+		Username: u.Username, AvatarUrl: u.Avatar.URL(), AvatarThumbUrl: u.Avatar.ThumbURL(),
 	}
+	if !u.UsernameChangedAt.IsZero() {
+		out.UsernameChangedAt = timestamppb.New(u.UsernameChangedAt)
+	}
+	return out
+}
+
+// ResetUsername gives an account a new drawn username for an operator.
+func (s *Server) ResetUsername(ctx context.Context, req *userv1.ResetUsernameRequest) (*userv1.ResetUsernameResponse, error) {
+	u, previous, err := s.svc.ResetUsername(ctx, req.GetUserId(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &userv1.ResetUsernameResponse{User: toProto(u), Previous: previous}, nil
+}
+
+// ResetAvatar takes an account back to the default avatar for an operator.
+func (s *Server) ResetAvatar(ctx context.Context, req *userv1.ResetAvatarRequest) (*userv1.ResetAvatarResponse, error) {
+	u, removed, err := s.svc.ResetAvatar(ctx, req.GetUserId(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &userv1.ResetAvatarResponse{User: toProto(u), Removed: removed}, nil
 }
 
 // CreateUser creates a profile idempotently.

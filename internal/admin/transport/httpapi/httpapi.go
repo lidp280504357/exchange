@@ -86,6 +86,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/users/{id}/login-history", h.loginHistory)
 			r.Post("/users/{id}/sessions/revoke", h.revokeSessions)
 			r.Post("/users/{id}/totp-reset", h.resetTOTP)
+			r.Post("/users/{id}/username-reset", h.usernameReset)
+			r.Post("/users/{id}/avatar-reset", h.avatarReset)
 			r.Post("/users/{id}/password-reset", h.passwordReset)
 			r.Get("/users/{id}/history", h.userHistory)
 			r.Get("/users/{id}/risk", h.userRisk)
@@ -461,6 +463,34 @@ func userJSON(u ports.User) map[string]any {
 		"status": u.Status, "region": u.Region, "language": u.Language, "timezone": u.Timezone, "kyc_level": u.KYCLevel,
 		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags,
 	}
+}
+
+func (h *Handler) usernameReset(w http.ResponseWriter, r *http.Request) {
+	var body reasonBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	u, err := h.Svc.ResetUsername(r.Context(), principal(r), chi.URLParam(r, "id"), body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, userJSON(u))
+}
+
+func (h *Handler) avatarReset(w http.ResponseWriter, r *http.Request) {
+	var body reasonBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	u, err := h.Svc.ResetAvatar(r.Context(), principal(r), chi.URLParam(r, "id"), body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, userJSON(u))
 }
 
 func (h *Handler) userDetail(w http.ResponseWriter, r *http.Request) {

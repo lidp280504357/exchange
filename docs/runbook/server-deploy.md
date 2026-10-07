@@ -83,6 +83,8 @@ bash /opt/exchange/src/deploy/server-update.sh
 
 编写 `docker-compose.apps.yml` 时，每个应用服务的 `stop_grace_period` 要大于 `SHUTDOWN_TIMEOUT`（默认 10s），建议 15s；否则 Docker 会在优雅退出完成前发 SIGKILL，在途请求与清理会被打断。
 
+用户上传的头像（设计 2026-10-07 头像与用户名）在 `infra/uploads/avatars/<用户 ID>/`：user-service 读写挂在 `/data/avatars`（`AVATAR_DIR`），nginx 只读挂在 `/usr/share/nginx/uploads/avatars`，三个站点的 `/uploads/avatars/`（`snippets/uploads.conf`）；`server-update.sh` 建好目录并交给 uid 10001（755，文件 644）。备份不含它（用户可以重新上传），见 [accounts.md](accounts.md) 用户名与头像一节。
+
 App 下载（设计 2026-10-07 App 下载页，H1）的文件放在 `infra/downloads/{android,ios}`（后台上传的安装包、iOS 安装清单与配置描述文件；admin-service 读写挂在 `/srv/downloads`，nginx 只读挂在 `/usr/share/nginx/files/downloads`，三个站点的 `/downloads/`）与 `infra/app-uploads`（上传中的分片，只给 admin-service，`/srv/app-uploads`）。两个目录由 `server-update.sh` 建好并交给容器用户 uid 10001（downloads 755、app-uploads 700；文件 644，nginx 的用户能读）。备份不含它们（可以重新上传）；每个平台最多保留 10 个、单个最多 500 MiB，磁盘剩余不到文件两倍加 2 GiB 时后台拒绝新上传。
 
 ## 应用服务与端口

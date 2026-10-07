@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -179,5 +180,55 @@ func TestListAndCountUsers(t *testing.T) {
 	}
 	if days < 3 {
 		t.Fatalf("per day %+v", st.Days)
+	}
+}
+
+// Usernames are unique whatever the case, a clash is ErrUsernameTaken on
+// create and update alike; the change time and the avatar round-trip
+// (design 2026-10-07, avatars and usernames).
+func TestUsernamesAndAvatars(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	users := store.Read().Users()
+	consents := []domain.Consent{{Document: domain.DocumentTerms, Version: "v1"}, {Document: domain.DocumentRiskDisclosure, Version: "v1"}}
+	a, _ := domain.NewUser(uuid.NewString(), "SG", "", "")
+	a.Username = "Satoshi_N"
+	if _, err := users.Create(ctx, a, consents); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := domain.NewUser(uuid.NewString(), "SG", "", "")
+	b.Username = "satoshi_n"
+	if _, err := users.Create(ctx, b, consents); !errors.Is(err, domain.ErrUsernameTaken) {
+		t.Fatalf("a clash on create: %v", err)
+	}
+	b.Username = "hal_f"
+	if _, err := users.Create(ctx, b, consents); err != nil {
+		t.Fatal(err)
+	}
+	got, err := users.Get(ctx, b.ID)
+	if err != nil || got.Username != "hal_f" || !got.UsernameChangedAt.IsZero() || got.Avatar != nil {
+		t.Fatalf("read %+v %v", got, err)
+	}
+	got.Username = "SATOSHI_N"
+	if _, err := users.Update(ctx, got); !errors.Is(err, domain.ErrUsernameTaken) {
+		t.Fatalf("a clash on update: %v", err)
+	}
+	at := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
+	got.Username, got.UsernameChangedAt = "hal_finney", at
+	got.Avatar = &domain.Avatar{Path: b.ID + "/abc.webp", ThumbPath: b.ID + "/abc_64.webp", UploadedAt: at, Size: 1234, SHA256: "ff"}
+	if _, err := users.Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got, err = users.Get(ctx, b.ID)
+	if err != nil || got.Username != "hal_finney" || !got.UsernameChangedAt.Equal(at) || got.Avatar == nil ||
+		got.Avatar.ThumbPath != b.ID+"/abc_64.webp" || got.Avatar.Size != 1234 || !got.Avatar.UploadedAt.Equal(at) {
+		t.Fatalf("round trip %+v %+v %v", got, got.Avatar, err)
+	}
+	got.Avatar, got.UsernameChangedAt = nil, time.Time{}
+	if _, err := users.Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = users.Get(ctx, b.ID); err != nil || got.Avatar != nil || !got.UsernameChangedAt.IsZero() {
+		t.Fatalf("back to the default %+v %v", got, err)
 	}
 }

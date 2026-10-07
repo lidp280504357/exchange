@@ -247,6 +247,30 @@ func (u *fakeUsers) Stats(context.Context, time.Time, int) (ports.UserStats, err
 	return ports.UserStats{}, nil
 }
 
+// ResetUsername gives a known account user_reset; ResetAvatar clears its
+// avatar.
+func (u *fakeUsers) ResetUsername(_ context.Context, id, _, _ string) (ports.User, string, error) {
+	v, ok := u.known[id]
+	if !ok {
+		return ports.User{}, "", apperr.NotFound("no such user")
+	}
+	previous := v.Username
+	v.Username = "user_reset"
+	u.known[id] = v
+	return v, previous, nil
+}
+
+func (u *fakeUsers) ResetAvatar(_ context.Context, id, _, _ string) (ports.User, bool, error) {
+	v, ok := u.known[id]
+	if !ok {
+		return ports.User{}, false, apperr.NotFound("no such user")
+	}
+	had := v.AvatarURL != ""
+	v.AvatarURL, v.AvatarThumbURL = "", ""
+	u.known[id] = v
+	return v, had, nil
+}
+
 func (m *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error { return fn(m) }
 
 func (m *memStore) Read() ports.Repos { return m }

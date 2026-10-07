@@ -3,6 +3,8 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -93,19 +95,47 @@ func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggreg
 
 type users repos
 
-const userColumns = `id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at, updated_at`
+const userColumns = `id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at, updated_at,
+	username, username_changed_at, avatar`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
 	var id uuid.UUID
-	err := row.Scan(&id, &u.Status, &u.Region, &u.Language, &u.Timezone, &u.AntiPhishingCode, &u.KYCLevel, &u.Version, &u.CreatedAt, &u.UpdatedAt)
+	var changed *time.Time
+	var avatar []byte
+	err := row.Scan(&id, &u.Status, &u.Region, &u.Language, &u.Timezone, &u.AntiPhishingCode, &u.KYCLevel, &u.Version, &u.CreatedAt, &u.UpdatedAt,
+		&u.Username, &changed, &avatar)
+	if err != nil {
+		return u, err
+	}
 	u.ID = id.String()
-	return u, err
+	if changed != nil {
+		u.UsernameChangedAt = *changed
+	}
+	if avatar != nil {
+		u.Avatar = &domain.Avatar{}
+		if err := json.Unmarshal(avatar, u.Avatar); err != nil {
+			return u, fmt.Errorf("user %s's avatar: %w", u.ID, err)
+		}
+	}
+	return u, nil
+}
+
+// usernameTaken maps a clash on the username's unique index (design
+// 2026-10-07: unique whatever the case) to domain.ErrUsernameTaken.
+func usernameTaken(err error) error {
+	if c, ok := pg.UniqueViolation(err); ok && c == "users_username_lower" {
+		return domain.ErrUsernameTaken
+	}
+	return err
 }
 
 func (r users) Create(ctx context.Context, u domain.User, consents []domain.Consent) (bool, error) {
-	tag, err := r.q.Exec(ctx, `INSERT INTO users (id, status, region, language, timezone) VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (id) DO NOTHING`, u.ID, u.Status, u.Region, u.Language, u.Timezone)
+	tag, err := r.q.Exec(ctx, `INSERT INTO users (id, status, region, language, timezone, username) VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO NOTHING`, u.ID, u.Status, u.Region, u.Language, u.Timezone, u.Username)
+	if err := usernameTaken(err); errors.Is(err, domain.ErrUsernameTaken) {
+		return false, err
+	}
 	if err != nil {
 		return false, fmt.Errorf("insert user: %w", err)
 	}
@@ -139,9 +169,23 @@ func (r users) GetForUpdate(ctx context.Context, id string) (domain.User, error)
 }
 
 func (r users) Update(ctx context.Context, u domain.User) (domain.User, error) {
+	var changed *time.Time
+	if !u.UsernameChangedAt.IsZero() {
+		changed = &u.UsernameChangedAt
+	}
+	var avatar []byte
+	if u.Avatar != nil {
+		var err error
+		if avatar, err = json.Marshal(u.Avatar); err != nil {
+			return domain.User{}, err
+		}
+	}
 	out, err := scanUser(r.q.QueryRow(ctx, `UPDATE users SET status = $2, language = $3, timezone = $4, anti_phishing_code = $5,
-		version = version + 1, updated_at = now() WHERE id = $1 RETURNING `+userColumns,
-		u.ID, u.Status, u.Language, u.Timezone, u.AntiPhishingCode))
+		username = $6, username_changed_at = $7, avatar = $8, version = version + 1, updated_at = now() WHERE id = $1 RETURNING `+userColumns,
+		u.ID, u.Status, u.Language, u.Timezone, u.AntiPhishingCode, u.Username, changed, avatar))
+	if err := usernameTaken(err); errors.Is(err, domain.ErrUsernameTaken) {
+		return domain.User{}, err
+	}
 	if err != nil {
 		return domain.User{}, fmt.Errorf("update user: %w", err)
 	}

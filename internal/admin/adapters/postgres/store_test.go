@@ -172,6 +172,14 @@ func (users) Stats(context.Context, time.Time, int) (ports.UserStats, error) {
 	return ports.UserStats{}, nil
 }
 
+func (users) ResetUsername(context.Context, string, string, string) (ports.User, string, error) {
+	return ports.User{}, "", nil
+}
+
+func (users) ResetAvatar(context.Context, string, string, string) (ports.User, bool, error) {
+	return ports.User{}, false, nil
+}
+
 // stream opens the console's event stream and passes on its lines until
 // the test ends.
 func (c *client) stream(ctx context.Context) <-chan string {

@@ -87,6 +87,24 @@ func (u Users) Balances(ctx context.Context, userID string) ([]ports.Balance, er
 	return out, nil
 }
 
+// ResetUsername gives an account a new drawn username.
+func (u Users) ResetUsername(ctx context.Context, userID, actor, reason string) (ports.User, string, error) {
+	resp, err := u.User.ResetUsername(ctx, &userv1.ResetUsernameRequest{UserId: userID, Actor: actor, Reason: reason})
+	if err != nil {
+		return ports.User{}, "", err
+	}
+	return userOf(resp.GetUser()), resp.GetPrevious(), nil
+}
+
+// ResetAvatar takes an account back to the default avatar.
+func (u Users) ResetAvatar(ctx context.Context, userID, actor, reason string) (ports.User, bool, error) {
+	resp, err := u.User.ResetAvatar(ctx, &userv1.ResetAvatarRequest{UserId: userID, Actor: actor, Reason: reason})
+	if err != nil {
+		return ports.User{}, false, err
+	}
+	return userOf(resp.GetUser()), resp.GetRemoved(), nil
+}
+
 // ChangeStatus moves an account to another status.
 func (u Users) ChangeStatus(ctx context.Context, userID, to, reason, actor, note string) (string, error) {
 	resp, err := u.User.ChangeStatus(ctx, &userv1.ChangeStatusRequest{UserId: userID, ToStatus: to, ReasonCode: reason, Actor: actor, Note: note})

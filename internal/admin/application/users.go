@@ -46,6 +46,61 @@ func (s *Service) UserDetail(ctx context.Context, p Principal, userID string) (p
 	return u, nil
 }
 
+// ResetUsername gives an account a new drawn username (design 2026-10-07,
+// avatars and usernames §1.6): one person with users.status, audited as
+// admin.users.username_reset with the names before and after.
+func (s *Service) ResetUsername(ctx context.Context, p Principal, userID, reason string) (ports.User, error) {
+	if err := s.moderation(p, userID, reason); err != nil {
+		return ports.User{}, err
+	}
+	u, previous, err := s.Users.ResetUsername(ctx, userID, p.Admin.Email, reason)
+	if err != nil {
+		return ports.User{}, err
+	}
+	details, _ := json.Marshal(map[string]string{"from": previous, "to": u.Username})
+	if err := s.audit(ctx, p, "user:"+userID, "admin.users.username_reset", reason, string(details)); err != nil {
+		return ports.User{}, err
+	}
+	return s.tagged(ctx, u)
+}
+
+// ResetAvatar takes an account back to the default avatar: one person with
+// users.status, audited as admin.users.avatar_reset.
+func (s *Service) ResetAvatar(ctx context.Context, p Principal, userID, reason string) (ports.User, error) {
+	if err := s.moderation(p, userID, reason); err != nil {
+		return ports.User{}, err
+	}
+	u, removed, err := s.Users.ResetAvatar(ctx, userID, p.Admin.Email, reason)
+	if err != nil {
+		return ports.User{}, err
+	}
+	details, _ := json.Marshal(map[string]bool{"removed": removed})
+	if err := s.audit(ctx, p, "user:"+userID, "admin.users.avatar_reset", reason, string(details)); err != nil {
+		return ports.User{}, err
+	}
+	return s.tagged(ctx, u)
+}
+
+// moderation checks a reset of an account's username or avatar.
+func (s *Service) moderation(p Principal, userID, reason string) error {
+	if err := p.require(domain.PermUsersStatus); err != nil {
+		return err
+	}
+	if err := needUser(userID); err != nil {
+		return err
+	}
+	return needReason(reason)
+}
+
+// tagged is an account with the console's tags.
+func (s *Service) tagged(ctx context.Context, u ports.User) (ports.User, error) {
+	list, err := s.withTags(ctx, []ports.User{u})
+	if err != nil {
+		return ports.User{}, err
+	}
+	return list[0], nil
+}
+
 func nonNil(s []string) []string {
 	if s == nil {
 		return []string{}

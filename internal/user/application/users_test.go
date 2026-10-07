@@ -92,9 +92,23 @@ func (r memRepos) Emit(_ context.Context, _ string, msg proto.Message, _, _ stri
 
 type memUsers memRepos
 
+// taken reports whether a user other than id has name, whatever the case
+// (the unique index on lower(username)).
+func (r memUsers) taken(id, name string) bool {
+	for _, o := range r.s.users {
+		if o.ID != id && name != "" && strings.EqualFold(o.Username, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r memUsers) Create(_ context.Context, u domain.User, _ []domain.Consent) (bool, error) {
 	if _, ok := r.s.users[u.ID]; ok {
 		return false, nil
+	}
+	if r.taken(u.ID, u.Username) {
+		return false, domain.ErrUsernameTaken
 	}
 	u.Version = 1
 	r.s.users[u.ID] = u
@@ -114,6 +128,9 @@ func (r memUsers) GetForUpdate(ctx context.Context, id string) (domain.User, err
 }
 
 func (r memUsers) Update(_ context.Context, u domain.User) (domain.User, error) {
+	if r.taken(u.ID, u.Username) {
+		return domain.User{}, domain.ErrUsernameTaken
+	}
 	u.Version++
 	r.s.users[u.ID] = u
 	return u, nil

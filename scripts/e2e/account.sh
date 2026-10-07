@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# End-to-end check of profiles, eligibility, account status and user
-# notifications against a deployed non-production environment. Status
+# End-to-end check of profiles (the username and avatar too), eligibility,
+# account status and user notifications against a deployed non-production
+# environment. Status
 # changes run exchangectl inside the user-service container, through
 # EXCHANGECTL (default: ssh to the test server).
 #
@@ -55,6 +56,37 @@ call GET /v1/user/favorites "" "${AUTH[@]}"
 check '.symbols | length == 3' "stored"
 call PUT /v1/user/favorites '{"symbols":["BTC/USDT"]}' "${AUTH[@]}"
 expect 400 COMMON_INVALID_ARGUMENT "not a market symbol"
+
+echo "== username and avatar (design 2026-10-07, avatars and usernames)"
+call GET /v1/user/profile "" "${AUTH[@]}"
+check '(.username | test("^user_[a-z0-9]{8}$")) and .username_changed_at == null and .avatar_url == null and .avatar_thumb_url == null' \
+  "a drawn username and the default avatar"
+NAME="E2e_${RUN: -10}"
+call PUT /v1/user/username '{"username":"astras_admin"}' "${AUTH[@]}"
+expect 400 USER_USERNAME_INVALID "a reserved name"
+call PUT /v1/user/username "{\"username\":\"$NAME\"}" "${AUTH[@]}"
+expect 200 - "username changed"
+check ".username == \"$NAME\" and (.username_changed_at | type) == \"string\"" "the new name and when"
+call PUT /v1/user/username "{\"username\":\"${NAME}x\"}" "${AUTH[@]}"
+expect 409 USER_USERNAME_COOLDOWN "once in 7 days"
+check '(.details.next_change_at | type) == "string"' "says when it may change again"
+# A 64 x 64 checkered PNG.
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeklEQVR42uzZsQmAQAwF0CgHuoUzuH/lBM7gFnY6QwQ1B+/XIfAgReC3a5sik2U/U/PHOr+6f4zOAwAAAAAAAAAAAPBfWrX/PrvfCQEAAAAAAAAAAAA8zqAfcEIAAAAAAAAAAAAR+oEa/71+AAAAAAAAAAAAAOCz3AMA/WAZ4C1vwAMAAAAASUVORK5CYII=' |
+  base64 --decode >"$WORK/avatar.png"
+call POST /v1/user/avatar "" "${AUTH[@]}" -F "file=@$WORK/avatar.png;type=image/png"
+expect 200 - "avatar uploaded"
+check '(.avatar_url | test("^/uploads/avatars/[0-9a-f-]{36}/[a-z0-9]{16}[.]webp$")) and (.avatar_thumb_url | endswith("_64.webp"))' \
+  "the two files' paths"
+AVATAR=$(jq -r .avatar_url <<<"$BODY")
+GOT=$(curl -s -o "$WORK/avatar.webp" -w '%{http_code} %{content_type}' "$BASE$AVATAR")
+[[ $GOT == "200 image/webp" && $(head -c 4 "$WORK/avatar.webp") == RIFF ]] || { echo "FAIL the avatar at $AVATAR: $GOT" >&2; exit 1; }
+echo "ok   the avatar is served as WebP ($(wc -c <"$WORK/avatar.webp" | tr -d ' ') bytes)"
+printf 'not an image' >"$WORK/bad.png"
+call POST /v1/user/avatar "" "${AUTH[@]}" -F "file=@$WORK/bad.png;type=image/png"
+expect 400 USER_AVATAR_INVALID "not an image"
+call DELETE /v1/user/avatar "" "${AUTH[@]}"
+expect 200 - "back to the default avatar"
+check '.avatar_url == null and .avatar_thumb_url == null' "no avatar"
 
 echo "== wallet networks and address checks"
 call GET "/v1/wallet/networks?asset=eth" "" "${AUTH[@]}"

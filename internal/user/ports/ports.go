@@ -91,3 +91,14 @@ type Flags interface {
 type StepUps interface {
 	Consume(ctx context.Context, userID, token string) error
 }
+
+// Avatars keeps the avatars' files (design 2026-10-07, avatars and
+// usernames §1.2): the directory nginx serves.
+type Avatars interface {
+	// Put processes an upload into the user's files and describes them;
+	// a bad image is domain.ErrAvatarInvalid, one too large
+	// domain.ErrAvatarTooLarge.
+	Put(ctx context.Context, userID string, upload []byte, at time.Time) (domain.Avatar, error)
+	// Remove deletes an avatar's files; files already gone are fine.
+	Remove(a domain.Avatar) error
+}

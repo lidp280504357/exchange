@@ -22,6 +22,8 @@ type Service struct {
 	Store   ports.Store
 	Flags   ports.Flags
 	StepUps ports.StepUps
+	// Avatars keeps the avatars' files (nil: uploads are refused).
+	Avatars ports.Avatars
 	Now     func() time.Time
 }
 
@@ -45,19 +47,31 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (domain.User, erro
 	if in.TermsVersion == "" || in.RiskVersion == "" {
 		return domain.User{}, apperr.Invalid("the accepted terms and risk disclosure versions are required")
 	}
+	// A drawn username that is taken is drawn again, in a new transaction
+	// (the clash ends the one it happened in).
 	var out domain.User
-	err = s.Store.Tx(ctx, func(r ports.Repos) error {
-		if _, err := r.Users().Create(ctx, u, []domain.Consent{
-			{Document: domain.DocumentTerms, Version: in.TermsVersion},
-			{Document: domain.DocumentRiskDisclosure, Version: in.RiskVersion},
-		}); err != nil {
+	for range drawAttempts {
+		u.Username = domain.DrawUsername()
+		err = s.Store.Tx(ctx, func(r ports.Repos) error {
+			if _, err := r.Users().Create(ctx, u, []domain.Consent{
+				{Document: domain.DocumentTerms, Version: in.TermsVersion},
+				{Document: domain.DocumentRiskDisclosure, Version: in.RiskVersion},
+			}); err != nil {
+				return err
+			}
+			out, err = r.Users().Get(ctx, u.ID)
 			return err
+		})
+		if !errors.Is(err, domain.ErrUsernameTaken) {
+			break
 		}
-		out, err = r.Users().Get(ctx, u.ID)
-		return err
-	})
+	}
 	return out, err
 }
+
+// drawAttempts is how many usernames a sign-up or reset draws before it
+// gives up (36^8 of them: a clash is already rare).
+const drawAttempts = 5
 
 // Get returns a profile.
 func (s *Service) Get(ctx context.Context, id string) (domain.User, error) {
