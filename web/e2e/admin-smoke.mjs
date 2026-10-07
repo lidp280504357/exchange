@@ -596,6 +596,10 @@ try {
   const deleteId = await uploadedRow.jsonValue();
   await waitText("vip.astras.e2e");
   await t.shot("4b-apps");
+  // The row to the middle first: at the bottom of the window (the 下载入口
+  // card above it since H5) the upload's toast covers its delete button,
+  // which a click there would miss.
+  await page.$eval(`[data-testid=${deleteId}]`, (el) => el.scrollIntoView({ block: "center" }));
   await page.click(`[data-testid=${deleteId}]`);
   await page.waitForSelector(appDialog);
   await page.type(`${appDialog} textarea[id$="-reason"]`, "smoke test: the app deleted");
@@ -962,6 +966,8 @@ try {
   await waitText("链接不完整");
   ok("the setup page without a link");
 } catch (e) {
+  // A wait's own error ("Waiting for selector … failed") keeps why in its cause.
+  if (e?.cause?.message) console.error("cause:", e.cause.message);
   await t.fail(e);
 }
 await t.finish();
