@@ -16,7 +16,7 @@
 4. 调账本 gRPC `Freeze`，类型 `ORDER_FREEZE`，幂等键 `order:<订单ID>`。冻结的内容：
    - 限价买单：价格 × 数量，向上取整到计价资产精度。
    - 市价买单：`quote_amount`。
-   - 市价买单按数量（B157，2026-10-07 起，币安同样有）：数量 × 保护价（锚点之上一个价格带，按 tick 向下取），向上取整到计价资产精度；要有锚点，没有时返回 `COMMON_INVALID_ARGUMENT`（请改用 `quote_amount`），`quantity` 与 `quote_amount` 只能给一个。送给引擎时是保护价上的限价 IOC（或 FOK）买单（与 derivatives-service 送市价单同一做法，引擎不用多一种市价单）：成交里带 `buyer_limit_price` = 保护价，账本结算时当场释放每笔与成交价的差额，订单结束时按限价买单释放剩下的（保护价 × 未成交数量）。`OrderAccepted` 与订单记录仍是 MARKET；没成交完的部分撤销原因为 `IOC`。
+   - 市价买单按数量（B157，2026-10-07 起，币安同样有）：数量 × 保护价（锚点之上一个价格带，按 tick 向下取），向上取整到计价资产精度；要有锚点，没有时返回 `COMMON_INVALID_ARGUMENT`（请改用 `quote_amount`），`quantity` 与 `quote_amount` 只能给一个。送给引擎时是保护价上的限价 IOC（或 FOK）买单（与 derivatives-service 送市价单同一做法，引擎不用多一种市价单）：成交里带 `buyer_limit_price` = 保护价，账本结算时当场释放每笔与成交价的差额，订单结束时按限价买单释放剩下的（保护价 × 未成交数量）。`OrderAccepted` 与订单记录仍是 MARKET；没成交完的部分撤销原因为 `IOC`。订单表的形状约束由迁移 trading 00008 放开（市价买单 `quote_amount` 与 `quantity` 二选一，按数量的必须有 `protection_price`；先 NOT VALID 加上再单独校验，校验期间订单照常可写）。
    - 卖单：数量（基础资产）。
 5. 冻结成功：同一事务把冻结状态记为 FROZEN，并经 outbox 发 `order.events: OrderAccepted` 与 `order.commands: PlaceOrder`，两者都按交易对分区。PlaceOrder 带着引擎需要的全部参数（费率、资产精度、市价单保护价、`house_only`），重放命令就能重建订单簿。返回 202 和订单（NEW）。
    - `house_only`（阶段 4 B4，ADR-0015）：交易对跟随参考市场、`market.house_liquidity` 对它打开且 `market.internal_matching` 关闭时为真，订单只和 HOUSE 的虚拟流动性成交（见 [market-maker.md](market-maker.md)）。与 HOUSE 成交时用户照常付手续费（HOUSE 不付），结算见 [ledger.md](ledger.md#house-的现货成交adr-0013)。
