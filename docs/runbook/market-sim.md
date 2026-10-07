@@ -154,9 +154,9 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 
 ## 产品线开关（设计 2026-10-07）
 
-- 现货关闭（`product.spot`）时整个模拟市场暂停，与 `sim.enabled` 关闭、交易对不在交易时一样：撤掉机器人在现货与永续上的挂单，目标价不再走，心跳照常上报；重开后从原来的价格继续。永续也停，是因为它们的指数取平台现货（设计稿 §3 风险一条：关闭现货时 ASTRA 永续按指数来源规则进入只减仓）。spot-trading-service 的撤单接口同时撤掉全部现货挂单（见 [trading.md](trading.md#现货产品线开关设计-2026-10-07-产品线开关批次-k1a)）。
-- U 本位（`product.usdt_m`）或币本位（`product.coin_m`）关闭时只停该产品线的永续（ASTRA-USDT-PERP 属 U 本位，ASTRA-USD-PERP 属币本位，按合约的 `contract_size` 判断），现货与另一条线照常。
-- 开关读 market-sim 自己每 5 秒刷新的副本，没存的产品线按开处理。单测 `TestClosedProductLinesStopTheirBots`。
+- 现货关闭（`product.spot`）时只暂停现货机器人：撤掉做市商在 ASTRA-USDT 上的挂单（与交易对不在交易时一样），噪声、趋势与事件执行者不再下现货单，价格带看门狗不计时；模型照常走（目标价照常上报，心跳不断），永续的机器人照常报价与交易。重开后现货机器人从当时的目标价重新报价，价格带按「价格带不锁死市场」走过去。现货关闭超过 5 分钟时永续没有指数（指数取平台现货），按指数来源规则进入只减仓（设计稿 §3 风险一条）。
+- U 本位（`product.usdt_m`）与币本位（`product.coin_m`）关闭时机器人都不停（设计 §1 #3 的 16:48 更正）：平台币永续没有 HOUSE 报价，机器人是持仓用户平仓与强平的对手方；derivatives-service 对做市账户（`MARKET_MAKER_USER_IDS`）不判产品线关闭，spot-trading-service 同样（现货关闭时机器人本来就停了，这只是免得开关副本有先后时报错）。
+- 开关读 market-sim 自己每 5 秒刷新的副本，没存的产品线按开处理。单测 `TestClosedSpotStopsOnlyTheSpotBots`。
 
 ## 机器人（设计 §4）
 

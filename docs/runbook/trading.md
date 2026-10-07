@@ -50,11 +50,13 @@
 
 ## 现货产品线开关（设计 2026-10-07 产品线开关，批次 K1a）
 
-- 开关 `product.spot`（默认开，见 [feature-flags.md](feature-flags.md)）。关闭后 `SPOT` 账户的新单一律返回 403 `PRODUCT_CLOSED`（`details.product` 为 `spot`），不落库：在幂等键与 `client_order_id` 之后、交易对与资格之前检查，存单前在同一用户的锁下再查一次；撤单照常。杠杆账户的订单不归它管（杠杆交易有自己的开关 `margin.enabled`，设计 §1 #7），强平单也不受影响。
-- 关闭时由 admin-service（后台「产品线」卡，批次 K3）调内部接口 `POST /internal/products/spot/cancel-open`（`{actor, reason}`；只在 compose 网络内，带 `X-User-Id` 的请求 404）：先重读开关，还开着就返回 409 `COMMON_CONFLICT`；然后对全部用户 `SPOT` 账户的活跃订单逐个请求撤单（每个用户一个事务），每单在同一事务里经 outbox 发审计 `admin.orders.canceled`（目标 `user:<用户ID>`，details 含 `order_id`、`symbol`、`product`；ClickHouse `audit_logs` 的 `actor_id` 是调用方给的 `actor`）；1 秒后再扫一遍，收走关闭那一刻正在下的单。返回 202 `{canceled, orders: [{order_id, user_id, symbol}]}`，已请求过撤单的不再计入。重开不回放撤掉的单。
-- 关闭期间行情照常；market-sim 的平台币机器人整体暂停（永续的指数来自现货，见 [market-sim.md](market-sim.md#产品线开关设计-2026-10-07)）；向合约账户的划入归合约产品线管（见 [ledger.md](ledger.md#接口)）。
-- 手动：`exchangectl flags set product.spot --off --reason ...` 关、`--on` 开。只改开关不撤单，撤单用上面的接口（后台切换时一并完成）。
-- 端到端：`scripts/e2e/trading.sh` 最后一节把现货关闭约半分钟——新单被拒、撤单接口收走自己的挂单并留下审计、重开后订单回到自己的检查；中途失败时退出前把开关打开（打不开就报 FAIL 并给出手动命令）。它撤的是全部用户的现货挂单，与运营关闭时一样；market-sim 的机器人在重开后几秒内重新挂单。
+- 开关 `product.spot`（默认开，见 [feature-flags.md](feature-flags.md)）。关闭后 `SPOT` 账户的新单一律返回 403 `PRODUCT_CLOSED`（`details.product` 为 `spot`），不落库：在幂等键与 `client_order_id` 之后、交易对与资格之前检查，存单前在同一用户的锁下再查一次；撤单照常。不受它管的：杠杆账户的订单（杠杆交易有自己的开关 `margin.enabled`，设计 §1 #7）、margin-service 的强平单，以及做市账户（`MARKET_MAKER_USER_IDS`，即 market-sim 的机器人）——与 HOUSE 一样照常报价（设计 §1 #3 的 16:48 更正：所有成交都对它们，停了就没有对手方）。
+- 关闭时由 admin-service（后台「产品线」卡，批次 K3）调内部接口 `POST /internal/products/spot/cancel-open`（`{actor, reason}`；只在 compose 网络内，带 `X-User-Id` 的请求 404）：先重读开关，还开着就返回 409 `COMMON_CONFLICT`；然后对全部用户（做市账户除外）`SPOT` 账户的活跃订单逐个请求撤单（每个用户一个事务），每单在同一事务里经 outbox 发审计 `admin.orders.canceled`（目标 `user:<用户ID>`，details 含 `order_id`、`symbol`、`product`；ClickHouse `audit_logs` 的 `actor_id` 是调用方给的 `actor`）；1 秒后再扫一遍，收走关闭那一刻正在下的单。返回 202 `{canceled, orders: [{order_id, user_id, symbol, type: ORDER}]}`（`type` 与合约的接口一致，合约另有 `CONDITIONAL`），已请求过撤单的不再计入。重开不回放撤掉的单。
+- 兜底：恢复任务每 5 秒看一次，现货关着时把关闭前 10 秒起存下的现货单（做市账户除外）撤掉，审计的 `actor` 为 `system:spot-trading-service`——将来有多个实例、某个实例的开关副本晚了几秒放进来的单，或者只用 `exchangectl` 关了开关、没调撤单接口时关闭前后进来的单。更早的单只由撤单接口撤。
+- 计数 `GET /internal/products/spot` → `{product: "spot", closed, open_orders, open_positions: 0}`：`SPOT` 账户的活跃订单数（做市账户除外；已请求撤单、引擎还没确认的仍算），给后台的「产品线」卡与确认框用。
+- 关闭期间行情照常；market-sim 只暂停平台币的现货机器人，模型与永续的机器人照常（见 [market-sim.md](market-sim.md#产品线开关设计-2026-10-07)）；向合约账户的划入归合约产品线管（见 [ledger.md](ledger.md#接口)）。
+- 手动：`exchangectl flags set product.spot --off --reason ...` 关、`--on` 开。只改开关不撤旧单（兜底只管关闭前 10 秒以后的），撤单用上面的接口（后台切换时一并完成）。
+- 端到端：`scripts/e2e/trading.sh` 最后一节把现货关闭约半分钟——新单被拒、计数接口看得到自己的挂单、撤单接口收走它并留下审计、重开后订单回到自己的检查；中途失败时退出前把开关打开（打不开就报 FAIL 并给出手动命令）。它撤的是全部用户的现货挂单（做市账户除外），与运营关闭时一样。
 
 ## 引擎事件与解冻
 
