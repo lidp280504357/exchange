@@ -102,6 +102,43 @@ func TestEveryIntervalsOpenCandleHasTheSpike(t *testing.T) {
 	spikeShown(t, again, "after a restart")
 }
 
+// A failed read of the touched minutes leaves an interval unseeded rather
+// than seeded without the spike: the next update asks again (review C65
+// ①).
+func TestAnOpenCandleWaitsForTheTouchedMinutes(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	spike := minute("2026-10-07T04:01:00Z", "84030", "97440", "84000", "97000", "1")
+	if err := store.Read().References().UpsertOverlaid(ctx, "binance", []domain.Candle{spike}); err != nil {
+		t.Fatal(err)
+	}
+	rc := newReferenceRig(spikeHistory())
+	defer rc.wg.Wait()
+	var mu sync.Mutex
+	down := true
+	rc.overlaid = func(ctx context.Context, symbol string, from, to time.Time) ([]domain.Candle, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if down {
+			return nil, context.DeadlineExceeded
+		}
+		return store.Read().References().Overlaid(ctx, "binance", symbol, from, to)
+	}
+	rc.Observe(minute("2026-10-07T04:02:00Z", "84040", "84060", "84020", "84050", "2"))
+	rc.wg.Wait()
+	if o := rc.open["BTC-USDT"][domain.Hour4]; o != nil {
+		t.Fatalf("seeded without the touched minutes %+v", o.c)
+	}
+	mu.Lock()
+	down = false
+	mu.Unlock()
+	rc.Observe(minute("2026-10-07T04:02:00Z", "84040", "84070", "84020", "84060", "3"))
+	rc.wg.Wait()
+	if o := rc.open["BTC-USDT"][domain.Hour4]; o == nil || !o.c.High.Equal(d("97440")) {
+		t.Fatalf("seeded once the store answers %+v", o)
+	}
+}
+
 // spikeSource streams one 1m candle and holds the connection.
 type spikeSource struct {
 	fakeSource
