@@ -246,7 +246,7 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9086/readyz"]
 
   # Each followed pair's and contract's book kept in memory: 162 MiB with
-  # the 87 pairs and 107 contracts of G1c (2026-10-07), over the default.
+  # the 87 pairs and 109 contracts of G1c (2026-10-07), over the default.
   market-data-service:
     <<: *app
     command: ["/app/market-data-service"]

@@ -197,6 +197,39 @@ func TestAQuietPriceStaysCurrentWhileItsConnectionIsLive(t *testing.T) {
 	if _, fresh := f.Latest("KAVA-USDT"); fresh {
 		t.Fatal("fresh by another market's connection")
 	}
+
+	// Up to QuietMax only (review FD, C43): past it the connection's
+	// liveness no longer counts.
+	f.heard(ports.MarketSpot, now)
+	if _, fresh := f.Latest("KAVA-USDT"); !fresh {
+		t.Fatal("2 minutes quiet, its connection live")
+	}
+	now = now.Add(QuietMax)
+	f.heard(ports.MarketSpot, now)
+	if a, _ := f.age("KAVA-USDT"); a <= QuietMax {
+		t.Fatalf("age %s past QuietMax, its connection live", a)
+	}
+	if _, fresh := f.Latest("KAVA-USDT"); fresh {
+		t.Fatal("fresh past QuietMax")
+	}
+	if q := f.quiet([]ports.Reference{ref("KAVA-USDT", "KAVAUSDT"), ref("BTC-USDT", "BTCUSDT")}, second); len(q) != 2 {
+		t.Fatalf("quiet %v", q)
+	}
+	// A REST ticker confirms it, unless the stream brought a price since
+	// the request went out.
+	asked := now
+	f.confirmPrice("KAVA-USDT", d("0.52"), ports.MarketSpot, second, asked)
+	if r, fresh := f.Latest("KAVA-USDT"); !fresh || !r.Price.Equal(d("0.52")) {
+		t.Fatalf("confirmed %+v %v", r, fresh)
+	}
+	if q := f.quiet([]ports.Reference{ref("KAVA-USDT", "KAVAUSDT")}, second); len(q) != 0 {
+		t.Fatalf("still quiet after it was confirmed: %v", q)
+	}
+	f.setPrice("KAVA-USDT", d("0.53"), now, ports.MarketSpot, second) // the stream, after the request went out
+	f.confirmPrice("KAVA-USDT", d("0.52"), ports.MarketSpot, second, asked)
+	if r, _ := f.Latest("KAVA-USDT"); !r.Price.Equal(d("0.53")) {
+		t.Fatalf("the stream's newer price lost: %+v", r)
+	}
 }
 
 func TestReferenceBackfillStopsWhereTheStreamStarted(t *testing.T) {

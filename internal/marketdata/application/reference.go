@@ -24,6 +24,14 @@ const (
 	ReferenceStale    = 5 * time.Second
 	referenceBackfill = 24 * time.Hour
 	referenceKeep     = 7 * 24 * time.Hour
+	// QuietMax is how long a quiet symbol's price rides its live
+	// connection (review FD, C43): past it the price is as old as it is,
+	// however live the connection, so one symbol whose stream stopped alone
+	// cannot keep a price for good. quietRefresh is how often the prices
+	// not brought for that long are confirmed by the REST tickers, so a
+	// symbol merely without trades stays well inside QuietMax.
+	QuietMax     = 5 * time.Minute
+	quietRefresh = time.Minute
 )
 
 // Reference is a symbol's latest external price.
@@ -124,6 +132,7 @@ func (c ageCollector) Collect(ch chan<- prometheus.Metric) {
 // trades, and the price of a quiet one stays the last traded while its
 // connection hears from the others (as the books' do; G1c: the index
 // prices of the contracts on quiet pairs went stale and degraded them).
+// Up to QuietMax: older than that, the price is as old as it is.
 func (f *ReferenceFeed) age(symbol string) (time.Duration, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -131,11 +140,17 @@ func (f *ReferenceFeed) age(symbol string) (time.Duration, bool) {
 	if !ok {
 		return 0, false
 	}
-	age := f.now().Sub(r.At)
-	if !r.session.IsZero() && r.session.Equal(f.sessions[r.market]) {
-		age = min(age, f.now().Sub(f.received[r.market]))
+	return f.ageOf(r), true
+}
+
+// ageOf is r's age (age); f.mu held.
+func (f *ReferenceFeed) ageOf(r Reference) time.Duration {
+	now := f.now()
+	age := now.Sub(r.At)
+	if age <= QuietMax && !r.session.IsZero() && r.session.Equal(f.sessions[r.market]) {
+		age = min(age, now.Sub(f.received[r.market]))
 	}
-	return age, true
+	return age
 }
 
 // begin notes that market's connection starts now and returns the time:
@@ -167,11 +182,12 @@ func (f *ReferenceFeed) get(symbol string) (Reference, bool) {
 }
 
 // Latest returns the symbol's reference and whether it is fresh (its age
-// under ReferenceStale).
+// under ReferenceStale), both read at once (review FD, C43).
 func (f *ReferenceFeed) Latest(symbol string) (Reference, bool) {
-	r, ok := f.get(symbol)
-	a, aged := f.age(symbol)
-	return r, ok && aged && a < ReferenceStale
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.latest[symbol]
+	return r, ok && f.ageOf(r) < ReferenceStale
 }
 
 // Ticker returns the symbol's latest reference ticker, however old: a
@@ -208,6 +224,36 @@ func (f *ReferenceFeed) setPrice(symbol string, price decimal.Decimal, at time.T
 	f.mu.Lock()
 	f.latest[symbol] = Reference{Symbol: symbol, Source: f.src.Name(), Price: price, At: at, market: market, session: session}
 	f.mu.Unlock()
+}
+
+// confirmPrice keeps a REST ticker's last price as symbol's, brought now
+// by market's connection that started at session, unless the stream
+// brought one since asked (when the request went out): checked and set at
+// once (review FD, C43), so a stream price between the two is not lost.
+func (f *ReferenceFeed) confirmPrice(symbol string, price decimal.Decimal, market string, session, asked time.Time) {
+	if !price.IsPositive() {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if r, ok := f.latest[symbol]; ok && r.session.Equal(session) && !r.At.Before(asked) {
+		return
+	}
+	f.latest[symbol] = Reference{Symbol: symbol, Source: f.src.Name(), Price: price, At: f.now(), market: market, session: session}
+}
+
+// quiet returns the refs whose price was not brought (or confirmed) by
+// the session's connection within quietRefresh.
+func (f *ReferenceFeed) quiet(refs []ports.Reference, session time.Time) []ports.Reference {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []ports.Reference
+	for _, ref := range refs {
+		if r, ok := f.latest[ref.Symbol]; !ok || !r.session.Equal(session) || f.now().Sub(r.At) >= quietRefresh {
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 func (f *ReferenceFeed) setTicker(t domain.Ticker) {
@@ -384,10 +430,14 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 	market := refs[0].Market
 	started := f.begin(market)
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		f.catchUp(ctx, refs, domain.Minute1.Start(f.now()), started)
+	}()
+	go func() {
+		defer wg.Done()
+		f.confirmQuiet(ctx, refs, started)
 	}()
 	err := f.src.Stream(ctx, refs, ports.StreamHandlers{
 		Candle: func(c domain.Candle) {
@@ -425,9 +475,7 @@ func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, str
 	} else {
 		for _, t := range tickers {
 			f.setTicker(t)
-			if r, ok := f.get(t.Symbol); !ok || !r.session.Equal(started) {
-				f.setPrice(t.Symbol, t.Last, f.now(), refs[0].Market, started)
-			}
+			f.confirmPrice(t.Symbol, t.Last, refs[0].Market, started, started)
 		}
 	}
 	for _, ref := range refs {
@@ -436,6 +484,35 @@ func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, str
 		}
 		if err := f.backfill(ctx, ref, streaming); err != nil && ctx.Err() == nil {
 			f.log.WarnContext(ctx, "reference backfill failed", "symbol", ref.Symbol, "error", err)
+		}
+	}
+}
+
+// confirmQuiet confirms, every quietRefresh while the session lasts, the
+// prices its stream has not brought for that long by the REST tickers
+// (one request): Binance streams nothing for a symbol without trades.
+func (f *ReferenceFeed) confirmQuiet(ctx context.Context, refs []ports.Reference, session time.Time) {
+	market := refs[0].Market
+	for {
+		sleep(ctx, quietRefresh)
+		if ctx.Err() != nil {
+			return
+		}
+		quiet := f.quiet(refs, session)
+		if len(quiet) == 0 {
+			continue
+		}
+		asked := f.now()
+		tickers, err := f.src.Tickers(ctx, quiet)
+		if err != nil {
+			if ctx.Err() == nil {
+				f.log.WarnContext(ctx, "quiet reference prices not confirmed", "market", market, "symbols", len(quiet), "error", err)
+			}
+			continue
+		}
+		for _, t := range tickers {
+			f.setTicker(t)
+			f.confirmPrice(t.Symbol, t.Last, market, session, asked)
 		}
 	}
 }
