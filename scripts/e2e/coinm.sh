@@ -76,8 +76,13 @@ check ".asset == \"BTC\" and .available == \"$IN\" and .frozen == \"0\"" "$IN BT
 call GET /v1/derivatives/account "" "${AUTH[@]}"
 expect 200 - "the USDT FUTURES account, the default"
 check '.asset == "USDT" and .available == "0"' "apart from the BTC one"
-call GET "/v1/derivatives/account?asset=DOGE" "" "${AUTH[@]}"
-expect 400 DERIV_SETTLE_ASSET_MISMATCH "no contract settles in DOGE"
+# An asset no contract settles in (DOGE was one until DOGE-USD-PERP came
+# with the other COIN-M contracts, G1c).
+call GET "/v1/market/contracts?margin_type=ALL" ""
+NONE=$(jq -r '[.contracts[].settle_asset] as $s | first(("HYPE", "PEPE", "SHIB", "WLD", "TON") | select(. as $a | $s | any(.[]; . == $a) | not)) // empty' <<<"$BODY")
+[[ -n $NONE ]] || fail "every candidate asset is a contract's settlement asset"
+call GET "/v1/derivatives/account?asset=$NONE" "" "${AUTH[@]}"
+expect 400 DERIV_SETTLE_ASSET_MISMATCH "no contract settles in $NONE"
 
 echo "== settings, the mark price and HOUSE's book"
 call PUT "/v1/derivatives/settings/$SYMBOL" '{"leverage":20}' "${AUTH[@]}"

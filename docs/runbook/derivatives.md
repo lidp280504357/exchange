@@ -122,7 +122,7 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 - 仓位、资金费、强平、ADL 与对账照常；HOUSE 照常报价（所有成交都对 HOUSE，平仓单与强平单只能和它成交；开仓单进不来，HOUSE 的报价只会被平仓与强平用到；设计稿 §1 #3，协调会话 16:48 更正）。
 - 做市账户（`MARKET_MAKER_USER_IDS`，模拟市场的机器人）不受开关限制：平台币永续没有 HOUSE 报价，机器人的挂单是平仓的对手方。
 - 后台关闭时调 `POST /internal/products/{usdt_m|coin_m}/cancel-open`（`{actor, reason}`）：先重读开关（读不到答 503，还开着答 409 `COMMON_CONFLICT`），再按用户逐个加锁、撤销该线合约上的全部用户挂单（强平、ADL、后台平仓单不撤，做市账户的不撤）与生效中的止盈止损（状态 `CANCELED`、原因 `PRODUCT_CLOSED`），每单在同一事务里发审计 `admin.orders.canceled`（`Target` 为 `user:<id>`、`Actor` 为调用方给的 `actor`、`Details` 含 `order_id`、`symbol`、`product`、`type`）；答 202 `{canceled, orders: [{order_id, user_id, symbol, type: ORDER|CONDITIONAL}]}`，挂单由引擎确认撤销。重复调用只撤此刻还开着的。
-- 兜底：恢复循环每 5 秒检查关闭的线，撤掉关闭前 10 秒起新建的开仓挂单与止盈止损（关闭那一刻正在下的单，读开关时还没变），审计的 `actor` 为 `system:derivatives-service`；关闭之后下的平仓单不动，关闭以前就挂着的由上面的接口撤。
+- 兜底：恢复循环每 5 秒检查关闭的线，撤掉关闭前 10 秒起新建的开仓挂单与止盈止损（关闭那一刻正在下的单，读开关时还没变），审计的 `actor` 为 `system:derivatives-service`；关闭之后下的平仓单不动，关闭以前就挂着的由上面的接口撤。兜底可能先于后台的调用撤掉关闭前 10 秒内新建的单（2026-10-07 端到端里出现过），这些不在 cancel-open 的回答与后台的撤单数里，审计里有。
 - `GET /internal/products/{usdt_m|coin_m}` → `{product, closed, open_orders, open_positions}`：关闭会撤的挂单数（含止盈止损）与会保留的持仓数，HOUSE 与做市账户不计（后台「产品线」卡用）。
 - 重新打开即恢复下单；关闭期间撤掉的挂单不回放。
 
