@@ -265,7 +265,8 @@ function keepUnfinished(platform: Platform, kind: Kind, u: Unfinished | null) {
  * UploadFile picks a file, hashes it, and once confirmed sends it in parts
  * and completes it. An upload that stopped half-way is remembered in the
  * browser (review FX, A74 ①): choosing the same file resumes it from the
- * parts the server has; it can be abandoned, its parts dropped.
+ * parts the server has, another file drops it before starting anew; it
+ * can be abandoned, its parts dropped.
  */
 function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
   const { t } = useTranslation();
@@ -297,6 +298,15 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
       const same = res.data && res.data.sha256 === sum && res.data.size === file.size && res.data.kind === kind;
       if (res.response.ok && same) up = res.data!;
     }
+    if (unfinished && !up) {
+      // Not resumed: dropped first, so it holds none of the platform's few
+      // open uploads for the day it would wait (review GI, A78 ①); gone
+      // already is as good, and one that cannot be dropped now expires.
+      await adminApi
+        .DELETE("/admin/v1/platform/apps/{platform}/uploads/{upload_id}", { params: { path: { platform, upload_id: unfinished.id } } })
+        .catch(() => undefined);
+      setUnfinished(null);
+    }
     up ??= adminData(
       await adminApi.POST("/admin/v1/platform/apps/{platform}/uploads", {
         params: { path: { platform } },
@@ -323,7 +333,8 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
   };
 
   // An unfinished upload is checked against the server when the card opens
-  // (review GF, A76 ④): gone (completed, dropped, expired), it is forgotten.
+  // (review GF, A76 ④): gone (completed, dropped, expired), it is forgotten;
+  // not reached, it stays remembered until the page opens again (A78 ②).
   const checked = useRef(false);
   useEffect(() => {
     if (checked.current || !unfinished) return;
@@ -335,7 +346,8 @@ function UploadFile({ platform, kind }: { platform: Platform; kind: Kind }) {
           keepUnfinished(platform, kind, null);
           setUnfinishedState(null);
         }
-      });
+      })
+      .catch(() => undefined);
   }, [platform, kind, unfinished]);
 
   const abandon = async () => {
