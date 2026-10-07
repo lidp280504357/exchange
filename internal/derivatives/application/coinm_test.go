@@ -246,6 +246,18 @@ func TestACoinMarginedLiquidationIsCoveredInTheCoin(t *testing.T) {
 	if p := r.positionOn(t, coinPerp.Symbol, bob); p.WarnedAt.IsZero() || p.Liquidating {
 		t.Fatalf("warned: %+v", p)
 	}
+	// The warning of Bob's one-way long says LONG (review FS C49, FU C51).
+	if events := r.events(); events != nil {
+		var warning *derivativesv1.LiquidationWarning
+		for _, e := range events {
+			if w, ok := e.(*derivativesv1.LiquidationWarning); ok && w.GetUserId() == bob {
+				warning = w
+			}
+		}
+		if warning == nil || warning.GetPositionSide() != "BOTH" || warning.GetDirection() != "LONG" || warning.GetSettleAsset() != "BTC" {
+			t.Fatalf("bob's warning %v", warning)
+		}
+	}
 	r.monitorOn(t, coinPerp.Symbol, "49200")
 	if p := r.positionOn(t, coinPerp.Symbol, bob); !p.Liquidating {
 		t.Fatalf("taken over: %+v", p)

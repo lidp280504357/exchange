@@ -158,7 +158,8 @@ caps)
   shift 2
   (($# >= 2)) || { echo "usage: scripts/ops/house.sh caps set NAME=VALUE... REASON" >&2; exit 2; }
   reason=${*: -1}
-  version=$(ctl market-maker house caps 2>/dev/null | jq -r .version)
+  version=$(ctl market-maker house caps 2>/dev/null | jq -r .version) || version=""
+  [[ $version =~ ^[0-9]+$ ]] || { echo "the caps' version could not be read (market-maker's internal API)" >&2; exit 1; }
   body=$(jq -n --argjson v "$version" --arg a "ops:$(whoami)" --arg r "$reason" '{version: $v, actor: $a, reason: $r}')
   for kv in "${@:1:$#-1}"; do
     case ${kv%%=*} in

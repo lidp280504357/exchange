@@ -76,6 +76,15 @@ func TestTheRestOfTheBookGoesOutMerged(t *testing.T) {
 	if got := show(Levels(levels(asks...), false, tenth, d("250"), 2, 3)); got != "100x1 100.1x1 100.3x2 100.7x2.4826 100.9x2 " {
 		t.Fatalf("capped %s", got)
 	}
+	// Only the levels within 1% of the best price are merged (review FT,
+	// C50): 101 is, 101.5 and beyond are left out.
+	var far []string
+	for _, p := range []string{"100", "100.1", "100.5", "100.9", "101", "101.5", "105"} {
+		far = append(far, p, "1")
+	}
+	if got := show(Levels(levels(far...), false, tenth, d("0"), 2, 3)); got != "100x1 100.1x1 100.9x2 101x1 " {
+		t.Fatalf("within 1%% %s", got)
+	}
 	// On a coarser grid than the reference market's a merged level that
 	// meets the one before joins it.
 	half := tenth

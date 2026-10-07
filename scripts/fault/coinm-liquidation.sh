@@ -262,7 +262,7 @@ eventually 60 "A was told: CONTRACT_LIQUIDATING" notice A CONTRACT_LIQUIDATING
 # margin between 1.0 and 1.2 times the maintenance margin on the way down,
 # which a mark moving with the 60-second index nearly always is. When the
 # outbox has one, the inbox must have it too (review FP, C48).
-WARNED=$(pg "SELECT count(*) FROM derivatives.outbox WHERE topic = 'derivatives.liquidation.events' AND event_type = 'derivatives.LiquidationWarning' AND partition_key = '$USER_A'")
+WARNED=$(pg "SELECT count(*) FROM derivatives.outbox WHERE topic = 'derivatives.liquidation.events' AND event_type = 'derivatives.LiquidationWarning' AND partition_key = '$USER_A' AND created_at >= to_timestamp($T0)")
 if ((WARNED > 0)); then
   eventually 60 "A was warned before: CONTRACT_LIQUIDATION_WARNED" notice A CONTRACT_LIQUIDATION_WARNED
 else

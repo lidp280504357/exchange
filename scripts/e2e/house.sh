@@ -200,6 +200,19 @@ echo "ok   sold at $FILL (the bid was $BID)"
 echo "== BTC-USDT: a market buy of about 5 BTC and a market sell of 5, each filled whole"
 eventually 30 "BTC-USDT shows a two-sided book" shown BTC-USDT
 SPEND=$(jq -r '.asks[0][0] | tonumber * 500 | ceil / 100' <<<"$BODY")
+BTC_BEFORE=$(balance BTC)
+# sell_btc_back: whatever BTC the steps below leave above what there was
+# before them is sold back, so a run that stops between the two orders
+# leaves no BTC behind (review FT, C50).
+sell_btc_back() {
+  local left
+  left=$(awk -v b="$(balance BTC)" -v a="$BTC_BEFORE" 'BEGIN { q = int((b - a) * 10000) / 10000; if (q >= 0.0001) printf "%.4f", q }')
+  [[ -n $left ]] || return 0
+  call POST /v1/orders "{\"symbol\":\"BTC-USDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"$left\"}" "${AUTH[@]}" \
+    -H "Idempotency-Key: house-back-$RUN" || true
+}
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'sell_btc_back'
 credit "$(awk -v s="$SPEND" 'BEGIN { printf "%.2f", s + 100 }')" spot
 place "{\"symbol\":\"BTC-USDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quote_amount\":\"$SPEND\"}"
 BIG=$ORDER

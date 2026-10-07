@@ -78,6 +78,9 @@ type Caps struct {
 // as it would on the reference market, a little worse within a merged
 // level, rather than stopping (review FI, C46: the best 20 levels of
 // BTCUSDT held 2.6 BTC at times, and a 5 BTC market order filled half).
+// The merged levels reach DeepWithin of the best price at most (review FT,
+// C50): a thin book's 200th level can be far off, and a merged level's
+// worst price would hand it to the whole level.
 func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n, deep int) []Level {
 	var out []Level
 	i := 0
@@ -97,6 +100,17 @@ func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n, deep
 		out = append(out, Level{Price: p, Quantity: l.Quantity})
 	}
 	rest := ref[i:]
+	if len(ref) > 0 {
+		reach := ref[0].Price.Mul(decimal.NewFromInt(1).Add(DeepWithin))
+		if bids {
+			reach = ref[0].Price.Mul(decimal.NewFromInt(1).Sub(DeepWithin))
+		}
+		within := 0
+		for within < len(rest) && (bids && !rest[within].Price.LessThan(reach) || !bids && !rest[within].Price.GreaterThan(reach)) {
+			within++
+		}
+		rest = rest[:within]
+	}
 	for size := 2; len(rest) > 0 && deep > 0; size, deep = size*2, deep-1 {
 		take := len(rest)
 		if deep > 1 {
@@ -130,6 +144,10 @@ func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n, deep
 	}
 	return kept
 }
+
+// DeepWithin is how far from the best reference price the merged levels
+// reach: 1%.
+var DeepWithin = decimal.RequireFromString("0.01")
 
 // Holdings is HOUSE's spot inventory: the available balance of each
 // asset's MARKET_MAKER account (below zero for an internal asset HOUSE
