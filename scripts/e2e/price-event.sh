@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Price events on a followed pair end to end (docs/设计-通用价格控制-2026-10-07.md
 # §5 J2, J0 contract; docs/runbook/market-sim.md): an operator's event on
-# BTC-USDT ramps up in 15 seconds, holds 0 and comes back in 5. While it
-# runs, the platform's reference price, ticker and book are the reference
-# market's times the event's factor, HOUSE quotes a quarter of each level
+# BTC-USDT ramps up in 15 seconds, holds 3 (the samples, a second apart,
+# see the peak) and comes back in 5. While it runs, the platform's
+# reference price, ticker and book are the reference market's times the
+# event's factor, HOUSE quotes a quarter of each level
 # (market_house_quoted_share against the reference market's book, before
 # and during), BTC-USDT-PERP's index and mark follow (the mark computed,
 # PLATFORM) and so does a margin account holding BTC; afterwards the event
@@ -147,7 +148,7 @@ at_exit '[[ -z $EVENT ]] || simpost "/internal/sim/events/$EVENT/end" "{\"actor\
 # event_body PCT RISK is the event's request.
 event_body() {
   jq -cn --argjson pct "$1" --argjson risk "$2" --arg symbol "$SYMBOL" '{type: "OVERLAY", symbols: [$symbol], target_pct: $pct,
-    ramp_up_seconds: 15, hold_seconds: 0, ramp_down_seconds: 5, risk: $risk, actor: "e2e-ops", reason: "e2e: a price event (price-event.sh)"}'
+    ramp_up_seconds: 15, hold_seconds: 3, ramp_down_seconds: 5, risk: $risk, actor: "e2e-ops", reason: "e2e: a price event (price-event.sh)"}'
 }
 # start RISK: an event of +16%, or the largest share HOUSE's loss cap
 # allows; sets EVENT, F (the target factor) and BASE.
