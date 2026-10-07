@@ -34,6 +34,10 @@ describe("notifications", () => {
   it("links a notice to the page it is about", () => {
     expect(noticeLink({ type: "NEW_DEVICE_LOGIN" })).toBe(routes.sessions);
     expect(noticeLink({ type: "IDENTITY_CHANGED" })).toBe(routes.security);
+    // An operator's reset leads to the profile page (B146).
+    expect(noticeLink({ type: "USERNAME_RESET", data: { username: "user_k3x9q2m7" } })).toBe(routes.profile);
+    expect(noticeLink({ type: "AVATAR_RESET" })).toBe(routes.profile);
+    expect(noticeCategory("USERNAME_RESET")).toBe("system");
     expect(noticeLink({ type: "DEPOSIT_CREDITED" })).toBe(routes.deposit);
     expect(noticeLink({ type: "WITHDRAWAL_REJECTED" })).toBe(routes.withdraw);
     expect(noticeLink({ type: "WELCOME" })).toBe(routes.assets);

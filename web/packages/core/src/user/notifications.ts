@@ -127,7 +127,7 @@ export function noticeCategory(type: string): NoticeCategory {
 
 /**
  * noticeLink is the page a notice leads to, if any: the devices, the
- * security centre, the deposit or withdrawal page; an operator's message
+ * security centre, the profile page, the deposit or withdrawal page; an operator's message
  * (BROADCAST) its own link, a path on the site.
  */
 export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, string> }): string | null {
@@ -141,6 +141,11 @@ export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, str
     case "ACCOUNT_LOCKED":
     case "TOTP_CHANGED":
       return routes.security;
+    // An operator reset the username or the avatar (avatars and usernames
+    // design §1.6): the profile page, to choose again.
+    case "USERNAME_RESET":
+    case "AVATAR_RESET":
+      return routes.profile;
     case "WELCOME":
       return routes.assets;
     default:
