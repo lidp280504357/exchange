@@ -241,6 +241,11 @@ func setup(ctx context.Context, a *app.App) error {
 	ledgerClient := ledgerv1.NewLedgerServiceClient(clients["ledger"])
 	authClient := authv1.NewAuthServiceClient(clients["auth"])
 	users := backends.Users{Auth: authClient, User: userv1.NewUserServiceClient(clients["user"]), Ledger: ledgerClient}
+	// cancel-open takes every open order of a line in one call (two passes
+	// a second apart, an account a transaction): a minute.
+	productLines := backends.ProductLines{
+		REST: backends.REST{Client: &http.Client{Timeout: time.Minute}}, Trading: cfg.TradingURL, Derivatives: cfg.DerivativesURL,
+	}
 	svc := &application.Service{
 		Store:       postgres.NewStore(db, events),
 		Hasher:      password.NewHasher(cfg.PasswordHashConcurrency, password.DefaultCost),
@@ -280,6 +285,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Margin:           backends.Margin{REST: rest, Base: cfg.MarginURL},
 		MarketMaker:      marketMaker,
 		MarginReports:    backends.Reports{Conn: ch},
+		ProductLines:     productLines,
 		Log:              a.Logger(),
 		Now:              time.Now,
 	}

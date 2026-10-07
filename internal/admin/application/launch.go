@@ -32,11 +32,13 @@ const (
 // The launch items in the order the design lists them, then HOUSE's
 // (review ㉚: design §3 row E), margin trading's (margin design
 // 2026-10-06 §8, E5), the contracts' (coin-margined design 2026-10-06
-// §2.7, G5) and the apps to download (App download design 2026-10-07 §5,
-// H4: for information, OK whatever is offered).
+// §2.7, G5), the apps to download (App download design 2026-10-07 §5,
+// H4) and the product lines (product switches design 2026-10-07 §1 #5,
+// K3); the last two for information, OK whatever is offered or open.
 var launchKeys = []string{
 	"welcome_credits", "test_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
 	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin", "insurance", "coin_m", "app_downloads",
+	"products",
 }
 
 // launchDefaultName is the name the platform is seeded with (migration
@@ -147,6 +149,11 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 	}
 	put("insurance")(s.launchInsurance(ctx))
 	put("app_downloads")(s.launchApps(ctx))
+	if err != nil {
+		set("products", LaunchUnknown, nil)
+	} else {
+		put("products")(launchProducts(flagged))
+	}
 
 	out := LaunchChecklist{Ready: true, CheckedAt: s.Now()}
 	for _, key := range launchKeys {
@@ -155,6 +162,22 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 		out.Items = append(out.Items, it)
 	}
 	return out, nil
+}
+
+// launchProducts: which product lines are open, for information (K3):
+// each line's enabled and, while closed, when it was; a flag not stored is
+// open.
+func launchProducts(flagged map[string]ports.Flag) (string, map[string]any) {
+	value := map[string]any{}
+	for _, line := range productLines {
+		f, stored := flagged[productFlag(line)]
+		st := map[string]any{"enabled": true, "closed_at": nil}
+		if stored && f.UpdatedAt != nil && !f.Enabled {
+			st["enabled"], st["closed_at"] = false, f.UpdatedAt.UTC().Format(time.RFC3339)
+		}
+		value[line] = st
+	}
+	return LaunchOK, value
 }
 
 // launchApps: what the download page offers of each platform (the

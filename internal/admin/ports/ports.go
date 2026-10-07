@@ -5,6 +5,7 @@ package ports
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"time"
 
@@ -1406,6 +1407,29 @@ type Prices map[string]decimal.Decimal
 type MarketPrices interface {
 	Prices(ctx context.Context, maxAge time.Duration) (Prices, error)
 }
+
+// ProductLines are the services that run the product lines (design
+// 2026-10-07, product switches): spot-trading-service spot,
+// derivatives-service usdt_m and coin_m. Line counts what closing a line
+// touches now (GET /internal/products/{line}: its open orders, conditional
+// ones included, and positions, HOUSE's and the market makers' left out);
+// CancelOpen cancels its open orders (POST
+// /internal/products/{line}/cancel-open; the service audits each cancel).
+// ErrProductLineMissing while a service has no such endpoint yet (deployed
+// before K1a or K1b).
+type ProductLines interface {
+	Line(ctx context.Context, product string) (ProductLine, error)
+	CancelOpen(ctx context.Context, product, actor, reason string) (int, error)
+}
+
+// ProductLine is what closing a product line touches now.
+type ProductLine struct {
+	OpenOrders, OpenPositions int
+}
+
+// ErrProductLineMissing tells a service without the product line's
+// endpoints.
+var ErrProductLineMissing = errors.New("the service has no product line endpoints yet")
 
 // HousePair is HOUSE's spot trading on one pair in the trades read model
 // (ADR-0015): the base it bought and sold, the quote it paid and got.

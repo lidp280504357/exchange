@@ -239,6 +239,33 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
       );
       break;
     }
+    case "products": {
+      // Which product lines are open (K3), for information.
+      const lines = ["spot", "usdt_m", "coin_m"] as const;
+      body = (
+        <>
+          {lines.map((l, i) => {
+            const st = (v[l] as { enabled?: boolean; closed_at?: string | null } | undefined) ?? {};
+            return (
+              <span key={l}>
+                {i > 0 && <span className="text-fg-3"> · </span>}
+                {t(`admin.products.lines.${l}`)}：
+                <span className={st.enabled === false ? "text-warn-strong" : undefined}>
+                  {t(st.enabled === false ? "admin.launch.productClosed" : "admin.launch.productOpen")}
+                </span>
+                {st.closed_at && (
+                  <span className="text-fg-3">
+                    {" "}
+                    <TimeText value={st.closed_at} />
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </>
+      );
+      break;
+    }
     case "app_downloads": {
       const offered = (p: "android" | "ios") => {
         const m = v[p] as string | null | undefined;

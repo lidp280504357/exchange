@@ -1585,7 +1585,8 @@ export interface paths {
          *     anything), HOUSE's and the market-making accounts'
          *     (MARKET_MAKER_USER_IDS) left out (the services' GET
          *     /internal/products/{line}). A count that cannot be read is null and
-         *     its line named in `partial`. Needs instruments.read.
+         *     its line named in `partial`. Needs instruments.read. The flags
+         *     page leaves product.* to this endpoint (400 there).
          */
         get: operations["getProducts"];
         /**
@@ -1606,8 +1607,12 @@ export interface paths {
          *     simulated market's spot bots wait while spot is closed. Positions,
          *     funding, liquidations (margin ones on spot too) and the
          *     reconciliation go on. Opening it again restores all of it; the
-         *     canceled orders stay canceled. Switching to the state it is in
-         *     changes nothing and cancels nothing. Audited as
+         *     canceled orders stay canceled. A cancel that fails, or a service
+         *     without the endpoint yet, leaves the line closed and is said in the
+         *     audit (cancel: failed or unavailable). Switching to the state it is
+         *     in changes nothing, but closing a closed line again cancels its
+         *     orders still open (audited as admin.products.orders_canceled).
+         *     Audited as
          *     admin.products.toggled (product, from, to, canceled orders,
          *     reason). Needs instruments.trading (ADMIN).
          */
@@ -5064,7 +5069,7 @@ export interface components {
              * @description When it was closed, while it is; null while open.
              */
             closed_at?: string | null;
-            /** @description The orders closing it would cancel now (contracts' conditional orders included); null when it could not be read. */
+            /** @description The resting orders closing it would cancel now (the read model; the contracts' conditional orders are canceled too but not counted); null when it could not be read. */
             open_orders: number | null;
             /** @description The contracts' open positions that would stay (spot holds none, 0); null when it could not be read. */
             open_positions: number | null;

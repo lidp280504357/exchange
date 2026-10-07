@@ -141,6 +141,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/custody/fees/{withdrawal}/book", h.bookCustodyFee)
 			r.Post("/custody/fees/{withdrawal}/write-off", h.writeOffCustodyFee)
 			r.Get("/instruments", h.instruments)
+			r.Get("/products", h.products)
+			r.Put("/products", h.setProduct)
 			r.Get("/instruments/config", h.instrumentConfig)
 			r.Post("/instruments/preview", h.previewConfig)
 			r.Post("/instruments/apply", h.applyConfig)

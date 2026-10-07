@@ -17,6 +17,7 @@ import { AssetDrawer, ContractDrawer, FeeDrawer, PairDrawer } from "./instrument
 import { changesKey, ChangesTab, moveNote, type StatusPreview } from "./instruments/changes";
 import { ListingWizard } from "./instruments/Wizard";
 import { useTodo } from "../live";
+import { ProductsCard } from "./instruments/products";
 
 type Status = PairConfig["status"];
 
@@ -82,6 +83,7 @@ export default function Instruments({ admin }: { admin: Admin }) {
     ) : undefined;
   return (
     <Page title={t("admin.nav.instruments")} help={write ? t("admin.listing.help") : undefined} actions={add}>
+      <ProductsCard admin={admin} />
       <Tabs
         items={[
           { value: "pairs", label: t("admin.instruments.tabs.pairs"), count: cfg?.pairs.length },

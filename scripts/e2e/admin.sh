@@ -1002,6 +1002,58 @@ else
   [[ -z $OVERLAY_ON ]] || overlay_off
 fi
 
+echo "== the product lines (design 2026-10-07, product switches, K3)"
+# Every administrator reads the three lines; only an ADMIN switches one,
+# on its card (not the flags page). The coin-margined line closed for a
+# moment: the sites' products say so within a minute, a contract order is
+# refused (once derivatives-service has K1b), and it opens again.
+as AUDITOR GET /admin/v1/products ""
+if [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
+  echo "skip the product lines: this admin-service is from before K3"
+else
+  expect 200 - "every administrator reads the product lines"
+  check '[.products[].product] == ["spot", "usdt_m", "coin_m"] and all(.products[]; (.enabled | type) == "boolean" and .flag == ("product." + .product)
+    and (.version | type) == "number" and ((.open_orders | type) == "number" or .open_orders == null)) and (.partial | type) == "array"' \
+    "spot, USDT- and coin-margined, each with its switch and what closing it touches"
+  COINM_OPEN=$(jq -r '.products[] | select(.product == "coin_m") | .enabled' <<<"$BODY")
+  as OPERATOR PUT /admin/v1/products '{"product":"coin_m","enabled":false,"reason":"e2e: an operator closes a line"}'
+  expect 403 ADMIN_FORBIDDEN "only an ADMIN switches a line"
+  as ADMIN PUT /admin/v1/products '{"product":"margin","enabled":false,"reason":"e2e: not a line"}'
+  expect 400 COMMON_INVALID_ARGUMENT "three lines, margin trading not among them"
+  as ADMIN PUT /admin/v1/flags/product.coin_m '{"enabled":false,"reason":"e2e: around the card"}'
+  expect 400 COMMON_INVALID_ARGUMENT "a line is switched on its card, not the flags page"
+  if [[ $COINM_OPEN != true ]]; then
+    echo "skip closing a line: the coin-margined line is closed already"
+  else
+    reopen_coinm() { as ADMIN PUT /admin/v1/products '{"product":"coin_m","enabled":true,"reason":"e2e cleanup"}' >/dev/null; }
+    at_exit reopen_coinm
+    as ADMIN PUT /admin/v1/products '{"product":"coin_m","enabled":false,"reason":"e2e: the coin-margined contracts closed for a moment"}'
+    expect 200 - "ADMIN closes the coin-margined contracts"
+    check "(.products[] | select(.product == \"coin_m\") | .enabled == false and (.closed_at | type) == \"string\" and .switched_by == \"$EMAIL_ADMIN\")
+      and (.canceled_orders | type) == \"number\"" "closed in the ADMIN's name, with the orders it canceled"
+    coinm_shown() { # coinm_shown true|false: the sites' products say it (cached 30 s)
+      call GET "/v1/platform/products?t=$RANDOM" ""
+      [[ $STATUS == 200 ]] && jq -e --argjson on "$1" '.coin_m.enabled == $on' <<<"$BODY" >/dev/null
+    }
+    eventually 140 "the sites see it closed within a minute" coinm_shown false
+    call POST /v1/derivatives/orders '{"symbol":"BTC-USD-PERP","side":"BUY","type":"MARKET","quantity":"1"}' "${UAUTH[@]}"
+    if [[ $STATUS == 403 && $(jq -r .code <<<"$BODY") == PRODUCT_CLOSED ]]; then
+      echo "ok   a coin-margined order is refused while it is closed"
+    else
+      echo "skip the refused order: derivatives-service answered $STATUS $(jq -r '.code // ""' <<<"$BODY") (before K1b)"
+    fi
+    as ADMIN PUT /admin/v1/products '{"product":"coin_m","enabled":true,"reason":"e2e: open again"}'
+    expect 200 - "and opens it again"
+    check '(.products[] | select(.product == "coin_m") | .enabled and .closed_at == null) and .canceled_orders == 0' "open, nothing canceled"
+    eventually 140 "the sites see it open again within a minute" coinm_shown true
+    toggled_twice() {
+      as AUDITOR GET "/admin/v1/audit-logs?target=product:coin_m&limit=10" ""
+      [[ $STATUS == 200 ]] && jq -e '[.items[] | select(.payload.action == "admin.products.toggled")] | length >= 2' <<<"$BODY" >/dev/null
+    }
+    eventually 40 "both switches in the audit trail (ClickHouse, seconds behind)" toggled_twice
+  fi
+fi
+
 echo "== paged lists and the overview"
 as AUDITOR GET "/admin/v1/users?limit=2" ""
 expect 200 - "accounts, newest first"
@@ -2040,15 +2092,19 @@ check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without 
 echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
 as AUDITOR GET /admin/v1/launch-checklist ""
 expect 200 - "every administrator reads the launch checklist"
-# Nineteen with the apps to download (H4), eighteen with the contracts'
-# (G5), sixteen with margin trading's (E5); fewer from an admin-service
-# before them.
-check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 19
+# Twenty with the product lines (K3), nineteen with the apps to download
+# (H4), eighteen with the contracts' (G5), sixteen with margin trading's
+# (E5); fewer from an admin-service before them.
+check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 20
+    or ((.items | length) == 19 and all(.items[]; .key != "products"))
     or ((.items | length) == 18 and all(.items[]; .key != "app_downloads"))
     or ((.items | length) == 16 and all(.items[]; .key != "insurance" and .key != "coin_m"))
     or ((.items | length) == 15 and all(.items[]; .key != "margin")))
   and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
-  "nineteen items, each with its state"
+  "twenty items, each with its state"
+check '[.items[] | select(.key == "products")] | all(.status == "UNKNOWN" or (.status == "OK"
+  and all(.value.spot, .value.usdt_m, .value.coin_m; (.enabled | type) == "boolean")))' \
+  "the product lines' item says which are open, OK whatever is"
 check '[.items[] | select(.key == "app_downloads")] | all(.status == "UNKNOWN" or (.status == "OK"
   and all(.value.android, .value.ios; . == null or IN("LINK", "FILE"))))' \
   "the App downloads item says what each platform offers, OK whatever it is"

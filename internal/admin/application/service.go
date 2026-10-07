@@ -93,8 +93,12 @@ type Service struct {
 	// trading's terms and accounts); MarginReports reads its read models.
 	Margin        ports.Margin
 	MarginReports ports.MarginReports
-	Log           *slog.Logger
-	Now           func() time.Time
+	// ProductLines are the services that run the product lines (design
+	// 2026-10-07, product switches): what closing one touches, and the
+	// cancels of a closed line's open orders.
+	ProductLines ports.ProductLines
+	Log          *slog.Logger
+	Now          func() time.Time
 	// CloseWait is the pause between attempts to close a position while
 	// its closing orders are being canceled (700 ms when zero).
 	CloseWait time.Duration
@@ -644,6 +648,11 @@ func (s *Service) SwitchFlag(ctx context.Context, p Principal, key string, enabl
 		if err := p.require(domain.PermSettingsEdit); err != nil {
 			return ports.Flag{}, err
 		}
+	}
+	// A product line is switched on its own card, which cancels a closed
+	// line's open orders (design 2026-10-07, product switches, K3).
+	if strings.HasPrefix(key, "product.") {
+		return ports.Flag{}, apperr.Invalid("a product line is opened and closed with PUT /admin/v1/products (交易品种 → 产品线), which cancels a closed line's open orders")
 	}
 	if err := needReason(reason); err != nil {
 		return ports.Flag{}, err

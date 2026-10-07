@@ -362,6 +362,15 @@ try {
   // 7. Pairs: 50 and more; a status change asks for a confirmation (canceled).
   await go("/instruments");
   await rows(50);
+  // The product lines above them (K3): three switches; closing (or
+  // opening) the coin-margined one asks for a confirmation (canceled).
+  await page.waitForSelector("[data-testid=products] [data-testid=product-coin_m]", { timeout: 20000 });
+  if ((await page.$$("[data-testid=products] [data-testid^=product-switch-]")).length !== 3) throw new Error("three product lines with their switches");
+  await page.click("[data-testid=product-switch-coin_m]");
+  await page.waitForFunction(() => /币本位合约/.test(document.querySelector("[role=dialog]")?.textContent ?? ""));
+  await t.shot("3-products");
+  await clickButton("取消", "[role=dialog]");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   await typeInto('main input[placeholder="搜索"]', "SOL-BTC");
   await page.waitForFunction(() => document.querySelectorAll("main tbody tr[data-row-id]").length === 1);
   await clickButton("操作", "main");
@@ -399,7 +408,7 @@ try {
   await waitText("资料与图标");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
-  ok("assets and pairs: 50+ pairs, a status change previewed by the server waits for its confirmation (canceled); the pending changes; a pair's editor; the listing wizard's preview; an asset's profile");
+  ok("assets and pairs: the product lines (a switch confirmed, canceled), 50+ pairs, a status change previewed by the server waits for its confirmation (canceled); the pending changes; a pair's editor; the listing wizard's preview; an asset's profile");
 
   // 8. Futures (every user's positions, the liquidation log), HOUSE, flags.
   await go("/derivatives");

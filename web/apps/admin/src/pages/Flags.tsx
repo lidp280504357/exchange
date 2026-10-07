@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { DangerAction } from "../kit/actions";
 import { TimeText } from "../kit/format";
 import { Page } from "../kit/Page";
@@ -32,7 +33,8 @@ export default function Flags({ admin }: { admin: Admin }) {
         cell: ({ row }) => (
           <Switch
             checked={row.original.enabled}
-            disabled={!writable}
+            // A product line is switched on its card, which cancels its orders (K3).
+            disabled={!writable || row.original.key.startsWith("product.")}
             onCheckedChange={() => setPending(row.original)}
             size="sm"
             // The compact rows are 32 px: a 44 px touch ring would reach into the next ones.
@@ -41,7 +43,20 @@ export default function Flags({ admin }: { admin: Admin }) {
           />
         ),
       },
-      { accessorKey: "key", header: t("admin.risk.key"), cell: ({ row }) => <span className="font-mono text-xs">{row.original.key}</span> },
+      {
+        accessorKey: "key",
+        header: t("admin.risk.key"),
+        cell: ({ row }) => (
+          <span className="flex flex-col">
+            <span className="font-mono text-xs">{row.original.key}</span>
+            {row.original.key.startsWith("product.") && (
+              <Link to="/instruments" className="text-xs text-info-strong hover:underline">
+                {t("admin.products.flagsHint")}
+              </Link>
+            )}
+          </span>
+        ),
+      },
       { accessorKey: "description", header: t("admin.risk.description"), cell: ({ row }) => <span className="text-sm text-fg-2">{row.original.description}</span> },
       { id: "rules", header: t("admin.risk.rules"), cell: ({ row }) => <Rules rules={row.original.rules} /> },
       {
