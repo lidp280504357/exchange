@@ -149,6 +149,9 @@ type ConditionalRepo interface {
 	Update(ctx context.Context, c domain.Conditional) error
 	// Active returns the active conditional orders of symbol ("" for all).
 	Active(ctx context.Context, symbol string) ([]domain.Conditional, error)
+	// ActiveOn returns the active conditional orders on the symbols (a
+	// product line's).
+	ActiveOn(ctx context.Context, symbols []string) ([]domain.Conditional, error)
 	// OfUser returns a page of the user's conditional orders, newest first,
 	// of one status when status is set.
 	OfUser(ctx context.Context, userID, symbol, status, before string, limit int) ([]domain.Conditional, error)

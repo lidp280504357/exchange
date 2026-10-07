@@ -765,6 +765,11 @@ func (r conditionals) Active(ctx context.Context, symbol string) ([]domain.Condi
 		ORDER BY conditional_id`, symbol)
 }
 
+func (r conditionals) ActiveOn(ctx context.Context, symbols []string) ([]domain.Conditional, error) {
+	return r.query(ctx, `SELECT `+conditionalColumns+` FROM conditional_orders WHERE status = 'ACTIVE' AND symbol = ANY($1)
+		ORDER BY conditional_id`, symbols)
+}
+
 func (r conditionals) OfUser(ctx context.Context, userID, symbol, status, before string, limit int) ([]domain.Conditional, error) {
 	var cursor any // NULL: the first page
 	if before != "" {

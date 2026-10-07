@@ -497,6 +497,17 @@ func (r memConds) Update(_ context.Context, c domain.Conditional) error {
 	return nil
 }
 
+func (r memConds) ActiveOn(_ context.Context, symbols []string) ([]domain.Conditional, error) {
+	var out []domain.Conditional
+	for _, c := range r.st.conds {
+		if c.Status == domain.ConditionalActive && slices.Contains(symbols, c.Symbol) {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Conditional) int { return strings.Compare(a.ID, b.ID) })
+	return out, nil
+}
+
 func (r memConds) Active(_ context.Context, symbol string) ([]domain.Conditional, error) {
 	var out []domain.Conditional
 	for _, c := range r.st.conds {

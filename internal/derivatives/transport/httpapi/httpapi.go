@@ -591,18 +591,35 @@ func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
 // open interest; lifting reduce-only; the positions close to or in
 // liquidation; every user's open positions; closing a user's position at
 // the market; a contract product line's counts and, as the console closes
-// it, its open orders canceled (design 2026-10-07, product switches).
+// it, its open orders canceled (design 2026-10-07, product switches). A
+// request carrying a caller's X-User-Id came through the gateway and is
+// not served (404, as spot-trading-service's; api/internal/products.yaml).
 func (h *Handler) InternalRoutes(r chi.Router) {
-	r.Get("/internal/products/{product}", h.product)
-	r.Post("/internal/products/{product}/cancel-open", h.cancelProduct)
-	r.Get("/internal/derivatives/contracts", h.overview)
-	r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
-	r.Get("/internal/derivatives/risk", h.risk)
-	r.Get("/internal/derivatives/positions", h.openPositions)
-	r.Post("/internal/derivatives/positions/close", h.adminClose)
-	r.Get("/internal/derivatives/users/{id}/cross-margin", h.crossMargin)
-	r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
-	r.Post("/internal/derivatives/contracts/{symbol}/price-impact", h.priceImpact)
+	r.Group(func(r chi.Router) {
+		r.Use(internalOnly)
+		r.Get("/internal/products/{product}", h.product)
+		r.Post("/internal/products/{product}/cancel-open", h.cancelProduct)
+		r.Get("/internal/derivatives/contracts", h.overview)
+		r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
+		r.Get("/internal/derivatives/risk", h.risk)
+		r.Get("/internal/derivatives/positions", h.openPositions)
+		r.Post("/internal/derivatives/positions/close", h.adminClose)
+		r.Get("/internal/derivatives/users/{id}/cross-margin", h.crossMargin)
+		r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
+		r.Post("/internal/derivatives/contracts/{symbol}/price-impact", h.priceImpact)
+	})
+}
+
+// internalOnly refuses a request that carries a caller's identity: only
+// what comes over the compose network is served (review C63 ①).
+func internalOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if httpx.UserID(r) != "" {
+			httpx.WriteError(w, r, apperr.NotFound("no such endpoint"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // product counts what closing a contract product line (usdt_m, coin_m)

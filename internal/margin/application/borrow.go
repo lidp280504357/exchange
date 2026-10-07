@@ -18,6 +18,7 @@ import (
 	"github.com/skill/exchange/internal/margin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // BorrowInput is a request to borrow.
@@ -72,6 +73,10 @@ func checkAmount(amount decimal.Decimal, decimals int32) error {
 // §4.3): within the account's room (MaxBorrow), the pool and the user's
 // cap; the first hour's interest is charged with it. The same key with the
 // same request returns the loan, with another COMMON_IDEMPOTENCY_CONFLICT.
+// While spot trading is closed (product.spot) a borrow by hand is
+// PRODUCT_CLOSED (review C61): a loan is new exposure on a line that takes
+// none; an order's own borrow comes with an order spot-trading-service
+// refuses then. Repaying and transfers out go on.
 func (s *Service) Borrow(ctx context.Context, in BorrowInput) (ports.Loan, error) {
 	if in.OrderID == "" {
 		if err := checkKey(in.IdemKey); err != nil {
@@ -84,6 +89,9 @@ func (s *Service) Borrow(ctx context.Context, in BorrowInput) (ports.Loan, error
 		return ports.Loan{}, err
 	} else if ok {
 		return s.replayBorrow(ctx, prior, in)
+	}
+	if in.OrderID == "" && s.Features != nil && s.Features.Closed(flags.KeyProductSpot) {
+		return ports.Loan{}, flags.ErrProductClosed(flags.KeyProductSpot)
 	}
 	if err := s.enabled(in.UserID); err != nil {
 		return ports.Loan{}, err

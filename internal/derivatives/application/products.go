@@ -165,7 +165,7 @@ func canceled(o domain.Order) bool {
 //
 // The orders come from the orders_active partial index read whole (its
 // first column is the user), the take-profits and stop-losses from
-// conditional_orders_active: active rows only, and only on a closed line.
+// conditional_orders_active by symbol: active rows only.
 func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since time.Time, openingOnly bool) ([]ProductOrder, error) {
 	symbols, err := s.productSymbols(ctx, key)
 	if err != nil || len(symbols) == 0 {
@@ -178,7 +178,7 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 	if err != nil {
 		return nil, err
 	}
-	all, err := s.Store.Read().Conditionals().Active(ctx, "")
+	all, err := s.Store.Read().Conditionals().ActiveOn(ctx, symbols)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 		}
 	}
 	for _, c := range all {
-		if slices.Contains(symbols, c.Symbol) && !c.CreatedAt.Before(since) {
+		if !c.CreatedAt.Before(since) {
 			conds[c.UserID] = append(conds[c.UserID], c)
 			add(c.UserID)
 		}
@@ -300,12 +300,12 @@ func (s *Service) ProductCounts(ctx context.Context, key string) (orders, positi
 			orders++
 		}
 	}
-	conds, err := s.Store.Read().Conditionals().Active(ctx, "")
+	conds, err := s.Store.Read().Conditionals().ActiveOn(ctx, symbols)
 	if err != nil {
 		return 0, 0, err
 	}
 	for _, c := range conds {
-		if slices.Contains(symbols, c.Symbol) && user(c.UserID) {
+		if user(c.UserID) {
 			orders++
 		}
 	}

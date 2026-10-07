@@ -15,8 +15,8 @@ import (
 // While spot trading is closed (design 2026-10-07 product switches §1 #7)
 // a transfer into a margin account takes only an asset the account owes,
 // however much of it - a debt must stay payable - and refuses any other
-// with PRODUCT_CLOSED; transfers out go on. Opened again, anything goes
-// in.
+// with PRODUCT_CLOSED; a borrow by hand is PRODUCT_CLOSED too (review C61);
+// repaying and transfers out go on. Opened again, anything goes in.
 func TestClosedSpotTakesOnlyWhatPaysADebt(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
@@ -54,6 +54,15 @@ func TestClosedSpotTakesOnlyWhatPaysADebt(t *testing.T) {
 	}
 	if err := transfer("out", domain.DirectionOut, cross, "USDT", "100"); err != nil {
 		t.Fatalf("out while spot is closed: %v", err)
+	}
+	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: user, IdemKey: "b-closed", Account: cross, Asset: "USDT", Amount: d("10")}); code(err) != flags.CodeProductClosed {
+		t.Fatalf("a borrow while spot is closed: %v", err)
+	}
+	if _, err := r.svc.Repay(ctx, application.RepayInput{UserID: user, IdemKey: "r-closed", Account: cross, Asset: "USDT", Amount: d("10")}); err != nil {
+		t.Fatalf("a repayment while spot is closed: %v", err)
+	}
+	if again, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: user, IdemKey: "b-1", Account: cross, Asset: "USDT", Amount: d("500")}); err != nil || !again.Principal.IsPositive() {
+		t.Fatalf("an earlier borrow's replay while spot is closed: %+v %v", again, err)
 	}
 
 	r.features.shut(flags.KeyProductSpot, false)

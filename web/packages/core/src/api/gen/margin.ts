@@ -113,7 +113,9 @@ export interface paths {
          *     (MARGIN_LEVEL_TOO_LOW); the account must have been opened by a
          *     transfer in and not be frozen (MARGIN_FROZEN), and every asset of it
          *     priced (MARGIN_PRICE_UNAVAILABLE). MARGIN_DISABLED while the switch
-         *     is off. The first hour's interest is charged at once.
+         *     is off; PRODUCT_CLOSED (403, details product: spot) while spot
+         *     trading is closed (product.spot; repaying and transfers out go on).
+         *     The first hour's interest is charged at once.
          */
         post: operations["marginBorrow"];
         delete?: never;
