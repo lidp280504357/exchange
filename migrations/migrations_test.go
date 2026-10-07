@@ -330,6 +330,7 @@ func TestTradingSchema(t *testing.T) {
 		VALUES ($1, $2, $3, 'BTC-USDT', 'BUY', 'MARKET', 'IOC', 'CANCEL_NEWEST', $4, $5, 66000, 'NEW', 'USDT', 33, 'PENDING', 0.001, 0.001, 8, 6, now(), now())`
 	accepts(t, db, byQuantity, uuid.New(), user, "c8", 0.0005, nil)
 	rejects(t, db, "a market buy takes a quantity or a quote amount, not both", byQuantity, uuid.New(), user, "c9", 0.0005, 33)
+	rejects(t, db, "a market buy takes a quantity or a quote amount", byQuantity, uuid.New(), user, "c10", nil, nil)
 	rejects(t, db, "a market sell sells a quantity", order, uuid.New(), user, "c6", "SELL", "MARKET", nil, nil, 100)
 	rejects(t, db, "client order IDs are short tokens", order, uuid.New(), user, "has space", "BUY", "LIMIT", 60000, 0.001, nil)
 	rejects(t, db, "amounts are positive", order, uuid.New(), user, "c7", "BUY", "LIMIT", 60000, -1, nil)
