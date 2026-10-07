@@ -25,7 +25,6 @@ export default {
       open: "前往下载",
       appStore: "前往 App Store",
       install: "安装",
-      sha256Copied: "SHA-256 已复制",
       mobileconfig: "下载配置描述文件",
       help: "安装说明",
       helpAndroid: {
@@ -62,7 +61,6 @@ export default {
       open: "Go to download",
       appStore: "Open the App Store",
       install: "Install",
-      sha256Copied: "SHA-256 copied",
       mobileconfig: "Download the configuration profile",
       help: "How to install",
       helpAndroid: {

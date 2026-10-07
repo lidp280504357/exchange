@@ -329,8 +329,11 @@ try {
     await page.waitForFunction(() => [...document.querySelectorAll("a")].some((a) => a.innerText.includes("BTCUSDT") && /费率\s*[+-]?\d+\.\d{4}%/.test(a.innerText)), {
       timeout: 20000,
     });
-    await go("/futures/data");
-    // A plain list, or from 50 contracts the windowed one: a row is a button either way.
+    // Searched for BTC: the windowed list draws its first rows only, and on a
+    // cold service the contracts without figures yet could push BTCUSDT
+    // below them (review R25, F8). A row is a button in the plain list and
+    // in the windowed one.
+    await go("/futures/data?q=BTC");
     const row = await page.waitForFunction(() => [...document.querySelectorAll("button")].find((b) => b.innerText.includes("BTCUSDT") && b.innerText.includes("费率")) ?? false, {
       timeout: 20000,
     });

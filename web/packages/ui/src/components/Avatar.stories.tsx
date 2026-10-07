@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 import { Avatar } from "./Avatar";
 import { DEFAULT_AVATARS, DefaultAvatar } from "./DefaultAvatar";
 
@@ -54,4 +55,37 @@ export const BySeed: Story = {
       <Avatar seed="0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2e" src="/does-not-exist.webp" name="user_k3x9q2ab" size={40} />
     </div>
   ),
+};
+
+// An uploaded avatar stand-in, drawn here (the real ones are 256 and 64 px WebP).
+function picture(): string {
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 256;
+  const g = c.getContext("2d");
+  if (!g) return "";
+  const grad = g.createLinearGradient(0, 0, 256, 256);
+  grad.addColorStop(0, "orange");
+  grad.addColorStop(1, "royalblue");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+  g.fillStyle = "white";
+  g.beginPath();
+  g.arc(128, 128, 64, 0, Math.PI * 2);
+  g.fill();
+  return c.toDataURL("image/png");
+}
+
+/** An uploaded picture at the sites' sizes (top bar 24, menu and side column 40, profile 88). */
+export const Image: Story = {
+  render: () => {
+    const [src] = useState(picture);
+    return (
+      <div className="flex items-center gap-3">
+        {[24, 40, 52, 88].map((size) => (
+          <Avatar key={size} src={src} seed="0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2e" name="satoshi_n" size={size} />
+        ))}
+      </div>
+    );
+  },
 };

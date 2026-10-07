@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { androidVersion, devicePlatform, fileSize, installUrl, offeredApps, parsePlatform, qrUrl, type AppDownload } from "./apps";
+import { androidVersion, appKind, devicePlatform, fileSize, installUrl, minOsText, offeredApps, parsePlatform, qrUrl, type AppDownload } from "./apps";
 
 const notes = { "zh-CN": "", en: "" };
 const link: AppDownload = {
@@ -37,6 +37,13 @@ describe("the apps to download", () => {
     expect(parsePlatform(null)).toBeNull();
   });
 
+  it("say how each app is offered", () => {
+    expect(appKind("android", apk)).toBe("androidFile");
+    expect(appKind("android", { ...link, ios_install: null })).toBe("androidLink");
+    expect(appKind("ios", ipa)).toBe("iosOta");
+    expect(appKind("ios", link)).toBe("iosStore");
+  });
+
   it("install a link or a file, an uploaded iOS app over the air", () => {
     expect(installUrl(link)).toBe(link.url);
     expect(installUrl(apk)).toBe(apk.url);
@@ -50,6 +57,11 @@ describe("the apps to download", () => {
   });
 
   it("name an Android API level's version", () => {
+    const say = (key: string, vars: Record<string, string>) => `${key} ${Object.values(vars).join()}`;
+    expect(minOsText("android", "24", say)).toBe("minAndroid 7.0");
+    expect(minOsText("android", "19", say)).toBe("minAndroidApi 19");
+    expect(minOsText("ios", "15.0", say)).toBe("minIos 15.0");
+    expect(minOsText("ios", null, say)).toBeNull();
     expect(androidVersion("24")).toBe("7.0");
     expect(androidVersion("35")).toBe("15");
     expect(androidVersion("19")).toBeNull();

@@ -43,7 +43,10 @@ export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [active, setActive] = useState<number | null>(null);
-  const keyboard = useRef(false);
+  // Whether the keyboard (not a pointer) picked the point: state, so that
+  // a focus reaching a point a pointer had already picked reads it out
+  // (review R25, F8).
+  const [keyboard, setKeyboard] = useState(false);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -144,11 +147,12 @@ export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip
 
   const pick = (e: PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
+    setKeyboard(false);
     setActive(indexAt(e.clientX - r.left, plotW, n));
   };
   const leave = (e: PointerEvent<SVGSVGElement>) => {
     // A touch keeps its point shown until the next one; a mouse leaving clears it.
-    if (e.pointerType === "mouse" && !keyboard.current) setActive(null);
+    if (e.pointerType === "mouse" && !keyboard) setActive(null);
   };
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (n === 0) return;
@@ -157,18 +161,18 @@ export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip
     if (e.key === "Escape") setActive(null);
     if (next === undefined) return;
     e.preventDefault();
-    keyboard.current = true;
+    setKeyboard(true);
     setActive(next);
   };
   const onFocus = (e: FocusEvent<HTMLDivElement>) => {
     // From the keyboard the latest point shows at once; a click shows the one under the pointer.
     if (e.currentTarget.matches(":focus-visible") && n > 0) {
-      keyboard.current = true;
+      setKeyboard(true);
       setActive((a) => a ?? n - 1);
     }
   };
   const onBlur = () => {
-    keyboard.current = false;
+    setKeyboard(false);
     setActive(null);
   };
 
@@ -178,7 +182,7 @@ export function SeriesChart({ points, form, axis, height = 160, formatX, tooltip
 
   // An image's content is hidden from screen readers: the point the arrow
   // keys reach is read out from a live region beside it.
-  const spoken = keyboard.current && shown !== null && describe ? describe(shown) : "";
+  const spoken = keyboard && shown !== null && describe ? describe(shown) : "";
 
   return (
     <>

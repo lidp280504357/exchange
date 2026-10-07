@@ -55,6 +55,15 @@ export function devicePlatform(userAgent: string, touchPoints = 0): AppPlatform 
   return null;
 }
 
+/** How an app is offered: an uploaded APK or an Android link; an uploaded iOS app (installed over the air) or an App Store link. */
+export type AppKind = "androidFile" | "androidLink" | "iosOta" | "iosStore";
+
+/** appKind tells how an app is offered: what its card says and which button and install steps it gets. */
+export function appKind(platform: AppPlatform, app: AppDownload): AppKind {
+  if (platform === "android") return app.mode === "FILE" ? "androidFile" : "androidLink";
+  return app.ios_install === "OTA" ? "iosOta" : "iosStore";
+}
+
 /** parsePlatform reads ?platform= (the QR codes' links say which app they are for). */
 export function parsePlatform(v: string | null | undefined): AppPlatform | null {
   return v === "android" || v === "ios" ? v : null;
@@ -90,6 +99,23 @@ const ANDROID_VERSIONS: Record<string, string> = {
 /** androidVersion names the Android version of an API level ("24" → "7.0"); null when it is not one of these. */
 export function androidVersion(level: string | null | undefined): string | null {
   return (level && ANDROID_VERSIONS[level.trim()]) || null;
+}
+
+/**
+ * minOsText words the system an app needs with the site's strings (say:
+ * minIos {version}, minAndroid {version}, minAndroidApi {level}): iOS as
+ * the package says, Android by its API level's version when known; null
+ * when the package does not say.
+ */
+export function minOsText(
+  platform: AppPlatform,
+  minOs: string | null,
+  say: (key: "minIos" | "minAndroid" | "minAndroidApi", vars: Record<string, string>) => string,
+): string | null {
+  if (!minOs) return null;
+  if (platform === "ios") return say("minIos", { version: minOs });
+  const version = androidVersion(minOs);
+  return version ? say("minAndroid", { version }) : say("minAndroidApi", { level: minOs });
 }
 
 /** fileSize renders a size in bytes: "48.2 MB", "860 KB". */

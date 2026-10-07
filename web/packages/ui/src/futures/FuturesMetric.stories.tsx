@@ -1,7 +1,6 @@
-import type { FuturesDataPoint, Liquidation } from "@exchange/core/futures/data";
+import type { FuturesDataPoint } from "@exchange/core/futures/data";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { FuturesMetric, type FuturesMetricProps } from "./FuturesMetric";
-import { LiquidationTape } from "./LiquidationTape";
 
 // The futures data cards (design 2026-10-06 §3.3) on numbers shaped like
 // the test server's BTC-USDT-PERP: 30 points of 5 minutes.
@@ -91,26 +90,3 @@ export const Funding: Story = {
 export const Loading: Story = { args: { state: "loading", points: undefined } };
 export const NoData: Story = { args: { state: "empty", points: [] } };
 export const Failed: Story = { args: { state: "error", points: undefined, onRetry: () => {} } };
-
-const liquidations: Liquidation[] = Array.from({ length: 12 }, (_, i) => ({
-  symbol: "BTC-USDT-PERP",
-  position_side: i % 3 ? "SHORT" : "LONG",
-  price: n(86_100 - i * 20, 1),
-  average_price: n(85_778 - i * 18, 1),
-  quantity: n(0.005 + i * 0.013, 3),
-  value_usd: n((0.005 + i * 0.013) * 85_778, 4),
-  traded_at: new Date(Date.UTC(2026, 9, 6, 18, 3, 17) - i * 41_000).toISOString(),
-}));
-
-/** The liquidation stream (a story of its own component). */
-export const Liquidations: StoryObj<typeof LiquidationTape> = {
-  render: () => (
-    <LiquidationTape
-      items={liquidations}
-      priceDecimals={1}
-      qtyDecimals={3}
-      labels={{ time: "时间", side: "方向", price: "均价", quantity: "数量(BTC)", value: "价值(USD)", long: "多单爆仓", short: "空单爆仓" }}
-      className="w-[420px]"
-    />
-  ),
-};

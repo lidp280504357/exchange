@@ -25,7 +25,6 @@ export default {
     open: "前往下載",
     appStore: "前往 App Store",
     install: "安裝",
-    sha256Copied: "SHA-256 已複製",
     mobileconfig: "下載配置描述檔案",
     help: "安裝說明",
     helpAndroid: {
