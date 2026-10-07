@@ -55,7 +55,7 @@ func (a *Avatar) ThumbURL() string {
 // Errors of avatars (appendix C).
 var (
 	ErrAvatarInvalid = apperr.New(apperr.KindInvalid, "USER_AVATAR_INVALID",
-		"the avatar must be a PNG, JPEG or WebP image of at least 64 pixels a side")
+		"the avatar must be a PNG, JPEG or WebP image of 64 pixels a side at least and 2048 x 2048 at most")
 	// ErrAvatarTooLarge is answered with AvatarTooLargeStatus (the kind
 	// has no 413).
 	ErrAvatarTooLarge = apperr.New(apperr.KindInvalid, "USER_AVATAR_TOO_LARGE", "the avatar may be at most 5 MB")

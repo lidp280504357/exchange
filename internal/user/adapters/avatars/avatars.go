@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/jpeg" // registers the JPEG decoder, a format taken
 	_ "image/png"  // registers the PNG decoder, a format taken
 	"os"
@@ -31,9 +32,13 @@ import (
 )
 
 // MaxPixels bounds an upload's decoded size (a 5 MB file can describe a
-// far larger image): 4096 x 4096, about 64 MB decoded, well within the
-// service's memory one upload at a time (Dir serializes them).
-const MaxPixels = 4096 * 4096
+// far larger image): 2048 x 2048, about 4 million pixels (review FY, C52:
+// a 16-bit 4096 x 4096 PNG of a few hundred KB decodes to 128 MB, past
+// user-service's 192 MiB). At 4 bytes a pixel that is 16 MB, and a
+// progressive JPEG's coefficients (4 bytes a pixel a component) at most 48
+// MB more, one upload at a time (Dir serializes them). The sites shrink a
+// larger photo before sending it.
+const MaxPixels = 2048 * 2048
 
 // Dir is the avatars directory: <dir>/<user_id>/<name>.webp.
 type Dir struct {
@@ -164,7 +169,13 @@ func Process(upload []byte) (big, thumb []byte, err error) {
 		return nil, nil, invalid("each side must be at least 64 pixels")
 	}
 	if cfg.Width*cfg.Height > MaxPixels {
-		return nil, nil, invalid("at most 4096 x 4096 pixels")
+		return nil, nil, invalid("at most 2048 x 2048 pixels")
+	}
+	// 16 bits a channel take twice the memory and add nothing to an
+	// avatar.
+	switch cfg.ColorModel {
+	case color.RGBA64Model, color.NRGBA64Model, color.Gray16Model, color.Alpha16Model:
+		return nil, nil, invalid("16 bits a channel are not taken")
 	}
 	img, _, err := image.Decode(bytes.NewReader(upload))
 	if err != nil {

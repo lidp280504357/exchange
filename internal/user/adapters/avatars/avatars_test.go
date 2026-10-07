@@ -174,15 +174,16 @@ func pngHeader(w, h uint32) []byte {
 	return append([]byte("\x89PNG\r\n\x1a\n"), chunk...)
 }
 
-// Anything but a decodable PNG, JPEG or WebP of 64 to 4096 pixels a side
-// is refused, its reason in the details.
+// Anything but a decodable 8-bit PNG, JPEG or WebP of 64 pixels a side and
+// at most 2048 x 2048 is refused, its reason in the details.
 func TestABadUploadIsRefused(t *testing.T) {
 	for name, upload := range map[string][]byte{
 		"svg":         []byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`),
 		"gif":         []byte("GIF89a\x40\x00\x40\x00\x00\x00\x00;"),
 		"text":        []byte("hello"),
 		"too small":   pngOf(t, paint(63, 200, func(int, int) color.NRGBA { return red })),
-		"too many":    pngHeader(4097, 4097),
+		"too many":    pngHeader(2049, 2048),
+		"16-bit":      pngOf(t, image.NewNRGBA64(image.Rect(0, 0, 64, 64))),
 		"truncated":   pngOf(t, paint(100, 100, func(int, int) color.NRGBA { return red }))[:60],
 		"header only": pngHeader(100, 100),
 	} {

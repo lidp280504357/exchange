@@ -64,9 +64,10 @@ export interface paths {
          * Upload the caller's avatar
          * @description One part, file: a PNG, JPEG or WebP image of at most 5 MB
          *     (USER_AVATAR_TOO_LARGE, 413; the request at most 8 MB), each side
-         *     at least 64 pixels. Its content decides the format, not its name or
-         *     type: anything else, or an image that does not decode, is
-         *     USER_AVATAR_INVALID (SVG and animated images too). The middle
+         *     at least 64 pixels, at most 2048 x 2048 pixels and 8 bits a channel
+         *     (clients shrink a larger photo first). Its content decides the
+         *     format, not its name or type: anything else, or an image that does
+         *     not decode, is USER_AVATAR_INVALID (SVG and animated images too). The middle
          *     square is kept, scaled to 256 x 256 and 64 x 64 WebP without any
          *     metadata (EXIF and the like); the original is not kept, and the
          *     previous avatar's files are deleted. FROZEN accounts may not upload
