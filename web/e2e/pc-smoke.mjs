@@ -42,6 +42,25 @@ try {
   }
   if (visitorFailing.length) throw new Error(`requests failed while a visitor's first screens came up: ${visitorFailing.join("; ")}`);
   ok("a visitor's home and terms pages come up without a failed request");
+  // A visitor's top bar asks for the margin assets (the margin entry's
+  // pair) only once its 交易 menu opens, not on every page (B143).
+  const marginAsked = [];
+  const onMarginAsked = (r) => {
+    if (new URL(r.url()).pathname === "/v1/margin/assets") marginAsked.push(r.url());
+  };
+  page.on("request", onMarginAsked);
+  try {
+    await go("/legal/terms");
+    await sleep(1500);
+    if (marginAsked.length) throw new Error(`a visitor's page asked for the margin assets before the 交易 menu opened: ${marginAsked.join("; ")}`);
+    const trade = await page.evaluateHandle(() => [...document.querySelectorAll("header nav a")].find((a) => a.innerText.trim() === "交易"));
+    await trade.hover();
+    for (let i = 0; i < 20 && !marginAsked.length; i++) await sleep(250);
+    if (!marginAsked.length) throw new Error("the 交易 menu opened without asking for the margin assets");
+  } finally {
+    page.off("request", onMarginAsked);
+  }
+  ok("a visitor's top bar asks for the margin assets only once its 交易 menu opens");
 
   // 1. Sign-up through the form: account, password, terms, then the code.
   await go("/register");
