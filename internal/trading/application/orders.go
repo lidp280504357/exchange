@@ -287,10 +287,13 @@ func (s *Service) CancelAccount(ctx context.Context, userID string, account doma
 }
 
 // spotClosed reports an order on the SPOT account while an operator has
-// spot trading closed. Orders on margin accounts follow margin trading's
-// own switch, margin.enabled (design 2026-10-07, product switches §1 #7).
+// spot trading closed (design 2026-10-07, product switches §1 #3). Orders
+// on margin accounts follow margin trading's own switch, margin.enabled
+// (§1 #7), and the market-making accounts (FeeFree: the simulated market's
+// bots) quote whatever the lines are, as HOUSE does.
 func (s *Service) spotClosed(req domain.Request) bool {
-	return !req.Defaults().AccountType.Margin() && s.Products != nil && s.Products.Closed(flags.KeyProductSpot)
+	return !req.Defaults().AccountType.Margin() && s.Products != nil && s.Products.Closed(flags.KeyProductSpot) &&
+		!slices.Contains(s.FeeFree, req.UserID)
 }
 
 // CanceledOrder is an order CancelOpen asked the engine to cancel.
@@ -300,8 +303,15 @@ type CanceledOrder struct {
 
 // sweepGap is how long CancelOpen waits before its second pass: long
 // enough for an order that passed Place's last check just before the flag
-// was reread to be stored.
-const sweepGap = time.Second
+// was reread to be stored. sweepLead is how far before the line closed
+// SweepClosed looks.
+const (
+	sweepGap  = time.Second
+	sweepLead = 10 * time.Second
+)
+
+// SweepActor is who SweepClosed's cancels are audited as.
+const SweepActor = "system:spot-trading-service"
 
 // CancelOpen asks the engine to cancel every active order on a SPOT
 // account once an operator closed spot trading (design 2026-10-07, product
@@ -309,9 +319,9 @@ const sweepGap = time.Second
 // each as admin.orders.canceled by actor with reason in the transaction
 // that marks it. It rereads the flag first and refuses while the line is
 // open; a second pass after sweepGap takes the orders that were on their
-// way in when it closed. Orders on margin accounts stay (margin trading
-// has its own switch), and orders already being canceled are not asked
-// again. It returns the orders it asked for.
+// way in when it closed. Orders on margin accounts and the market-making
+// accounts' stay, and orders already being canceled are not asked again.
+// It returns the orders it asked for.
 func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]CanceledOrder, error) {
 	if actor == "" || reason == "" {
 		return nil, apperr.Invalid("actor and reason are required")
@@ -325,7 +335,7 @@ func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]Cance
 	if !s.Products.Closed(flags.KeyProductSpot) {
 		return nil, errSpotOpen
 	}
-	out, err := s.sweep(ctx, actor, reason, nil)
+	out, err := s.sweep(ctx, actor, reason, time.Time{}, nil)
 	if err != nil {
 		return out, err
 	}
@@ -334,19 +344,49 @@ func (s *Service) CancelOpen(ctx context.Context, actor, reason string) ([]Cance
 		return out, ctx.Err()
 	case <-time.After(sweepGap):
 	}
-	return s.sweep(ctx, actor, reason, out)
+	return s.sweep(ctx, actor, reason, time.Time{}, out)
 }
 
 var errSpotOpen = apperr.New(apperr.KindConflict, apperr.CodeConflict, "spot trading is open; close it first")
 
-// sweep is one pass of CancelOpen, one transaction per user, appending
-// what it asked for to out.
-func (s *Service) sweep(ctx context.Context, actor, reason string, out []CanceledOrder) ([]CanceledOrder, error) {
-	users, err := s.Store.Read().Orders().ActiveUsers(ctx)
+// SweepClosed is CancelOpen's fallback, run every few seconds: while spot
+// trading is closed it cancels the SPOT orders stored from sweepLead
+// before it closed on (taken while some copy of the flag was behind, or
+// with no CancelOpen at all), audited as SweepActor. Older orders are
+// CancelOpen's.
+func (s *Service) SweepClosed(ctx context.Context) (int, error) {
+	if s.Products == nil {
+		return 0, nil
+	}
+	f, ok := s.Products.Get(flags.KeyProductSpot)
+	if !ok || f.Enabled {
+		return 0, nil
+	}
+	out, err := s.sweep(ctx, SweepActor, "spot trading is closed", f.UpdatedAt.Add(-sweepLead), nil)
+	return len(out), err
+}
+
+// SpotLine is spot trading's line as the console counts it: whether it is
+// closed and the open orders closing it touches (the SPOT accounts', but
+// the market-making accounts').
+func (s *Service) SpotLine(ctx context.Context) (closed bool, openOrders int, err error) {
+	closed = s.Products != nil && s.Products.Closed(flags.KeyProductSpot)
+	openOrders, err = s.Store.Read().Orders().CountOpen(ctx, domain.AccountSpot, s.FeeFree)
+	return closed, openOrders, err
+}
+
+// sweep cancels the active SPOT orders stored at or after since, but the
+// market-making accounts', one transaction per user, appending what it
+// asked for to out.
+func (s *Service) sweep(ctx context.Context, actor, reason string, since time.Time, out []CanceledOrder) ([]CanceledOrder, error) {
+	users, err := s.Store.Read().Orders().ActiveUsers(ctx, domain.AccountSpot, since)
 	if err != nil {
 		return out, err
 	}
 	for _, u := range users {
+		if slices.Contains(s.FeeFree, u) {
+			continue
+		}
 		var mine []CanceledOrder
 		err := s.Store.Tx(ctx, func(r ports.Repos) error {
 			mine = mine[:0]
@@ -355,7 +395,7 @@ func (s *Service) sweep(ctx context.Context, actor, reason string, out []Cancele
 				return err
 			}
 			for _, o := range active {
-				if o.AccountType.Margin() || o.CancelRequested {
+				if o.AccountType != domain.AccountSpot || o.CancelRequested || o.CreatedAt.Before(since) {
 					continue
 				}
 				if _, err := s.requestCancel(ctx, r, o); err != nil {

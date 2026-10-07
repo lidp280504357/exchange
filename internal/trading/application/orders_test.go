@@ -125,15 +125,25 @@ func (r memOrders) Active(_ context.Context, userID, symbol string) ([]domain.Or
 	return out, nil
 }
 
-func (r memOrders) ActiveUsers(context.Context) ([]string, error) {
+func (r memOrders) ActiveUsers(_ context.Context, account domain.AccountType, since time.Time) ([]string, error) {
 	var out []string
 	for _, o := range r.s.orders {
-		if o.Status.Active() && !slices.Contains(out, o.UserID) {
+		if o.Status.Active() && o.AccountType == account && !o.CreatedAt.Before(since) && !slices.Contains(out, o.UserID) {
 			out = append(out, o.UserID)
 		}
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func (r memOrders) CountOpen(_ context.Context, account domain.AccountType, except []string) (int, error) {
+	n := 0
+	for _, o := range r.s.orders {
+		if o.Status.Active() && o.AccountType == account && !slices.Contains(except, o.UserID) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r memOrders) List(_ context.Context, userID string, f ports.ListFilter) ([]domain.Order, error) {
@@ -963,6 +973,7 @@ func TestCancelAccountCancelsOnlyThatAccount(t *testing.T) {
 // operator closed it while an order was on its way in.
 type lines struct {
 	closed          map[string]bool
+	closedAt        time.Time // the closed lines' UpdatedAt
 	closing, checks int
 	refreshes       int
 }
@@ -970,6 +981,11 @@ type lines struct {
 func (l *lines) Closed(key string) bool {
 	l.checks++
 	return l.closed[key] || (key == flags.KeyProductSpot && l.closing > 0 && l.checks >= l.closing)
+}
+
+func (l *lines) Get(key string) (flags.Flag, bool) {
+	closed, ok := l.closed[key]
+	return flags.Flag{Key: key, Enabled: !closed, UpdatedAt: l.closedAt}, ok
 }
 
 func (l *lines) Refresh(context.Context) error {
@@ -1026,6 +1042,18 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 	if _, err := place(users[0], "m2", domain.AccountMarginCross); err != nil {
 		t.Fatalf("a margin order while spot is closed: %v", err)
 	}
+	// The market-making accounts quote whatever the lines are.
+	maker := "0199b0a0-0000-7000-8000-0000000000c3"
+	svc.FeeFree = []string{maker}
+	quote, err := place(maker, "q", domain.AccountSpot)
+	if err != nil {
+		t.Fatalf("a market maker's order while spot is closed: %v", err)
+	}
+	// The four spot orders (the one being canceled is open until the engine
+	// answers), not the market maker's.
+	if closed, open, err := svc.SpotLine(ctx); err != nil || !closed || open != 4 {
+		t.Fatalf("spot line: closed %v, %d open orders, %v", closed, open, err)
+	}
 	if _, err := svc.CancelOpen(ctx, "", "closing spot"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("no actor: %v", err)
 	}
@@ -1050,8 +1078,10 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 			t.Fatalf("spot order %d missing from %+v", i, canceled)
 		}
 	}
-	if got, _ := store.Read().Orders().Get(ctx, margin.ID); got.CancelRequested {
-		t.Fatal("the margin order was canceled")
+	for _, o := range []domain.Order{margin, quote} {
+		if got, _ := store.Read().Orders().Get(ctx, o.ID); got.CancelRequested {
+			t.Fatalf("%s %s was canceled", o.ClientOrderID, o.AccountType)
+		}
 	}
 	var actions []*auditv1.AdminActionPerformed
 	for _, e := range store.events {
@@ -1071,6 +1101,45 @@ func TestAClosedSpotLineTakesNoOrdersAndItsOrdersAreCanceled(t *testing.T) {
 	// Cancels go on while the line is closed.
 	if n, err := svc.CancelAll(ctx, users[0], ""); err != nil || n != 2 {
 		t.Fatalf("cancel all: %d %v", n, err)
+	}
+}
+
+// While spot is closed the 5-second sweep takes the SPOT orders stored
+// from ten seconds before it closed on (an order a stale copy of the flag
+// let in), as system:spot-trading-service; older ones are CancelOpen's.
+func TestTheSweepTakesWhatSlippedInAsSpotClosed(t *testing.T) {
+	svc, store, _, c := newService()
+	ctx := context.Background()
+	products := &lines{closed: map[string]bool{}}
+	svc.Products = products
+	old, err := svc.Place(ctx, buy("old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := svc.SweepClosed(ctx); err != nil || n != 0 {
+		t.Fatalf("sweep while open: %d %v", n, err)
+	}
+	c.t = c.t.Add(time.Minute)
+	late, err := svc.Place(ctx, buy("late")) // let in by a copy of the flag that was behind
+	if err != nil {
+		t.Fatal(err)
+	}
+	products.closed[flags.KeyProductSpot], products.closedAt = true, c.t.Add(5*time.Second)
+	if n, err := svc.SweepClosed(ctx); err != nil || n != 1 {
+		t.Fatalf("sweep: %d %v", n, err)
+	}
+	if got, _ := store.Read().Orders().Get(ctx, old.ID); got.CancelRequested {
+		t.Fatal("the sweep took an order from before the line closed")
+	}
+	if got, _ := store.Read().Orders().Get(ctx, late.ID); !got.CancelRequested {
+		t.Fatal("the sweep left the order that slipped in")
+	}
+	last, _ := store.events[len(store.events)-1].msg.(*auditv1.AdminActionPerformed)
+	if last.GetActor() != SweepActor || last.GetAction() != "admin.orders.canceled" || !strings.Contains(last.GetDetails(), late.ID) {
+		t.Fatalf("audit %+v", last)
+	}
+	if n, err := svc.SweepClosed(ctx); err != nil || n != 0 {
+		t.Fatalf("sweep again: %d %v", n, err)
 	}
 }
 

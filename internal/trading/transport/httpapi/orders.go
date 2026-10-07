@@ -37,6 +37,7 @@ func (h *Handler) Routes(r chi.Router) {
 		})
 		r.Post("/internal/orders/liquidations", h.liquidate)
 		r.Post("/internal/orders/cancel", h.cancelAccount)
+		r.Get("/internal/products/spot", h.spotLine)
 		r.Post("/internal/products/spot/cancel-open", h.cancelOpen)
 	})
 	r.Group(func(r chi.Router) {
@@ -190,16 +191,31 @@ func (h *Handler) cancelOpen(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	// type: the contract lines' answer has CONDITIONAL ones too.
 	type orderRef struct {
 		OrderID string `json:"order_id"`
 		UserID  string `json:"user_id"`
 		Symbol  string `json:"symbol"`
+		Type    string `json:"type"`
 	}
 	orders := make([]orderRef, 0, len(canceled))
 	for _, o := range canceled {
-		orders = append(orders, orderRef{OrderID: o.OrderID, UserID: o.UserID, Symbol: o.Symbol})
+		orders = append(orders, orderRef{OrderID: o.OrderID, UserID: o.UserID, Symbol: o.Symbol, Type: "ORDER"})
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"canceled": len(orders), "orders": orders})
+}
+
+// spotLine answers the console's count of what closing spot trading
+// touches (design 2026-10-07, product switches §1 #3): the open orders on
+// SPOT accounts, the market-making accounts' left out; spot holds no
+// positions.
+func (h *Handler) spotLine(w http.ResponseWriter, r *http.Request) {
+	closed, open, err := h.Svc.SpotLine(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"product": "spot", "closed": closed, "open_orders": open, "open_positions": 0})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

@@ -339,10 +339,11 @@ func (s *Sim) Run(ctx context.Context) error {
 }
 
 // Round advances the model one step and lets the bots act. With
-// sim.enabled off, the pair not trading or spot trading closed as a
-// product line (design 2026-10-07, product switches: the perpetuals' index
-// is the pair's), the bots' orders are canceled once and nothing else
-// happens.
+// sim.enabled off, or the pair not trading, the bots' orders are canceled
+// once and nothing else happens. With spot trading closed as a product
+// line (design 2026-10-07, product switches §1 #3) only the spot bots stop:
+// the model goes on, and so do the perpetuals' bots, against whom the
+// positions are closed (the product lines do not stop market makers).
 func (s *Sim) Round(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -361,7 +362,7 @@ func (s *Sim) Round(ctx context.Context) {
 	s.refreshPair(ctx, now)
 	s.noteBeat(now, s.model.State.P) // whether the bots trade or not
 	enabled := s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol})
-	if !enabled || !s.pair.Trading || s.flags.Closed(flags.KeyProductSpot) {
+	if !enabled || !s.pair.Trading {
 		if s.running {
 			s.stop(ctx)
 		}
@@ -374,11 +375,15 @@ func (s *Sim) Round(ctx context.Context) {
 		}
 		return
 	}
-	if !s.running {
+	spot := !s.flags.Closed(flags.KeyProductSpot)
+	switch {
+	case !spot && s.running:
+		s.stop(ctx)
+	case spot && !s.running:
 		s.running, s.watchFrom = true, now
 		s.checkInventory(ctx, now) // the takers lean by what they hold
 	}
-	s.m.running.Set(1)
+	s.m.running.Set(map[bool]float64{false: 0, true: 1}[spot])
 	s.refreshRefs(ctx, now)
 	s.startDue(ctx, now)
 	s.breathe(now)
@@ -399,11 +404,18 @@ func (s *Sim) Round(ctx context.Context) {
 	}
 	s.sample(ctx, now, p)
 	s.refreshAnchor(ctx, now)
-	s.watch(ctx, now, sh)
+	if spot {
+		s.watch(ctx, now, sh) // nothing trades on the pair while spot is closed
+	}
 	if sh.Halted {
 		s.stopPerps(ctx)
 		s.keepHalted(ctx, now)
 		return // the halt canceled the makers' orders; the pair waits
+	}
+	if !spot {
+		s.runPerps(ctx, now, p, dt)
+		s.chores(ctx, now)
+		return
 	}
 	// The quotes stand within the price band around its anchor; beyond
 	// it they walk toward the target (band.go). A spike moves them, not

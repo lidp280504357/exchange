@@ -177,6 +177,15 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 				a.Logger().InfoContext(ctx, "order releases recovered", "orders", n)
 			}
 			cancel()
+			// While spot trading is closed: the orders that slipped in as it
+			// closed (design 2026-10-07, product switches §1 #3).
+			pass, cancel = context.WithTimeout(ctx, 30*time.Second)
+			if n, err := svc.SweepClosed(pass); err != nil {
+				a.Logger().WarnContext(ctx, "closed spot sweep failed", "error", err)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "orders canceled: spot trading is closed", "orders", n)
+			}
+			cancel()
 		}
 	}
 }

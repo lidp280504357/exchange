@@ -44,9 +44,12 @@ export interface paths {
          *
          *     Product lines (design 2026-10-07, product switches): while an
          *     operator has spot trading closed (the flag product.spot; GET
-         *     /v1/platform/products) every new order fails with PRODUCT_CLOSED
-         *     (403, details product: spot) and nothing is stored; cancels go on,
-         *     and the orders open when it closed were canceled then.
+         *     /v1/platform/products) every new order on the SPOT account fails
+         *     with PRODUCT_CLOSED (403, details product: spot) and nothing is
+         *     stored; cancels go on, and the orders open when it closed were
+         *     canceled then (and any that slipped in, within 5 seconds). Orders
+         *     on margin accounts follow margin.enabled; margin liquidations and
+         *     the market-making accounts are not refused.
          */
         post: operations["createOrder"];
         /**

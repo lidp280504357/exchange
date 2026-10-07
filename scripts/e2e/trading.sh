@@ -9,8 +9,9 @@
 # reference price). Needs ETH-BTC in TRADING and SOL-BTC not (the test data
 # keeps it PREPARE). Last, spot trading is closed as a product line for a
 # moment (design 2026-10-07, product switches): new orders are refused with
-# PRODUCT_CLOSED, the console's cancel-open takes the resting orders (every
-# user's, as when an operator closes it), and opened again orders are taken.
+# PRODUCT_CLOSED, the console's count sees the resting order, cancel-open
+# takes the resting orders (every user's but the market makers', as when an
+# operator closes it), and opened again orders are taken.
 #
 #   scripts/e2e/trading.sh
 set -euo pipefail
@@ -171,10 +172,13 @@ expect 403 PRODUCT_CLOSED "an order while spot is closed"
 check '.details.product == "spot"' "the details name the line"
 order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.1\"}"
 expect 403 PRODUCT_CLOSED "a funded order too"
+internal GET spot-trading-service 8088 /internal/products/spot
+[[ $STATUS == 200 ]] || { echo "FAIL the spot line's counts: $STATUS $BODY" >&2; exit 1; }
+check '.product == "spot" and .closed and .open_orders >= 1 and .open_positions == 0' "the console's count sees the resting order"
 internal POST spot-trading-service 8088 /internal/products/spot/cancel-open \
   '{"actor":"e2e:trading.sh","reason":"e2e: spot trading closed for a moment"}'
 [[ $STATUS == 202 ]] || { echo "FAIL cancel-open: $STATUS $BODY" >&2; exit 1; }
-jq -e --arg o "$RESTING" '[.orders[].order_id] | index($o) != null and (.canceled == (.orders | length))' <<<"$BODY" >/dev/null ||
+jq -e --arg o "$RESTING" '([.orders[].order_id] | index($o) != null) and .canceled == (.orders | length) and all(.orders[]; .type == "ORDER")' <<<"$BODY" >/dev/null ||
   { echo "FAIL cancel-open did not take $RESTING: $BODY" >&2; exit 1; }
 echo "ok   cancel-open asked to cancel $(jq -r .canceled <<<"$BODY") resting spot orders, this one among them"
 eventually 40 "the engine cancels it" status_is "$RESTING" CANCELED

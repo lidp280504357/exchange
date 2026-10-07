@@ -1111,13 +1111,13 @@ func TestTheBotsMakeThePerpetual(t *testing.T) {
 	}
 }
 
-// The product switches (design 2026-10-07): a contract line closed stops
-// the bots on its perpetual only; spot trading closed holds the whole
-// market, as sim.enabled off does (the perpetuals' index is the pair's);
-// reopened, they quote again.
-func TestClosedProductLinesStopTheirBots(t *testing.T) {
+// The product switches (design 2026-10-07, §1 #3): spot trading closed
+// stops the spot bots only, the model and the perpetuals' bots going on
+// (positions are closed against them), and the watchdog waits; the
+// contract lines stop no bot. Reopened, the spot bots quote again.
+func TestClosedSpotStopsOnlyTheSpotBots(t *testing.T) {
 	p := domain.DefaultParams()
-	p.DailyVolume, p.PerpDailyVolume = 0, 86_400*400*2
+	p.PerpDailyVolume = 86_400 * 400 * 2
 	r, fd := coinRig(t, p)
 	r.flags.closed = map[string]bool{}
 	open := func() (spot, linear, coin int) {
@@ -1129,23 +1129,31 @@ func TestClosedProductLinesStopTheirBots(t *testing.T) {
 	if spot, linear, coin := open(); spot == 0 || linear == 0 || coin == 0 {
 		t.Fatalf("quotes: %d spot, %d linear, %d coin-margined", spot, linear, coin)
 	}
-	r.flags.closed[flags.KeyProductCoinM] = true
-	r.rounds(1)
-	if spot, linear, coin := open(); spot == 0 || linear == 0 || coin != 0 {
-		t.Fatalf("coin_m closed: %d spot, %d linear, %d coin-margined", spot, linear, coin)
-	}
-	r.flags.closed = map[string]bool{flags.KeyProductUSDTM: true}
+	r.flags.closed = map[string]bool{flags.KeyProductUSDTM: true, flags.KeyProductCoinM: true}
 	r.rounds(4 * 20)
-	if spot, linear, coin := open(); spot == 0 || linear != 0 || coin == 0 {
-		t.Fatalf("usdt_m closed: %d spot, %d linear, %d coin-margined", spot, linear, coin)
+	if spot, linear, coin := open(); spot == 0 || linear == 0 || coin == 0 || len(fd.cancelAll) != 0 {
+		t.Fatalf("contract lines closed: %d spot, %d linear, %d coin-margined, cancel all %v", spot, linear, coin, fd.cancelAll)
 	}
 	r.flags.closed = map[string]bool{flags.KeyProductSpot: true}
 	r.rounds(1)
-	if spot, linear, coin := open(); spot != 0 || linear != 0 || coin != 0 || r.trading.cancelAl["m1"] != 1 {
+	if spot, linear, coin := open(); spot != 0 || linear == 0 || coin == 0 || r.trading.cancelAl["m1"] != 1 {
 		t.Fatalf("spot closed: %d spot, %d linear, %d coin-margined, cancel all %v", spot, linear, coin, r.trading.cancelAl)
 	}
-	if st := r.sim.Status(); st.Running {
+	if st := r.sim.Status(); st.Running || !st.Enabled {
 		t.Fatalf("status while spot is closed: %+v", st)
+	}
+	markets := func() int {
+		r.trading.mu.Lock()
+		defer r.trading.mu.Unlock()
+		return r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	}
+	trades, from := markets(), r.sim.model.State.P
+	r.rounds(4 * 60 * 4) // four minutes: past the watchdog's three
+	if spot, linear, coin := open(); spot != 0 || linear == 0 || coin == 0 || markets() != trades {
+		t.Fatalf("spot closed for minutes: %d spot, %d linear, %d coin-margined, %d spot market orders", spot, linear, coin, markets()-trades)
+	}
+	if r.sim.deadlocks != 0 || r.sim.model.State.P == from {
+		t.Fatalf("spot closed: %d watchdog rebases, the target at %v from %v", r.sim.deadlocks, r.sim.model.State.P, from)
 	}
 	r.flags.closed = nil
 	r.rounds(4 * 20)

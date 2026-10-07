@@ -203,9 +203,22 @@ func TestActiveOrdersAndPages(t *testing.T) {
 	if err := store.Read().Orders().Insert(ctx, done); err != nil {
 		t.Fatal(err)
 	}
-	users, err := store.Read().Orders().ActiveUsers(ctx)
+	users, err := store.Read().Orders().ActiveUsers(ctx, domain.AccountSpot, time.Time{})
 	if err != nil || !slices.Contains(users, user) || slices.Contains(users, done.UserID) {
 		t.Fatalf("users with active orders: %v %v", users, err)
+	}
+	if later, err := store.Read().Orders().ActiveUsers(ctx, domain.AccountSpot, at.Add(4*time.Second)); err != nil || slices.Contains(later, user) {
+		t.Fatalf("users with active orders stored later: %v %v", later, err)
+	}
+	if margin, err := store.Read().Orders().ActiveUsers(ctx, domain.AccountMarginCross, time.Time{}); err != nil || slices.Contains(margin, user) {
+		t.Fatalf("users with active margin orders: %v %v", margin, err)
+	}
+	open, err := store.Read().Orders().CountOpen(ctx, domain.AccountSpot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if others, err := store.Read().Orders().CountOpen(ctx, domain.AccountSpot, []string{user}); err != nil || open-others != 4 {
+		t.Fatalf("open orders: %d, %d without the user's, %v", open, others, err)
 	}
 	var active []domain.Order
 	err = store.Tx(ctx, func(r ports.Repos) error {
