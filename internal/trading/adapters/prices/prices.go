@@ -27,14 +27,15 @@ type LastTradeFunc func(ctx context.Context, symbol string) (decimal.Decimal, ti
 // ReferenceFunc returns a symbol's fresh reference price, zero for none.
 type ReferenceFunc func(ctx context.Context, symbol string) (decimal.Decimal, error)
 
-// RecentTrade is how old the last trade may be and still anchor the band
-// on its own: an older one gives way to a fresh reference price.
-const RecentTrade = 5 * time.Minute
-
-// LastTrade anchors on the symbol's latest trade, which the service records
-// itself from trade.events (§11.2). A trade older than RecentTrade, or none,
-// gives way to a fresh reference price; without one the old trade still
-// anchors. Answers are cached for ttl.
+// LastTrade anchors the band (§11.2) on the symbol's fresh reference price
+// where it has a reference market: HOUSE quotes around it (ADR-0015), and a
+// price event moves it at once (the general price control's overlay, J1),
+// while the platform's own trades only follow once one fills at the new
+// level: anchored on the last trade, a limit order 16% up was refused as
+// out of the band and a market buy's protection price could not reach
+// HOUSE's asks (review B144). Without a fresh reference (none, stale, or
+// unreachable) the latest trade, which the service records itself from
+// trade.events, anchors, however old. Answers are cached for ttl.
 type LastTrade struct {
 	last      LastTradeFunc
 	reference ReferenceFunc
@@ -56,7 +57,8 @@ func NewLastTrade(last LastTradeFunc, reference ReferenceFunc, ttl time.Duration
 	return &LastTrade{last: last, reference: reference, ttl: ttl, now: time.Now, cached: map[string]cachedPrice{}}
 }
 
-// Anchor returns the latest trade price of symbol.
+// Anchor returns the anchor price of symbol: its fresh reference price,
+// else its latest trade's; zero for neither.
 func (l *LastTrade) Anchor(ctx context.Context, symbol string) (decimal.Decimal, error) {
 	now := l.now()
 	l.mu.Lock()
@@ -65,15 +67,19 @@ func (l *LastTrade) Anchor(ctx context.Context, symbol string) (decimal.Decimal,
 	if ok && now.Sub(c.at) < l.ttl {
 		return c.price, nil
 	}
-	price, at, err := l.last(ctx, symbol)
-	if err != nil {
-		return decimal.Zero, err
-	}
-	if (price.IsZero() || now.Sub(at) > RecentTrade) && l.reference != nil {
+	var price decimal.Decimal
+	if l.reference != nil {
 		// An unreachable reference leaves the last trade, or no band.
 		if ref, err := l.reference(ctx, symbol); err == nil && ref.IsPositive() {
 			price = ref
 		}
+	}
+	if price.IsZero() {
+		last, _, err := l.last(ctx, symbol)
+		if err != nil {
+			return decimal.Zero, err
+		}
+		price = last
 	}
 	l.mu.Lock()
 	l.cached[symbol] = cachedPrice{price: price, at: now}
