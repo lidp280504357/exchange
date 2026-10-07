@@ -234,6 +234,28 @@ expect 400 COMMON_INVALID_ARGUMENT "a tag is a code"
 as OPERATOR PUT "/admin/v1/users/$USER_ID/tags" '{"tags":[]}'
 expect 200 - "and removes the tags"
 
+echo "== the account's username and avatar (design 2026-10-07, avatars and usernames, I3)"
+as AUDITOR GET "/admin/v1/users/$USER_ID" ""
+check '(.username | type) == "string" and has("avatar_url") and has("avatar_thumb_url")' "the account carries its username and avatar"
+OLD_NAME=$(jq -r .username <<<"$BODY")
+as AUDITOR POST "/admin/v1/users/$USER_ID/username-reset" '{"reason":"e2e: an auditor"}'
+if [[ $STATUS == 404 && $(jq -r '.message // ""' <<<"$BODY" 2>/dev/null) == "no such endpoint" ]]; then
+  echo "skip the resets: this admin-service is from before I1"
+else
+  expect 403 ADMIN_FORBIDDEN "AUDITOR resets no username"
+  as OPERATOR POST "/admin/v1/users/$USER_ID/username-reset" '{"reason":"e2e: a username that breaks the rules"}'
+  expect 200 - "OPERATOR resets the username"
+  check ".id == \"$USER_ID\" and (.username | test(\"^user_[a-z0-9]{8}$\")) and .username != \"$OLD_NAME\"" "a drawn username, another"
+  as OPERATOR POST "/admin/v1/users/$USER_ID/avatar-reset" '{"reason":"e2e: no avatar to reset"}'
+  expect 200 - "resetting a default avatar"
+  check '.avatar_url == null and .avatar_thumb_url == null' "changes nothing"
+  resets_audited() {
+    as AUDITOR GET "/admin/v1/audit-logs?target=user:$USER_ID" ""
+    [[ $STATUS == 200 ]] && jq -e '[.items[].payload.action] | index("admin.users.username_reset") != null' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "the reset is audited" resets_audited
+fi
+
 echo "== freeze and unfreeze"
 as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"FROZEN","reason":"SUSPICIOUS_LOGIN","note":"scripts/e2e/admin.sh"}'
 expect 200 - "OPERATOR freezes the account"
@@ -2034,22 +2056,27 @@ else
     and all(.apps[]; (.files | type) == "array" and .version >= 1 and (.notes | has("zh-TW")))' "Android, then iOS, each with its files and version"
   APPS_BEFORE=$BODY
   app_of() { jq -c --arg p "$1" '.apps[] | select(.platform == $p)' <<<"$2"; }
-  # app_write PLATFORM MODE LINK ENABLED REASON: a write on the version now.
+  # app_write PLATFORM MODE LINK ENABLED REASON: a write on the version now
+  # (read by the ADMIN, who is still signed in when the exit actions run).
   app_write() {
-    as AUDITOR GET /admin/v1/platform/apps "" >/dev/null
+    as ADMIN GET /admin/v1/platform/apps "" >/dev/null
     jq -c --arg p "$1" --arg m "$2" --arg l "$3" --argjson e "$4" --arg r "$5" \
       '.apps[] | select(.platform == $p) | {mode: $m, link_url: $l, notes, enabled: $e, expected_version: .version, reason: $r}' <<<"$BODY"
   }
   restore_apps() { # the files e2e uploaded deleted, the settings as they were
     local p id was
     for p in ANDROID IOS; do
-      as AUDITOR GET /admin/v1/platform/apps "" >/dev/null
+      as ADMIN GET /admin/v1/platform/apps "" >/dev/null
       for id in $(jq -r --arg p "$p" '.apps[] | select(.platform == $p) | .files[] | select(.name | startswith("e2e")) | .file_id' <<<"$BODY"); do
         as ADMIN DELETE "/admin/v1/platform/apps/$p/files/$id" '{"reason":"e2e cleanup"}' >/dev/null
       done
       was=$(app_of "$p" "$APPS_BEFORE")
       as ADMIN PUT "/admin/v1/platform/apps/$p" "$(app_write "$p" "$(jq -r .mode <<<"$was")" "$(jq -r .link_url <<<"$was")" \
         "$(jq .enabled <<<"$was")" "e2e cleanup" | jq -c --argjson n "$(jq .notes <<<"$was")" '.notes = $n')" >/dev/null
+      if [[ $STATUS != 200 ]]; then
+        echo "FAIL $p's download is not as it was ($STATUS): set it back in 平台设置 → App 下载 ($(jq -c '{mode, link_url, enabled}' <<<"$was"))" >&2
+        EXIT_FAILED=1
+      fi
     done
   }
   at_exit restore_apps
