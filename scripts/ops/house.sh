@@ -49,7 +49,8 @@
 #                               and funding rate are Binance's; coin-margined
 #                               design §3.1), N of them (all without N),
 #                               each only while its mark stays within
-#                               MAX_GAP (default 0.001) of Binance's.
+#                               MAX_GAP (default 0.001) of Binance's; under
+#                               the ops lock. DRY_RUN=1 lists who would join.
 #   scripts/ops/house.sh show   HOUSE's MARKET_MAKER balances.
 #
 # Internal assets need no inventory: HOUSE may sell them short (ADR-0013).
@@ -220,21 +221,31 @@ follow-marks)
   # contract at a time while the market is quiet). So a contract joins
   # only while its own mark has stayed within MAX_GAP of Binance's over
   # three readings 5 s apart, Binance's at most 2 s old at each; one that
-  # moved further waits for another run.
+  # moved further waits for another run. Under the ops lock (it changes
+  # how every position of those contracts is marked); DRY_RUN=1 says what
+  # would join and changes nothing.
+  [[ -n ${OPS_LOCK_HELD:-} || -n ${DRY_RUN:-} ]] ||
+    exec "$(dirname "$0")/lock.sh" run --owner "ops house.sh follow-marks" -- bash "$0" "$@"
   limit=${2:-0}
   max=${3:-0.001}
   [[ $limit =~ ^[0-9]+$ ]] || { echo "follow-marks N: a count" >&2; exit 2; }
   [[ $max =~ ^0?\.[0-9]+$ ]] || { echo "follow-marks N MAX_GAP: a fraction such as 0.001" >&2; exit 2; }
-  # The list is set whole: a flag that could not be read must not become
-  # one of the new contracts alone.
-  err=$(mktemp)
-  if ! flag="$(ctl user-service flags show market.reference_mark 2>"$err")"; then
-    grep -q "is not set" "$err" || { cat "$err" >&2; exit 1; }
-    flag='{}'
-  fi
-  rm -f "$err"
-  jq -e 'type == "object"' <<<"$flag" >/dev/null || { echo "market.reference_mark: not a flag: $flag" >&2; exit 1; }
-  if jq -e '.enabled and .rules.symbols == null' <<<"$flag" >/dev/null; then
+  # flag reads market.reference_mark: an empty one while it was never set;
+  # one that cannot be read stops the run, since the list is set whole and
+  # must not become the new contracts alone.
+  flag() {
+    local err out
+    err=$(mktemp)
+    if ! out="$(ctl user-service flags show market.reference_mark 2>"$err")"; then
+      grep -q "is not set" "$err" || { cat "$err" >&2; rm -f "$err"; return 1; }
+      out='{}'
+    fi
+    rm -f "$err"
+    jq -e 'type == "object"' <<<"$out" >/dev/null || { echo "market.reference_mark: not a flag: $out" >&2; return 1; }
+    echo "$out"
+  }
+  current=$(flag) || exit 1
+  if jq -e '.enabled and .rules.symbols == null' <<<"$current" >/dev/null; then
     echo "market.reference_mark is on for every contract: nothing to add"
     exit 0
   fi
@@ -251,7 +262,7 @@ follow-marks)
       function dash(x) { return x == "" ? "-" : x }
       END { for (s in seen) print s, dash(v[s, "market_mark_reference_gap"]), dash(v[s, "market_mark_reference_age_seconds"]), dash(v[s, "market_mark_source"]) }'
   }
-  candidates=" $(jq -r --argjson f "$flag" '($f.rules.symbols.allow // []) as $on | .contracts[] |
+  candidates=" $(jq -r --argjson f "$current" '($f.rules.symbols.allow // []) as $on | .contracts[] |
     select(.status == "TRADING" and (.reference_symbol // "") != "" and (.symbol | IN($on[]) | not)) | .symbol' <<<"$contracts" | tr '\n' ' ')"
   for round in 1 2 3; do
     ((round == 1)) || sleep 5
@@ -264,13 +275,20 @@ follow-marks)
   done
   add=$(tr ' ' '\n' <<<"$candidates" | sed '/^$/d' | sort)
   ((limit == 0)) || add=$(head -n "$limit" <<<"$add")
-  waiting=$(jq -r --argjson f "$flag" --arg add "$add" '($f.rules.symbols.allow // []) as $on | ($add | split("\n")) as $new | .contracts[] |
+  waiting=$(jq -r --argjson f "$current" --arg add "$add" '($f.rules.symbols.allow // []) as $on | ($add | split("\n")) as $new | .contracts[] |
     select(.status == "TRADING" and (.reference_symbol // "") != "" and (.symbol | IN($on[], $new[]) | not)) | .symbol' <<<"$contracts" | tr '\n' ' ')
   if [[ -z $add ]]; then
     echo "no contract to add${waiting:+; waiting (moved past $max or no fresh mark from Binance): $waiting}"
     exit 0
   fi
-  allow=$(jq -r --argjson f "$flag" --arg add "$add" '[($f.rules.symbols.allow // [])[], ($add | split("\n"))[]] | unique | join(",")' <<<'{}')
+  if [[ -n ${DRY_RUN:-} ]]; then
+    echo "would add $(wc -l <<<"$add" | tr -d ' '): $(tr '\n' ' ' <<<"$add")${waiting:+; waiting: $waiting}"
+    exit 0
+  fi
+  # Read again right before the set: a change made meanwhile (another
+  # operator, the console) stays in the list (review B142).
+  current=$(flag) || exit 1
+  allow=$(jq -r --argjson f "$current" --arg add "$add" '[($f.rules.symbols.allow // [])[], ($add | split("\n"))[]] | unique | join(",")' <<<'{}')
   ctl user-service flags set market.reference_mark --on --allow-symbols "$allow" \
     --reason "the contracts' prices from Binance, $(wc -l <<<"$add" | tr -d ' ') within $max of their own (G1c)"
   sleep 15
@@ -287,7 +305,7 @@ show)
   ssh exchange "cd $INFRA && set -a && . ./.env && set +a && sudo docker compose exec -T postgres psql -U \"\$POSTGRES_USER\" -d exchange -At -c \"SELECT asset, available FROM ledger.accounts WHERE account_type = 'MARKET_MAKER' ORDER BY asset\""
   ;;
 *)
-  sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^set -euo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac
