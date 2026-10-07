@@ -31,6 +31,7 @@ import (
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/svcsign"
 	"github.com/skill/exchange/migrations"
 )
 
@@ -66,6 +67,11 @@ type settings struct {
 	// depth updates every 100 ms (BINANCE_FAST_DEPTH, coin-M design §3.4:
 	// BTC and ETH); the other perpetuals' come every 500 ms.
 	BinanceFastDepth []string `koanf:"binance_fast_depth"`
+	// OverlayAPISecret signs market-sim's pushes of the price events'
+	// factors (OVERLAY_API_SECRET, key ID "sim"; design 2026-10-07, general
+	// price control); without one (or under 32 characters) the pushes are
+	// refused and no pair is overlaid.
+	OverlayAPISecret string `koanf:"overlay_api_secret"`
 	// IndexMinSources is the fewest reference sources an index price
 	// needs (INDEX_MIN_SOURCES, §11.7: 2); test environments with Binance
 	// alone set 1.
@@ -165,6 +171,15 @@ func setup(ctx context.Context, a *app.App) error {
 	a.Add("flat minutes", app.Loop(flats.Run))
 	books := application.NewBooks(src, refs, flagClient, prod, events, a.Logger(), a.Metrics())
 	books.LoadFirst(cfg.BinanceFastDepth)
+	// The price events' factors on the followed pairs (market.overlay).
+	overlay := application.NewOverlay(flagClient, refs.FollowsPair, a.Metrics())
+	books.WithOverlay(overlay)
+	overlaySigned := &svcsign.Verifier{Keys: map[string][]byte{}}
+	if err := svcsign.CheckSecret(cfg.OverlayAPISecret); err != nil {
+		a.Logger().Warn("price overlays are refused: set OVERLAY_API_SECRET", "error", err.Error())
+	} else {
+		overlaySigned.Keys["sim"] = []byte(cfg.OverlayAPISecret)
+	}
 	a.Add("reference books", app.Loop(books.Run))
 	a.Add("public books", app.Loop(books.Push))
 	// Pairs and contracts alike: their symbols differ. The platform's
@@ -185,11 +200,13 @@ func setup(ctx context.Context, a *app.App) error {
 	pusher := application.NewPusher(svc, prod, events, a.Metrics())
 	a.Add("market push", app.Loop(pusher.Run))
 	feed := application.NewReferenceFeed(src, store, flagClient, listed, a.Logger(), a.Metrics())
+	feed.WithOverlay(overlay)
 	a.Add("reference feed", app.Loop(feed.Run))
 	refKlines := application.NewReferenceCandles(src, flagClient, refs, a.Logger())
 	feed.Observe(refKlines.Observe)
 	tickers := application.NewTickers(svc, feed, refs, flagClient, listed)
 	tickers.UseBooks(books.Levels) // a futures ticker has no best bid and ask
+	tickers.WithOverlay(overlay)
 	pusher.Use(refKlines.Push)
 	pusher.Use(tickers.Push)
 	guard := application.NewFeedGuard(feed, listed, store, flagClient, a.Logger(), a.Metrics())
@@ -201,6 +218,7 @@ func setup(ctx context.Context, a *app.App) error {
 	marks := application.NewMarks(svc, listed, indexes, store, pusher, prod, events,
 		application.MarksConfig{MinSources: cfg.IndexMinSources, Weights: sourceWeights}, a.Logger(), a.Metrics())
 	marks.UseReferenceBooks(books.Levels) // HOUSE trades at the reference book's prices (ADR-0015)
+	marks.WithOverlay(overlay)
 	// The reference market's mark prices and funding rates, followed where
 	// market.reference_mark is on (coin-M design §3.1); the self-computed
 	// ones stand in while they are stale.
@@ -254,7 +272,7 @@ func setup(ctx context.Context, a *app.App) error {
 	r := a.NewRouter()
 	(&httpapi.Handler{
 		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks,
-		Platform: platform, Listed: src, Now: time.Now,
+		Platform: platform, Listed: src, Overlay: overlay, Signed: overlaySigned, Now: time.Now,
 	}).Routes(r)
 	(&httpapi.FuturesData{Stats: futures, Marks: marks, Tickers: tickers, Contracts: futuresContracts}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)

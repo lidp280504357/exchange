@@ -280,6 +280,17 @@ groups:
           summary: "market-maker has no usable {{ $labels.key }} key for HOUSE's caps: changes signed with it are refused (house/caps.env, house/admin.env)"
           runbook: docs/runbook/market-maker.md
 
+      # A price event's factor on a pair for longer than any event lasts
+      # (10 minutes): market-sim kept pushing it (design 2026-10-07,
+      # general price control).
+      - alert: MarketOverlayStuck
+        expr: max by (job, symbol) (market_overlay_factor) > 0
+        for: 11m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.symbol }} has carried a price event's factor of {{ $value }} for 11 minutes: end the event, or clear it on market-data (DELETE /internal/market/overlay/{{ $labels.symbol }})"
+          runbook: docs/runbook/market-data.md
+
       - alert: MarketSimFailing
         expr: sum by (job) (increase(market_sim_errors_total[10m])) > 100
         labels: {severity: warning}

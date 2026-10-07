@@ -256,6 +256,13 @@ services:
     <<: *app
     command: ["/app/market-data-service"]
     mem_limit: 384m
+    # The price events' factors are pushed by market-sim, signed with
+    # OVERLAY_API_SECRET (design 2026-10-07, general price control).
+    env_file:
+      - path: apps.env
+        required: false
+      - path: market/overlay.env
+        required: false
     environment:
       <<: *base-env
       GOMEMLIMIT: 320MiB
@@ -499,6 +506,9 @@ services:
       - path: sim/sim.env
         required: false
       - path: sim/admin.env
+        required: false
+      # Signs its pushes of the price events' factors to market-data.
+      - path: market/overlay.env
         required: false
     environment:
       <<: *base-env

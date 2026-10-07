@@ -149,6 +149,22 @@ func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n, deep
 // reach: 1%.
 var DeepWithin = decimal.RequireFromString("0.01")
 
+// Fraction is levels with each quantity times part, in whole lots, the
+// levels left empty dropped: what HOUSE offers while a price event is on
+// the book (design 2026-10-07, general price control).
+func Fraction(levels []Level, part decimal.Decimal, spec Spec) []Level {
+	if !part.IsPositive() || part.GreaterThanOrEqual(decimal.NewFromInt(1)) {
+		return levels
+	}
+	out := make([]Level, 0, len(levels))
+	for _, l := range levels {
+		if q := floor(l.Quantity.Mul(part), spec.LotSize); q.IsPositive() {
+			out = append(out, Level{Price: l.Price, Quantity: q})
+		}
+	}
+	return out
+}
+
 // Holdings is HOUSE's spot inventory: the available balance of each
 // asset's MARKET_MAKER account (below zero for an internal asset HOUSE
 // sold).

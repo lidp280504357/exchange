@@ -40,6 +40,10 @@ type Config struct {
 	// side's book into (domain.Levels).
 	Levels int
 	Deep   int
+	// OverlayFraction is the part of each level HOUSE offers while a price
+	// event is on the book (OVERLAY_QUOTE_FRACTION, design 2026-10-07,
+	// general price control: 0.25).
+	OverlayFraction decimal.Decimal
 	// Interval is how often books go out when they changed, Heartbeat how
 	// often an unchanged one does, Stale how long a reference book may go
 	// without a message before HOUSE stops offering on it.
@@ -60,7 +64,7 @@ func DefaultConfig() Config {
 			Level: decimal.NewFromInt(20000), Symbol: decimal.NewFromInt(100000), Total: decimal.NewFromInt(1000000),
 			Contract: decimal.NewFromInt(100000), Safety: decimal.NewFromInt(1000), ContractLeverage: decimal.NewFromInt(10),
 		},
-		Levels: 20, Deep: 6,
+		Levels: 20, Deep: 6, OverlayFraction: decimal.RequireFromString("0.25"),
 		Interval: 250 * time.Millisecond, Heartbeat: 2 * time.Second, Stale: 3 * time.Second,
 	}
 }
@@ -118,6 +122,7 @@ type Publisher struct {
 	// coin-margined accounts' equity (in the coin and in USD) and
 	// positions' worth, for the assets in coinAssets.
 	equity, worth, leverage, capsVersion    prometheus.Gauge
+	overlayQuoting                          *prometheus.GaugeVec
 	coinEquity, coinEquityUSD, coinExposure *prometheus.GaugeVec
 	capGauge                                *prometheus.GaugeVec
 	coinAssets                              []string
@@ -130,6 +135,9 @@ type refBook struct {
 	// heard is when the last message arrived, taken the book's time.
 	heard, taken time.Time
 	gap          bool // an update was missed: wait for a snapshot
+	// overlay: a price event's factor is on the book; HOUSE quotes
+	// OverlayFraction of each level meanwhile.
+	overlay bool
 }
 
 type sent struct {
@@ -191,6 +199,9 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 		capsVersion: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "market_house_caps_version", Help: "The version of HOUSE's caps in force (0 before the stored ones are read).",
 		}),
+		overlayQuoting: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "market_house_overlay_quoting", Help: "1 while HOUSE quotes a part of each level because a price event is on the symbol's book.",
+		}, []string{"symbol"}),
 	}
 	p.showCaps(cfg.Caps, 0)
 	// Not a number until HOUSE's contract account is read: 0 would say its
@@ -199,7 +210,7 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 	p.equity.Set(math.NaN())
 	p.worth.Set(math.NaN())
 	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures, p.equity, p.worth, p.leverage, p.coinEquity,
-		p.coinEquityUSD, p.coinExposure, p.capGauge, p.capsVersion)
+		p.coinEquityUSD, p.coinExposure, p.capGauge, p.capsVersion, p.overlayQuoting)
 	return p
 }
 
@@ -238,7 +249,20 @@ func (p *Publisher) OnSnapshot(d *marketv1.DepthSnapshot) {
 	}
 	p.books[d.GetSymbol()] = &refBook{
 		seq: d.GetSequence(), bids: levelsOf(d.GetBids()), asks: levelsOf(d.GetAsks()), heard: p.now(), taken: d.GetTakenAt().AsTime(),
+		overlay: overlaid(d.GetOverlayFactor()),
 	}
+}
+
+// overlaid reports whether a depth message's overlay_factor is a price
+// event's (design 2026-10-07, general price control).
+func overlaid(factor string) bool { return factor != "" && factor != "1" }
+
+// boolGauge is 1 for true.
+func boolGauge(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // OnUpdate applies a public book update that follows the message taken
@@ -257,7 +281,7 @@ func (p *Publisher) OnUpdate(u *marketv1.DepthUpdate) {
 		b.gap = true
 		return
 	}
-	b.seq, b.heard, b.taken = u.GetSequence(), p.now(), u.GetTakenAt().AsTime()
+	b.seq, b.heard, b.taken, b.overlay = u.GetSequence(), p.now(), u.GetTakenAt().AsTime(), overlaid(u.GetOverlayFactor())
 	b.bids = apply(b.bids, levelsOf(u.GetBids()), true)
 	b.asks = apply(b.asks, levelsOf(u.GetAsks()), false)
 }
@@ -476,6 +500,10 @@ func (p *Publisher) round() []outgoing {
 		if usable[i] {
 			bids := domain.Levels(b.bids, true, spec, levelCap, p.cfg.Levels, p.cfg.Deep)
 			asks := domain.Levels(b.asks, false, spec, levelCap, p.cfg.Levels, p.cfg.Deep)
+			if b.overlay { // a price event on the book: less of each level (J0 contract §4.1)
+				bids, asks = domain.Fraction(bids, p.cfg.OverlayFraction, spec), domain.Fraction(asks, p.cfg.OverlayFraction, spec)
+			}
+			p.overlayQuoting.WithLabelValues(spec.Symbol).Set(boolGauge(b.overlay))
 			var buy, sell decimal.Decimal
 			if spec.Contract {
 				pos, mid := p.contracts.Positions[spec.Symbol], midOf(b)

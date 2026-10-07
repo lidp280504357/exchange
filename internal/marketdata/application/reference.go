@@ -80,6 +80,9 @@ type ReferenceFeed struct {
 	received  map[string]time.Time // each market's latest message
 	sessions  map[string]time.Time // when each market's current connection started
 	observers []func(domain.Candle)
+	// overlay keeps the candles a price event touched (nil: none;
+	// WithOverlay).
+	overlay *overlayCandles
 
 	updates *prometheus.CounterVec
 	errors  prometheus.Counter
@@ -152,6 +155,11 @@ func (f *ReferenceFeed) ageOf(r Reference) time.Duration {
 	}
 	return age
 }
+
+// WithOverlay has the reference candles carry the price events (design
+// 2026-10-07, general price control): a minute an event touched follows
+// the scaled closes, shown and stored so. Call it before Run.
+func (f *ReferenceFeed) WithOverlay(o *Overlay) { f.overlay = newOverlayCandles(o) }
 
 // begin notes that market's connection starts now and returns the time:
 // prices it brings carry it.
@@ -443,8 +451,11 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 		Candle: func(c domain.Candle) {
 			at := f.now()
 			f.heard(market, at)
-			f.setPrice(c.Symbol, c.Close, at, market, started)
+			f.setPrice(c.Symbol, c.Close, at, market, started) // the reference price stays the market's
 			f.updates.WithLabelValues(c.Symbol).Inc()
+			if f.overlay != nil { // the candle shown and stored carries a price event
+				c = f.overlay.apply(c)
+			}
 			f.notify(c)
 			if err := f.store.Read().References().Upsert(ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
 				f.log.WarnContext(ctx, "reference candle not stored", "symbol", c.Symbol, "error", err)

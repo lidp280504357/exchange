@@ -553,6 +553,26 @@ func TestABookGoesOutAgainAfterHouseTraded(t *testing.T) {
 	}
 }
 
+// While a price event's factor is on a book, HOUSE quotes a quarter of each
+// level (design 2026-10-07, general price control); without it, all.
+func TestHouseQuotesLessDuringAPriceEvent(t *testing.T) {
+	p, rec, _, _ := newRig(t)
+	ctx := context.Background()
+	p.OnSnapshot(&marketv1.DepthSnapshot{
+		Symbol: "BTC-USDT", Sequence: 10, Reference: true, Bids: levels("55000", "0.1"), Asks: levels("55001", "0.1"), OverlayFactor: "1.1",
+	})
+	_ = p.publish(ctx, p.round())
+	_, books := rec.take(t)
+	if len(books) != 1 || books[0].GetBids()[0].GetQuantity() != "0.025" || books[0].GetAsks()[0].GetQuantity() != "0.025" {
+		t.Fatalf("during the event: %v", books)
+	}
+	p.OnUpdate(&marketv1.DepthUpdate{Symbol: "BTC-USDT", Sequence: 11, PrevSequence: 10, Reference: true})
+	_ = p.publish(ctx, p.round())
+	if _, books = rec.take(t); len(books) != 1 || books[0].GetBids()[0].GetQuantity() != "0.1" {
+		t.Fatalf("after it: %v", books)
+	}
+}
+
 // A coin-margined contract (coin-margined design 2026-10-06 §2.3): HOUSE
 // quotes it in contracts against its BTC account, the equity valued at
 // BTC-USDT's mid; its levels are worth at most 20,000 USD each (200

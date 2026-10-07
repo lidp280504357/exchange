@@ -164,6 +164,14 @@ func (r *ReferenceMap) Unfollowed(ctx context.Context, symbol string) bool {
 	return m != nil && r.pairs[symbol] && !followed
 }
 
+// FollowsPair reports whether symbol is a spot pair a reference market
+// follows, as last read: the pairs a price event may overlay (design
+// 2026-10-07, general price control).
+func (r *ReferenceMap) FollowsPair(symbol string) bool {
+	ref, ok := r.cached()[symbol]
+	return ok && ref.Market == ports.MarketSpot
+}
+
 // cached returns the mapping as last read, without reading it again.
 func (r *ReferenceMap) cached() map[string]ports.Reference {
 	r.mu.Lock()

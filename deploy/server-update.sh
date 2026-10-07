@@ -224,10 +224,11 @@ sync_infra() {
   # HOUSE 运行时额度接口（market-maker，审查 FL C47）同样两把：house/caps.env 的 HOUSE_CAPS_API_SECRET 只给
   # market-maker（容器里的 exchangectl house 用），house/admin.env 的 HOUSE_CAPS_ADMIN_API_SECRET 给 market-maker
   # 与 admin-service（只有它能填批准人）
-  sudo mkdir -p "$INFRA/sim" "$INFRA/house" && sudo chmod 700 "$INFRA/sim" "$INFRA/house"
+  # 价格叠加（通用价格控制 J1）：market/overlay.env 的 OVERLAY_API_SECRET 给 market-sim（推送）与 market-data（验签）
+  sudo mkdir -p "$INFRA/sim" "$INFRA/house" "$INFRA/market" && sudo chmod 700 "$INFRA/sim" "$INFRA/house" "$INFRA/market"
   local pair
   for pair in sim/sim.env:SIM_API_SECRET sim/admin.env:SIM_ADMIN_API_SECRET house/caps.env:HOUSE_CAPS_API_SECRET \
-    house/admin.env:HOUSE_CAPS_ADMIN_API_SECRET; do
+    house/admin.env:HOUSE_CAPS_ADMIN_API_SECRET market/overlay.env:OVERLAY_API_SECRET; do
     if ! sudo test -s "$INFRA/${pair%%:*}"; then
       sudo sh -c "umask 077 && printf '%s=%s\n' '${pair#*:}' \"\$(openssl rand -hex 32)\" >'$INFRA/${pair%%:*}'"
       echo "== 已生成 ${pair%%:*}（${pair#*:}）"

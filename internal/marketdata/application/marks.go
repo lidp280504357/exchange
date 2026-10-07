@@ -158,7 +158,10 @@ type Marks struct {
 	// follows says so (FollowReference); stale bounds their age.
 	refMarks ReferenceMarks
 	follows  func(symbol string) bool
-	stale    time.Duration
+	// overlay is the price events' factors (nil: none; WithOverlay): with
+	// risk they move the index, and the mark is computed meanwhile.
+	overlay *Overlay
+	stale   time.Duration
 
 	// Loop state, touched by the loop only.
 	contracts map[string]*contractMarks
@@ -402,14 +405,25 @@ func (m *Marks) prices(symbol string) []domain.SourcePrice {
 		return nil
 	}
 	prices := m.sources.Prices(symbol)
+	f := one
+	if m.overlay != nil { // a price event that reaches risk moves the index (J0 contract §2.3)
+		f = m.overlay.RiskFactor(symbol)
+	}
 	for i := range prices {
 		prices[i].Weight = 1
 		if w, ok := m.weights[prices[i].Source]; ok {
 			prices[i].Weight = w
 		}
+		prices[i].Price = domain.ScalePrice(prices[i].Price, f)
 	}
 	return prices
 }
+
+// WithOverlay has the contract prices follow the price events that reach
+// risk (design 2026-10-07, general price control): the index from the
+// scaled pair, the mark computed (PLATFORM) meanwhile and MarkBackAfter
+// past their end. Call it before Run.
+func (m *Marks) WithOverlay(o *Overlay) { m.overlay = o }
 
 func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Time, indexes map[string]bool) []Update {
 	spec := st.spec
@@ -575,6 +589,11 @@ func (m *Marks) reference(ctx context.Context, st *contractMarks, now time.Time)
 	if fresh && st.latest.Computed.IsPositive() {
 		gap, _ := st.latest.Computed.Div(ref.Mark).Sub(decimal.NewFromInt(1)).Float64()
 		m.gap.WithLabelValues(symbol).Set(gap)
+	}
+	if m.overlay != nil && m.overlay.MarkComputed(st.spec.IndexSymbol) {
+		// The reference market's mark knows nothing of the price event.
+		m.markSource(ctx, st, false, "")
+		return domain.ReferenceMark{}, false
 	}
 	if !m.follows(symbol) {
 		m.markSource(ctx, st, false, "")

@@ -21,6 +21,7 @@ import (
 	"github.com/skill/exchange/internal/marketdata/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/svcsign"
 )
 
 // Handler serves the market data; no sign-in needed.
@@ -49,7 +50,12 @@ type Handler struct {
 	Listed interface {
 		Listed(ctx context.Context, symbol string, futures bool) (bool, error)
 	}
-	Now func() time.Time
+	// Overlay is the price events' factors (design 2026-10-07, general
+	// price control) and Signed checks market-sim's pushes of them; nil:
+	// no overlays.
+	Overlay *application.Overlay
+	Signed  *svcsign.Verifier
+	Now     func() time.Time
 }
 
 // Routes mounts the endpoints on r.
@@ -67,6 +73,11 @@ func (h *Handler) Routes(r chi.Router) {
 	// (Binance, §11.9) never reaches clients; the trading service and the
 	// market maker read it, and the index components for audits.
 	r.Get("/internal/market/{symbol}/reference", h.reference)
+	if h.Overlay != nil && h.Signed != nil {
+		r.Get("/internal/market/overlay", h.overlays)
+		r.With(h.Signed.Changes).Put("/internal/market/overlay/{symbol}", h.setOverlay)
+		r.With(h.Signed.Changes).Delete("/internal/market/overlay/{symbol}", h.clearOverlay)
+	}
 	r.Put("/internal/market/{symbol}/simulated-price", h.simulatedPrice)
 	r.Get("/internal/market/{symbol}/mark", h.markInternal)
 	r.Get("/internal/market/feed", h.feed)
@@ -132,7 +143,12 @@ func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"symbol": s, "source": nil, "price": nil, "updated_at": nil, "fresh": false}
 	if h.Ref != nil {
 		if ref, fresh := h.Ref.Latest(s); !ref.At.IsZero() {
-			out["source"], out["price"], out["fresh"] = ref.Source, ref.Price.String(), fresh
+			price := ref.Price
+			if h.Overlay != nil { // a price event moves the trading anchor too
+				f, _ := h.Overlay.Factor(s)
+				price = domain.ScalePrice(price, f)
+			}
+			out["source"], out["price"], out["fresh"] = ref.Source, price.String(), fresh
 			out["updated_at"] = ref.At.UTC().Format(time.RFC3339Nano)
 		}
 	}
@@ -144,6 +160,56 @@ func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// setOverlay takes market-sim's push of a price event's factor (J0
+// contract §2.1).
+func (h *Handler) setOverlay(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Factor  string `json:"factor"`
+		Until   string `json:"until"`
+		Risk    *bool  `json:"risk"`
+		EventID string `json:"event_id"`
+		Seq     int64  `json:"seq"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f, err := decimal.NewFromString(body.Factor)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("factor must be a decimal string"))
+		return
+	}
+	until, err := time.Parse(time.RFC3339Nano, body.Until)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("until must be an RFC 3339 time"))
+		return
+	}
+	risk := body.Risk == nil || *body.Risk
+	if err := h.Overlay.Set(symbol(r), application.OverlayPush{Factor: f, Until: until, Risk: risk, EventID: body.EventID, Seq: body.Seq}); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// clearOverlay takes a pair back to 1 at once.
+func (h *Handler) clearOverlay(w http.ResponseWriter, r *http.Request) {
+	h.Overlay.Clear(symbol(r))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// overlays lists the factors not at 1.
+func (h *Handler) overlays(w http.ResponseWriter, _ *http.Request) {
+	items := make([]map[string]any, 0)
+	for _, s := range h.Overlay.List() {
+		items = append(items, map[string]any{
+			"symbol": s.Symbol, "factor": s.Factor.String(), "until": s.Until.UTC().Format(time.RFC3339Nano), "risk": s.Risk,
+			"event_id": s.EventID, "seq": s.Seq, "updated_at": s.Received.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // simulatedPrice keeps the price the simulated market reports for a pair

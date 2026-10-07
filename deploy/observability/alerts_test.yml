@@ -539,6 +539,24 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'market_overlay_factor{job="market-data-service", instance="a", symbol="BTC-USDT"}'
+        values: '1.16x14'
+      - series: 'market_overlay_factor{job="market-data-service", instance="a", symbol="ETH-USDT"}'
+        values: '0.9x5'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MarketOverlayStuck
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: MarketOverlayStuck
+        exp_alerts:
+          - exp_labels: {severity: critical, job: market-data-service, symbol: BTC-USDT}
+            exp_annotations:
+              summary: "BTC-USDT has carried a price event's factor of 1.16 for 11 minutes: end the event, or clear it on market-data (DELETE /internal/market/overlay/BTC-USDT)"
+              runbook: docs/runbook/market-data.md
+
+  - interval: 1m
+    input_series:
       - series: 'market_house_caps_signing_key{job="market-maker", instance="a", key="ops"}'
         values: '1x14'
       - series: 'market_house_caps_signing_key{job="market-maker", instance="a", key="admin"}'

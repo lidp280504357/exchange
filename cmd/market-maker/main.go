@@ -73,6 +73,10 @@ type settings struct {
 	// keeps quoting on the stored ones).
 	CapsAPISecret      string `koanf:"house_caps_api_secret"`
 	CapsAdminAPISecret string `koanf:"house_caps_admin_api_secret"`
+	// OverlayFraction is the part of each level HOUSE offers while a price
+	// event is on a book (OVERLAY_QUOTE_FRACTION, design 2026-10-07,
+	// general price control; above 0, at most 1).
+	OverlayFraction string `koanf:"overlay_quote_fraction"`
 }
 
 func (s *settings) Validate() error {
@@ -102,6 +106,9 @@ func (s *settings) Validate() error {
 			errs = append(errs, fmt.Errorf("HOUSE_*: %w", err))
 		}
 	}
+	if f, err := decimal.NewFromString(s.OverlayFraction); err != nil || !f.IsPositive() || f.GreaterThan(decimal.NewFromInt(1)) {
+		errs = append(errs, errors.New("OVERLAY_QUOTE_FRACTION must be above 0 and at most 1"))
+	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
 
@@ -115,7 +122,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Postgres: pg.DefaultConfig(), HTTPAddr: ":8091", LevelCap: def.Caps.Level.String(), SymbolCap: def.Caps.Symbol.String(),
 		TotalCap: def.Caps.Total.String(), ContractCap: def.Caps.Contract.String(), Safety: def.Caps.Safety.String(),
 		ContractLeverage: def.Caps.ContractLeverage.String(), LedgerAddr: "localhost:9185", InstrumentURL: "http://localhost:8084",
-		DerivativesURL: "http://localhost:8095",
+		DerivativesURL: "http://localhost:8095", OverlayFraction: def.OverlayFraction.String(),
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -142,6 +149,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	conf := def
 	conf.HouseUser = cfg.HouseUser
+	conf.OverlayFraction = decimal.RequireFromString(cfg.OverlayFraction)
 	conf.Caps = domain.Caps{
 		Level: decimal.RequireFromString(cfg.LevelCap), Symbol: decimal.RequireFromString(cfg.SymbolCap),
 		Total: decimal.RequireFromString(cfg.TotalCap), Contract: decimal.RequireFromString(cfg.ContractCap),

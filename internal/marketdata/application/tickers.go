@@ -26,6 +26,8 @@ type Tickers struct {
 	flags       Flags
 	instruments ports.Instruments
 	book        func(symbol string, limit int) (bids, asks []domain.Level, ok bool)
+	// overlay is the price events' factors (nil: none; WithOverlay).
+	overlay *Overlay
 
 	mu     sync.Mutex
 	pushed map[string]time.Time // the reference ticker last pushed, by symbol
@@ -39,6 +41,11 @@ type Tickers struct {
 func NewTickers(svc *Service, feed *ReferenceFeed, refs *ReferenceMap, fl Flags, instruments ports.Instruments) *Tickers {
 	return &Tickers{svc: svc, feed: feed, refs: refs, flags: fl, instruments: instruments, pushed: map[string]time.Time{}}
 }
+
+// WithOverlay has the reference tickers carry the price events' factors
+// (design 2026-10-07, general price control): a pair's own, a perpetual's
+// from its index pair while the overlay reaches risk.
+func (t *Tickers) WithOverlay(o *Overlay) { t.overlay = o }
 
 // UseBooks has the contracts' reference tickers take their best bid and
 // ask from the reference books (Books.Levels). Call it before serving.
@@ -76,6 +83,15 @@ func (t *Tickers) reference(mapping map[string]ports.Reference, symbol string) (
 		if len(asks) > 0 {
 			tk.Ask = asks[0].Price
 		}
+	}
+	if t.overlay != nil {
+		// A perpetual's best bid and ask come from its book, already
+		// scaled; a pair's are the reference market's.
+		f, spot := t.overlay.RiskFactor(domain.IndexPairOf(symbol)), ref.Market == ports.MarketSpot
+		if spot {
+			f, _ = t.overlay.Factor(symbol)
+		}
+		tk = t.overlay.Ticker(symbol, tk, f, spot)
 	}
 	return tk, true
 }

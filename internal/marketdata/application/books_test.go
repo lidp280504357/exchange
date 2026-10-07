@@ -169,6 +169,64 @@ func TestReferenceBooksArePublishedAsSnapshotsThenUpdates(t *testing.T) {
 	_ = rec
 }
 
+// A price event's factor on a pair goes out on its book at once, as a
+// snapshot carrying the factor, scaled at the prices' precision (bids
+// down, asks up), and on its trades; back at 1 the book is the reference
+// market's again (design 2026-10-07, general price control).
+func TestAPriceEventMovesTheShownBook(t *testing.T) {
+	b, src, _, fl := newBooksRig(t)
+	overlay := NewOverlay(fl, b.refs.FollowsPair, prometheus.NewRegistry())
+	b.WithOverlay(overlay)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx) }()
+	<-src.opened
+	src.diffs <- bookDiff{"BTC-USDT", domain.DepthDiff{First: 99, Last: 100}}
+	waitFor(t, "the snapshot", func() bool { return b.Shown("BTC-USDT") })
+	if msgs := b.collect(); len(msgs) != 1 || msgs[0].msg.(*marketv1.DepthSnapshot).GetOverlayFactor() != "" {
+		t.Fatalf("before the event %+v", msgs)
+	}
+	if err := overlay.Set("BTC-USDT", OverlayPush{Factor: d("1.1"), Until: time.Now().Add(4 * time.Second), Risk: true, EventID: "e1", Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	msgs := b.collect()
+	if len(msgs) != 1 {
+		t.Fatalf("the factor moved: %+v", msgs)
+	}
+	snap, ok := msgs[0].msg.(*marketv1.DepthSnapshot)
+	if !ok || snap.GetOverlayFactor() != "1.1" || snap.GetBids()[0].GetPrice() != "110" || snap.GetBids()[1].GetPrice() != "108" ||
+		snap.GetAsks()[0].GetPrice() != "112" {
+		t.Fatalf("scaled snapshot %v", msgs[0].msg)
+	}
+	if depth, ok := b.Depth("BTC-USDT", 5); !ok || depth.GetOverlayFactor() != "1.1" || depth.GetAsks()[0].GetPrice() != "112" {
+		t.Fatalf("depth %v", depth)
+	}
+	src.trades <- domain.Trade{Symbol: "BTC-USDT", ID: "t", Number: 8, Price: d("101"), Quantity: d("0.5"), Quote: d("50.5"), TakerSide: "BUY", At: time.Now()}
+	var printed *marketv1.TradesPrinted
+	waitFor(t, "the trade", func() bool {
+		for _, m := range b.collect() {
+			if x, ok := m.msg.(*marketv1.TradesPrinted); ok {
+				printed = x
+			}
+		}
+		return printed != nil
+	})
+	if p := printed.GetTrades()[0].GetPrice(); p != "111" {
+		t.Fatalf("trade at %s", p)
+	}
+	if trades, _ := b.Trades("BTC-USDT", 1); !trades[0].Price.Equal(d("111")) {
+		t.Fatalf("recent trade at %s", trades[0].Price)
+	}
+	overlay.Clear("BTC-USDT")
+	msgs = b.collect()
+	if len(msgs) != 1 {
+		t.Fatalf("back at 1: %+v", msgs)
+	}
+	if back := msgs[0].msg.(*marketv1.DepthSnapshot); back.GetOverlayFactor() != "" || back.GetBids()[0].GetPrice() != "100" {
+		t.Fatalf("back at 1: %v", back)
+	}
+}
+
 func TestTheEnginesBookIsRelayedWhereTheReferenceIsNotShown(t *testing.T) {
 	b, src, rec, fl := newBooksRig(t)
 	ctx, cancel := context.WithCancel(context.Background())

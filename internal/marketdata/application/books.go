@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -77,7 +78,14 @@ type Books struct {
 	published *prometheus.CounterVec
 	resyncs   prometheus.Counter
 	failures  prometheus.Counter
+	// overlay is the price events' factors (nil: none; WithOverlay).
+	overlay *Overlay
 }
+
+// WithOverlay has the books carry the price events' factors (design
+// 2026-10-07, general price control): a pair's own on what is shown, its
+// perpetuals' from it while the overlay reaches risk. Call it before Run.
+func (b *Books) WithOverlay(o *Overlay) { b.overlay = o }
 
 type bookState struct {
 	ref     ports.Reference
@@ -96,6 +104,62 @@ type bookState struct {
 	changed bool
 	recent  []domain.Trade // oldest first
 	pending []domain.Trade // not published yet
+	// factor is the overlay's factor the last message carried.
+	factor decimal.Decimal
+}
+
+// shownFactor is the overlay's factor on what st shows: a pair's own, a
+// perpetual's from its index pair while the overlay reaches risk.
+func (b *Books) shownFactor(st *bookState) decimal.Decimal {
+	if b.overlay == nil {
+		return one
+	}
+	if st.futures {
+		return b.overlay.RiskFactor(domain.IndexPairOf(st.ref.Symbol))
+	}
+	f, _ := b.overlay.Factor(st.ref.Symbol)
+	return f
+}
+
+// riskFactor is the overlay's factor on st for the contract prices: a
+// pair's or a perpetual's while the overlay reaches risk.
+func (b *Books) riskFactor(st *bookState) decimal.Decimal {
+	if b.overlay == nil {
+		return one
+	}
+	pair := st.ref.Symbol
+	if st.futures {
+		pair = domain.IndexPairOf(pair)
+	}
+	return b.overlay.RiskFactor(pair)
+}
+
+// scaled is st's best n levels a side times f.
+func scaled(st *bookState, n int, f decimal.Decimal) (bids, asks []domain.Level) {
+	bids, asks = st.local.Top(n)
+	return domain.ScaleLevels(bids, f, true), domain.ScaleLevels(asks, f, false)
+}
+
+// scaledTrades is trades with their prices times f (and the quote amounts
+// with them).
+func scaledTrades(trades []domain.Trade, f decimal.Decimal) []domain.Trade {
+	if f.Equal(one) {
+		return trades
+	}
+	out := make([]domain.Trade, len(trades))
+	for i, t := range trades {
+		t.Price, t.Quote = domain.ScalePrice(t.Price, f), domain.ScalePrice(t.Quote, f)
+		out[i] = t
+	}
+	return out
+}
+
+// overlayField is f as the depth messages carry it: empty for 1.
+func overlayField(f decimal.Decimal) string {
+	if f.Equal(one) {
+		return ""
+	}
+	return f.String()
 }
 
 // NewBooks returns the public books of the symbols refs maps, reading the
@@ -604,10 +668,11 @@ func (b *Books) Depth(symbol string, limit int) (*marketv1.DepthSnapshot, bool) 
 	if !ok || !b.usable(st) {
 		return nil, false
 	}
-	bids, asks := st.local.Top(limit)
+	f := b.shownFactor(st)
+	bids, asks := scaled(st, limit, f)
 	return &marketv1.DepthSnapshot{
 		Symbol: symbol, Sequence: b.seq[symbol], Bids: protoLevels(bids), Asks: protoLevels(asks),
-		TakenAt: timestamppb.New(st.updated), Reference: true,
+		TakenAt: timestamppb.New(st.updated), Reference: true, OverlayFactor: overlayField(f),
 	}, true
 }
 
@@ -620,7 +685,7 @@ func (b *Books) Levels(symbol string, limit int) (bids, asks []domain.Level, ok 
 	if !found || !b.usable(st) {
 		return nil, nil, false
 	}
-	bids, asks = st.local.Top(limit)
+	bids, asks = scaled(st, limit, b.riskFactor(st))
 	return bids, asks, true
 }
 
@@ -640,7 +705,7 @@ func (b *Books) Trades(symbol string, limit int) ([]domain.Trade, bool) {
 	for i := len(st.recent) - 1; i >= 0 && len(out) < limit; i-- {
 		out = append(out, st.recent[i])
 	}
-	return out, true
+	return scaledTrades(out, b.shownFactor(st)), true
 }
 
 // Push publishes, every bookPush until ctx ends (an app.Loop body), the
@@ -683,20 +748,24 @@ func (b *Books) collect() []outMsg {
 		if st.futures {
 			topic = event.TopicDerivMarketDepth
 		}
-		if !st.shown || now.Sub(st.sentAt) >= bookSnapshotEvery {
-			bids, asks := st.local.Top(PublicDepth)
+		// A factor that moved since the last message moves every price:
+		// a snapshot, not an update of every level.
+		f := b.shownFactor(st)
+		moved := st.factor.IsZero() && !f.Equal(one) || !st.factor.IsZero() && !st.factor.Equal(f)
+		if !st.shown || now.Sub(st.sentAt) >= bookSnapshotEvery || moved {
+			bids, asks := scaled(st, PublicDepth, f)
 			_, seq := b.nextSeq(symbol)
 			st.sent = [2][][2]string{rows(bids), rows(asks)}
-			st.shown, st.sentAt, st.beatAt, st.changed = true, now, now, false
+			st.shown, st.sentAt, st.beatAt, st.changed, st.factor = true, now, now, false, f
 			out = append(out, outMsg{topic, symbol, "snapshot", "reference", &marketv1.DepthSnapshot{
 				Symbol: symbol, Sequence: seq, Bids: protoLevels(bids), Asks: protoLevels(asks), TakenAt: timestamppb.New(*st.live),
-				Reference: true,
+				Reference: true, OverlayFactor: overlayField(f),
 			}})
 		} else {
 			var db, da [][2]string
 			if st.changed {
 				st.changed = false
-				bids, asks := st.local.Top(PublicDepth)
+				bids, asks := scaled(st, PublicDepth, f)
 				next := [2][][2]string{rows(bids), rows(asks)}
 				db, da = diffRows(st.sent[0], next[0]), diffRows(st.sent[1], next[1])
 				st.sent = next
@@ -708,12 +777,12 @@ func (b *Books) collect() []outMsg {
 				st.beatAt = now
 				out = append(out, outMsg{topic, symbol, "update", "reference", &marketv1.DepthUpdate{
 					Symbol: symbol, Sequence: seq, PrevSequence: prev, Bids: rowLevels(db), Asks: rowLevels(da),
-					TakenAt: timestamppb.New(*st.live), Reference: true,
+					TakenAt: timestamppb.New(*st.live), Reference: true, OverlayFactor: overlayField(f),
 				}})
 			}
 		}
 		if len(st.pending) > 0 {
-			out = append(out, outMsg{event.TopicMarketTrades, symbol, "trades", "reference", tradesPrinted(symbol, st.pending, true)})
+			out = append(out, outMsg{event.TopicMarketTrades, symbol, "trades", "reference", tradesPrinted(symbol, scaledTrades(st.pending, f), true)})
 			st.pending = nil
 		}
 	}
