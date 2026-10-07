@@ -7,10 +7,10 @@ import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
 import {
-  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Bell, Bitcoin, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark, ScrollText, UserRound,
-  Wallet,
+  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Bell, Bitcoin, ChartCandlestick, ChartColumn, Check, ChevronDown, CircleDollarSign, Globe, Landmark,
+  ScrollText, UserRound, Wallet,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
 import { Logo } from "./Logo";
@@ -42,8 +42,10 @@ export function TopNav() {
   const bySymbol = new Map(listed.map((c) => [c.symbol, c]));
   const spot = recent.find((s) => !isContract(s)) ?? DEFAULT_SYMBOL;
   // Margin opens the last pair the cross account trades: both its assets
-  // are collateral (review FN, B136).
-  const collateral = new Set((useMarginAssets().data ?? []).filter((a) => a.collateral).map((a) => a.asset));
+  // are collateral (review FN, B136). A visitor's bar asks for them once
+  // the trade menu opens, not on every page (review GA, B143).
+  const [tradeOpened, setTradeOpened] = useState(false);
+  const collateral = new Set((useMarginAssets(signedIn || tradeOpened).data ?? []).filter((a) => a.collateral).map((a) => a.asset));
   const marginPair =
     recent.find((s) => {
       if (isContract(s)) return false;
@@ -65,8 +67,8 @@ export function TopNav() {
         </Link>
         <nav className="flex h-full items-center gap-1 text-base">
           <Item to={routes.markets}>{t("nav.markets")}</Item>
-          <Menu label={t("nav.trade")} to={routes.trade(spot)} wide>
-            <MenuEntry to={routes.trade(spot)} icon={<ArrowLeftRight size={18} />} title={t("pc.menu.spot")} hint={t("pc.menu.spotHint")} onClick={account("SPOT")} />
+          <Menu label={t("nav.trade")} to={routes.trade(spot)} wide onOpen={() => setTradeOpened(true)}>
+            <MenuEntry to={routes.trade(spot)} icon={<ChartCandlestick size={18} />} title={t("pc.menu.spot")} hint={t("pc.menu.spotHint")} onClick={account("SPOT")} />
             <MenuEntry
               to={routes.trade(marginPair)}
               icon={<Landmark size={18} />}
@@ -148,7 +150,7 @@ function Item({ to, children }: { to: string; children: ReactNode }) {
 // leaves on the item, which kept the menu open after the pointer had left
 // it (B109); an item followed blurs too, so the keyboard's Enter closes it.
 function Menu({
-  label, to, children, align = "left", wide,
+  label, to, children, align = "left", wide, onOpen,
 }: {
   label: ReactNode;
   to: string;
@@ -156,9 +158,11 @@ function Menu({
   align?: "left" | "right";
   /** A panel of entries with a line each (MenuEntry). */
   wide?: boolean;
+  /** Called as the menu opens (the pointer or the focus enters it). */
+  onOpen?: () => void;
 }) {
   return (
-    <div className="group relative flex h-full items-center">
+    <div className="group relative flex h-full items-center" onPointerEnter={onOpen} onFocus={onOpen}>
       <NavLink
         to={to}
         className={({ isActive }) =>
