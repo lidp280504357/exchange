@@ -15,6 +15,7 @@
 
 - gRPC `LedgerService`（`ledger-service:9185`）：`Freeze`、`Unfreeze`（`ORDER_*`/`WITHDRAW_*`；`account_type` 可为 `SPOT`、`FUTURES`、`MARGIN_CROSS`、`MARGIN_ISOLATED`，逐仓带 `scope` = 交易对）、`Transfer`、`GetBalances`（只有 SPOT/FUTURES），写操作都要幂等键；杠杆的 `PostMargin`、`AccrueMarginInterest`、`GetMarginBalances`、`ListMarginDebts` 只给 margin-service 用，见「杠杆账户」。
 - REST（经网关，需登录）：`GET /v1/account/balances`、`POST /v1/account/transfers`（必须带 `Idempotency-Key`）、`GET /v1/account/transfers`、`GET /v1/account/ledger`。
+  - `/v1/account/ledger`（两站的资金流水）按用户的每个账户沿 `(account_id, account_version)` 倒着取最新的几行，再按行 ID 合并成一页（同一账户里版本与 ID 同序：两者都在账户锁内取得）。2026-10-07 之前按行 ID 倒序扫全表再按用户过滤：分录行比一页少的新用户要把全部 350 万行走一遍，测试服 58 秒（网关 20 秒超时，冒烟测试的「资金流水」步因此失败），改后 17 毫秒；集成测试 `TestEntriesAcrossAccounts` 校验跨账户的顺序、翻页与过滤。
 - 划转：现货 ↔ 合约在一个事务里完成（§13 验收 11）。需要功能开关 `account.transfer` 且账户资格允许（user-service `CheckEligibility(TRANSFER)`）；余额不足的划转记为 `FAILED` 并保留，同键重试得到同样的错误；成功/失败分别发 `account.AccountTransferCompleted`/`AccountTransferFailed`。
 - 管理后台（2026-10-02 设计 C2）：
   - `Adjust` 可调现货或合约账户（`account_type`，默认 `SPOT`）。
