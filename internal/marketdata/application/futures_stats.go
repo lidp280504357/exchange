@@ -493,7 +493,8 @@ func backoff(se *series) time.Duration {
 	return min(ceiling, max(futuresRetry, 2*se.retry))
 }
 
-// openInterest reads each followed contract's open interest every minute.
+// openInterest keeps each followed contract's open interest now, taken
+// every minute (interestNow).
 func (s *FuturesStats) openInterest(ctx context.Context, coinMargined bool) {
 	var warned time.Time
 	for ctx.Err() == nil {
@@ -503,25 +504,54 @@ func (s *FuturesStats) openInterest(ctx context.Context, coinMargined bool) {
 		}
 		round := s.now()
 		for _, m := range s.marketsOf(coinMargined) {
-			q, at, err := s.src.OpenInterest(ctx, m)
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				s.requests.WithLabelValues(marginName(coinMargined), "open_interest_now", "error").Inc()
+			q, at, err := s.interestNow(ctx, m)
+			switch {
+			case ctx.Err() != nil:
+				return
+			case err != nil:
 				if s.now().Sub(warned) >= futuresWarnEvery {
 					s.log.WarnContext(ctx, "futures statistics: open interest failed", "symbol", m.Symbol, "error", err)
 					warned = s.now()
 				}
 				continue
+			case at.IsZero():
+				continue
 			}
-			s.requests.WithLabelValues(marginName(coinMargined), "open_interest_now", "ok").Inc()
 			s.mu.Lock()
 			s.interest[m.Symbol] = OpenInterest{Market: m, Quantity: q, At: at}
 			s.mu.Unlock()
 		}
 		s.sleep(ctx, round.Add(time.Minute).Sub(s.now()))
 	}
+}
+
+// interestNow returns a contract's open interest now and when it was
+// counted. A USDⓈ-M contract's is read from the source. A COIN-M
+// contract's is its latest 5-minute point stored, where the panel's curve
+// ends (zero time while none is stored): the source's /dapi/v1/openInterest
+// counts the contracts another way, about 3.8 times openInterestHist's
+// sumOpenInterest for BTCUSD_PERP (review A71, docs/runbook/market-data.md).
+func (s *FuturesStats) interestNow(ctx context.Context, m ports.FuturesMarket) (decimal.Decimal, time.Time, error) {
+	if m.CoinMargined {
+		list, err := s.repo.Recent(ctx, m.Symbol, ports.MetricOpenInterest, "5m", 1)
+		if err != nil || len(list) == 0 {
+			return decimal.Decimal{}, time.Time{}, err
+		}
+		q, ok := list[0].Values["open_interest"]
+		if !ok {
+			return decimal.Decimal{}, time.Time{}, nil
+		}
+		return q, list[0].At, nil
+	}
+	q, at, err := s.src.OpenInterest(ctx, m)
+	switch {
+	case ctx.Err() != nil:
+	case err != nil:
+		s.requests.WithLabelValues(marginName(false), "open_interest_now", "error").Inc()
+	default:
+		s.requests.WithLabelValues(marginName(false), "open_interest_now", "ok").Inc()
+	}
+	return q, at, err
 }
 
 // OpenInterestNow returns a contract's open interest as last read.

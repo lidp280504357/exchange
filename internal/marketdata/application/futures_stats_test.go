@@ -656,6 +656,44 @@ func TestFuturesStatsPurgesByPeriod(t *testing.T) {
 	}
 }
 
+// A COIN-M contract's open interest now is its latest 5-minute point
+// stored, where the panel's curve ends; a USDⓈ-M one's is read from the
+// source (review A71).
+func TestFuturesStatsInterestNow(t *testing.T) {
+	s, _, repo, _ := newTestFutures(t)
+	ctx := context.Background()
+	coinM := ports.FuturesMarket{Symbol: "BTC-USD-PERP", CoinMargined: true, Remote: "BTCUSD_PERP", Pair: "BTCUSD", ContractSize: decimal.NewFromInt(100)}
+	if q, at, err := s.interestNow(ctx, coinM); err != nil || !at.IsZero() || !q.IsZero() {
+		t.Fatalf("nothing stored: %v %v %v", q, at, err)
+	}
+	point := func(at time.Time, metric, period, oi string) ports.FuturesStat {
+		return ports.FuturesStat{Symbol: "BTC-USD-PERP", Metric: metric, Period: period, At: at, Values: map[string]decimal.Decimal{
+			"open_interest": decimal.RequireFromString(oi), "open_interest_value": decimal.RequireFromString(oi).Mul(coinM.ContractSize),
+		}}
+	}
+	if err := repo.Upsert(ctx, []ports.FuturesStat{
+		point(futuresT0.Add(-10*time.Minute), ports.MetricOpenInterest, "5m", "3336000"),
+		point(futuresT0.Add(-5*time.Minute), ports.MetricOpenInterest, "5m", "3336618"),
+		point(futuresT0, ports.MetricOpenInterest, "15m", "1"),
+		point(futuresT0, ports.MetricLongShortAccount, "5m", "2"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if q, at, err := s.interestNow(ctx, coinM); err != nil || q.String() != "3336618" || !at.Equal(futuresT0.Add(-5*time.Minute)) {
+		t.Fatalf("COIN-M now: %v %v %v", q, at, err)
+	}
+	usdM := ports.FuturesMarket{Symbol: "BTC-USDT-PERP", Remote: "BTCUSDT", Pair: "BTCUSDT"}
+	if q, at, err := s.interestNow(ctx, usdM); err != nil || q.String() != "94791.893" || !at.Equal(time.UnixMilli(1791284697161).UTC()) {
+		t.Fatalf("USDⓈ-M now: %v %v %v", q, at, err)
+	}
+	if v := counted(t, s.requests.WithLabelValues("usdm", "open_interest_now", "ok")); v != 1 {
+		t.Fatalf("source reads counted %v", v)
+	}
+	if v := counted(t, s.requests.WithLabelValues("coinm", "open_interest_now", "ok")); v != 0 {
+		t.Fatalf("stored points counted as source reads: %v", v)
+	}
+}
+
 func TestFuturesStatsRunsWhileOn(t *testing.T) {
 	s, src, repo, fl := newTestFutures(t)
 	fl.on.Store(false)
@@ -676,10 +714,11 @@ func TestFuturesStatsRunsWhileOn(t *testing.T) {
 		if !at.After(c.after) {
 			return nil, nil
 		}
-		return []ports.FuturesStat{{
-			Symbol: c.symbol, Metric: c.metric, Period: c.period, At: at,
-			Values: map[string]decimal.Decimal{"x": decimal.NewFromInt(1)},
-		}}, nil
+		values := map[string]decimal.Decimal{"x": decimal.NewFromInt(1)}
+		if c.metric == ports.MetricOpenInterest {
+			values = map[string]decimal.Decimal{"open_interest": decimal.RequireFromString("3336618")}
+		}
+		return []ports.FuturesStat{{Symbol: c.symbol, Metric: c.metric, Period: c.period, At: at, Values: values}}, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
@@ -707,8 +746,25 @@ func TestFuturesStatsRunsWhileOn(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if oi, ok := s.OpenInterestNow("BTC-USD-PERP"); !ok || oi.Quantity.String() != "94791.893" || !oi.Market.CoinMargined {
-		t.Fatalf("open interest now: %+v %v", oi, ok)
+	// Open interest now: the source's for a USDⓈ-M contract, the latest
+	// 5-minute point stored for a COIN-M one, once the minute's loop has
+	// taken it.
+	for {
+		usdM, okU := s.OpenInterestNow("BTC-USDT-PERP")
+		coinM, okC := s.OpenInterestNow("BTC-USD-PERP")
+		if okU && okC {
+			if usdM.Quantity.String() != "94791.893" || usdM.Market.CoinMargined {
+				t.Fatalf("USDⓈ-M open interest now: %+v", usdM)
+			}
+			if coinM.Quantity.String() != "3336618" || !coinM.At.Equal(futuresT0.Add(-time.Hour)) || !coinM.Market.CoinMargined {
+				t.Fatalf("COIN-M open interest now: %+v", coinM)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("open interest now: %v %v", okU, okC)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
