@@ -15,11 +15,13 @@ import (
 )
 
 // productFlags keeps flags as the config store does: a switch stores the
-// flag at a new version with who and when.
+// flag at a new version with who and when; afterSwitch runs once one is
+// stored (a caller going away then).
 type productFlags struct {
-	flags map[string]ports.Flag
-	now   func() time.Time
-	down  bool
+	flags       map[string]ports.Flag
+	now         func() time.Time
+	down        bool
+	afterSwitch func()
 }
 
 func (f *productFlags) List(context.Context) ([]ports.Flag, error) {
@@ -39,6 +41,9 @@ func (f *productFlags) Switch(_ context.Context, key string, enabled bool, actor
 	v.Key, v.Enabled, v.UpdatedBy, v.UpdatedAt = key, enabled, actor, &at
 	v.Version++
 	f.flags[key] = v
+	if f.afterSwitch != nil {
+		f.afterSwitch()
+	}
 	return v, nil
 }
 
@@ -207,6 +212,21 @@ func TestProductLines(t *testing.T) {
 		t.Fatalf("audited %v", got)
 	}
 	svcs.cancel, svcs.err, svcs.errs = ports.ProductCanceled{}, nil, nil
+
+	// The caller gone right after the switch (A91): the flag changed, so the
+	// switch is audited all the same (the store fails on a context done, as
+	// a database does).
+	gone, leave := context.WithCancel(ctx)
+	pf.afterSwitch = leave
+	_, _ = h.svc.SetProduct(gone, boss, "usdt_m", false, "close usdt_m, the caller gone")
+	pf.afterSwitch = nil
+	if got := h.auditsOf("admin.products.toggled"); pf.flags["product.usdt_m"].Enabled ||
+		!strings.HasPrefix(got[len(got)-1], "product:usdt_m close usdt_m, the caller gone ") {
+		t.Fatalf("switched with the caller gone %v", got)
+	}
+	if _, err := h.svc.SetProduct(ctx, boss, "usdt_m", true, "open usdt_m again"); err != nil {
+		t.Fatal(err)
+	}
 
 	// A line whose service cannot count is null and named partial, the
 	// others as counted.

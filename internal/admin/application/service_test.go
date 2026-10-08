@@ -271,7 +271,14 @@ func (u *fakeUsers) ResetAvatar(_ context.Context, id, _, _ string) (ports.User,
 	return v, had, nil
 }
 
-func (m *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error { return fn(m) }
+// Tx fails on a context done, as a database's would (A91's test relies on
+// it).
+func (m *memStore) Tx(ctx context.Context, fn func(ports.Repos) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn(m)
+}
 
 func (m *memStore) Read() ports.Repos { return m }
 

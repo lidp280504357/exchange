@@ -26,6 +26,10 @@ import (
 // productLines are the lines in the order the console shows them.
 var productLines = []string{"spot", "usdt_m", "coin_m"}
 
+// productAuditTimeout bounds a switch's audit, written whether or not its
+// caller is still there (A91).
+const productAuditTimeout = 5 * time.Second
+
 // productFlag is a line's flag.
 func productFlag(line string) string { return "product." + line }
 
@@ -235,6 +239,10 @@ func (s *Service) cancelProduct(ctx context.Context, p Principal, product, reaso
 // the reason and what the service said, never its address (the console
 // shows the details; the log has the failure in full, A88).
 func (s *Service) auditProduct(ctx context.Context, p Principal, action, product string, from, to bool, c *ProductCancel, reason string) {
+	// The switch is made by then: its record outlives a caller gone
+	// meanwhile (A91), bounded on its own.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), productAuditTimeout)
+	defer cancel()
 	d := map[string]any{"product": product, "flag": productFlag(product), "from": from, "to": to, "canceled_orders": 0}
 	if c != nil {
 		d["canceled_orders"] = c.Canceled
