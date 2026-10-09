@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import src from "../../../../../internal/platform/flags/flags.go?raw";
-import { flagsZh } from "./flags";
+import { flagsEn, flagsZh } from "./flags";
 
 // Every flag the backend knows (internal/platform/flags: flags.Known) has
-// its Chinese description here, so the feature flags page never falls back
-// to the backend's English in Chinese (user 2026-10-10).
+// its description here in both languages, so the feature flags page never
+// falls back to what is stored with the flag (user 2026-10-10, A103).
 
 /** known reads the keys of flags.Known: its Key constants' values. */
 function known(): string[] {
@@ -14,15 +14,20 @@ function known(): string[] {
   return names.map((n) => values.get(n) ?? `unresolved ${n}`);
 }
 
+/** missing are the keys without a description that passes ok. */
+function missing(keys: string[], descs: unknown, ok: (s: string) => boolean): string[] {
+  const d = descs as Record<string, Record<string, string>>;
+  return keys.filter((k) => {
+    const [group, name] = k.split(".");
+    return !group || !name || !ok(d[group]?.[name] ?? "");
+  });
+}
+
 describe("flag descriptions", () => {
-  it("covers every flag the backend knows, in Chinese", () => {
+  it("cover every flag the backend knows, in Chinese and in English", () => {
     const keys = known();
     expect(keys.length).toBeGreaterThan(30);
-    const desc = flagsZh.admin.flagDesc as Record<string, Record<string, string>>;
-    const missing = keys.filter((k) => {
-      const [group, name] = k.split(".");
-      return !group || !name || !/[一-鿿]/.test(desc[group]?.[name] ?? "");
-    });
-    expect(missing).toEqual([]);
+    expect(missing(keys, flagsZh.admin.flagDesc, (s) => /[一-鿿]/.test(s))).toEqual([]);
+    expect(missing(keys, flagsEn.admin.flagDesc, (s) => /^[A-Z]/.test(s) && !/[一-鿿]/.test(s))).toEqual([]);
   });
 });

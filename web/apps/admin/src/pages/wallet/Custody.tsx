@@ -1,12 +1,13 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, DataTable, Drawer, ErrorState, KeyValue, Segmented, Stat, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { Badge, Button, DataTable, Drawer, ErrorState, KeyTag, Segmented, Stat, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, Num, TimeText, useTimeText } from "../../kit/format";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
@@ -326,24 +327,33 @@ function CallbackDrawer({ admin, id, onClose }: { admin: Admin; id: string; onCl
         <ErrorState compact message={errorText(q.error)} onRetry={() => void q.refetch()} />
       ) : !c ? null : (
         <div className="flex flex-col gap-5">
-          <KeyValue
+          <Fields
+            label={t("admin.custody.callbacks")}
             items={[
-              { label: t("admin.custody.tradeId"), value: <span className="font-mono text-xs">{c.trade_id || "—"}</span>, copy: c.trade_id || undefined },
+              { label: t("admin.custody.tradeId"), value: c.trade_id ? <KeyTag>{c.trade_id}</KeyTag> : "—", copy: c.trade_id || undefined },
               { label: t("admin.custody.custodianStatus"), value: <EnumBadge group="custodyStatus" code={c.status == null ? null : String(c.status)} /> },
-              ...(c.business_id ? [{ label: t("admin.custody.businessId"), value: <span className="font-mono text-xs">{c.business_id}</span>, copy: c.business_id }] : []),
-              { label: t("admin.custody.coin"), value: <span className="font-mono text-xs">{c.coin || "—"}</span> },
+              ...(c.business_id ? [{ label: t("admin.custody.businessId"), value: <KeyTag>{c.business_id}</KeyTag>, copy: c.business_id }] : []),
+              { label: t("admin.custody.coin"), value: c.coin ? <KeyTag>{c.coin}</KeyTag> : "—" },
               { label: t("admin.common.amount"), value: <Num value={c.amount ?? null} /> },
-              ...(c.address ? [{ label: t("admin.withdrawals.address"), value: <span className="font-mono text-xs">{c.address}</span>, copy: c.address }] : []),
-              ...(c.tx_hash ? [{ label: t("admin.withdrawals.txHash"), value: <span className="font-mono text-xs">{c.tx_hash}</span>, copy: c.tx_hash }] : []),
+              ...(c.address ? [{ label: t("admin.withdrawals.address"), value: <KeyTag>{c.address}</KeyTag>, copy: c.address }] : []),
+              ...(c.tx_hash ? [{ label: t("admin.withdrawals.txHash"), value: <KeyTag>{c.tx_hash}</KeyTag>, copy: c.tx_hash }] : []),
               {
                 label: t("admin.custody.signature"),
                 value: <Badge tone={c.signature_ok ? "success" : "danger"}>{c.signature_ok ? t("admin.custody.signatureOk") : t("admin.custody.signatureBad")}</Badge>,
               },
               { label: t("admin.custody.detail"), value: c.detail || "—" },
-              { label: t("admin.custody.attempts"), value: c.attempts },
+              { label: t("admin.custody.attempts"), value: <span className="tabular-nums">{c.attempts}</span> },
               {
                 label: t("admin.custody.remoteIps"),
-                value: c.remote_ips?.length ? <span className="font-mono text-xs">{c.remote_ips.join(", ")}</span> : t("admin.custody.remoteIpsNone"),
+                value: c.remote_ips?.length ? (
+                  <span className="inline-flex flex-wrap gap-1.5">
+                    {c.remote_ips.map((ip) => (
+                      <KeyTag key={ip}>{ip}</KeyTag>
+                    ))}
+                  </span>
+                ) : (
+                  t("admin.custody.remoteIpsNone")
+                ),
               },
               { label: t("admin.custody.receivedAt"), value: <TimeText value={c.received_at} /> },
               { label: t("admin.custody.processedAt"), value: <TimeText value={c.processed_at} /> },

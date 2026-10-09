@@ -1,9 +1,10 @@
 import { can, type Admin } from "@exchange/core/api/admin";
-import { Button, Drawer, KeyValue, Tabs } from "@exchange/ui";
+import { Button, Drawer, KeyTag, Tabs } from "@exchange/ui";
 import { FilePlus2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EnumBadge, useEnum } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { FilterBar, options, useFilters } from "../../kit/filters";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { Page } from "../../kit/Page";
@@ -96,15 +97,16 @@ function AllDeposits({ filters }: { filters: Filters }) {
           description={<span className="font-mono">{open.deposit_id}</span>}
           actions={<EnumBadge group="depositStatus" code={open.status} />}
         >
-          <KeyValue
+          <Fields
+            label={t("admin.nav.deposits")}
             items={[
               { label: t("admin.common.user"), value: <UserCell id={open.user_id} /> },
               { label: t("admin.common.amount"), value: <Num value={open.amount} unit={open.asset} /> },
               { label: t("admin.common.network"), value: open.network },
               { label: t("admin.deposits.kind"), value: open.kind },
-              { label: t("admin.deposits.address"), value: <span className="font-mono text-xs">{open.address}</span>, copy: open.address },
-              { label: t("admin.deposits.txHash"), value: <span className="font-mono text-xs">{open.tx_hash || "—"}</span>, copy: open.tx_hash || undefined },
-              { label: t("admin.deposits.confirmations"), value: `${open.confirmations}/${open.required_confirmations}` },
+              { label: t("admin.deposits.address"), value: <KeyTag>{open.address}</KeyTag>, copy: open.address },
+              { label: t("admin.deposits.txHash"), value: open.tx_hash ? <KeyTag>{open.tx_hash}</KeyTag> : "—", copy: open.tx_hash || undefined },
+              { label: t("admin.deposits.confirmations"), value: <span className="tabular-nums">{`${open.confirmations}/${open.required_confirmations}`}</span> },
               { label: t("admin.deposits.unclaimed"), value: open.unclaimed ? t("admin.common.yes") : t("admin.common.no") },
               ...(open.reason ? [{ label: t("admin.deposits.reason"), value: <EnumBadge group="depositReason" code={open.reason} /> }] : []),
               { label: t("admin.common.updatedAt"), value: <TimeText value={open.updated_at} /> },

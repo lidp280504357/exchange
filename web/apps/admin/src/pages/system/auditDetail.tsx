@@ -1,7 +1,8 @@
 import type { AdminSchemas } from "@exchange/core/api/admin";
-import { KeyValue } from "@exchange/ui";
+import { cn, KeyTag } from "@exchange/ui";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Fields } from "../../kit/fields";
 import { TimeText } from "../../kit/format";
 
 // An audit entry in detail (design 2026-10-02 §4.6): who did what to which
@@ -77,6 +78,18 @@ export function changesOf(payload: Payload): Change[] | null {
 
 const show = (v: unknown): string => (v === undefined ? "—" : typeof v === "string" ? v : JSON.stringify(v));
 
+/**
+ * detailValue is a detail's value in a row (A94): an ID or a JSON in the
+ * monospace face, other text as text; one longer than a line folded, its
+ * start shown and the whole once the row is opened.
+ */
+function detailValue(s: string): { value: ReactNode; details?: ReactNode; copy?: string } {
+  const code = /^[[{]/.test(s) || /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(s) || /^0x[0-9a-f]{16,}$/i.test(s);
+  const whole = <span className={code ? "break-all font-mono text-xs text-fg-1" : "break-words"}>{s}</span>;
+  if (s.length <= 120) return { value: whole };
+  return { value: <span className={cn("block truncate", code && "font-mono text-xs")}>{s}</span>, details: whole, copy: s };
+}
+
 /** AuditDetail is an entry in a drawer: its facts, its changes field by field, its raw event. */
 export function AuditDetail({ entry }: { entry: Entry }) {
   const { t } = useTranslation();
@@ -86,15 +99,15 @@ export function AuditDetail({ entry }: { entry: Entry }) {
   const text = (v: unknown) => (typeof v === "string" && v ? v : "—");
   return (
     <div className="flex flex-col gap-5" data-testid="audit-detail">
-      <KeyValue
-        density="compact"
+      <Fields
+        label={t("admin.audit.details")}
         items={[
           { key: "time", label: t("admin.common.time"), value: <TimeText value={entry.occurred_at} /> },
-          { key: "actor", label: t("admin.audit.actor"), value: entry.actor, copy: true },
-          { key: "target", label: t("admin.audit.target"), value: <span className="font-mono text-xs">{entry.target}</span>, copy: entry.target },
-          { key: "action", label: t("admin.audit.action"), value: <span className="font-mono text-xs">{text(p.action)}</span> },
+          { key: "actor", label: t("admin.audit.actor"), value: entry.actor, copy: entry.actor || undefined },
+          { key: "target", label: t("admin.audit.target"), value: <KeyTag>{entry.target}</KeyTag>, copy: entry.target },
+          { key: "action", label: t("admin.audit.action"), value: p.action ? <KeyTag>{text(p.action)}</KeyTag> : "—" },
           { key: "reason", label: t("admin.audit.reason"), value: text(p.reason) },
-          { key: "event", label: t("admin.audit.eventId"), value: <span className="font-mono text-xs">{entry.event_id}</span>, copy: entry.event_id },
+          { key: "event", label: t("admin.audit.eventId"), value: <KeyTag>{entry.event_id}</KeyTag>, copy: entry.event_id },
         ]}
       />
       {changes && (
@@ -109,11 +122,9 @@ export function AuditDetail({ entry }: { entry: Entry }) {
         <section className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold text-fg-1">{t("admin.audit.details")}</h3>
           {typeof details === "object" ? (
-            <KeyValue
-              density="compact"
-              items={Object.entries(flatten(details)).map(([k, v]) => ({
-                key: k, label: <span className="font-mono text-xs">{k}</span>, value: <span className="break-all font-mono text-xs">{show(v)}</span>,
-              }))}
+            <Fields
+              label={t("admin.audit.details")}
+              items={Object.entries(flatten(details)).map(([k, v]) => ({ key: k, label: <KeyTag>{k}</KeyTag>, ...detailValue(show(v)) }))}
             />
           ) : (
             <p className="break-all font-mono text-xs text-fg-2">{show(details)}</p>

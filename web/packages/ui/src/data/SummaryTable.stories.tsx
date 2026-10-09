@@ -93,6 +93,26 @@ export const Values: Story = {
   ),
 };
 
+/** A record's labelled values (a deposit's, in a drawer): grey labels, lower rows, a copy button, a long value folded. */
+export const Fields: Story = {
+  render: () => (
+    <div className="w-[520px]">
+      <SummaryTable label="充值" variant="fields">
+        <SummaryRow title="用户" summary={<KeyTag>0191f0c2-7e2a-7b6e-9c1d-5a4f3e2d1c0b</KeyTag>} />
+        <SummaryRow title="金额" summary={<AmountText value="1250.5" asset="USDT" />} />
+        <SummaryRow title="网络" summary="TRON" />
+        <SummaryRow
+          title="交易哈希"
+          summary={<KeyTag>0x8f3c…a91e</KeyTag>}
+          action={<span className="text-xs text-info-strong">复制</span>}
+          details={<KeyTag>0x8f3c2b7d4e1a9c6f0b5d8e2a7c4f1b9e6d3a0c5f8b2e7d4a1c9f6b3e0d5a91e</KeyTag>}
+        />
+        <SummaryRow title="确认数" summary="19/19" />
+      </SummaryTable>
+    </div>
+  ),
+};
+
 /** Compact, for half a page: narrower item and status columns. */
 export const Compact: Story = {
   render: () => (

@@ -1,6 +1,6 @@
 import { dec, errorText, formatDecimal } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Drawer, KeyValue, Skeleton, Stepper, type DataColumnMeta, type ColumnDef, type RowSelectionState } from "@exchange/ui";
+import { Badge, Button, Drawer, KeyTag, Skeleton, Stepper, type DataColumnMeta, type ColumnDef, type RowSelectionState } from "@exchange/ui";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { CirclePause, CirclePlay } from "lucide-react";
 import { useMemo } from "react";
@@ -9,6 +9,7 @@ import { useConsoleSettings } from "../../live";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { SuspendedBadge, useSuspended } from "./suspensions";
 import { EnumBadge, useEnum } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
 import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 import { clean } from "../records/tables";
@@ -185,17 +186,23 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
           steps={steps.map((s) => ({ key: s.key, title: t(`admin.withdrawals.${s.key}`), description: s.at ? time(s.at) : undefined }))}
           current={current}
         />
-        <KeyValue
+        <Fields
+          label={t("admin.nav.withdrawals")}
           items={[
             { label: t("admin.common.user"), value: <UserCell id={w.user_id} /> },
             {
               label: t("admin.common.network"),
-              value: `${w.network}${w.internal ? ` · ${t("admin.withdrawals.internal")}` : w.custody ? ` · ${t("admin.withdrawals.custody")}` : ""}`,
+              value: (
+                <span className="inline-flex flex-wrap items-center gap-1.5">
+                  {w.network}
+                  {w.internal ? <Badge tone="info">{t("admin.withdrawals.internal")}</Badge> : w.custody ? <Badge tone="neutral">{t("admin.withdrawals.custody")}</Badge> : null}
+                </span>
+              ),
             },
             ...(w.custody && w.provider_status
               ? [{ label: t("admin.withdrawals.providerStatus"), value: <EnumBadge group="providerStatus" code={w.provider_status} /> }]
               : []),
-            { label: t("admin.withdrawals.address"), value: <span className="font-mono text-xs">{w.address}</span>, copy: w.address },
+            { label: t("admin.withdrawals.address"), value: <KeyTag>{w.address}</KeyTag>, copy: w.address },
             { label: t("admin.withdrawalDetail.addressBook"), value: <AddressBook detail={detail} w={w} /> },
             { label: t("admin.withdrawals.fee"), value: <Num value={w.fee} unit={w.asset} /> },
             { label: t("admin.withdrawals.value"), value: <Num value={w.value_usdt} decimals={2} unit="USDT" /> },
@@ -218,7 +225,7 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
                   {
                     label: t("admin.hold.note"),
                     value: (
-                      <span className="flex flex-col items-end gap-0.5">
+                      <span className="flex flex-col gap-0.5">
                         <span>{w.hold_note}</span>
                         <span className="text-xs text-fg-3">{t("admin.hold.by", { by: w.held_by, time: time(w.held_at!) })}</span>
                       </span>
@@ -241,9 +248,14 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
             },
             {
               label: t("admin.withdrawals.approvals"),
-              value: `${w.approvals?.length ?? 0}/${w.approvals_required}${w.approvals?.length ? ` · ${w.approvals.join("、")}` : ""}`,
+              value: (
+                <span className="inline-flex flex-wrap items-baseline gap-x-2">
+                  <span className="tabular-nums">{`${w.approvals?.length ?? 0}/${w.approvals_required}`}</span>
+                  {w.approvals?.length ? <span className="text-fg-3">{w.approvals.join(t("admin.summary.sep"))}</span> : null}
+                </span>
+              ),
             },
-            ...(w.tx_hash ? [{ label: t("admin.withdrawals.txHash"), value: <span className="font-mono text-xs">{w.tx_hash}</span>, copy: w.tx_hash }] : []),
+            ...(w.tx_hash ? [{ label: t("admin.withdrawals.txHash"), value: <KeyTag>{w.tx_hash}</KeyTag>, copy: w.tx_hash }] : []),
             ...(w.reject_reason ? [{ label: t("admin.withdrawals.rejectReason"), value: w.reject_reason }] : []),
           ]}
         />
@@ -325,7 +337,7 @@ function AddressBook({ detail, w }: { detail: Detail; w: Withdrawal }) {
   const fresh = Date.parse(w.created_at) - Date.parse(book.created_at) < NEW_ADDRESS_MS;
   const cooling = Date.parse(book.usable_at) > Date.now();
   return (
-    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+    <span className="inline-flex flex-wrap items-center gap-1.5">
       {book.label && <span>{book.label}</span>}
       <span className="text-xs text-fg-3">{t("admin.withdrawalDetail.addedAt", { time: time(book.created_at) })}</span>
       {fresh && (

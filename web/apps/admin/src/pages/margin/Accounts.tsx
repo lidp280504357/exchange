@@ -1,13 +1,14 @@
 import { dec, i18n } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import {
-  Badge, Button, CopyButton, DataTable, Drawer, ErrorState, KeyValue, Skeleton, Stat, Tabs, type ColumnDef, type DataColumnMeta,
+  Badge, Button, CopyButton, DataTable, Drawer, ErrorState, KeyTag, Skeleton, Stat, Tabs, type ColumnDef, type DataColumnMeta,
 } from "@exchange/ui";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText, useEnum } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { useFlagCheck } from "../../kit/flags";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
@@ -154,15 +155,14 @@ function AccountDrawer({ admin, row, onClose }: { admin: Admin; row: MarginAccou
       actions={act ? <Actions a={a} /> : undefined}
     >
       <div className="flex flex-col gap-4" data-testid="margin-account">
-        <KeyValue
-          layout="grid"
-          columns={3}
-          density="compact"
+        <Fields
+          label={t("admin.margin.accounts.detail")}
+          columns={2}
           items={[
             { key: "user", label: t("admin.common.user"), value: <UserCell id={a.user_id} /> },
-            { key: "key", label: t("admin.margin.accountKey"), value: <span className="font-mono text-xs">{keyOf(a)}</span> },
+            { key: "key", label: t("admin.margin.accountKey"), value: <KeyTag>{keyOf(a)}</KeyTag> },
             { key: "level", label: t("admin.margin.fields.level"), value: <Level level={a.margin_level} warning={a.warn_level} liquidation={a.liquidation_level} /> },
-            { key: "lines", label: t("admin.margin.lines"), value: <span className="font-mono">{lineText(a.warn_level)} / {lineText(a.liquidation_level)}</span> },
+            { key: "lines", label: t("admin.margin.lines"), value: <span className="tabular-nums">{lineText(a.warn_level)} / {lineText(a.liquidation_level)}</span> },
             { key: "assets", label: t("admin.margin.fields.assets"), value: <Num value={a.total_asset} decimals={2} unit="USDT" /> },
             { key: "liabilities", label: t("admin.margin.fields.liabilities"), value: <Num value={a.total_liability} decimals={2} unit="USDT" /> },
             { key: "net", label: t("admin.margin.fields.net"), value: <Num value={a.net_asset} decimals={2} unit="USDT" signed /> },

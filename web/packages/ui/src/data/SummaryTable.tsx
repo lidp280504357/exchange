@@ -24,13 +24,20 @@ export type SummaryTableProps = {
   noStatus?: boolean;
   /** Narrower item and status columns, for a table in half a page. */
   compact?: boolean;
+  /**
+   * fields: a record's labelled values (a drawer's, an account's) - the
+   * label in grey, no status column, lower rows; items (the default): checks
+   * and summaries, the title in bold.
+   */
+  variant?: "items" | "fields";
   className?: string;
   children: ReactNode;
 };
 
 // The columns: item, status, summary, action, arrow - wide (item 280px,
-// status 100px) or compact (item 160px). The details start under the
-// status column (the item's width and the gap and padding before it).
+// status 100px), compact (item 160px) or fields (label 136px). The details
+// start under the status column (the item's width and the gap and padding
+// before it).
 const layouts = {
   wide: {
     grid: "md:grid-cols-[280px_100px_minmax(0,1fr)_auto_28px]",
@@ -42,16 +49,25 @@ const layouts = {
     noStatus: "md:grid-cols-[160px_minmax(0,1fr)_auto_28px]",
     details: "md:pl-[calc(160px_+_2rem)]",
   },
+  fields: {
+    grid: "md:grid-cols-[136px_minmax(0,1fr)_auto_28px]",
+    noStatus: "md:grid-cols-[136px_minmax(0,1fr)_auto_28px]",
+    details: "md:pl-[calc(136px_+_2rem)]",
+  },
 };
 
-const Layout = createContext({ noStatus: false, compact: false });
+type LayoutName = keyof typeof layouts;
+
+const Layout = createContext<{ noStatus: boolean; layout: LayoutName }>({ noStatus: false, layout: "wide" });
 
 /** SummaryTable holds SummaryRows under their headings. */
-export function SummaryTable({ label, headings, noStatus = false, compact = false, className, children }: SummaryTableProps) {
+export function SummaryTable({ label, headings, noStatus = false, compact = false, variant = "items", className, children }: SummaryTableProps) {
   const { t } = useTranslation();
-  const l = layouts[compact ? "compact" : "wide"];
+  const layout: LayoutName = variant === "fields" ? "fields" : compact ? "compact" : "wide";
+  const l = layouts[layout];
+  noStatus = noStatus || variant === "fields";
   return (
-    <Layout.Provider value={{ noStatus, compact }}>
+    <Layout.Provider value={{ noStatus, layout }}>
       <div role="table" aria-label={label} className={cn("overflow-hidden rounded-2 border border-line-1 text-sm", className)}>
         {headings && (
           <div role="row" className={cn("hidden gap-x-4 border-b border-line-1 bg-bg-2 px-4 py-2 text-xs font-medium text-fg-3 md:grid", noStatus ? l.noStatus : l.grid)}>
@@ -97,8 +113,9 @@ export type SummaryRowProps = {
 /** SummaryRow is an item of a SummaryTable: a click anywhere on it, or its arrow, opens its details. */
 export function SummaryRow({ title, source, status, summary, details, action, defaultOpen = false, statusTestId, statusData, ...rest }: SummaryRowProps) {
   const { t } = useTranslation();
-  const { noStatus, compact } = useContext(Layout);
-  const l = layouts[compact ? "compact" : "wide"];
+  const { noStatus, layout } = useContext(Layout);
+  const l = layouts[layout];
+  const fields = layout === "fields";
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   const openable = details !== undefined && details !== null && details !== false;
@@ -107,14 +124,15 @@ export function SummaryRow({ title, source, status, summary, details, action, de
     <div role="row" className="even:bg-bg-2/40" data-testid={rest["data-testid"]} data-open={openable ? open : undefined}>
       <div
         className={cn(
-          "grid min-h-12 grid-cols-1 items-center gap-x-4 gap-y-1 px-4 py-2.5",
+          "grid grid-cols-1 items-center gap-x-4 gap-y-1 px-4",
+          fields ? "min-h-10 py-2" : "min-h-12 py-2.5",
           noStatus ? l.noStatus : l.grid,
           openable && "cursor-pointer transition-colors hover:bg-bg-2",
         )}
         onClick={toggle}
       >
         <div role="cell" className="flex min-w-0 flex-col gap-0.5">
-          <span className="font-semibold text-fg-1">{title}</span>
+          <span className={fields ? "text-fg-3" : "font-semibold text-fg-1"}>{title}</span>
           {source && <span className="text-xs leading-5 text-fg-3">{source}</span>}
         </div>
         {!noStatus && (

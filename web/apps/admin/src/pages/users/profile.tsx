@@ -1,11 +1,12 @@
 import { errorText } from "@exchange/core";
 import { can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, cn, DataTable, ErrorState, IconButton, KeyValue, Skeleton, type ColumnDef } from "@exchange/ui";
+import { Badge, cn, DataTable, ErrorState, IconButton, KeyTag, Skeleton, type ColumnDef } from "@exchange/ui";
 import { Eye, EyeOff, Mail, Phone } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { errorToast } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { TimeText } from "../../kit/format";
 import { Card } from "../../kit/Page";
 import { useContacts, useHistory, useSecurity } from "./data";
@@ -81,11 +82,11 @@ export function ProfileTab({ admin, user }: { admin: Admin; user: UserSummary })
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-5">
-      <KeyValue
-        layout="grid"
-        columns={3}
+      <Fields
+        label={t("admin.user.tabs.profile")}
+        columns={2}
         items={[
-          { label: t("admin.users.id"), value: <span className="font-mono text-xs">{user.id}</span>, copy: user.id },
+          { label: t("admin.users.id"), value: <KeyTag>{user.id}</KeyTag>, copy: user.id },
           { label: t("admin.user.profileRows.status"), value: <EnumBadge group="userStatus" code={user.status} /> },
           { label: t("admin.user.registered"), value: <TimeText value={user.created_at} /> },
           { label: t("admin.user.profileRows.region"), value: user.region || "—" },

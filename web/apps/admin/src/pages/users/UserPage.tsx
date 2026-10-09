@@ -1,11 +1,12 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Avatar, ErrorState, KeyValue, Skeleton, Tabs } from "@exchange/ui";
+import { Avatar, ErrorState, Skeleton, Tabs } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams, useSearchParams } from "react-router";
 import { EnumBadge } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { IdText, TimeText } from "../../kit/format";
 import { stagger } from "../../kit/motion";
 import { Card } from "../../kit/Page";
@@ -123,7 +124,8 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
         <EnumBadge group="userStatus" code={user.status} />
         <TagChips tags={user.tags} />
       </div>
-      <KeyValue
+      <Fields
+        label={t("admin.user.tabs.profile")}
         items={[
           { label: t("admin.user.registered"), value: <TimeText value={user.created_at} /> },
           { label: t("admin.user.lastLogin"), value: sec.data ? <TimeText value={sec.data.last_login_at} /> : "—" },

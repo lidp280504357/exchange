@@ -1,11 +1,12 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, CopyButton, DataTable, Dialog, ErrorState, KeyValue, Skeleton, type ColumnDef } from "@exchange/ui";
+import { Badge, Button, CopyButton, DataTable, Dialog, ErrorState, Skeleton, type ColumnDef } from "@exchange/ui";
 import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { IdText, TimeText } from "../../kit/format";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Card } from "../../kit/Page";
@@ -38,7 +39,8 @@ export function SecurityTab({ admin, userId }: { admin: Admin; userId: string })
         <Card title={t("admin.user.sec.totp")} extra={<ShieldCheck size={16} className="text-fg-3" />}>
           {s ? (
             <div className="flex flex-col gap-3">
-              <KeyValue
+              <Fields
+                label={t("admin.user.sec.totp")}
                 items={[
                   { label: t("admin.common.status"), value: <EnumBadge group="totpStatus" code={s.totp.status} /> },
                   { label: t("admin.user.sec.totpSince"), value: <TimeText value={s.totp.activated_at} /> },
@@ -70,7 +72,8 @@ export function SecurityTab({ admin, userId }: { admin: Admin; userId: string })
         <Card title={t("admin.user.sec.password")} extra={<KeyRound size={16} className="text-fg-3" />}>
           {s ? (
             <div className="flex flex-col gap-3">
-              <KeyValue
+              <Fields
+                label={t("admin.user.sec.password")}
                 items={[
                   { label: t("admin.user.sec.passwordChanged"), value: s.password_changed_at ? <TimeText value={s.password_changed_at} /> : t("admin.user.sec.never") },
                   { label: t("admin.user.lastLogin"), value: <TimeText value={s.last_login_at} /> },

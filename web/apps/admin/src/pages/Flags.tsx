@@ -24,11 +24,11 @@ export default function Flags({ admin }: { admin: Admin }) {
   const [pending, setPending] = useState<Flag | null>(null);
   const flags = useQuery({ queryKey: ["admin", "flags"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/flags")).items });
   const writable = can(admin, "flags.write");
-  // A flag's description in the console's language: the known flags' own
-  // words (messages/flags.ts), else the backend's (in English), never
-  // another language's.
+  // A flag's description in a language (the console's by default): the
+  // known flags' own words (messages/flags.ts, A103), else the one stored
+  // with the flag (English), never another language's.
   const describe = useCallback(
-    (f: Flag) => t(`admin.flagDesc.${f.key}`, { fallbackLng: false, defaultValue: f.description || "—" }),
+    (f: Flag, lng?: string) => t(`admin.flagDesc.${f.key}`, { lng, fallbackLng: false, defaultValue: f.description || "—" }),
     [t],
   );
   const columns = useMemo<ColumnDef<Flag, unknown>[]>(
@@ -65,7 +65,7 @@ export default function Flags({ admin }: { admin: Admin }) {
         ),
       },
       {
-        id: "description", header: t("admin.risk.description"), accessorFn: describe,
+        id: "description", header: t("admin.risk.description"), accessorFn: (f) => describe(f),
         // Wrapped, so the rules and the last change stay in view.
         cell: ({ row }) => <span className="block min-w-[20rem] max-w-[42rem] whitespace-normal py-1 text-sm leading-6 text-fg-2">{describe(row.original)}</span>,
       },
@@ -83,8 +83,11 @@ export default function Flags({ admin }: { admin: Admin }) {
     ],
     [t, writable, describe],
   );
+  // The search matches the key and the description in either language.
   const needle = q.trim().toLowerCase();
-  const shown = (flags.data ?? []).filter((f) => !needle || f.key.includes(needle) || describe(f).toLowerCase().includes(needle) || f.description?.toLowerCase().includes(needle));
+  const shown = (flags.data ?? []).filter(
+    (f) => !needle || [f.key, describe(f, "zh-CN"), describe(f, "en"), f.description ?? ""].some((s) => s.toLowerCase().includes(needle)),
+  );
   return (
     <Page title={t("admin.risk.flags")} help={t("admin.risk.rulesHint")} actions={<Input size="sm" value={q} onValueChange={setQ} placeholder={t("admin.common.search")} containerClassName="w-56" clearable onClear={() => setQ("")} />}>
       <ReadOnly admin={admin} perm="flags.write" />

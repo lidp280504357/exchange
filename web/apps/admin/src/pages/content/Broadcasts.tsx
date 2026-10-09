@@ -1,11 +1,12 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Drawer, Input, KeyValue, Progress, Segmented, Switch, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { Badge, Button, Drawer, Input, KeyTag, Progress, Segmented, Switch, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Mail, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, FormError, lastFour } from "../../kit/actions";
-import { TimeText, UserCell } from "../../kit/format";
+import { Fields } from "../../kit/fields";
+import { Num, TimeText, UserCell } from "../../kit/format";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
 
@@ -172,12 +173,20 @@ function BroadcastDrawer({ admin, id, initial, onClose }: { admin: Admin; id: st
             )}
           </div>
         )}
-        <KeyValue
+        <Fields
+          label={t("admin.nav.broadcasts")}
           items={[
             { label: t("admin.broadcasts.audience"), value: b.audience === "ALL" ? t("admin.broadcasts.everyone") : t("admin.broadcasts.users", { n: b.users }) },
-            { label: t("admin.broadcasts.recipients"), value: <span className="tabular-nums">{b.recipients}</span> },
-            { label: t("admin.broadcasts.read"), value: <span className="tabular-nums">{b.read} ({readShare(b)}%)</span> },
-            { label: t("admin.broadcasts.link"), value: b.link ? <span className="font-mono">{b.link}</span> : "—" },
+            { label: t("admin.broadcasts.recipients"), value: <Num value={String(b.recipients)} /> },
+            {
+              label: t("admin.broadcasts.read"),
+              value: (
+                <span>
+                  <Num value={String(b.read)} /> <span className="text-fg-3">({readShare(b)}%)</span>
+                </span>
+              ),
+            },
+            { label: t("admin.broadcasts.link"), value: b.link ? <KeyTag>{b.link}</KeyTag> : "—", copy: b.link || undefined },
             { label: t("admin.broadcasts.email"), value: t(b.email ? "admin.common.yes" : "admin.common.no") },
             { label: t("admin.broadcasts.by"), value: b.created_by },
             { label: t("admin.common.createdAt"), value: <TimeText value={b.created_at} /> },

@@ -459,6 +459,18 @@ echo "== a flag round trip (market.reference_kline)"
 as OPERATOR GET /admin/v1/flags ""
 expect 200 - "flags"
 check '(.items | map(.key) | index("wallet.withdraw")) != null and (.items | map(.key) | index("derivatives.trading")) != null' "every known flag is listed"
+# The console describes every flag this server lists in Chinese and in
+# English (web/apps/admin/src/messages/flags.ts; A103): what is stored with
+# a flag is English, and sometimes empty.
+FLAG_KEYS=$(jq -r '[.items[].key] | join(" ")' <<<"$BODY")
+# shellcheck disable=SC2086 # one argument per key
+UNDESCRIBED=$(node --input-type=module -e '
+const { flagsZh, flagsEn } = await import(process.argv[1]);
+const has = (d, k) => { const [g, n] = k.split("."); return Boolean(d[g]?.[n]); };
+console.log(process.argv.slice(2).filter((k) => !has(flagsZh.admin.flagDesc, k) || !has(flagsEn.admin.flagDesc, k)).join(" "));
+' "$(cd "$(dirname "$0")/../.." && pwd)/web/apps/admin/src/messages/flags.ts" $FLAG_KEYS)
+if [[ -n $UNDESCRIBED ]]; then fail "flags the console does not describe: $UNDESCRIBED"; fi
+echo "ok   the console describes all $(wc -w <<<"$FLAG_KEYS" | tr -d ' ') flags in Chinese and English"
 BEFORE=$(jq -r '.items[] | select(.key == "market.reference_kline") | .enabled' <<<"$BODY")
 FLIP=$([[ $BEFORE == true ]] && echo false || echo true)
 as OPERATOR PUT /admin/v1/flags/market.reference_kline "{\"enabled\":$FLIP,\"reason\":\"e2e flip\"}"

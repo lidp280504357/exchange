@@ -1,6 +1,6 @@
 import { dec } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Drawer, Input, KeyValue, Select } from "@exchange/ui";
+import { Badge, Button, Drawer, Input, Select } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useState } from "react";
@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { errorToast, lastFour } from "../../kit/actions";
 import { Check } from "../../kit/Check";
 import { EnumBadge } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { Num, UserCell } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { useConsoleSettings } from "../../live";
@@ -109,8 +110,8 @@ export function BackfillDrawer({ onClose }: { onClose: () => void }) {
         {current && (
           <div className="flex flex-col gap-3 rounded-2 border border-line-1 bg-bg-0 p-3 animate-rise">
             <p className="text-sm text-success-strong">{t("admin.backfill.checked")}</p>
-            <KeyValue
-              density="compact"
+            <Fields
+              label={t("admin.backfill.checked")}
               items={[
                 { label: t("admin.backfill.user"), value: <UserCell id={current.user_id} /> },
                 { label: t("admin.common.amount"), value: <Num value={body.amount} unit={current.asset} /> },

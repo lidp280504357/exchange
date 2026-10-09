@@ -1,9 +1,10 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Drawer, EmptyState, Input, KeyValue, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { Badge, Button, Drawer, EmptyState, Input, KeyTag, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge } from "../../kit/enums";
+import { Fields } from "../../kit/fields";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
 import { FundAction } from "../../kit/funds";
 import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
@@ -307,7 +308,8 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
       actions={<EnumBadge group="depositStatus" code={d.status} />}
     >
       <div className="flex flex-col gap-5">
-        <KeyValue
+        <Fields
+          label={t("admin.nav.deposits")}
           items={[
             { label: t("admin.common.user"), value: <Owner d={d} /> },
             ...(nobodys(d)
@@ -315,7 +317,7 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
                   {
                     label: t(d.address_owner_retired ? "admin.unowned.ownerRetired" : "admin.unowned.owner"),
                     value: d.address_owner ? (
-                      <span className="flex flex-col items-end gap-0.5">
+                      <span className="flex flex-col gap-0.5">
                         <UserCell id={d.address_owner} />
                         <span className="text-xs text-fg-3">{t("admin.unowned.ownerHint")}</span>
                       </span>
@@ -327,10 +329,10 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
               : []),
             { label: t("admin.common.amount"), value: <Amount d={d} /> },
             { label: t("admin.common.network"), value: d.network },
-            { label: t("admin.deposits.address"), value: <span className="font-mono text-xs">{d.address}</span>, copy: d.address },
-            { label: t("admin.deposits.txHash"), value: <span className="font-mono text-xs">{d.tx_hash || "—"}</span>, copy: d.tx_hash || undefined },
-            ...(d.trade_id ? [{ label: t("admin.depositReview.tradeId"), value: <span className="font-mono text-xs">{d.trade_id}</span>, copy: d.trade_id }] : []),
-            { label: t("admin.deposits.confirmations"), value: `${d.confirmations}/${d.required_confirmations}` },
+            { label: t("admin.deposits.address"), value: <KeyTag>{d.address}</KeyTag>, copy: d.address },
+            { label: t("admin.deposits.txHash"), value: d.tx_hash ? <KeyTag>{d.tx_hash}</KeyTag> : "—", copy: d.tx_hash || undefined },
+            ...(d.trade_id ? [{ label: t("admin.depositReview.tradeId"), value: <KeyTag>{d.trade_id}</KeyTag>, copy: d.trade_id }] : []),
+            { label: t("admin.deposits.confirmations"), value: <span className="tabular-nums">{`${d.confirmations}/${d.required_confirmations}`}</span> },
             { label: t("admin.depositReview.detected"), value: <TimeText value={d.detected_at} /> },
             { label: t("admin.depositReview.source"), value: <Source d={d} /> },
             ...(d.source === "MANUAL"
@@ -349,7 +351,7 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
                   {
                     label: t("admin.depositReview.resolution"),
                     value: (
-                      <span className="flex flex-col items-end gap-0.5">
+                      <span className="flex flex-col gap-0.5">
                         <EnumBadge group="depositResolution" code={d.resolution} />
                         <span className="text-xs text-fg-3">{t("admin.depositReview.resolvedBy", { by: d.resolved_by, time: time(d.resolved_at!) })}</span>
                         {d.resolution_note && <span>{d.resolution_note}</span>}

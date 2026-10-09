@@ -1,6 +1,6 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, KeyTag, Skeleton, SummaryRow, SummaryTable } from "@exchange/ui";
+import { KeyTag, ShortList, Skeleton, SummaryRow, SummaryTable } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import { Link } from "react-router";
 import { useEnum } from "../../kit/enums";
 import { TimeText } from "../../kit/format";
 import { Card } from "../../kit/Page";
+import { Amount, AmountGrid } from "../../kit/summary";
 
 // The status cards the overview and the system health page share, and the
 // reconciliation's checks the health and ledger pages share.
@@ -92,22 +93,47 @@ export function CustodySummary({ className, style }: { className?: string; style
       ) : !o ? (
         <Skeleton className="h-6 w-64" />
       ) : (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          {!o.configured ? (
-            <Badge tone="neutral">{t("admin.overview.custodyOff")}</Badge>
-          ) : o.error ? (
-            <Badge tone="danger">{t("admin.overview.custodyDown", { error: o.error })}</Badge>
-          ) : (
-            <Badge tone="success">{t("admin.overview.custodyOk", { n: o.coins.length })}</Badge>
-          )}
-          {short.map((c) => (
-            <Badge key={`${c.holder}/${c.asset}`} tone="danger">
-              {t("admin.overview.custodyShort", { asset: c.asset, amount: c.shortfall })}
-            </Badge>
-          ))}
-          {o.callbacks.attention > 0 && <Badge tone="warn">{t("admin.overview.custodyCallbacks", { n: o.callbacks.attention })}</Badge>}
-          {o.submitted.count > 0 && <Badge tone="info">{t("admin.overview.custodySubmitted", { n: o.submitted.count })}</Badge>}
-        </div>
+        // A94: its link, what it is short of, the callbacks to look at and the withdrawals with it, a row each.
+        <SummaryTable label={t("admin.overview.custody")} compact>
+          <SummaryRow
+            data-testid="custody-link"
+            title={t("admin.summary.custody.link")}
+            status={
+              !o.configured
+                ? { tone: "neutral", label: t("admin.summary.custody.off") }
+                : o.error
+                  ? { tone: "danger", label: t("admin.summary.custody.down") }
+                  : { tone: "success", label: t("admin.summary.custody.up") }
+            }
+            summary={
+              !o.configured ? t("admin.overview.custodyOff") : o.error ? <span className="break-all">{o.error}</span> : t("admin.summary.custody.coins", { n: o.coins.length })
+            }
+          />
+          <SummaryRow
+            title={t("admin.summary.custody.balances")}
+            status={short.length ? { tone: "danger", label: t("admin.summary.custody.short") } : { tone: "success", label: t("admin.summary.custody.enough") }}
+            summary={
+              short.length ? (
+                <ShortList items={short.map((c) => <Amount key={`${c.holder}/${c.asset}`} value={c.shortfall} asset={c.asset} />)} />
+              ) : (
+                t("admin.summary.custody.noShort")
+              )
+            }
+            details={
+              short.length > 3 ? <AmountGrid rows={short.map((c) => [c.asset, c.shortfall])} problem={() => true} /> : undefined
+            }
+          />
+          <SummaryRow
+            title={t("admin.summary.custody.callbacks")}
+            status={o.callbacks.attention > 0 ? { tone: "warn", label: t("admin.summary.custody.look") } : { tone: "success", label: t("admin.summary.custody.fine") }}
+            summary={o.callbacks.attention > 0 ? t("admin.overview.custodyCallbacks", { n: o.callbacks.attention }) : t("admin.summary.custody.noCallbacks")}
+          />
+          <SummaryRow
+            title={t("admin.summary.custody.submitted")}
+            status={o.submitted.count > 0 ? { tone: "info", label: t("admin.summary.custody.inFlight") } : { tone: "neutral", label: t("admin.summary.custody.none") }}
+            summary={o.submitted.count > 0 ? t("admin.overview.custodySubmitted", { n: o.submitted.count }) : t("admin.summary.custody.noSubmitted")}
+          />
+        </SummaryTable>
       )}
     </Card>
   );
