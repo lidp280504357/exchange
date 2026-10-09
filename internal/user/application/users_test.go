@@ -144,7 +144,8 @@ func (r memUsers) AddStatusChange(_ context.Context, c domain.StatusChange) erro
 func (r memUsers) List(_ context.Context, f ports.UserFilter) ([]domain.User, error) {
 	var out []domain.User
 	for _, u := range r.s.users {
-		if (f.Status == "" || u.Status == f.Status) && (f.AfterID == "" || u.CreatedAt.Before(f.AfterTime) ||
+		matched := f.Q == "" || strings.Contains(strings.ToLower(u.Username), strings.ToLower(f.Q)) || slices.Contains(f.IDs, u.ID)
+		if matched && (f.Status == "" || u.Status == f.Status) && (f.AfterID == "" || u.CreatedAt.Before(f.AfterTime) ||
 			(u.CreatedAt.Equal(f.AfterTime) && u.ID < f.AfterID)) {
 			out = append(out, u)
 		}
@@ -156,6 +157,15 @@ func (r memUsers) List(_ context.Context, f ports.UserFilter) ([]domain.User, er
 		return strings.Compare(b.ID, a.ID)
 	})
 	return out[:min(f.Limit, len(out))], nil
+}
+
+func (r memUsers) FindUsername(_ context.Context, name string) (string, error) {
+	for _, u := range r.s.users {
+		if strings.EqualFold(u.Username, name) {
+			return u.ID, nil
+		}
+	}
+	return "", domain.ErrUserNotFound
 }
 
 func (r memUsers) Stats(_ context.Context, since time.Time, _ int) (ports.UserStats, error) {
@@ -369,6 +379,54 @@ func TestFavoritesAreCheckedAndStored(t *testing.T) {
 	}
 	if _, _, err := svc.SetFavorites(ctx, uuid.NewString(), nil); !errors.Is(err, domain.ErrUserNotFound) {
 		t.Fatalf("unknown user: %v", err)
+	}
+}
+
+// A keyword keeps the usernames that contain it, whatever the case, and
+// the accounts matched on it elsewhere (auth-service's email addresses);
+// FindUsername finds a username whatever its case, and a name that cannot
+// be one is not found (B167).
+func TestListUsersByKeywordAndFindUsername(t *testing.T) {
+	svc, store, _ := newService()
+	ctx := context.Background()
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	var ids []string
+	for i, name := range []string{"user_8c6fbf82", "Satoshi_N", "pac_fan"} {
+		id := uuid.NewString()
+		store.users[id] = domain.User{ID: id, Status: domain.StatusActive, Region: "SG", Username: name, CreatedAt: base.Add(time.Duration(i) * time.Hour)}
+		ids = append(ids, id)
+	}
+	list := func(f ports.UserFilter) []string {
+		t.Helper()
+		page, err := svc.ListUsers(ctx, f, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, u := range page.Users {
+			names = append(names, u.Username)
+		}
+		return names
+	}
+	if got := list(ports.UserFilter{Q: " SATOSHI "}); !slices.Equal(got, []string{"Satoshi_N"}) {
+		t.Fatalf("by username: %v", got)
+	}
+	if got := list(ports.UserFilter{Q: "pac", IDs: []string{ids[0]}}); !slices.Equal(got, []string{"pac_fan", "user_8c6fbf82"}) {
+		t.Fatalf("with the accounts matched elsewhere: %v", got)
+	}
+	if got := list(ports.UserFilter{IDs: []string{ids[0]}}); len(got) != 3 {
+		t.Fatalf("IDs without a keyword filter nothing: %v", got)
+	}
+	if _, err := svc.ListUsers(ctx, ports.UserFilter{Q: "x", IDs: make([]string, 501)}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("too many IDs: %v", err)
+	}
+	if id, err := svc.FindUsername(ctx, " satoshi_N "); err != nil || id != ids[1] {
+		t.Fatalf("find: %q %v", id, err)
+	}
+	for _, name := range []string{"pacminer", "ab", "not a name", "x@y.z", ""} {
+		if _, err := svc.FindUsername(ctx, name); !apperr.Is(err, apperr.CodeNotFound) {
+			t.Fatalf("%q: %v", name, err)
+		}
 	}
 }
 

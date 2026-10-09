@@ -176,6 +176,24 @@ func (r identities) Find(ctx context.Context, kind, value string) (*domain.Ident
 	return &id, nil
 }
 
+func (r identities) SearchUsers(ctx context.Context, q string, limit int) ([]string, error) {
+	rows, err := r.q.Query(ctx, `SELECT user_id::text FROM identities WHERE strpos(lower(value), lower($1)) > 0
+		GROUP BY user_id ORDER BY user_id DESC LIMIT $2`, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search identities: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("search identities: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (r identities) ByUser(ctx context.Context, userID string) ([]domain.Identity, error) {
 	rows, err := r.q.Query(ctx, `SELECT id::text, user_id::text, kind, value, verified_at, created_at FROM identities
 		WHERE user_id = $1 ORDER BY kind`, userID)

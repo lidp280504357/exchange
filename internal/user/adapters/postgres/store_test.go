@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -180,6 +181,62 @@ func TestListAndCountUsers(t *testing.T) {
 	}
 	if days < 3 {
 		t.Fatalf("per day %+v", st.Days)
+	}
+}
+
+// A keyword keeps the usernames that contain it, whatever the case (an
+// underscore or a percent sign is no wildcard), and the accounts given by
+// ID; a username is found whatever its case (B167).
+func TestListByKeywordAndFindUsername(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	users := store.Read().Users()
+	var ids []string
+	for _, name := range []string{"user_8c6fbf82", "Satoshi_N", "pacfan", "userx8c6"} {
+		u, err := domain.NewUser(uuid.NewString(), "SG", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.Username = name
+		if _, err := users.Create(ctx, u, nil); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	names := func(f ports.UserFilter) []string {
+		t.Helper()
+		f.Limit = 10
+		list, err := users.List(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, u := range list {
+			out = append(out, u.Username)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := names(ports.UserFilter{Q: "SATOSHI"}); !slices.Equal(got, []string{"Satoshi_N"}) {
+		t.Fatalf("by username: %v", got)
+	}
+	if got := names(ports.UserFilter{Q: "user_"}); !slices.Equal(got, []string{"user_8c6fbf82"}) {
+		t.Fatalf("an underscore is no wildcard: %v", got)
+	}
+	if got := names(ports.UserFilter{Q: "%"}); len(got) != 0 {
+		t.Fatalf("a percent sign is no wildcard: %v", got)
+	}
+	if got := names(ports.UserFilter{Q: "pac", IDs: []string{ids[1], "not-a-uuid"}}); !slices.Equal(got, []string{"Satoshi_N", "pacfan"}) {
+		t.Fatalf("with the accounts matched elsewhere: %v", got)
+	}
+	if got := names(ports.UserFilter{}); len(got) != 4 {
+		t.Fatalf("no keyword: %v", got)
+	}
+	if id, err := users.FindUsername(ctx, "SATOSHI_n"); err != nil || id != ids[1] {
+		t.Fatalf("find: %q %v", id, err)
+	}
+	if _, err := users.FindUsername(ctx, "nobody_here"); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("unknown: %v", err)
 	}
 }
 

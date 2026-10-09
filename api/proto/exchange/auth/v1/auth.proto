@@ -15,9 +15,17 @@ service AuthService {
   // same user; each token works once. The answer carries the user's
   // security context for the action's risk rules (§11.6).
   rpc ConsumeStepUp(ConsumeStepUpRequest) returns (ConsumeStepUpResponse);
-  // FindUser returns the user an email address or phone number (E.164)
-  // belongs to, for the admin console; unknown ones fail with NOT_FOUND.
+  // FindUser returns the user an email address, a phone number (E.164) or
+  // a username belongs to (the username whatever its case, through
+  // user-service; B167), for the admin console's lookup; anything else,
+  // and no such user, fails with NOT_FOUND.
   rpc FindUser(FindUserRequest) returns (FindUserResponse);
+  // SearchUsers returns the users whose email address or phone number
+  // contains a keyword, whatever the case, newest first (B167, the admin
+  // console's user list): user-service's ListUsers takes them as user_ids
+  // with the same q, so the list matches usernames, email addresses and
+  // phone numbers.
+  rpc SearchUsers(SearchUsersRequest) returns (SearchUsersResponse);
   // GetSecurityContext returns a user's security context without a
   // step-up and without a device (the wallet's limits in effect, shown
   // before a withdrawal).
@@ -266,4 +274,14 @@ message FindUserRequest {
 
 message FindUserResponse {
   string user_id = 1;
+}
+
+message SearchUsersRequest {
+  string q = 1;
+  // At most this many (1 to 500; default 200).
+  int32 limit = 2;
+}
+
+message SearchUsersResponse {
+  repeated string user_ids = 1;
 }

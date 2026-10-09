@@ -119,4 +119,12 @@ func TestIdentities(t *testing.T) {
 	if err != nil || len(all) != 2 || all[0].Kind != "EMAIL" || all[1].Kind != "PHONE" {
 		t.Fatalf("by user: %+v %v", all, err)
 	}
+	// B167: by substring of either identity, whatever the case, each user
+	// once; an underscore or a percent sign is no wildcard.
+	for q, want := range map[string]int{"A@EXAMPLE": 1, "1234": 1, "example": 1, "_": 0, "%": 0, "nobody": 0} {
+		found, err := store.Read().Identities().SearchUsers(ctx, q, 10)
+		if err != nil || len(found) != want || (want == 1 && found[0] != user) {
+			t.Fatalf("search %q: %v %v", q, found, err)
+		}
+	}
 }

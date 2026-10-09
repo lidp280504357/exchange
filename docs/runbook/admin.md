@@ -147,7 +147,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 - `GET /admin/v1/users`：账户，新到旧，可按状态、地区、注册时间过滤，数据来自 user-service 的 `ListUsers`；列表带标签。
 - 列表与用户页显示用户名与头像（设计 [用户头像与用户名](../设计-用户头像与用户名-2026-10-07.md)，I3）：上传的头像（列表用 64 px 缩略图，`/uploads/avatars/` 由 nginx 直出，后台站点同样可访问），没有上传时是与两站相同的内置头像（按用户 ID 在 12 个里选，`Avatar` 的 `seed`，A79）。用户页有「重置用户名」（重新随机一个 `user_` + 8 位）与「恢复默认头像」（`POST /admin/v1/users/{id}/username-reset`、`…/avatar-reset`，要 `users.status` 与理由，一人即可；审计 `admin.users.username_reset`（前后用户名）与 `admin.users.avatar_reset`，用户在站内收到通知）。本机开发时 Vite 把 `/uploads` 与 `/downloads` 也代理到测试服。
-- 查找 `GET /admin/v1/users/lookup?q=`：按用户 ID、邮箱或手机号（`+` 开头的 E.164）找到账户；全局搜索也用它。
+- 查找 `GET /admin/v1/users/lookup?q=`：按用户 ID、邮箱、手机号（`+` 开头的 E.164）或用户名（不分大小写，B167 起）找到账户；全局搜索也用它。认不出的格式与查不到一样答 404（以前非邮箱非手机号答 400）。按关键字筛列表：auth-service `SearchUsers(q)` 给出邮箱或手机号含它的用户 ID，连同 `q` 一起传给 user-service `ListUsers` 的 `user_ids`，列表就同时按用户名、邮箱、手机号子串匹配（控制台与 `admin.yaml` 的 `q` 是后台会话 A93）。
 - 改账户状态（`users.status`；状态机见需求附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`；user-service 记审计，操作者为管理员邮箱）；强制撤销用户全部挂单（`orders.cancel`，撮合引擎异步完成）。
 
 ### 用户页

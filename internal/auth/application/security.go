@@ -256,22 +256,47 @@ func (s *AccountService) SecurityContext(ctx context.Context, userID string) (do
 	return s.Store.Read().Security().Context(ctx, userID, uuid.Nil.String())
 }
 
-// FindUser returns the user an email address or phone number belongs to.
+// errNoSuchUser answers FindUser when it finds no user (B167: also for
+// what is neither an email address, a phone number nor a username).
+var errNoSuchUser = apperr.NotFound("no user has this email address, phone number or username")
+
+// FindUser returns the user an email address, a phone number (E.164) or
+// a username belongs to, for the admin console's lookup (B167: its search
+// box takes all three; the username through user-service, whatever its
+// case); anything else, and no such user, is NOT_FOUND.
 func (s *AccountService) FindUser(ctx context.Context, identifier string) (string, error) {
+	identifier = strings.TrimSpace(identifier)
 	ch := domain.ChannelEmail
-	if strings.HasPrefix(strings.TrimSpace(identifier), "+") {
+	switch {
+	case strings.HasPrefix(identifier, "+"):
 		ch = domain.ChannelSMS
+	case !strings.Contains(identifier, "@"):
+		return s.Users.FindUsername(ctx, identifier)
 	}
 	id, err := domain.ParseIdentifier(ch, identifier)
 	if err != nil {
-		return "", err
+		return "", errNoSuchUser
 	}
 	found, err := s.Store.Read().Identities().Find(ctx, ch.Kind(), id.Value)
 	if err != nil {
 		return "", err
 	}
 	if found == nil {
-		return "", apperr.NotFound("no user has this email address or phone number")
+		return "", errNoSuchUser
 	}
 	return found.UserID, nil
+}
+
+// SearchUsers returns the users whose email address or phone number
+// contains q, whatever the case, newest first, at most limit (1 to 500;
+// default 200): the admin console's user list matches them with the
+// usernames (B167).
+func (s *AccountService) SearchUsers(ctx context.Context, q string, limit int) ([]string, error) {
+	if q = strings.TrimSpace(q); q == "" {
+		return nil, apperr.Invalid("q is required")
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	return s.Store.Read().Identities().SearchUsers(ctx, q, min(limit, 500))
 }

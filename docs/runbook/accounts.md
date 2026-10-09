@@ -48,7 +48,7 @@ ssh exchange sudo docker exec exchange-infra-user-service-1 /app/exchangectl use
 - 只检查格式（交易对 `BTC-USDT` 或合约 `BTC-USDT-PERP`），不核对是否上架。
 - 前端未登录时存本地，登录后把两边合并再写回。
 
-管理后台的账户列表与概览用 gRPC `ListUsers`（按注册时间新到旧，游标分页）与 `UserStats`（总数、某时刻以来的新增、最近若干天每日新增）。
+管理后台的账户列表与概览用 gRPC `ListUsers`（按注册时间新到旧，游标分页）与 `UserStats`（总数、某时刻以来的新增、最近若干天每日新增）。关键字（B167）：`ListUsers` 的 `q` 只留用户名含它的账户（不分大小写，`strpos` 子串匹配，下划线与百分号不是通配符），再加上 `user_ids` 里的账户（别处按同一关键字匹配到的，即 auth-service `SearchUsers` 的邮箱、手机号结果，最多 500 个，多了 400），`q` 为空时 `user_ids` 不起作用；`FindUsername` 按用户名精确找账户（不分大小写，走 `users_username_lower` 索引），长得不像用户名的直接 404。后台的查找经 auth-service `FindUser` 用它（见 [auth.md](auth.md)）。
 
 ### 用户名与头像（设计 2026-10-07 头像与用户名，I0/I1）
 

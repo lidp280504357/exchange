@@ -69,6 +69,9 @@ type IdentityRepo interface {
 	Create(ctx context.Context, id domain.Identity, verifiedAt time.Time) error
 	// UpdateValue replaces the value of an identity (rebinding).
 	UpdateValue(ctx context.Context, id, value string, verifiedAt time.Time) error
+	// SearchUsers returns up to limit users with an identity whose value
+	// contains q, whatever the case, newest first (B167).
+	SearchUsers(ctx context.Context, q string, limit int) ([]string, error)
 }
 
 // CredentialRepo stores password records.
@@ -240,6 +243,9 @@ type Users interface {
 	// Create is idempotent on the user ID.
 	Create(ctx context.Context, u NewUser) error
 	Get(ctx context.Context, userID string) (UserInfo, error)
+	// FindUsername returns the account a username belongs to, whatever its
+	// case; NOT_FOUND without one (B167).
+	FindUsername(ctx context.Context, name string) (string, error)
 }
 
 // Revocations tells the gateway that a session ended, so its access tokens

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -254,10 +255,21 @@ type UserPage struct {
 	Next  string
 }
 
-// ListUsers pages through accounts newest first for the admin console.
+// maxMatchedIDs bounds the accounts a keyword matched elsewhere (B167).
+const maxMatchedIDs = 500
+
+// ListUsers pages through accounts newest first for the admin console; a
+// keyword keeps the usernames that contain it and the accounts matched on
+// it elsewhere (B167).
 func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor string) (UserPage, error) {
 	if f.Status != "" && !domain.ValidStatus(f.Status) {
 		return UserPage{}, apperr.Invalid("unknown status " + f.Status)
+	}
+	if len(f.IDs) > maxMatchedIDs {
+		return UserPage{}, apperr.Invalid(fmt.Sprintf("at most %d user_ids", maxMatchedIDs))
+	}
+	if f.Q = strings.TrimSpace(f.Q); f.Q == "" {
+		f.IDs = nil
 	}
 	f.Region = strings.ToUpper(strings.TrimSpace(f.Region))
 	if f.Limit <= 0 || f.Limit > 200 {
@@ -281,6 +293,15 @@ func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor stri
 		page.Next = pagecursor.Encode(last.CreatedAt, last.ID)
 	}
 	return page, nil
+}
+
+// FindUsername returns the account a username belongs to, whatever its
+// case (B167); a name that cannot be a username is not found either.
+func (s *Service) FindUsername(ctx context.Context, name string) (string, error) {
+	if name = strings.TrimSpace(name); !domain.LooksLikeUsername(name) {
+		return "", domain.ErrUserNotFound
+	}
+	return s.Store.Read().Users().FindUsername(ctx, name)
 }
 
 // UserStats counts accounts for the admin console's overview: all of

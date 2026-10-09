@@ -842,6 +842,94 @@ func (x *GetUserResponse) GetUser() *User {
 	return nil
 }
 
+type FindUsernameRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindUsernameRequest) Reset() {
+	*x = FindUsernameRequest{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindUsernameRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindUsernameRequest) ProtoMessage() {}
+
+func (x *FindUsernameRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindUsernameRequest.ProtoReflect.Descriptor instead.
+func (*FindUsernameRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *FindUsernameRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type FindUsernameResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindUsernameResponse) Reset() {
+	*x = FindUsernameResponse{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindUsernameResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindUsernameResponse) ProtoMessage() {}
+
+func (x *FindUsernameResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindUsernameResponse.ProtoReflect.Descriptor instead.
+func (*FindUsernameResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *FindUsernameResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 type CheckEligibilityRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -858,7 +946,7 @@ type CheckEligibilityRequest struct {
 
 func (x *CheckEligibilityRequest) Reset() {
 	*x = CheckEligibilityRequest{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[13]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -870,7 +958,7 @@ func (x *CheckEligibilityRequest) String() string {
 func (*CheckEligibilityRequest) ProtoMessage() {}
 
 func (x *CheckEligibilityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[13]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -883,7 +971,7 @@ func (x *CheckEligibilityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckEligibilityRequest.ProtoReflect.Descriptor instead.
 func (*CheckEligibilityRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{13}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CheckEligibilityRequest) GetUserId() string {
@@ -926,7 +1014,7 @@ type CheckEligibilityResponse struct {
 
 func (x *CheckEligibilityResponse) Reset() {
 	*x = CheckEligibilityResponse{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[14]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -938,7 +1026,7 @@ func (x *CheckEligibilityResponse) String() string {
 func (*CheckEligibilityResponse) ProtoMessage() {}
 
 func (x *CheckEligibilityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[14]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -951,7 +1039,7 @@ func (x *CheckEligibilityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckEligibilityResponse.ProtoReflect.Descriptor instead.
 func (*CheckEligibilityResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{14}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CheckEligibilityResponse) GetAllowed() bool {
@@ -983,7 +1071,7 @@ type ChangeStatusRequest struct {
 
 func (x *ChangeStatusRequest) Reset() {
 	*x = ChangeStatusRequest{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[15]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -995,7 +1083,7 @@ func (x *ChangeStatusRequest) String() string {
 func (*ChangeStatusRequest) ProtoMessage() {}
 
 func (x *ChangeStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[15]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1008,7 +1096,7 @@ func (x *ChangeStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChangeStatusRequest.ProtoReflect.Descriptor instead.
 func (*ChangeStatusRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{15}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ChangeStatusRequest) GetUserId() string {
@@ -1056,7 +1144,7 @@ type ChangeStatusResponse struct {
 
 func (x *ChangeStatusResponse) Reset() {
 	*x = ChangeStatusResponse{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[16]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1068,7 +1156,7 @@ func (x *ChangeStatusResponse) String() string {
 func (*ChangeStatusResponse) ProtoMessage() {}
 
 func (x *ChangeStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[16]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1081,7 +1169,7 @@ func (x *ChangeStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChangeStatusResponse.ProtoReflect.Descriptor instead.
 func (*ChangeStatusResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{16}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ChangeStatusResponse) GetFromStatus() string {
@@ -1112,14 +1200,22 @@ type ListUsersRequest struct {
 	// The previous page's next_cursor; empty for the newest.
 	Cursor string `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	// At most this many (1 to 200; default 50).
-	Limit         int32 `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`
+	Limit int32 `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`
+	// A keyword (B167): only accounts whose username contains it, whatever
+	// the case, or that are among user_ids; empty for all (user_ids then
+	// unused).
+	Q string `protobuf:"bytes,7,opt,name=q,proto3" json:"q,omitempty"`
+	// The accounts another service matched on the same keyword, listed with
+	// the username matches: auth-service's SearchUsers, the email addresses
+	// and phone numbers that contain it. At most 500.
+	UserIds       []string `protobuf:"bytes,8,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListUsersRequest) Reset() {
 	*x = ListUsersRequest{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[17]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1131,7 +1227,7 @@ func (x *ListUsersRequest) String() string {
 func (*ListUsersRequest) ProtoMessage() {}
 
 func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[17]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1144,7 +1240,7 @@ func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
 func (*ListUsersRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{17}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListUsersRequest) GetStatus() string {
@@ -1189,6 +1285,20 @@ func (x *ListUsersRequest) GetLimit() int32 {
 	return 0
 }
 
+func (x *ListUsersRequest) GetQ() string {
+	if x != nil {
+		return x.Q
+	}
+	return ""
+}
+
+func (x *ListUsersRequest) GetUserIds() []string {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
 type ListUsersResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Users []*User                `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
@@ -1200,7 +1310,7 @@ type ListUsersResponse struct {
 
 func (x *ListUsersResponse) Reset() {
 	*x = ListUsersResponse{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[18]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1212,7 +1322,7 @@ func (x *ListUsersResponse) String() string {
 func (*ListUsersResponse) ProtoMessage() {}
 
 func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[18]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1225,7 +1335,7 @@ func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
 func (*ListUsersResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{18}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListUsersResponse) GetUsers() []*User {
@@ -1254,7 +1364,7 @@ type UserStatsRequest struct {
 
 func (x *UserStatsRequest) Reset() {
 	*x = UserStatsRequest{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[19]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1266,7 +1376,7 @@ func (x *UserStatsRequest) String() string {
 func (*UserStatsRequest) ProtoMessage() {}
 
 func (x *UserStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[19]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1279,7 +1389,7 @@ func (x *UserStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserStatsRequest.ProtoReflect.Descriptor instead.
 func (*UserStatsRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{19}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UserStatsRequest) GetSince() *timestamppb.Timestamp {
@@ -1307,7 +1417,7 @@ type UserStatsResponse struct {
 
 func (x *UserStatsResponse) Reset() {
 	*x = UserStatsResponse{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[20]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1319,7 +1429,7 @@ func (x *UserStatsResponse) String() string {
 func (*UserStatsResponse) ProtoMessage() {}
 
 func (x *UserStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[20]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1332,7 +1442,7 @@ func (x *UserStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserStatsResponse.ProtoReflect.Descriptor instead.
 func (*UserStatsResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{20}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UserStatsResponse) GetTotal() int64 {
@@ -1368,7 +1478,7 @@ type DayCount struct {
 
 func (x *DayCount) Reset() {
 	*x = DayCount{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[21]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1380,7 +1490,7 @@ func (x *DayCount) String() string {
 func (*DayCount) ProtoMessage() {}
 
 func (x *DayCount) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[21]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1393,7 +1503,7 @@ func (x *DayCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DayCount.ProtoReflect.Descriptor instead.
 func (*DayCount) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{21}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DayCount) GetDay() string {
@@ -1475,7 +1585,11 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x0eGetUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"=\n" +
 	"\x0fGetUserResponse\x12*\n" +
-	"\x04user\x18\x01 \x01(\v2\x16.exchange.user.v1.UserR\x04user\"z\n" +
+	"\x04user\x18\x01 \x01(\v2\x16.exchange.user.v1.UserR\x04user\"1\n" +
+	"\x13FindUsernameRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\"/\n" +
+	"\x14FindUsernameResponse\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"z\n" +
 	"\x17CheckEligibilityRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x18\n" +
 	"\afeature\x18\x02 \x01(\tR\afeature\x12\x14\n" +
@@ -1495,14 +1609,16 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x14ChangeStatusResponse\x12\x1f\n" +
 	"\vfrom_status\x18\x01 \x01(\tR\n" +
 	"fromStatus\x12\x1b\n" +
-	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\xf2\x01\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\x9b\x02\n" +
 	"\x10ListUsersRequest\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12=\n" +
 	"\fcreated_from\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vcreatedFrom\x12A\n" +
 	"\x0ecreated_before\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rcreatedBefore\x12\x16\n" +
 	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x14\n" +
-	"\x05limit\x18\x06 \x01(\x05R\x05limit\"b\n" +
+	"\x05limit\x18\x06 \x01(\x05R\x05limit\x12\f\n" +
+	"\x01q\x18\a \x01(\tR\x01q\x12\x19\n" +
+	"\buser_ids\x18\b \x03(\tR\auserIds\"b\n" +
 	"\x11ListUsersResponse\x12,\n" +
 	"\x05users\x18\x01 \x03(\v2\x16.exchange.user.v1.UserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1516,11 +1632,12 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x04days\x18\x03 \x03(\v2\x1a.exchange.user.v1.DayCountR\x04days\"2\n" +
 	"\bDayCount\x12\x10\n" +
 	"\x03day\x18\x01 \x01(\tR\x03day\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count2\xcf\x06\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count2\xae\a\n" +
 	"\vUserService\x12W\n" +
 	"\n" +
 	"CreateUser\x12#.exchange.user.v1.CreateUserRequest\x1a$.exchange.user.v1.CreateUserResponse\x12N\n" +
-	"\aGetUser\x12 .exchange.user.v1.GetUserRequest\x1a!.exchange.user.v1.GetUserResponse\x12i\n" +
+	"\aGetUser\x12 .exchange.user.v1.GetUserRequest\x1a!.exchange.user.v1.GetUserResponse\x12]\n" +
+	"\fFindUsername\x12%.exchange.user.v1.FindUsernameRequest\x1a&.exchange.user.v1.FindUsernameResponse\x12i\n" +
 	"\x10CheckEligibility\x12).exchange.user.v1.CheckEligibilityRequest\x1a*.exchange.user.v1.CheckEligibilityResponse\x12]\n" +
 	"\fChangeStatus\x12%.exchange.user.v1.ChangeStatusRequest\x1a&.exchange.user.v1.ChangeStatusResponse\x12T\n" +
 	"\tListUsers\x12\".exchange.user.v1.ListUsersRequest\x1a#.exchange.user.v1.ListUsersResponse\x12T\n" +
@@ -1542,7 +1659,7 @@ func file_exchange_user_v1_user_proto_rawDescGZIP() []byte {
 	return file_exchange_user_v1_user_proto_rawDescData
 }
 
-var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*ResetUsernameRequest)(nil),     // 0: exchange.user.v1.ResetUsernameRequest
 	(*ResetUsernameResponse)(nil),    // 1: exchange.user.v1.ResetUsernameResponse
@@ -1557,53 +1674,57 @@ var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*CreateUserResponse)(nil),       // 10: exchange.user.v1.CreateUserResponse
 	(*GetUserRequest)(nil),           // 11: exchange.user.v1.GetUserRequest
 	(*GetUserResponse)(nil),          // 12: exchange.user.v1.GetUserResponse
-	(*CheckEligibilityRequest)(nil),  // 13: exchange.user.v1.CheckEligibilityRequest
-	(*CheckEligibilityResponse)(nil), // 14: exchange.user.v1.CheckEligibilityResponse
-	(*ChangeStatusRequest)(nil),      // 15: exchange.user.v1.ChangeStatusRequest
-	(*ChangeStatusResponse)(nil),     // 16: exchange.user.v1.ChangeStatusResponse
-	(*ListUsersRequest)(nil),         // 17: exchange.user.v1.ListUsersRequest
-	(*ListUsersResponse)(nil),        // 18: exchange.user.v1.ListUsersResponse
-	(*UserStatsRequest)(nil),         // 19: exchange.user.v1.UserStatsRequest
-	(*UserStatsResponse)(nil),        // 20: exchange.user.v1.UserStatsResponse
-	(*DayCount)(nil),                 // 21: exchange.user.v1.DayCount
-	(*timestamppb.Timestamp)(nil),    // 22: google.protobuf.Timestamp
+	(*FindUsernameRequest)(nil),      // 13: exchange.user.v1.FindUsernameRequest
+	(*FindUsernameResponse)(nil),     // 14: exchange.user.v1.FindUsernameResponse
+	(*CheckEligibilityRequest)(nil),  // 15: exchange.user.v1.CheckEligibilityRequest
+	(*CheckEligibilityResponse)(nil), // 16: exchange.user.v1.CheckEligibilityResponse
+	(*ChangeStatusRequest)(nil),      // 17: exchange.user.v1.ChangeStatusRequest
+	(*ChangeStatusResponse)(nil),     // 18: exchange.user.v1.ChangeStatusResponse
+	(*ListUsersRequest)(nil),         // 19: exchange.user.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),        // 20: exchange.user.v1.ListUsersResponse
+	(*UserStatsRequest)(nil),         // 21: exchange.user.v1.UserStatsRequest
+	(*UserStatsResponse)(nil),        // 22: exchange.user.v1.UserStatsResponse
+	(*DayCount)(nil),                 // 23: exchange.user.v1.DayCount
+	(*timestamppb.Timestamp)(nil),    // 24: google.protobuf.Timestamp
 }
 var file_exchange_user_v1_user_proto_depIdxs = []int32{
 	8,  // 0: exchange.user.v1.ResetUsernameResponse.user:type_name -> exchange.user.v1.User
 	8,  // 1: exchange.user.v1.ResetAvatarResponse.user:type_name -> exchange.user.v1.User
-	22, // 2: exchange.user.v1.StatusChange.at:type_name -> google.protobuf.Timestamp
-	22, // 3: exchange.user.v1.Consent.accepted_at:type_name -> google.protobuf.Timestamp
+	24, // 2: exchange.user.v1.StatusChange.at:type_name -> google.protobuf.Timestamp
+	24, // 3: exchange.user.v1.Consent.accepted_at:type_name -> google.protobuf.Timestamp
 	5,  // 4: exchange.user.v1.GetUserHistoryResponse.status_changes:type_name -> exchange.user.v1.StatusChange
 	6,  // 5: exchange.user.v1.GetUserHistoryResponse.consents:type_name -> exchange.user.v1.Consent
-	22, // 6: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	22, // 7: exchange.user.v1.User.username_changed_at:type_name -> google.protobuf.Timestamp
+	24, // 6: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	24, // 7: exchange.user.v1.User.username_changed_at:type_name -> google.protobuf.Timestamp
 	8,  // 8: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
 	8,  // 9: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
-	22, // 10: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
-	22, // 11: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
+	24, // 10: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
+	24, // 11: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
 	8,  // 12: exchange.user.v1.ListUsersResponse.users:type_name -> exchange.user.v1.User
-	22, // 13: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
-	21, // 14: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
+	24, // 13: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
+	23, // 14: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
 	9,  // 15: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
 	11, // 16: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
-	13, // 17: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
-	15, // 18: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
-	17, // 19: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
-	19, // 20: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
-	4,  // 21: exchange.user.v1.UserService.GetUserHistory:input_type -> exchange.user.v1.GetUserHistoryRequest
-	0,  // 22: exchange.user.v1.UserService.ResetUsername:input_type -> exchange.user.v1.ResetUsernameRequest
-	2,  // 23: exchange.user.v1.UserService.ResetAvatar:input_type -> exchange.user.v1.ResetAvatarRequest
-	10, // 24: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
-	12, // 25: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
-	14, // 26: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
-	16, // 27: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
-	18, // 28: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
-	20, // 29: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
-	7,  // 30: exchange.user.v1.UserService.GetUserHistory:output_type -> exchange.user.v1.GetUserHistoryResponse
-	1,  // 31: exchange.user.v1.UserService.ResetUsername:output_type -> exchange.user.v1.ResetUsernameResponse
-	3,  // 32: exchange.user.v1.UserService.ResetAvatar:output_type -> exchange.user.v1.ResetAvatarResponse
-	24, // [24:33] is the sub-list for method output_type
-	15, // [15:24] is the sub-list for method input_type
+	13, // 17: exchange.user.v1.UserService.FindUsername:input_type -> exchange.user.v1.FindUsernameRequest
+	15, // 18: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
+	17, // 19: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
+	19, // 20: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
+	21, // 21: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
+	4,  // 22: exchange.user.v1.UserService.GetUserHistory:input_type -> exchange.user.v1.GetUserHistoryRequest
+	0,  // 23: exchange.user.v1.UserService.ResetUsername:input_type -> exchange.user.v1.ResetUsernameRequest
+	2,  // 24: exchange.user.v1.UserService.ResetAvatar:input_type -> exchange.user.v1.ResetAvatarRequest
+	10, // 25: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
+	12, // 26: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
+	14, // 27: exchange.user.v1.UserService.FindUsername:output_type -> exchange.user.v1.FindUsernameResponse
+	16, // 28: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
+	18, // 29: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
+	20, // 30: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
+	22, // 31: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
+	7,  // 32: exchange.user.v1.UserService.GetUserHistory:output_type -> exchange.user.v1.GetUserHistoryResponse
+	1,  // 33: exchange.user.v1.UserService.ResetUsername:output_type -> exchange.user.v1.ResetUsernameResponse
+	3,  // 34: exchange.user.v1.UserService.ResetAvatar:output_type -> exchange.user.v1.ResetAvatarResponse
+	25, // [25:35] is the sub-list for method output_type
+	15, // [15:25] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
 	15, // [15:15] is the sub-list for extension extendee
 	0,  // [0:15] is the sub-list for field type_name
@@ -1620,7 +1741,7 @@ func file_exchange_user_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_user_v1_user_proto_rawDesc), len(file_exchange_user_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

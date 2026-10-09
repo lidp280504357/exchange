@@ -38,6 +38,10 @@ var (
 	ErrUsernameCooldown = apperr.New(apperr.KindConflict, "USER_USERNAME_COOLDOWN", "the username may change once in 7 days")
 )
 
+// LooksLikeUsername tells whether name has a username's form (reserved
+// ones included): only such a name can be one (B167, the lookup).
+func LooksLikeUsername(name string) bool { return usernameRE.MatchString(name) }
+
 // CheckUsername refuses a name of the wrong form or a reserved one.
 func CheckUsername(name string) error {
 	if !usernameRE.MatchString(name) {

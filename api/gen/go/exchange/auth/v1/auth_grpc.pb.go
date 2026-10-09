@@ -22,6 +22,7 @@ const (
 	AuthService_GetContacts_FullMethodName           = "/exchange.auth.v1.AuthService/GetContacts"
 	AuthService_ConsumeStepUp_FullMethodName         = "/exchange.auth.v1.AuthService/ConsumeStepUp"
 	AuthService_FindUser_FullMethodName              = "/exchange.auth.v1.AuthService/FindUser"
+	AuthService_SearchUsers_FullMethodName           = "/exchange.auth.v1.AuthService/SearchUsers"
 	AuthService_GetSecurityContext_FullMethodName    = "/exchange.auth.v1.AuthService/GetSecurityContext"
 	AuthService_GetSecurity_FullMethodName           = "/exchange.auth.v1.AuthService/GetSecurity"
 	AuthService_ListLoginHistory_FullMethodName      = "/exchange.auth.v1.AuthService/ListLoginHistory"
@@ -47,9 +48,17 @@ type AuthServiceClient interface {
 	// same user; each token works once. The answer carries the user's
 	// security context for the action's risk rules (§11.6).
 	ConsumeStepUp(ctx context.Context, in *ConsumeStepUpRequest, opts ...grpc.CallOption) (*ConsumeStepUpResponse, error)
-	// FindUser returns the user an email address or phone number (E.164)
-	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
+	// FindUser returns the user an email address, a phone number (E.164) or
+	// a username belongs to (the username whatever its case, through
+	// user-service; B167), for the admin console's lookup; anything else,
+	// and no such user, fails with NOT_FOUND.
 	FindUser(ctx context.Context, in *FindUserRequest, opts ...grpc.CallOption) (*FindUserResponse, error)
+	// SearchUsers returns the users whose email address or phone number
+	// contains a keyword, whatever the case, newest first (B167, the admin
+	// console's user list): user-service's ListUsers takes them as user_ids
+	// with the same q, so the list matches usernames, email addresses and
+	// phone numbers.
+	SearchUsers(ctx context.Context, in *SearchUsersRequest, opts ...grpc.CallOption) (*SearchUsersResponse, error)
 	// GetSecurityContext returns a user's security context without a
 	// step-up and without a device (the wallet's limits in effect, shown
 	// before a withdrawal).
@@ -110,6 +119,16 @@ func (c *authServiceClient) FindUser(ctx context.Context, in *FindUserRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FindUserResponse)
 	err := c.cc.Invoke(ctx, AuthService_FindUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) SearchUsers(ctx context.Context, in *SearchUsersRequest, opts ...grpc.CallOption) (*SearchUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchUsersResponse)
+	err := c.cc.Invoke(ctx, AuthService_SearchUsers_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -211,9 +230,17 @@ type AuthServiceServer interface {
 	// same user; each token works once. The answer carries the user's
 	// security context for the action's risk rules (§11.6).
 	ConsumeStepUp(context.Context, *ConsumeStepUpRequest) (*ConsumeStepUpResponse, error)
-	// FindUser returns the user an email address or phone number (E.164)
-	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
+	// FindUser returns the user an email address, a phone number (E.164) or
+	// a username belongs to (the username whatever its case, through
+	// user-service; B167), for the admin console's lookup; anything else,
+	// and no such user, fails with NOT_FOUND.
 	FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error)
+	// SearchUsers returns the users whose email address or phone number
+	// contains a keyword, whatever the case, newest first (B167, the admin
+	// console's user list): user-service's ListUsers takes them as user_ids
+	// with the same q, so the list matches usernames, email addresses and
+	// phone numbers.
+	SearchUsers(context.Context, *SearchUsersRequest) (*SearchUsersResponse, error)
 	// GetSecurityContext returns a user's security context without a
 	// step-up and without a device (the wallet's limits in effect, shown
 	// before a withdrawal).
@@ -258,6 +285,9 @@ func (UnimplementedAuthServiceServer) ConsumeStepUp(context.Context, *ConsumeSte
 }
 func (UnimplementedAuthServiceServer) FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FindUser not implemented")
+}
+func (UnimplementedAuthServiceServer) SearchUsers(context.Context, *SearchUsersRequest) (*SearchUsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchUsers not implemented")
 }
 func (UnimplementedAuthServiceServer) GetSecurityContext(context.Context, *GetSecurityContextRequest) (*GetSecurityContextResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSecurityContext not implemented")
@@ -354,6 +384,24 @@ func _AuthService_FindUser_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).FindUser(ctx, req.(*FindUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_SearchUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).SearchUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_SearchUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).SearchUsers(ctx, req.(*SearchUsersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -520,6 +568,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FindUser",
 			Handler:    _AuthService_FindUser_Handler,
+		},
+		{
+			MethodName: "SearchUsers",
+			Handler:    _AuthService_SearchUsers_Handler,
 		},
 		{
 			MethodName: "GetSecurityContext",

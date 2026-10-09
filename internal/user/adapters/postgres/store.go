@@ -254,11 +254,18 @@ func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, err
 	if !f.CreatedBefore.IsZero() {
 		before = &f.CreatedBefore
 	}
+	ids := make([]uuid.UUID, 0, len(f.IDs))
+	for _, s := range f.IDs {
+		if id, err := uuid.Parse(s); err == nil {
+			ids = append(ids, id)
+		}
+	}
 	rows, err := r.q.Query(ctx, `SELECT `+userColumns+` FROM users
 		WHERE ($1 = '' OR status = $1) AND ($2 = '' OR region = $2)
 		AND ($3::timestamptz IS NULL OR created_at >= $3) AND ($4::timestamptz IS NULL OR created_at < $4)
 		AND ($5::timestamptz IS NULL OR (created_at, id) < ($5, $6::uuid))
-		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit)
+		AND ($8 = '' OR strpos(lower(username), lower($8)) > 0 OR id = ANY($9::uuid[]))
+		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit, f.Q, ids)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -272,6 +279,18 @@ func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, err
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+func (r users) FindUsername(ctx context.Context, name string) (string, error) {
+	var id string
+	err := r.q.QueryRow(ctx, `SELECT id::text FROM users WHERE lower(username) = lower($1)`, name).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", domain.ErrUserNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("find username: %w", err)
+	}
+	return id, nil
 }
 
 func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {

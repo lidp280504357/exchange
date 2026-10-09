@@ -95,7 +95,7 @@ func (s *Server) ChangeStatus(ctx context.Context, req *userv1.ChangeStatusReque
 
 // ListUsers pages through accounts newest first.
 func (s *Server) ListUsers(ctx context.Context, req *userv1.ListUsersRequest) (*userv1.ListUsersResponse, error) {
-	f := ports.UserFilter{Status: req.GetStatus(), Region: req.GetRegion(), Limit: int(req.GetLimit())}
+	f := ports.UserFilter{Status: req.GetStatus(), Region: req.GetRegion(), Q: req.GetQ(), IDs: req.GetUserIds(), Limit: int(req.GetLimit())}
 	if req.GetCreatedFrom() != nil {
 		f.CreatedFrom = req.GetCreatedFrom().AsTime()
 	}
@@ -111,6 +111,15 @@ func (s *Server) ListUsers(ctx context.Context, req *userv1.ListUsersRequest) (*
 		resp.Users = append(resp.Users, toProto(u))
 	}
 	return resp, nil
+}
+
+// FindUsername returns the account of a username (B167).
+func (s *Server) FindUsername(ctx context.Context, req *userv1.FindUsernameRequest) (*userv1.FindUsernameResponse, error) {
+	id, err := s.svc.FindUsername(ctx, req.GetUsername())
+	if err != nil {
+		return nil, err
+	}
+	return &userv1.FindUsernameResponse{UserId: id}, nil
 }
 
 // UserStats counts accounts.

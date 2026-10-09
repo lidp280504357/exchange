@@ -12,6 +12,10 @@ service UserService {
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   // GetUser returns a profile, including its account status.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  // FindUsername returns the account a username belongs to, whatever its
+  // case (B167: the admin console's lookup, through auth-service's
+  // FindUser); NOT_FOUND without one.
+  rpc FindUsername(FindUsernameRequest) returns (FindUsernameResponse);
   // CheckEligibility decides whether a user may use a feature now.
   rpc CheckEligibility(CheckEligibilityRequest) returns (CheckEligibilityResponse);
   // ChangeStatus moves an account to another status for an operator, with
@@ -132,6 +136,14 @@ message GetUserResponse {
   User user = 1;
 }
 
+message FindUsernameRequest {
+  string username = 1;
+}
+
+message FindUsernameResponse {
+  string user_id = 1;
+}
+
 message CheckEligibilityRequest {
   string user_id = 1;
   // SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER,
@@ -180,6 +192,14 @@ message ListUsersRequest {
   string cursor = 5;
   // At most this many (1 to 200; default 50).
   int32 limit = 6;
+  // A keyword (B167): only accounts whose username contains it, whatever
+  // the case, or that are among user_ids; empty for all (user_ids then
+  // unused).
+  string q = 7;
+  // The accounts another service matched on the same keyword, listed with
+  // the username matches: auth-service's SearchUsers, the email addresses
+  // and phone numbers that contain it. At most 500.
+  repeated string user_ids = 8;
 }
 
 message ListUsersResponse {

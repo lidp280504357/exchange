@@ -23,6 +23,15 @@ func (u *Client) Create(ctx context.Context, n ports.NewUser) error {
 	return err
 }
 
+// FindUsername returns the account of a username (B167).
+func (u *Client) FindUsername(ctx context.Context, name string) (string, error) {
+	resp, err := u.c.FindUsername(ctx, &userv1.FindUsernameRequest{Username: name})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetUserId(), nil
+}
+
 // Get returns what login needs to know about a user.
 func (u *Client) Get(ctx context.Context, userID string) (ports.UserInfo, error) {
 	resp, err := u.c.GetUser(ctx, &userv1.GetUserRequest{UserId: userID})

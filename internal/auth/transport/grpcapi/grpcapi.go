@@ -71,13 +71,23 @@ func securityProto(sec domain.SecurityContext) *authv1.SecurityContext {
 	}
 }
 
-// FindUser looks a user up by email address or phone number.
+// FindUser looks a user up by email address, phone number or username.
 func (s *Server) FindUser(ctx context.Context, req *authv1.FindUserRequest) (*authv1.FindUserResponse, error) {
 	id, err := s.accounts.FindUser(ctx, req.GetIdentifier())
 	if err != nil {
 		return nil, err
 	}
 	return &authv1.FindUserResponse{UserId: id}, nil
+}
+
+// SearchUsers returns the users whose email address or phone number
+// contains a keyword (B167).
+func (s *Server) SearchUsers(ctx context.Context, req *authv1.SearchUsersRequest) (*authv1.SearchUsersResponse, error) {
+	ids, err := s.accounts.SearchUsers(ctx, req.GetQ(), int(req.GetLimit()))
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.SearchUsersResponse{UserIds: ids}, nil
 }
 
 func stamp(t time.Time) *timestamppb.Timestamp {

@@ -53,6 +53,9 @@ type UserRepo interface {
 	// Stats counts every account, those created at or after since, and
 	// those created on each of the last days (UTC, today included).
 	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
+	// FindUsername returns the account whose username is name, whatever
+	// the case, or domain.ErrUserNotFound.
+	FindUsername(ctx context.Context, name string) (string, error)
 }
 
 // UserFilter selects accounts for the admin console.
@@ -61,9 +64,13 @@ type UserFilter struct {
 	Region        string
 	CreatedFrom   time.Time
 	CreatedBefore time.Time
-	AfterTime     time.Time
-	AfterID       string
-	Limit         int
+	// Q, when set, keeps the accounts whose username contains it (any
+	// case) and those among IDs (matched elsewhere on it; B167).
+	Q         string
+	IDs       []string
+	AfterTime time.Time
+	AfterID   string
+	Limit     int
 }
 
 // UserStats are the admin console's account counts.

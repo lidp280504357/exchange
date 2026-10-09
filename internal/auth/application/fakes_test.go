@@ -16,6 +16,7 @@ import (
 
 	"github.com/skill/exchange/internal/auth/domain"
 	"github.com/skill/exchange/internal/auth/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/ratelimit"
 )
@@ -218,6 +219,17 @@ func (r memIdentities) Find(_ context.Context, kind, value string) (*domain.Iden
 		}
 	}
 	return nil, nil
+}
+
+func (r memIdentities) SearchUsers(_ context.Context, q string, limit int) ([]string, error) {
+	var out []string
+	for _, id := range r.s.identities {
+		if strings.Contains(strings.ToLower(id.Value), strings.ToLower(q)) && !slices.Contains(out, id.UserID) {
+			out = append(out, id.UserID)
+		}
+	}
+	slices.SortFunc(out, func(a, b string) int { return compareStrings(b, a) })
+	return out[:min(len(out), limit)], nil
 }
 
 func (r memIdentities) ByUser(_ context.Context, userID string) ([]domain.Identity, error) {
@@ -572,12 +584,23 @@ func (f fakeFlags) Enabled(key string, s flags.Subject) bool {
 	return ok && fl.Allows(s)
 }
 
-// fakeUsers is user-service.
+// fakeUsers is user-service; usernames maps a lowercase username to its
+// account.
 type fakeUsers struct {
-	mu      sync.Mutex
-	users   map[string]ports.UserInfo
-	created []ports.NewUser
-	fail    error
+	mu        sync.Mutex
+	users     map[string]ports.UserInfo
+	usernames map[string]string
+	created   []ports.NewUser
+	fail      error
+}
+
+func (u *fakeUsers) FindUsername(_ context.Context, name string) (string, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if id, ok := u.usernames[strings.ToLower(name)]; ok {
+		return id, nil
+	}
+	return "", apperr.NotFound("no such user")
 }
 
 func (u *fakeUsers) Create(_ context.Context, n ports.NewUser) error {

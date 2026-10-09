@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -508,5 +509,49 @@ func TestUserStatusChanges(t *testing.T) {
 	}
 	if len(eventsOf[*authv1.SessionRevoked](a.store)) != 1 {
 		t.Fatal("redelivery revoked again")
+	}
+}
+
+// FindUser takes an email address, a phone number or a username (through
+// user-service, whatever its case); anything else, and no such user, is
+// NOT_FOUND. SearchUsers matches email addresses and phone numbers by
+// substring, whatever the case, newest first (B167).
+func TestFindAndSearchUsers(t *testing.T) {
+	a := newAccountFixture(t)
+	a.store.identities = append(a.store.identities,
+		domain.Identity{ID: "i1", UserID: "u1", Kind: domain.ChannelEmail.Kind(), Value: "pacminer@b167.test"},
+		domain.Identity{ID: "i2", UserID: "u2", Kind: domain.ChannelEmail.Kind(), Value: "satoshi@b167.test"},
+		domain.Identity{ID: "i3", UserID: "u2", Kind: domain.ChannelSMS.Kind(), Value: "+6581234567"},
+	)
+	a.users.usernames = map[string]string{"user_8c6fbf82": "u3"}
+	for _, c := range []struct{ in, want string }{
+		{"  pacminer@b167.test", "u1"}, {"+6581234567", "u2"}, {"USER_8c6fbf82", "u3"},
+	} {
+		if got, err := a.acc.FindUser(ctx, c.in); err != nil || got != c.want {
+			t.Fatalf("%q: %q %v", c.in, got, err)
+		}
+	}
+	for _, in := range []string{"pacminer", "nobody@b167.test", "+1", "not an email@", "x@", ""} {
+		if _, err := a.acc.FindUser(ctx, in); !apperr.Is(err, apperr.CodeNotFound) {
+			t.Fatalf("%q: %v", in, err)
+		}
+	}
+	for _, c := range []struct {
+		q     string
+		limit int
+		want  []string
+	}{
+		{"PACMINER", 0, []string{"u1"}},
+		{"B167.TEST", 0, []string{"u2", "u1"}},
+		{"8123", 0, []string{"u2"}},
+		{"b167.test", 1, []string{"u2"}},
+		{"nothing", 0, nil},
+	} {
+		if got, err := a.acc.SearchUsers(ctx, c.q, c.limit); err != nil || !slices.Equal(got, c.want) {
+			t.Fatalf("%q: %v %v", c.q, got, err)
+		}
+	}
+	if _, err := a.acc.SearchUsers(ctx, "  ", 0); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no keyword: %v", err)
 	}
 }

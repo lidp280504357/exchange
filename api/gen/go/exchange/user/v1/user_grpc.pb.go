@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	UserService_CreateUser_FullMethodName       = "/exchange.user.v1.UserService/CreateUser"
 	UserService_GetUser_FullMethodName          = "/exchange.user.v1.UserService/GetUser"
+	UserService_FindUsername_FullMethodName     = "/exchange.user.v1.UserService/FindUsername"
 	UserService_CheckEligibility_FullMethodName = "/exchange.user.v1.UserService/CheckEligibility"
 	UserService_ChangeStatus_FullMethodName     = "/exchange.user.v1.UserService/ChangeStatus"
 	UserService_ListUsers_FullMethodName        = "/exchange.user.v1.UserService/ListUsers"
@@ -42,6 +43,10 @@ type UserServiceClient interface {
 	CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error)
 	// GetUser returns a profile, including its account status.
 	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
+	// FindUsername returns the account a username belongs to, whatever its
+	// case (B167: the admin console's lookup, through auth-service's
+	// FindUser); NOT_FOUND without one.
+	FindUsername(ctx context.Context, in *FindUsernameRequest, opts ...grpc.CallOption) (*FindUsernameResponse, error)
 	// CheckEligibility decides whether a user may use a feature now.
 	CheckEligibility(ctx context.Context, in *CheckEligibilityRequest, opts ...grpc.CallOption) (*CheckEligibilityResponse, error)
 	// ChangeStatus moves an account to another status for an operator, with
@@ -87,6 +92,16 @@ func (c *userServiceClient) GetUser(ctx context.Context, in *GetUserRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUserResponse)
 	err := c.cc.Invoke(ctx, UserService_GetUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) FindUsername(ctx context.Context, in *FindUsernameRequest, opts ...grpc.CallOption) (*FindUsernameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FindUsernameResponse)
+	err := c.cc.Invoke(ctx, UserService_FindUsername_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +190,10 @@ type UserServiceServer interface {
 	CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error)
 	// GetUser returns a profile, including its account status.
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
+	// FindUsername returns the account a username belongs to, whatever its
+	// case (B167: the admin console's lookup, through auth-service's
+	// FindUser); NOT_FOUND without one.
+	FindUsername(context.Context, *FindUsernameRequest) (*FindUsernameResponse, error)
 	// CheckEligibility decides whether a user may use a feature now.
 	CheckEligibility(context.Context, *CheckEligibilityRequest) (*CheckEligibilityResponse, error)
 	// ChangeStatus moves an account to another status for an operator, with
@@ -211,6 +230,9 @@ func (UnimplementedUserServiceServer) CreateUser(context.Context, *CreateUserReq
 }
 func (UnimplementedUserServiceServer) GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUser not implemented")
+}
+func (UnimplementedUserServiceServer) FindUsername(context.Context, *FindUsernameRequest) (*FindUsernameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FindUsername not implemented")
 }
 func (UnimplementedUserServiceServer) CheckEligibility(context.Context, *CheckEligibilityRequest) (*CheckEligibilityResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckEligibility not implemented")
@@ -286,6 +308,24 @@ func _UserService_GetUser_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UserServiceServer).GetUser(ctx, req.(*GetUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_FindUsername_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindUsernameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).FindUsername(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_FindUsername_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).FindUsername(ctx, req.(*FindUsernameRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -430,6 +470,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUser",
 			Handler:    _UserService_GetUser_Handler,
+		},
+		{
+			MethodName: "FindUsername",
+			Handler:    _UserService_FindUsername_Handler,
 		},
 		{
 			MethodName: "CheckEligibility",
