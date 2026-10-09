@@ -23,7 +23,7 @@
 // switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
+import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, note, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -642,9 +642,11 @@ try {
     // download page for Android, the store's the store.
     const links = { android: `${APP}/download?platform=android`, ios: APPS_OFFERED.ios.url };
     if (apk?.mark !== "android" || store?.mark !== "ios") throw new Error(`the cards' QR marks: ${apk?.mark}, ${store?.mark}`);
+    let unread = false;
     for (const p of ["android", "ios"]) {
       const read = await decodeQr(page, await page.$(`[data-testid="app-${p}"] [role="img"]`));
-      if (read[0] !== links[p]) throw new Error(`the ${p} card's QR code reads ${JSON.stringify(read)}, not ${links[p]}`);
+      if (read === null) unread = true;
+      else if (read[0] !== links[p]) throw new Error(`the ${p} card's QR code reads ${JSON.stringify(read)}, not ${links[p]}`);
     }
     await page.hover('header [data-testid="download-menu"]');
     await page.waitForSelector('[data-testid="download-qrs"]', { visible: true, timeout: 10000 });
@@ -653,7 +655,9 @@ try {
     const menuMarks = await page.$$eval('[data-testid="download-qrs"] [data-testid="qr-logo"] svg', (svgs) => svgs.map((s) => s.getAttribute("data-platform")));
     if (menuMarks.join() !== "android,ios") throw new Error(`the top bar's QR marks: ${menuMarks.join()}`);
     const menuRead = await decodeQr(page, await page.$('[data-testid="download-qrs"]'));
-    if (menuRead.join() !== [links.android, links.ios].join()) throw new Error(`the top bar's QR codes read ${JSON.stringify(menuRead)}`);
+    if (menuRead === null) unread = true;
+    else if (menuRead.join() !== [links.android, links.ios].join()) throw new Error(`the top bar's QR codes read ${JSON.stringify(menuRead)}`);
+    if (unread) note("this Chrome has no BarcodeDetector for QR codes: the download QR codes were not read back");
     await shot("8c-download");
     await page.mouse.move(720, 700);
     if (!(await page.$('footer a[href="/download"]'))) throw new Error("the footer does not lead to the download page");

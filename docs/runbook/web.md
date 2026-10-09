@@ -202,7 +202,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 | 入口 | 顶栏语言按钮左边的下载图标（悬停或键盘聚焦弹出每个平台的二维码与「更多下载方式」，点击去下载页）；页脚「关于」列「下载 App」 | 「我的」的「其他」组与设置页底部「下载 App」 |
 
 - 二维码里放什么（core `qrUrl`）：链接方式放链接本身（商店直接打开）；上传的安装包放下载页地址加 `?platform=`——手机扫了会被分流到手机站的下载页，那里有安装按钮与说明（`itms-services` 链接放进二维码打不开，Android 也需要未知来源的说明）。`?platform=` 让该平台排在前面。
-- 二维码中间贴系统标志（F25，用户 10-09 要求）：ui `PlatformLogo`（Android 机器人头、苹果标，内联 SVG，取 Simple Icons 的 CC0 路径，单色 `currentColor`）放在白底圆角徽章里居中，徽章边长为码的 24%（面积约 6%，要求不超过 20%）；带标志的码用纠错等级 H（`QrCode` 的 `logo`，不带的照旧 M）。PC 下载页卡片与顶栏面板都有，手机站不显示二维码。冒烟第 8c 步用 Chrome 的 BarcodeDetector 从截图读回两张卡片与顶栏面板的码，须等于各自的链接（`lib.mjs` 的 `decodeQr`；这台 Chrome 没有 BarcodeDetector 时失败而不是跳过）。
+- 二维码中间贴系统标志（F25，用户 10-09 要求）：ui `PlatformLogo`（Android 机器人头、苹果标，内联 SVG，取 Simple Icons 的 CC0 路径，单色 `currentColor`）放在白底圆角徽章里居中，徽章边长为码的 24%（面积约 6%，要求不超过 20%）；带标志的码用纠错等级 H（`QrCode` 的 `logo`，不带的照旧 M）。PC 下载页卡片与顶栏面板都有，手机站不显示二维码。冒烟第 8c 步用 Chrome 的 BarcodeDetector 从截图读回两张卡片与顶栏面板的码，须等于各自的链接（`lib.mjs` 的 `decodeQr`；Chrome 没有 BarcodeDetector 时——macOS 的有，并非每个平台的都有——打一行 `note` 后照常往下，不读回，F29）。
 - 手机站按 UA 判断本机平台（core `devicePlatform`：iPhone/iPad/iPod，或自称 Macintosh 但有触屏的 iPad；Android）。
 - 体积：二维码库（qrcode.react）、顶栏的二维码面板（`features/download/lazyQrs.ts`，指针或焦点第一次到下载图标时开始加载，连同文案）与下载页各自成块，不在首屏；顶栏只多一个读 `/v1/platform/apps` 的查询与图标（PC 入口 172.6 → 174.0 KB，手机 150.9 → 151.0 KB）。
 - 文案在两站的 `src/i18n/download.ts`（`pcDownload`/`mDownload`）；顶栏、页脚与「我的」用 core 的 `nav.download`、`nav.downloadApp`。

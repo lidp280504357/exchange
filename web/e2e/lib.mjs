@@ -349,18 +349,20 @@ export function withApps(page, apps, fn) {
   return withAnswer(page, "/v1/platform/apps", apps, fn);
 }
 
+/** note prints what a run could not check here, without failing it. */
+export const note = (what) => console.log("note " + what);
+
 /**
  * decodeQr reads the QR codes an element shows, left to right, from one
  * screenshot of it, with Chrome's BarcodeDetector (the download QR codes
  * carry a logo, F25: what matters is that they still read as their links).
- * It fails when this Chrome cannot read QR codes rather than passing unread.
+ * null when this Chrome cannot read QR codes (BarcodeDetector is on macOS,
+ * not on every platform's Chrome): the caller notes it and goes on (F29).
  */
 export async function decodeQr(page, element) {
   const png = await element.screenshot({ encoding: "base64" });
   return page.evaluate(async (b64) => {
-    if (!("BarcodeDetector" in window) || !(await BarcodeDetector.getSupportedFormats()).includes("qr_code")) {
-      throw new Error("this Chrome has no BarcodeDetector for QR codes");
-    }
+    if (!("BarcodeDetector" in window) || !(await BarcodeDetector.getSupportedFormats()).includes("qr_code")) return null;
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
     const codes = await new BarcodeDetector({ formats: ["qr_code"] }).detect(bitmap);
