@@ -56,7 +56,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
       - 资产表头修复：`DataTable` 的 `stickyTop` 不带 `height` 时外层用 clip。
       - 手机站「我的」按设计 §7.3 重做：`apps/m/src/pages/account/me/`，资产汇总钩子是 core 的 `usePortfolio`。
     - 用户决定（2026-10-02）：
-      - 合约最高 125 倍，7 档风险限额阶梯在 `deploy/instruments/test.json`（前端与规格接口都从这里读）。
+      - 合约最高杠杆与风险限额阶梯按币安各合约的真实分档生成（2026-10-10 用户决定「全部按照币安来」，BTC/ETH U 本位第一档 150 倍，取代原先的"最高 125 倍、7 档"），在 `deploy/instruments/test.json`（前端与规格接口都从这里读）。
       - 所有交易一律和 HOUSE 成交（现货、合约，开多开空都是），用户之间不撮合（`market.internal_matching` 关）。HOUSE 为全部交易对与合约报价（`scripts/ops/house.sh flags`）；以 BTC 计价的交易对按 USDT 价折算额度。测试服的上限在 compose 里放大（单资产 2,000,000、单合约 5,000,000 USDT），资金由 `house.sh seed` 补到相应水平（合约保证金用 `exchangectl ledger house-margin`）。库存也算头寸：持有超过单资产上限会让 HOUSE 在所有交易对上停止买入该资产。
       - 端到端脚本全部以 HOUSE 为对手方，价格从当时的盘口推出；`matching-failover` 也改为与 HOUSE 成交。见 `docs/runbook/market-maker.md`。
       - 上币扩展：前 50 之外再上 37 个知名币（`gen-top50.go` 的 `extension` 名单，币安没在交易的跳过，TON 因此没上），全部是站内资产、只做现货、对手方 HOUSE；已上架交易对重新生成时保留原有的 tick、lot 与数量上下限；每个币的资料在 `web/packages/core/assets/coins/`。
