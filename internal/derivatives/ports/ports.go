@@ -113,7 +113,8 @@ type PositionRepo interface {
 // UserFilter selects users for the admin console's lists (review L3: the
 // real users' rows, or all but the bots' and test accounts'): only those
 // of Only when it is not nil (an empty Only selects nobody), none of
-// Except. At most httpx.MaxFilterUserIDs each.
+// Except. At most httpx.MaxFilterUserIDs each from a GET's query string,
+// httpx.MaxFilterUserIDsBody from a POST .../list's body (review C76).
 type UserFilter struct {
 	Only, Except []string
 }

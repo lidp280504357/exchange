@@ -138,7 +138,9 @@ type Account struct {
 // AccountFilter narrows a list of accounts; empty fields match all.
 // UserIDs, when not nil, keeps only those users' accounts (an empty one,
 // nobody's) and ExcludeUserIDs leaves those out: the admin console's list
-// of the real users' accounts (review L3), at most httpx.MaxFilterUserIDs each.
+// of the real users' accounts (review L3), at most httpx.MaxFilterUserIDs
+// each from a GET's query string, httpx.MaxFilterUserIDsBody from a POST
+// .../list's body (review C76).
 type AccountFilter struct {
 	UserID         string
 	UserIDs        []string

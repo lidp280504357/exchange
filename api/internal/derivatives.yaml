@@ -122,16 +122,21 @@ components:
     Watch:
       name: watch
       in: query
-      description: true keeps only the positions under watch, as /internal/derivatives/risk lists them.
+      description: |
+        The literal true keeps only the positions under watch, as
+        /internal/derivatives/risk lists them; any other value, or none,
+        lists them all.
       schema:
-        type: boolean
+        type: string
+        examples: ['true']
     Limit:
       name: limit
       in: query
-      description: At most this many, 200 by default; past 1,000 it is 1,000.
+      description: |
+        At most this many: 200 when absent, not a number or 0 or less;
+        past 1,000 it is 1,000.
       schema:
         type: integer
-        minimum: 1
     UserIDs:
       name: user_ids
       in: query

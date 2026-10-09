@@ -213,7 +213,8 @@ func positionKey(p domain.Position) string { return p.UserID + "|" + p.Symbol + 
 func (r memPositions) OfUser(_ context.Context, userID, symbol string) ([]domain.Position, error) {
 	var out []domain.Position
 	for _, p := range r.st.positions {
-		if p.UserID == userID && (symbol == "" || p.Symbol == symbol) {
+		// As PostgreSQL compares a uuid column: in any case (review C77 ①).
+		if strings.EqualFold(p.UserID, userID) && (symbol == "" || p.Symbol == symbol) {
 			out = append(out, p)
 		}
 	}
