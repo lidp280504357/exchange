@@ -41,6 +41,7 @@ func TestContractValidate(t *testing.T) {
 		"cap falls":      func(c *Contract) { c.RiskTiers[1].MaxNotional = d("10000") },
 		"mmr falls":      func(c *Contract) { c.RiskTiers[1].MMR = d("0.001") },
 		"leverage":       func(c *Contract) { c.RiskTiers[0].MaxLeverage = 200 },
+		"leverage cap":   func(c *Contract) { c.RiskTiers[0].MaxLeverage = LeverageCap + 1 },
 	} {
 		bad := perp()
 		bad.RiskTiers = append([]RiskTier(nil), bad.RiskTiers...)
@@ -48,6 +49,12 @@ func TestContractValidate(t *testing.T) {
 		if err := bad.Validate(btc, usdt); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// Binance's BTCUSDT goes to 150x on its first bracket (B171).
+	binance := perp()
+	binance.RiskTiers = []RiskTier{{MaxNotional: d("300000"), MaxLeverage: LeverageCap, MMR: d("0.004")}, {MaxNotional: d("800000"), MaxLeverage: 100, MMR: d("0.005")}}
+	if err := binance.Validate(btc, usdt); err != nil || binance.MaxLeverage() != 150 {
+		t.Fatalf("150x first tier: %v, max %d", err, binance.MaxLeverage())
 	}
 	disabled := btc
 	disabled.TradingEnabled = false

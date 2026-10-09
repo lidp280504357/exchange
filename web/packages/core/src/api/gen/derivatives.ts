@@ -567,6 +567,7 @@ export interface operations {
                     position_mode?: "ONE_WAY" | "HEDGE";
                     /** @enum {string} */
                     margin_mode?: "CROSS" | "ISOLATED";
+                    /** @description At most the contract's max_leverage, its first risk tier's (Binance's; 150 for BTC-USDT-PERP and ETH-USDT-PERP), else DERIV_LEVERAGE_EXCEEDED. */
                     leverage?: number;
                 };
             };

@@ -102,20 +102,27 @@ func (c Contract) exact(qty, price decimal.Decimal) decimal.Decimal {
 	return qty.Mul(c.ContractSize).Div(price)
 }
 
+// LeverageCap bounds a tier's leverage as instrument-service does, a
+// guard: a contract's top leverage is its first tier's (B171).
+const LeverageCap = 150
+
 // ValidTiers checks a ladder as instrument-service does: 1 to 20 tiers,
-// notional caps rising, leverage (1 to 125) not rising, maintenance
-// margin rates not falling and below 1 / leverage.
+// notional caps rising, leverage (1 to LeverageCap) not rising,
+// maintenance margin rates not falling and below 1 / leverage.
 func ValidTiers(tiers []RiskTier) error {
 	if len(tiers) == 0 || len(tiers) > 20 {
 		return apperr.Invalid("1 to 20 risk tiers are required")
 	}
 	one := decimal.NewFromInt(1)
 	for i, t := range tiers {
-		if !t.MaxNotional.IsPositive() || t.MaxLeverage < 1 || t.MaxLeverage > 125 || !t.MMR.IsPositive() ||
+		if !t.MaxNotional.IsPositive() || t.MaxLeverage < 1 || t.MaxLeverage > LeverageCap || !t.MMR.IsPositive() ||
 			!t.MMR.LessThan(one.Div(decimal.NewFromInt32(t.MaxLeverage))) {
-			return apperr.Invalid(fmt.Sprintf("tier %d: max_notional above 0, max_leverage 1 to 125, mmr above 0 and below 1/max_leverage", i+1))
+			return apperr.Invalid(fmt.Sprintf("tier %d: max_notional above 0, max_leverage 1 to %d, mmr above 0 and below 1/max_leverage", i+1, LeverageCap))
 		}
-		if i > 0 && (!t.MaxNotional.GreaterThan(tiers[i-1].MaxNotional) || t.MaxLeverage > tiers[i-1].MaxLeverage || t.MMR.LessThan(tiers[i-1].MMR)) {
+	}
+	for i := 1; i < len(tiers); i++ {
+		prev, t := tiers[i-1], tiers[i]
+		if !t.MaxNotional.GreaterThan(prev.MaxNotional) || t.MaxLeverage > prev.MaxLeverage || t.MMR.LessThan(prev.MMR) {
 			return apperr.Invalid(fmt.Sprintf("tier %d: max_notional must rise, max_leverage and mmr must not move the other way", i+1))
 		}
 	}

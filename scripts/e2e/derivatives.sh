@@ -2,7 +2,8 @@
 # Perpetual contract trading end to end (implementation plan §7.3 task 5)
 # on ETH-USDT-PERP, against HOUSE (every order trades against HOUSE, user
 # decision 2026-10-02): two new users move USDT to FUTURES; leverage stops
-# at the contract's 125x; a bid under the market rests with its margin
+# at the contract's top, its first tier's (Binance's: 150x on
+# ETH-USDT-PERP, B171); a bid under the market rests with its margin
 # reserved until canceled; the buyer (cross, 10x) opens a long with a limit
 # buy over the ask, the seller (isolated, 20x) a short with a market sell.
 # Then the USDT-margined line closes for a moment as the console closes it
@@ -68,8 +69,12 @@ expect 200 - "buyer: cross, 10x"
 check '.margin_mode == "CROSS" and .leverage == 10 and .position_mode == "ONE_WAY"' "defaults kept, leverage set"
 call PUT /v1/derivatives/settings/$SYMBOL '{"margin_mode":"ISOLATED","leverage":20}' "${SELLER[@]}"
 expect 200 - "seller: isolated, 20x"
-call PUT /v1/derivatives/settings/$SYMBOL '{"leverage":126}' "${SELLER[@]}"
-expect 400 DERIV_LEVERAGE_EXCEEDED "above the contract's 125x"
+call GET /v1/market/contracts/$SYMBOL ""
+expect 200 - "the contract's specification"
+TOP=$(jq -r .max_leverage <<<"$BODY")
+call PUT /v1/derivatives/settings/$SYMBOL "{\"leverage\":$((TOP + 1))}" "${SELLER[@]}"
+expect 400 DERIV_LEVERAGE_EXCEEDED "above the contract's ${TOP}x (its first tier's)"
+check ".details.max_leverage == $TOP" "the details name the contract's top leverage"
 call GET /v1/market/$SYMBOL/mark-price ""
 expect 200 - "mark price"
 MARK=$(jq -r .mark_price <<<"$BODY")

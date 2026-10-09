@@ -222,3 +222,22 @@ func TestMaintenanceIsContinuousAcrossTiers(t *testing.T) {
 		t.Fatalf("maintenance %s", got)
 	}
 }
+
+// ValidTiers takes a ladder as instrument-service does, up to 150x on its
+// first tier (B171: Binance's BTCUSDT and ETHUSDT), and a contract's top
+// leverage is its first tier's.
+func TestValidTiersUpTo150x(t *testing.T) {
+	ladder := []RiskTier{{MaxNotional: d("300000"), MaxLeverage: LeverageCap, MMR: d("0.004")}, {MaxNotional: d("800000"), MaxLeverage: 100, MMR: d("0.005")}}
+	if err := ValidTiers(ladder); err != nil {
+		t.Fatalf("150x: %v", err)
+	}
+	over := append([]RiskTier(nil), ladder...)
+	over[0].MaxLeverage = LeverageCap + 1
+	if err := ValidTiers(over); err == nil {
+		t.Fatal("151x accepted")
+	}
+	c := Contract{Tiers: ladder}
+	if c.MaxLeverage() != 150 || !c.MaxNotional(150).Equal(d("300000")) || !c.MaxNotional(100).Equal(d("800000")) {
+		t.Fatalf("leverage %d, caps %s %s", c.MaxLeverage(), c.MaxNotional(150), c.MaxNotional(100))
+	}
+}

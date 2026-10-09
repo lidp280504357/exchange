@@ -227,6 +227,11 @@ func (c Contract) validateMargin(quote Asset) error {
 	return nil
 }
 
+// LeverageCap bounds a tier's leverage, a guard: a contract's top
+// leverage is its first tier's, Binance's (B171, the user 2026-10-10:
+// all as Binance; BTCUSDT's and ETHUSDT's first brackets are 150x).
+const LeverageCap = 150
+
 // validateTiers checks the ladder: notional caps rise, leverage does not,
 // maintenance margin rises and stays below the initial margin of its
 // leverage (1 / leverage), or a position would be liquidated on opening.
@@ -238,8 +243,8 @@ func (c Contract) validateTiers() error {
 		switch {
 		case !t.MaxNotional.IsPositive():
 			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_notional must be positive", c.Symbol, i+1))
-		case t.MaxLeverage < 1 || t.MaxLeverage > 125:
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_leverage must be 1 to 125", c.Symbol, i+1))
+		case t.MaxLeverage < 1 || t.MaxLeverage > LeverageCap:
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_leverage must be 1 to %d", c.Symbol, i+1, LeverageCap))
 		case !t.MMR.IsPositive() || !t.MMR.LessThan(one.Div(decimal.NewFromInt32(t.MaxLeverage))):
 			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: mmr must be above 0 and below 1/max_leverage", c.Symbol, i+1))
 		}

@@ -3,8 +3,8 @@
 # specifications (task 1), the index price, mark price and funding (task
 # 3) over REST and WebSocket, and every contract's public book: Binance
 # futures' (ADR-0015), which HOUSE offers. Every contract following
-# Binance carries its brackets (B168: BTC's and ETH's linear contracts too,
-# their 150x first brackets taken at 125x), the coin-margined ones (§2.1,
+# Binance carries its brackets and its top leverage (B168, B171: BTC's and
+# ETH's linear contracts too, to 150x), the coin-margined ones (§2.1,
 # listed with ?margin_type=COIN) Binance COIN-M's face values and ladders. The mark price needs the reference feed (flag
 # market.reference_feed, on in the test environment); the books need
 # market.reference_depth to allow the contracts.
@@ -19,17 +19,17 @@ echo "== specifications"
 call GET /v1/market/contracts ""
 expect 200 - "contracts"
 check '[.contracts[].symbol] | contains(["BTC-USDT-PERP","ETH-USDT-PERP"])' "seeded contracts listed"
-check 'all(.contracts[]; .max_leverage == .risk_tiers[0].max_leverage and .max_leverage >= 1 and .max_leverage <= 125)' "each contract's top leverage is its first tier's, at most 125x"
-check '[.contracts[] | select(.symbol | IN("BTC-USDT-PERP","ETH-USDT-PERP")) | .max_leverage] == [125,125]' "BTC and ETH go to 125x"
+check 'all(.contracts[]; .max_leverage == .risk_tiers[0].max_leverage and .max_leverage >= 1 and .max_leverage <= 150)' "each contract's top leverage is its first tier's, at most 150x"
+check '[.contracts[] | select(.symbol | IN("BTC-USDT-PERP","ETH-USDT-PERP")) | .max_leverage] == [150,150]' "BTC and ETH go to 150x, as Binance's"
 call GET /v1/market/contracts/btc-usdt-perp ""
 expect 200 - "one contract (symbol is case-insensitive)"
 check '.index_symbol == "BTC-USDT" and .funding_interval_hours == 8' "its index and funding interval"
 btc_cap=$(jq -r .funding_cap <<<"$BODY")
-# Binance's brackets (B168, deploy/instruments/gen-contracts.go), its
-# 150x first bracket taken at the platform's 125x: as the file lists them.
+# Binance's brackets (B168, B171; deploy/instruments/gen-contracts.go), as
+# the file lists them.
 LADDER=$(jq -c '.contracts[] | select(.symbol == "BTC-USDT-PERP") | [.risk_tiers[] | [.max_notional, .max_leverage, .mmr]]' "$(dirname "$0")/../../deploy/instruments/test.json")
 check "[.risk_tiers[] | [.max_notional, .max_leverage, .mmr]] == $LADDER" "the risk limit ladder as deploy/instruments/test.json lists it"
-check '(.risk_tiers | length) == 12 and .risk_tiers[0].max_notional == "300000" and .risk_tiers[0].max_leverage == 125 and .risk_tiers[-1].max_leverage == 1' "Binance's 12 brackets: 125x to 300,000 USDT, down to 1x"
+check '(.risk_tiers | length) == 12 and .risk_tiers[0].max_notional == "300000" and .risk_tiers[0].max_leverage == 150 and .risk_tiers[-1].max_leverage == 1' "Binance's 12 brackets: 150x to 300,000 USDT, down to 1x"
 call GET /v1/market/contracts/BTC-USDT ""
 expect 404 COMMON_NOT_FOUND "a pair is not a contract"
 
