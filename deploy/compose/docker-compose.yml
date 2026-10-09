@@ -72,9 +72,10 @@ services:
       - "1"
       # Without a cap Seastar takes memory as it goes and never gives it
       # back: 3.4 to 4.3 GB of the test server's 7.8 on 2026-10-02, the
-      # swap full and the host unresponsive during builds. 2 GB holds the
-      # 93 partitions (topic_memory_per_partition 4 MiB allows 512); the
-      # container's limit below leaves Seastar's own overhead room.
+      # swap full and the host unresponsive during builds. 2 GB allows 512
+      # partitions (topic_memory_per_partition 4 MiB; 111 in use on
+      # 2026-10-08); the container's limit below leaves Seastar's own
+      # overhead room.
       - --memory
       - 2G
       - --overprovisioned
@@ -84,6 +85,12 @@ services:
       - "8081:8081"
       - "9644:9644"
     mem_limit: 2560m
+    # Each partition holds topic_fds_per_partition (5) files open: with
+    # Docker's default soft limit of 1024 Redpanda refused topics past about
+    # 204 partitions as "hardware constraints" (the dev. namespace on
+    # 2026-10-07, review C67 ①); 65536 leaves memory the bound (review C71).
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
