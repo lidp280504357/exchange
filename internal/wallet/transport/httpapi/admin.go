@@ -22,6 +22,7 @@ func (h *Handler) adminRoutes(r chi.Router) {
 	r.Get("/internal/wallet/withdrawals/{id}", h.adminWithdrawal)
 	r.Post("/internal/wallet/withdrawals/{id}/hold", h.adminHold)
 	r.Get("/internal/wallet/deposits", h.adminDeposits)
+	r.Post("/internal/wallet/deposits/list", h.adminDeposits)
 	r.Post("/internal/wallet/deposits/manual/check", h.adminCheckManual)
 	r.Post("/internal/wallet/deposits/manual", h.adminBookManual)
 	r.Get("/internal/wallet/deposits/{id}", h.adminDeposit)
@@ -141,10 +142,12 @@ func AdminDepositJSONOf(d domain.Deposit) AdminDepositJSON {
 
 // adminDeposits pages through deposits, newest first: user_id, status,
 // network, attention=true (waiting for a decision), manual_pending=true
-// (backfilled, no callback yet), cursor, limit (at most 200, default 50).
+// (backfilled, no callback yet), user_ids or exclude_user_ids (L2), cursor,
+// limit (at most 200, default 50). POST .../list takes the same, the
+// accounts in its body (httpx.UserIDsOf).
 func (h *Handler) adminDeposits(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	only, exclude, err := httpx.UserIDsFrom(q)
+	only, exclude, err := httpx.UserIDsOf(w, r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

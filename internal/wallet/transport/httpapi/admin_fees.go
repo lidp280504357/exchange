@@ -19,6 +19,7 @@ import (
 // fees (review ④): the list, and the decisions on one held for a person.
 func (h *Handler) feeRoutes(r chi.Router) {
 	r.Get("/internal/wallet/custody/fees", h.adminCustodyFees)
+	r.Post("/internal/wallet/custody/fees/list", h.adminCustodyFees)
 	r.Post("/internal/wallet/custody/fees/{withdrawal}/book", h.adminBookCustodyFee)
 	r.Post("/internal/wallet/custody/fees/{withdrawal}/write-off", h.adminWriteOffCustodyFee)
 }
@@ -67,10 +68,11 @@ func CustodyFeeJSONOf(f domain.CustodyFee) CustodyFeeJSON {
 // adminCustodyFees pages through the fees, newest first: provider (UDUN,
 // UDUNMOCK; any when absent), status (HELD, BOOKABLE, WRITTEN_OFF; any when
 // absent), user_ids or exclude_user_ids (the withdrawals' users, L2),
-// cursor, limit (at most 200, default 50).
+// cursor, limit (at most 200, default 50). POST .../list takes the same,
+// the accounts in its body (httpx.UserIDsOf).
 func (h *Handler) adminCustodyFees(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	only, exclude, err := httpx.UserIDsFrom(q)
+	only, exclude, err := httpx.UserIDsOf(w, r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

@@ -1,0 +1,435 @@
+openapi: 3.1.0
+info:
+  title: Exchange wallet lists for the admin console, internal API
+  version: 0.1.0
+  description: |
+    The console's three wallet lists that can be narrowed by account
+    (L2 of the user-kind design 2026-10-09, §1 #8): withdrawals, deposits
+    and the custodians' withdrawal fees. The console shows people by
+    default: it leaves the bots, test accounts and HOUSE out (their IDs
+    from user-service, GET /internal/users/ids in users.yaml) or keeps
+    only some accounts.
+
+    Each list has a GET, its filters in the query string, user_ids or
+    exclude_user_ids among them (at most 1,000 accounts), and a POST
+    .../list variant taking the same query string but the accounts in a
+    JSON body (at most 5,000): the console's sets of test accounts run to
+    thousands. Both read the accounts the same way (httpx.UserIDsOf): one
+    of the two sets, UUIDs in any case, each counted once; an empty
+    user_ids lists nothing, an absent or null one is no filter. Accounts
+    named in a POST's query string, both sets, an ID that is no UUID or
+    too many are 400.
+
+    wallet-service serves these on the compose network only: the gateway
+    does not route /internal.
+servers:
+  - url: http://wallet-service:8092
+tags:
+  - name: lists
+paths:
+  /internal/wallet/withdrawals:
+    get:
+      operationId: listWithdrawals
+      summary: Withdrawals, the review queue by default
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/WithdrawalStatus'
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Asset'
+        - $ref: '#/components/parameters/Network'
+        - $ref: '#/components/parameters/Held'
+        - $ref: '#/components/parameters/MinValue'
+        - $ref: '#/components/parameters/MaxValue'
+        - $ref: '#/components/parameters/MinRisk'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UserIDs'
+        - $ref: '#/components/parameters/ExcludeUserIDs'
+      responses:
+        '200':
+          $ref: '#/components/responses/Withdrawals'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/wallet/withdrawals/list:
+    post:
+      operationId: listWithdrawalsOfAccounts
+      summary: Withdrawals, the accounts in the body
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/WithdrawalStatus'
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Asset'
+        - $ref: '#/components/parameters/Network'
+        - $ref: '#/components/parameters/Held'
+        - $ref: '#/components/parameters/MinValue'
+        - $ref: '#/components/parameters/MaxValue'
+        - $ref: '#/components/parameters/MinRisk'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      requestBody:
+        $ref: '#/components/requestBodies/Accounts'
+      responses:
+        '200':
+          $ref: '#/components/responses/Withdrawals'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/wallet/deposits:
+    get:
+      operationId: listDeposits
+      summary: Deposits, newest first
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/DepositStatus'
+        - $ref: '#/components/parameters/Network'
+        - $ref: '#/components/parameters/Attention'
+        - $ref: '#/components/parameters/ManualPending'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UserIDs'
+        - $ref: '#/components/parameters/ExcludeUserIDs'
+      responses:
+        '200':
+          $ref: '#/components/responses/Deposits'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/wallet/deposits/list:
+    post:
+      operationId: listDepositsOfAccounts
+      summary: Deposits, the accounts in the body
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/DepositStatus'
+        - $ref: '#/components/parameters/Network'
+        - $ref: '#/components/parameters/Attention'
+        - $ref: '#/components/parameters/ManualPending'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      requestBody:
+        $ref: '#/components/requestBodies/Accounts'
+      responses:
+        '200':
+          $ref: '#/components/responses/Deposits'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/wallet/custody/fees:
+    get:
+      operationId: listCustodyFees
+      summary: The custodians' withdrawal fees, newest first
+      description: The accounts are the withdrawals' users.
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+        - $ref: '#/components/parameters/FeeStatus'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UserIDs'
+        - $ref: '#/components/parameters/ExcludeUserIDs'
+      responses:
+        '200':
+          $ref: '#/components/responses/CustodyFees'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/wallet/custody/fees/list:
+    post:
+      operationId: listCustodyFeesOfAccounts
+      summary: The custodians' withdrawal fees, the accounts in the body
+      description: The accounts are the withdrawals' users.
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+        - $ref: '#/components/parameters/FeeStatus'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      requestBody:
+        $ref: '#/components/requestBodies/Accounts'
+      responses:
+        '200':
+          $ref: '#/components/responses/CustodyFees'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+components:
+  parameters:
+    UserIDs:
+      name: user_ids
+      in: query
+      description: |
+        Only these accounts (at most 1,000), comma-separated or repeated;
+        present but empty lists nothing. Not with exclude_user_ids.
+      schema:
+        type: array
+        items:
+          type: string
+          format: uuid
+      style: form
+      explode: true
+    ExcludeUserIDs:
+      name: exclude_user_ids
+      in: query
+      description: Past these accounts (at most 1,000), comma-separated or repeated. Not with user_ids.
+      schema:
+        type: array
+        items:
+          type: string
+          format: uuid
+      style: form
+      explode: true
+    UserID:
+      name: user_id
+      in: query
+      description: One account's.
+      schema:
+        type: string
+        format: uuid
+    Asset:
+      name: asset
+      in: query
+      schema:
+        type: string
+    Network:
+      name: network
+      in: query
+      description: Every network when absent.
+      schema:
+        type: string
+    WithdrawalStatus:
+      name: status
+      in: query
+      description: PENDING_REVIEW when absent; ALL for every status.
+      schema:
+        type: string
+    DepositStatus:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED, REJECTED]
+    FeeStatus:
+      name: status
+      in: query
+      description: Any when absent.
+      schema:
+        type: string
+        enum: [HELD, BOOKABLE, WRITTEN_OFF]
+    Provider:
+      name: provider
+      in: query
+      description: The custodian (UDUN, UDUNMOCK); any when absent, an unknown one 404.
+      schema:
+        type: string
+    Held:
+      name: held
+      in: query
+      description: Put on hold by a reviewer, or not.
+      schema:
+        type: string
+        enum: ['true', 'false']
+    MinValue:
+      name: min_value_usdt
+      in: query
+      schema:
+        type: string
+        description: A decimal, not negative.
+    MaxValue:
+      name: max_value_usdt
+      in: query
+      schema:
+        type: string
+        description: A decimal, not negative.
+    MinRisk:
+      name: min_risk
+      in: query
+      schema:
+        type: integer
+    Order:
+      name: order
+      in: query
+      description: asc (the default for the review queue) or desc.
+      schema:
+        type: string
+        enum: [asc, desc]
+    Attention:
+      name: attention
+      in: query
+      description: true for the deposits waiting for a decision.
+      schema:
+        type: string
+        enum: ['true']
+    ManualPending:
+      name: manual_pending
+      in: query
+      description: true for the backfilled deposits no callback confirmed yet.
+      schema:
+        type: string
+        enum: ['true']
+    Cursor:
+      name: cursor
+      in: query
+      description: The previous page's next_cursor.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      description: At most 200; 50 when absent or out of range.
+      schema:
+        type: integer
+  requestBodies:
+    Accounts:
+      required: true
+      description: '{} narrows nothing.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Accounts'
+  responses:
+    Withdrawals:
+      description: A page.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items, next_cursor]
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Withdrawal'
+              next_cursor:
+                type: [string, 'null']
+    Deposits:
+      description: A page.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items, next_cursor]
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deposit'
+              next_cursor:
+                type: [string, 'null']
+    CustodyFees:
+      description: A page.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items, next_cursor]
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CustodyFee'
+              next_cursor:
+                type: [string, 'null']
+  schemas:
+    Accounts:
+      type: object
+      additionalProperties: false
+      description: One of the two, or neither.
+      properties:
+        user_ids:
+          type: [array, 'null']
+          maxItems: 5000
+          description: Only these accounts; [] lists nothing, null or absent is no filter.
+          items:
+            type: string
+            format: uuid
+        exclude_user_ids:
+          type: [array, 'null']
+          maxItems: 5000
+          description: Past these accounts.
+          items:
+            type: string
+            format: uuid
+    Withdrawal:
+      type: object
+      description: internal/wallet/transport/httpapi.AdminWithdrawalJSON.
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        asset: {type: string}
+        network: {type: string}
+        address: {type: string}
+        amount: {type: string}
+        fee: {type: string}
+        internal: {type: boolean}
+        custody: {type: boolean}
+        status: {type: string}
+        risk_score: {type: integer}
+        risk_reasons: {type: array, items: {type: string}}
+        value_usdt: {type: string}
+        approvals: {type: array, items: {type: string}}
+        approvals_required: {type: integer}
+        provider_status: {type: string}
+        reject_reason: {type: [string, 'null']}
+        tx_hash: {type: [string, 'null']}
+        confirmations: {type: integer}
+        required_confirmations: {type: integer}
+        held_at: {type: [string, 'null'], format: date-time}
+        held_by: {type: string}
+        hold_note: {type: string}
+        created_at: {type: string, format: date-time}
+        approved_at: {type: [string, 'null'], format: date-time}
+        submitted_at: {type: [string, 'null'], format: date-time}
+        broadcast_at: {type: [string, 'null'], format: date-time}
+        confirmed_at: {type: [string, 'null'], format: date-time}
+    Deposit:
+      type: object
+      description: internal/wallet/transport/httpapi.AdminDepositJSON.
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        kind: {type: string}
+        asset: {type: [string, 'null']}
+        network: {type: string}
+        address: {type: string}
+        tx_hash: {type: string}
+        amount: {type: string}
+        status: {type: string}
+        unclaimed: {type: boolean}
+        reason: {type: [string, 'null']}
+        trade_id: {type: [string, 'null']}
+        confirmations: {type: integer}
+        required_confirmations: {type: integer}
+        journal_id: {type: [string, 'null']}
+        detected_at: {type: string, format: date-time}
+        confirmed_at: {type: [string, 'null'], format: date-time}
+        credited_at: {type: [string, 'null'], format: date-time}
+        source: {type: string}
+        entered_by: {type: string}
+        callback_at: {type: [string, 'null'], format: date-time}
+        discrepancy: {type: string}
+        attention: {type: boolean}
+        resolution: {type: string}
+        resolved_by: {type: string}
+        resolved_at: {type: [string, 'null'], format: date-time}
+        resolution_note: {type: string}
+        release_journal_id: {type: [string, 'null']}
+        address_owner: {type: [string, 'null']}
+        address_owner_retired: {type: boolean}
+    CustodyFee:
+      type: object
+      description: internal/wallet/transport/httpapi.CustodyFeeJSON.
+      properties:
+        withdrawal_id: {type: string, format: uuid}
+        provider: {type: string}
+        tx_hash: {type: string}
+        asset: {type: string}
+        network: {type: string}
+        amount: {type: string}
+        unit: {type: [string, 'null']}
+        status: {type: string}
+        hold_reason: {type: string}
+        journal_id: {type: [string, 'null']}
+        created_at: {type: string, format: date-time}
+        booked_at: {type: [string, 'null'], format: date-time}
+        written_off_at: {type: [string, 'null'], format: date-time}
+        resolved_by: {type: string}
+        resolution: {type: string}

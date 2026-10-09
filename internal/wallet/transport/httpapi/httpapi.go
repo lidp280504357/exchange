@@ -58,6 +58,7 @@ func (h *Handler) Routes(r chi.Router) {
 	})
 	r.Post("/v1/wallet/callbacks/{provider}", h.callback)
 	r.Get("/internal/wallet/withdrawals", h.adminWithdrawals)
+	r.Post("/internal/wallet/withdrawals/list", h.adminWithdrawals)
 	r.Post("/internal/wallet/withdrawals/{id}/review", h.adminReview)
 	r.Get("/internal/wallet/custody", h.adminCustody)
 	r.Get("/internal/wallet/custody/callbacks", h.adminCallbacks)
@@ -98,10 +99,11 @@ func AdminWithdrawalJSONOf(wd domain.Withdrawal) AdminWithdrawalJSON {
 // status (default PENDING_REVIEW; ALL for every status), user_id, asset,
 // network (every one when empty), user_ids or exclude_user_ids (L2),
 // cursor (the previous page's next_cursor), limit (at most 200, default
-// 50) and order (asc, the default for the review queue, or desc).
+// 50) and order (asc, the default for the review queue, or desc). POST
+// .../list takes the same, the accounts in its body (httpx.UserIDsOf).
 func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	only, exclude, err := httpx.UserIDsFrom(q)
+	only, exclude, err := httpx.UserIDsOf(w, r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

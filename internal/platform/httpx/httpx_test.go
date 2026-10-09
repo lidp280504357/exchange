@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -271,9 +272,19 @@ func TestDecodeJSON(t *testing.T) {
 	}
 }
 
+// someUserIDs is n different UUIDs.
+func someUserIDs(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("0192f0c4-8a3e-7b2d-9c1f-%012x", i)
+	}
+	return out
+}
+
 // The console's narrowing of a list by account (L2): user_ids or
-// exclude_user_ids, comma-separated or repeated, UUIDs, at most 1,000; an
-// empty user_ids keeps nobody, an absent one is no filter.
+// exclude_user_ids, comma-separated or repeated, UUIDs, each once, at most
+// 1,000 different ones; an empty user_ids keeps nobody, an absent one is
+// no filter.
 func TestUserIDsFrom(t *testing.T) {
 	a, b := "0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2e", "0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2f"
 	parse := func(raw string) ([]string, []string, error) {
@@ -286,8 +297,8 @@ func TestUserIDsFrom(t *testing.T) {
 	if only, exclude, err := parse(""); err != nil || only != nil || len(exclude) != 0 {
 		t.Fatalf("none: %v %v %v", only, exclude, err)
 	}
-	if only, _, err := parse("user_ids=" + a + "," + strings.ToUpper(b)); err != nil || !slices.Equal(only, []string{a, b}) {
-		t.Fatalf("only: %v %v", only, err)
+	if only, _, err := parse("user_ids=" + a + "," + strings.ToUpper(b) + "," + a); err != nil || !slices.Equal(only, []string{a, b}) {
+		t.Fatalf("only, each once: %v %v", only, err)
 	}
 	if only, _, err := parse("user_ids="); err != nil || only == nil || len(only) != 0 {
 		t.Fatalf("an empty list keeps nobody: %v %v", only, err)
@@ -295,10 +306,67 @@ func TestUserIDsFrom(t *testing.T) {
 	if _, exclude, err := parse("exclude_user_ids=" + a + "&exclude_user_ids=" + b); err != nil || !slices.Equal(exclude, []string{a, b}) {
 		t.Fatalf("exclude: %v %v", exclude, err)
 	}
-	many := strings.TrimSuffix(strings.Repeat(a+",", MaxFilterUserIDs+1), ",")
+	// The cap counts different accounts: the same one 1,001 times is one.
+	same := strings.TrimSuffix(strings.Repeat(a+",", MaxFilterUserIDs+1), ",")
+	if _, exclude, err := parse("exclude_user_ids=" + same); err != nil || !slices.Equal(exclude, []string{a}) {
+		t.Fatalf("the same account again and again: %v %v", exclude, err)
+	}
+	if only, _, err := parse("user_ids=" + strings.Join(someUserIDs(MaxFilterUserIDs), ",")); err != nil || len(only) != MaxFilterUserIDs {
+		t.Fatalf("as many as allowed: %d %v", len(only), err)
+	}
+	many := strings.Join(someUserIDs(MaxFilterUserIDs+1), ",")
 	for _, bad := range []string{"user_ids=" + a + "&exclude_user_ids=" + b, "user_ids=nope", "exclude_user_ids=" + many} {
 		if _, _, err := parse(bad); apperr.From(err).Code != apperr.CodeInvalidArgument {
 			t.Fatalf("%.60s: %v", bad, err)
+		}
+	}
+}
+
+// A list's POST .../list variant (L2, review IY): the accounts in a JSON
+// body, at most 5,000 different ones, read by the same core as the GET's;
+// the GET still reads its query string, and a POST naming accounts in its
+// query string, both sets, or a body that is no JSON object is refused.
+func TestUserIDsOf(t *testing.T) {
+	a, b := "0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2e", "0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2f"
+	read := func(method, target, body string) ([]string, []string, error) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(t.Context(), method, target, strings.NewReader(body))
+		return UserIDsOf(w, r)
+	}
+	if only, _, err := read(http.MethodGet, "/list?user_ids="+a, ""); err != nil || !slices.Equal(only, []string{a}) {
+		t.Fatalf("a GET's query string: %v %v", only, err)
+	}
+	if only, exclude, err := read(http.MethodPost, "/list?status=ALL", `{}`); err != nil || only != nil || len(exclude) != 0 {
+		t.Fatalf("no accounts: %v %v %v", only, exclude, err)
+	}
+	if only, exclude, err := read(http.MethodPost, "/list", `{"user_ids":null,"exclude_user_ids":null}`); err != nil || only != nil || len(exclude) != 0 {
+		t.Fatalf("null is absent: %v %v %v", only, exclude, err)
+	}
+	if only, _, err := read(http.MethodPost, "/list", `{"user_ids":[]}`); err != nil || only == nil || len(only) != 0 {
+		t.Fatalf("an empty list keeps nobody: %v %v", only, err)
+	}
+	if only, _, err := read(http.MethodPost, "/list", `{"user_ids":["`+strings.ToUpper(b)+`","`+a+`","`+b+`"]}`); err != nil || !slices.Equal(only, []string{b, a}) {
+		t.Fatalf("each once, lower-case: %v %v", only, err)
+	}
+	ids := func(n int) string {
+		raw, _ := json.Marshal(someUserIDs(n))
+		return string(raw)
+	}
+	if _, exclude, err := read(http.MethodPost, "/list", `{"exclude_user_ids":`+ids(MaxFilterUserIDsBody)+`}`); err != nil || len(exclude) != MaxFilterUserIDsBody {
+		t.Fatalf("as many as a body allows: %d %v", len(exclude), err)
+	}
+	for _, bad := range []struct{ target, body string }{
+		{"/list?user_ids=" + a, `{}`},
+		{"/list?exclude_user_ids=", `{"user_ids":["` + a + `"]}`},
+		{"/list", `{"user_ids":["` + a + `"],"exclude_user_ids":[]}`},
+		{"/list", `{"user_ids":["nope"]}`},
+		{"/list", `{"exclude_user_ids":` + ids(MaxFilterUserIDsBody+1) + `}`},
+		{"/list", `{"user_id":"` + a + `"}`},
+		{"/list", `{"user_ids":"` + a + `"}`},
+		{"/list", ``},
+	} {
+		if _, _, err := read(http.MethodPost, bad.target, bad.body); apperr.From(err).Code != apperr.CodeInvalidArgument {
+			t.Fatalf("%s %.60s: %v", bad.target, bad.body, err)
 		}
 	}
 }
