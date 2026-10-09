@@ -26,10 +26,14 @@ export type LeverageDialogProps = {
   symbol?: string;
 };
 
-/** leverageMarks spreads at most six marks from min to max (1, 25, 50 … 125 for 125×). */
+/**
+ * leverageMarks spreads at most six marks from min to max, by the contract's
+ * own maximum (F28): 1, 30, 60 … 150 for 150×, 1, 25 … 125 for 125×, 1, 15 …
+ * 75 for 75×, as Binance's slider has them.
+ */
 export function leverageMarks(min: number, max: number): number[] {
   if (max - min <= 5) return Array.from({ length: max - min + 1 }, (_, i) => min + i);
-  const step = [2, 5, 10, 20, 25, 50].find((n) => (max - min) / n <= 5) ?? Math.ceil((max - min) / 5);
+  const step = [2, 5, 10, 15, 20, 25, 30, 50].find((n) => (max - min) / n <= 5) ?? Math.ceil((max - min) / 5);
   const out = [min];
   for (let v = step; v < max; v += step) if (v > min) out.push(v);
   out.push(max);

@@ -375,18 +375,23 @@ export async function pickLanguage(page, label, name) {
  * fallback language). A first screen in one language that turns into
  * another once the platform's profile is in comes back as "en then
  * zh-CN" (the flash F33 removed). A first screen that waited for the
- * profile and went on without it (core awaitFallbackLocale's marks:
- * "timeout", its 1.5 s ran out; "failed", the read failed) had no
- * fallback language to draw in, so it says nothing either way: it tries
- * again, three times in all, then returns {locale: null, gaveUp: [how each
- * ended]} for the caller to note (F34). A page that did not wait at all
- * still comes back as "en then …".
+ * profile and went on without it (core awaitFallbackLocale's marks) had no
+ * fallback language to draw in, so it says nothing either way. Its 1.5 s
+ * ran out ("timeout") while the profile came later: a slow server, so it
+ * tries again, three times in all, then returns {locale: null, gaveUp:
+ * [how each ended]} for the caller to note (F34). The read failed
+ * ("failed"), or no answer came within 10 s ("unanswered": the page did
+ * not ask, or the server did not answer): a fault, returned at once with
+ * gaveUp ending in it for the caller to fail (F35, F36). A page that did
+ * not wait at all comes back as "en then …" when the fallback language
+ * is not English (with English as the fallback its first screen is right).
  */
 export async function firstVisitLocale(page, app, path, tags, device = {}) {
   const gaveUp = [];
   for (let attempt = 0; attempt < 3; attempt++) {
     const { first, settled, ended } = await openFirstVisit(page, app, path, tags, device);
-    if (ended === "timeout" || ended === "failed") {
+    if (ended === "failed" || ended === "unanswered") return { locale: null, gaveUp: [...gaveUp, ended] };
+    if (ended === "timeout") {
       gaveUp.push(ended);
       continue;
     }
@@ -395,7 +400,11 @@ export async function firstVisitLocale(page, app, path, tags, device = {}) {
   return { locale: null, gaveUp };
 }
 
-/** openFirstVisit is one of firstVisitLocale's visits: its first screen's language, the settled one, and how its wait ended (null: no wait). */
+/**
+ * openFirstVisit is one of firstVisitLocale's visits: its first screen's
+ * language, the settled one, and how its wait ended (null: no wait;
+ * "unanswered": it timed out and no profile answer came within 10 s).
+ */
 async function openFirstVisit(page, app, path, tags, device) {
   const ctx = await page.browser().createBrowserContext();
   try {
@@ -429,7 +438,12 @@ async function openFirstVisit(page, app, path, tags, device) {
           .find(Boolean) ?? null,
     );
     const first = await visit.evaluate(() => window.__firstScreenLang);
-    if (ended === "timeout" || ended === "failed") return { first, settled: null, ended }; // nothing to settle
+    if (ended === "failed") return { first, settled: null, ended }; // nothing to settle
+    if (ended === "timeout") {
+      // Late (a slow server) or never (the page did not ask, or no answer).
+      const late = await Promise.race([profile.then(() => true), new Promise((r) => setTimeout(() => r(false), 10000))]).catch(() => false);
+      return { first, settled: null, ended: late ? "timeout" : "unanswered" };
+    }
     await profile;
     await new Promise((r) => setTimeout(r, 500)); // the effects that follow the profile
     return { first, settled: await visit.evaluate(() => document.documentElement.lang), ended };
