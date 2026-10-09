@@ -12,6 +12,7 @@ import (
 	"github.com/skill/exchange/internal/platform/httpx"
 	"github.com/skill/exchange/internal/wallet/application"
 	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // feeRoutes serves the console's handling of the custodians' withdrawal
@@ -65,11 +66,18 @@ func CustodyFeeJSONOf(f domain.CustodyFee) CustodyFeeJSON {
 
 // adminCustodyFees pages through the fees, newest first: provider (UDUN,
 // UDUNMOCK; any when absent), status (HELD, BOOKABLE, WRITTEN_OFF; any when
-// absent), cursor, limit (at most 200, default 50).
+// absent), user_ids or exclude_user_ids (the withdrawals' users, L2),
+// cursor, limit (at most 200, default 50).
 func (h *Handler) adminCustodyFees(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	only, exclude, err := httpx.UserIDsFrom(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	list, next, err := h.Svc.CustodyFees(r.Context(), q.Get("provider"), q.Get("status"), q.Get("cursor"), limit)
+	list, next, err := h.Svc.CustodyFees(r.Context(), q.Get("provider"), q.Get("status"), ports.UserIDs{Only: only, Exclude: exclude},
+		q.Get("cursor"), limit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

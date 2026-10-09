@@ -466,6 +466,16 @@ func TestWithdrawalStorage(t *testing.T) {
 	if one, _ := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{Status: domain.WithdrawalBroadcast, Limit: 5}); len(one) != 1 {
 		t.Fatalf("by status %v", one)
 	}
+	// L2: only some users' (none for an empty list), or past them.
+	if theirs, _ := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{Users: ports.UserIDs{Only: []string{other}}, Limit: 5}); len(theirs) != 2 {
+		t.Fatalf("only %s's %v", other, theirs)
+	}
+	if rest, _ := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{Users: ports.UserIDs{Exclude: []string{other}}, Limit: 5}); len(rest) != 1 || rest[0].ID != w.ID {
+		t.Fatalf("past %s %v", other, rest)
+	}
+	if none, err := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{Users: ports.UserIDs{Only: []string{}}, Limit: 5}); err != nil || len(none) != 0 {
+		t.Fatalf("only nobody's %v %v", none, err)
+	}
 	if atts, err := read.Attempts().Of(ctx, w.ID); err != nil || len(atts) != 1 || atts[0].MaxFee.Int64() != 3e9 {
 		t.Fatalf("attempts %v %v", atts, err)
 	}
@@ -608,14 +618,14 @@ func TestCustodyStorage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := read.ChainFees().Page(ctx, "", "", "", 1)
+	page, err := read.ChainFees().Page(ctx, "", "", ports.UserIDs{}, "", 1)
 	if err != nil || len(page) != 1 || page[0].TxHash != "UDUN:page-2" || page[0].WithdrawalID != w.ID || page[0].Unit != domain.FeeUnitSelf {
 		t.Fatalf("the newest fee %+v %v", page, err)
 	}
-	if more, err := read.ChainFees().Page(ctx, "", "", "UDUN:page-2", 5); err != nil || len(more) != 1 || more[0].TxHash != "UDUN:page-1" {
+	if more, err := read.ChainFees().Page(ctx, "", "", ports.UserIDs{}, "UDUN:page-2", 5); err != nil || len(more) != 1 || more[0].TxHash != "UDUN:page-1" {
 		t.Fatalf("after it %+v %v", more, err)
 	}
-	if held, err := read.ChainFees().Page(ctx, "", domain.FeeHeld, "", 5); err != nil || len(held) != 1 || held[0].HoldReason != "above 5 USDT" {
+	if held, err := read.ChainFees().Page(ctx, "", domain.FeeHeld, ports.UserIDs{}, "", 5); err != nil || len(held) != 1 || held[0].HoldReason != "above 5 USDT" {
 		t.Fatalf("held %+v %v", held, err)
 	}
 	// With the withdrawal's custodian; a cursor no fee has is refused
@@ -623,11 +633,21 @@ func TestCustodyStorage(t *testing.T) {
 	if page[0].Provider != w.Provider {
 		t.Fatalf("the fee's custodian %q, want %q", page[0].Provider, w.Provider)
 	}
-	if other, err := read.ChainFees().Page(ctx, domain.ProviderUdunMock, "", "", 5); err != nil || len(other) != 0 {
+	if other, err := read.ChainFees().Page(ctx, domain.ProviderUdunMock, "", ports.UserIDs{}, "", 5); err != nil || len(other) != 0 {
 		t.Fatalf("another custodian's fees %+v %v", other, err)
 	}
-	if _, err := read.ChainFees().Page(ctx, "", "", "UDUN:no-such-fee", 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, err := read.ChainFees().Page(ctx, "", "", ports.UserIDs{}, "UDUN:no-such-fee", 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("an unknown cursor: %v", err)
+	}
+	// L2: by the withdrawal's user.
+	if theirs, err := read.ChainFees().Page(ctx, "", "", ports.UserIDs{Only: []string{w.UserID}}, "", 5); err != nil || len(theirs) != 2 {
+		t.Fatalf("only %s's fees %+v %v", w.UserID, theirs, err)
+	}
+	if past, err := read.ChainFees().Page(ctx, "", "", ports.UserIDs{Exclude: []string{w.UserID}}, "", 5); err != nil || len(past) != 0 {
+		t.Fatalf("past %s %+v %v", w.UserID, past, err)
+	}
+	if nobody, err := read.ChainFees().Page(ctx, "", "", ports.UserIDs{Only: []string{uuid.NewString()}}, "", 5); err != nil || len(nobody) != 0 {
+		t.Fatalf("another user's %+v %v", nobody, err)
 	}
 
 	amount := decimal.NewFromInt(100)

@@ -264,7 +264,9 @@ func (r withdrawals) Page(ctx context.Context, network string, f ports.Withdrawa
 		AND ($3::uuid IS NULL OR user_id = $3) AND ($4 = '' OR asset = $4) AND ($5::uuid IS NULL OR id `+cmp+` $5)
 		AND ($7 = '' OR (held_at IS NOT NULL AND status = 'PENDING_REVIEW') = ($7 = 'true')) AND ($8::numeric IS NULL OR value_usdt >= $8)
 		AND ($9::numeric IS NULL OR value_usdt <= $9) AND risk_score >= $10
-		ORDER BY id `+order+` LIMIT $6`, network, f.Status, user, f.Asset, after, f.Limit, f.Held, minValue, maxValue, f.MinRisk)
+		AND (NOT $11 OR user_id = ANY($12::uuid[])) AND user_id <> ALL($13::uuid[])
+		ORDER BY id `+order+` LIMIT $6`, network, f.Status, user, f.Asset, after, f.Limit, f.Held, minValue, maxValue, f.MinRisk,
+		f.Users.Only != nil, ids(f.Users.Only), ids(f.Users.Exclude))
 }
 
 func (r withdrawals) Unreleased(ctx context.Context, network string) ([]domain.Withdrawal, error) {

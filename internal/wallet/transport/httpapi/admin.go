@@ -144,10 +144,16 @@ func AdminDepositJSONOf(d domain.Deposit) AdminDepositJSON {
 // (backfilled, no callback yet), cursor, limit (at most 200, default 50).
 func (h *Handler) adminDeposits(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	only, exclude, err := httpx.UserIDsFrom(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	list, next, err := h.Svc.AdminDeposits(r.Context(), ports.DepositFilter{
 		UserID: q.Get("user_id"), Status: strings.ToUpper(q.Get("status")), Network: strings.ToUpper(q.Get("network")),
 		Attention: q.Get("attention") == "true", ManualPending: q.Get("manual_pending") == "true", After: q.Get("cursor"), Limit: limit,
+		Users: ports.UserIDs{Only: only, Exclude: exclude},
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

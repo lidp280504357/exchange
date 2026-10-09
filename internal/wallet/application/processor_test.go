@@ -248,12 +248,13 @@ func (f memFees) Units(context.Context) ([]domain.FeeUnit, error) {
 	return out, nil
 }
 
-func (f memFees) Page(_ context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, error) {
+func (f memFees) Page(_ context.Context, provider, status string, users ports.UserIDs, after string, limit int) ([]domain.CustodyFee, error) {
 	var out []domain.CustodyFee
 	for _, x := range f.m.fees {
 		w, ok := f.m.wds[x.Reference]
 		if x.Purpose != domain.FeeWithdrawal || !ok || w.Provider == "" || status != "" && x.Status != status ||
-			provider != "" && w.Provider != provider {
+			provider != "" && w.Provider != provider ||
+			users.Only != nil && !slices.Contains(users.Only, w.UserID) || slices.Contains(users.Exclude, w.UserID) {
 			continue
 		}
 		unit := ""

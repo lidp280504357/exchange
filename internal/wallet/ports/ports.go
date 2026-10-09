@@ -227,9 +227,19 @@ type ChainFeeRepo interface {
 	// Units lists the confirmed fee units.
 	Units(ctx context.Context) ([]domain.FeeUnit, error)
 	// Page lists the custodians' withdrawal fees, newest first, of a
-	// custodian and a status ("" any), after the fee whose transaction is
-	// after ("" from the newest), at most limit.
-	Page(ctx context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, error)
+	// custodian and a status ("" any), of the withdrawals of users (L2),
+	// after the fee whose transaction is after ("" from the newest), at most
+	// limit.
+	Page(ctx context.Context, provider, status string, users UserIDs, after string, limit int) ([]domain.CustodyFee, error)
+}
+
+// UserIDs narrows an admin list by account (L2, the user-kind design
+// 2026-10-09 §1 #8): Only, when not nil, keeps just those accounts (none
+// when empty); Exclude leaves those out (the bots, test accounts and
+// HOUSE, by default). At most one is set.
+type UserIDs struct {
+	Only    []string
+	Exclude []string
 }
 
 // SuspensionRepo stores the assets whose withdrawals are suspended.
@@ -563,6 +573,8 @@ type WithdrawalFilter struct {
 	MinValue decimal.Decimal
 	MaxValue decimal.Decimal
 	MinRisk  int
+	// Users narrows the list by account (L2).
+	Users UserIDs
 }
 
 // DepositFilter selects deposits for the admin console; empty fields match
@@ -579,6 +591,8 @@ type DepositFilter struct {
 	// After is the last ID of the previous page, newest first.
 	After string
 	Limit int
+	// Users narrows the list by account (L2).
+	Users UserIDs
 }
 
 // Networks reads deposit networks (instrument-service).

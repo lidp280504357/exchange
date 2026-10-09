@@ -96,11 +96,16 @@ func AdminWithdrawalJSONOf(wd domain.Withdrawal) AdminWithdrawalJSON {
 
 // adminWithdrawals pages through the withdrawals for the admin console:
 // status (default PENDING_REVIEW; ALL for every status), user_id, asset,
-// network (every one when empty), cursor (the previous page's
-// next_cursor), limit (at most 200, default 50) and order (asc, the
-// default for the review queue, or desc).
+// network (every one when empty), user_ids or exclude_user_ids (L2),
+// cursor (the previous page's next_cursor), limit (at most 200, default
+// 50) and order (asc, the default for the review queue, or desc).
 func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	only, exclude, err := httpx.UserIDsFrom(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	status := strings.ToUpper(q.Get("status"))
 	switch status {
 	case "":
@@ -118,7 +123,7 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	}
 	f := ports.WithdrawalFilter{
 		Status: status, UserID: q.Get("user_id"), Asset: strings.ToUpper(q.Get("asset")), After: q.Get("cursor"),
-		Oldest: order == "asc", Limit: limit + 1, Held: q.Get("held"),
+		Oldest: order == "asc", Limit: limit + 1, Held: q.Get("held"), Users: ports.UserIDs{Only: only, Exclude: exclude},
 	}
 	if f.Held != "" && f.Held != "true" && f.Held != "false" {
 		httpx.WriteError(w, r, apperr.Invalid("held must be true or false"))

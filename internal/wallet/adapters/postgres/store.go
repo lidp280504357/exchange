@@ -350,8 +350,18 @@ func (r deposits) Page(ctx context.Context, f ports.DepositFilter) ([]domain.Dep
 		AND ($3 = '' OR network = $3)
 		AND (NOT $4 OR (resolution = '' AND (status = 'REJECTED' OR discrepancy <> '')))
 		AND (NOT $5 OR (source = 'MANUAL' AND callback_at IS NULL))
-		AND ($6::uuid IS NULL OR id < $6) ORDER BY id DESC LIMIT $7`,
-		user, f.Status, f.Network, f.Attention, f.ManualPending, after, f.Limit)
+		AND ($6::uuid IS NULL OR id < $6) AND (NOT $8 OR user_id = ANY($9::uuid[])) AND user_id <> ALL($10::uuid[])
+		ORDER BY id DESC LIMIT $7`,
+		user, f.Status, f.Network, f.Attention, f.ManualPending, after, f.Limit, f.Users.Only != nil, ids(f.Users.Only), ids(f.Users.Exclude))
+}
+
+// ids is an account list for a uuid[] parameter: never NULL, so that
+// "<> ALL" of none keeps every row (L2).
+func ids(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 func (r deposits) one(ctx context.Context, sql string, args ...any) (*domain.Deposit, error) {

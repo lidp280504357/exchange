@@ -90,6 +90,27 @@ func TestAdminStorage(t *testing.T) {
 	if page, _ := read.Deposits().Page(ctx, ports.DepositFilter{UserID: alice, Limit: 1}); len(page) != 1 || page[0].ID != unclaimed.ID {
 		t.Fatalf("newest first, a page of one: %+v", page)
 	}
+	// L2: only some users' (none for an empty list), or past them; the two
+	// split the list.
+	all, _ := read.Deposits().Page(ctx, ports.DepositFilter{Limit: 50})
+	hers, _ := read.Deposits().Page(ctx, ports.DepositFilter{Users: ports.UserIDs{Only: []string{alice}}, Limit: 50})
+	rest, _ := read.Deposits().Page(ctx, ports.DepositFilter{Users: ports.UserIDs{Exclude: []string{alice}}, Limit: 50})
+	if len(hers) == 0 || len(hers)+len(rest) != len(all) {
+		t.Fatalf("hers %d, the rest %d, all %d", len(hers), len(rest), len(all))
+	}
+	for _, d := range hers {
+		if d.UserID != alice {
+			t.Fatalf("only %s's: %+v", alice, d)
+		}
+	}
+	for _, d := range rest {
+		if d.UserID == alice {
+			t.Fatalf("past %s: %+v", alice, d)
+		}
+	}
+	if none, err := read.Deposits().Page(ctx, ports.DepositFilter{Users: ports.UserIDs{Only: []string{}}, Limit: 50}); err != nil || len(none) != 0 {
+		t.Fatalf("only nobody's %+v %v", none, err)
+	}
 	// A CREDITED unclaimed deposit without a release is refused.
 	bad := *back
 	bad.Resolution, bad.ReleaseJournalID = "", ""

@@ -8,6 +8,7 @@ import (
 
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // CustodyFees pages through the custodians' withdrawal fees for the
@@ -18,7 +19,7 @@ import (
 // (the cursor is its transaction; an unknown one is refused), at most
 // limit (default 50, at most 200). It returns the cursor of the next page,
 // "" at the end.
-func (s *Service) CustodyFees(ctx context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, string, error) {
+func (s *Service) CustodyFees(ctx context.Context, provider, status string, users ports.UserIDs, after string, limit int) ([]domain.CustodyFee, string, error) {
 	provider, status = strings.ToUpper(strings.TrimSpace(provider)), strings.ToUpper(strings.TrimSpace(status))
 	if provider != "" && !s.custodian(provider) {
 		return nil, "", apperr.NotFound("no such custodian")
@@ -34,7 +35,7 @@ func (s *Service) CustodyFees(ctx context.Context, provider, status, after strin
 	case limit > 200:
 		limit = 200
 	}
-	list, err := s.Store.Read().ChainFees().Page(ctx, provider, status, after, limit+1)
+	list, err := s.Store.Read().ChainFees().Page(ctx, provider, status, users, after, limit+1)
 	if err != nil {
 		return nil, "", err
 	}

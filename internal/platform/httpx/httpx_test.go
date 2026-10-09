@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -266,5 +268,37 @@ func TestDecodeJSON(t *testing.T) {
 				t.Fatalf("decode errors must be COMMON_INVALID_ARGUMENT, got %v", err)
 			}
 		})
+	}
+}
+
+// The console's narrowing of a list by account (L2): user_ids or
+// exclude_user_ids, comma-separated or repeated, UUIDs, at most 1,000; an
+// empty user_ids keeps nobody, an absent one is no filter.
+func TestUserIDsFrom(t *testing.T) {
+	a, b := "0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2e", "0192f0c4-8a3e-7b2d-9c1f-3e5a7d9b1c2f"
+	parse := func(raw string) ([]string, []string, error) {
+		q, err := url.ParseQuery(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return UserIDsFrom(q)
+	}
+	if only, exclude, err := parse(""); err != nil || only != nil || len(exclude) != 0 {
+		t.Fatalf("none: %v %v %v", only, exclude, err)
+	}
+	if only, _, err := parse("user_ids=" + a + "," + strings.ToUpper(b)); err != nil || !slices.Equal(only, []string{a, b}) {
+		t.Fatalf("only: %v %v", only, err)
+	}
+	if only, _, err := parse("user_ids="); err != nil || only == nil || len(only) != 0 {
+		t.Fatalf("an empty list keeps nobody: %v %v", only, err)
+	}
+	if _, exclude, err := parse("exclude_user_ids=" + a + "&exclude_user_ids=" + b); err != nil || !slices.Equal(exclude, []string{a, b}) {
+		t.Fatalf("exclude: %v %v", exclude, err)
+	}
+	many := strings.TrimSuffix(strings.Repeat(a+",", MaxFilterUserIDs+1), ",")
+	for _, bad := range []string{"user_ids=" + a + "&exclude_user_ids=" + b, "user_ids=nope", "exclude_user_ids=" + many} {
+		if _, _, err := parse(bad); apperr.From(err).Code != apperr.CodeInvalidArgument {
+			t.Fatalf("%.60s: %v", bad, err)
+		}
 	}
 }

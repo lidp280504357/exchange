@@ -159,7 +159,7 @@ func scanChainFee(row pgx.CollectableRow) (domain.ChainFee, error) {
 	return f, err
 }
 
-func (r chainFees) Page(ctx context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, error) {
+func (r chainFees) Page(ctx context.Context, provider, status string, users ports.UserIDs, after string, limit int) ([]domain.CustodyFee, error) {
 	if after != "" {
 		var known bool
 		if err := r.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM chain_fees WHERE tx_hash = $1)`, after).Scan(&known); err != nil {
@@ -177,7 +177,8 @@ func (r chainFees) Page(ctx context.Context, provider, status, after string, lim
 		LEFT JOIN custody_fee_units u ON u.provider = w.provider AND u.asset = w.asset AND u.network = w.network
 		WHERE f.purpose = 'WITHDRAWAL' AND w.provider <> '' AND ($1 = '' OR f.status = $1) AND ($4 = '' OR w.provider = $4)
 			AND ($2 = '' OR (f.created_at, f.tx_hash) < (SELECT created_at, tx_hash FROM chain_fees WHERE tx_hash = $2))
-		ORDER BY f.created_at DESC, f.tx_hash DESC LIMIT $3`, status, after, limit, provider)
+			AND (NOT $5 OR w.user_id = ANY($6::uuid[])) AND w.user_id <> ALL($7::uuid[])
+		ORDER BY f.created_at DESC, f.tx_hash DESC LIMIT $3`, status, after, limit, provider, users.Only != nil, ids(users.Only), ids(users.Exclude))
 	if err != nil {
 		return nil, fmt.Errorf("page custodian fees: %w", err)
 	}
