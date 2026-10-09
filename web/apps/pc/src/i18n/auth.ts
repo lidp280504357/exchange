@@ -14,10 +14,7 @@ export default {
       totpCode: "身份验证器验证码",
       stepUpTitle: "安全验证",
       stepUpTotpHint: "请输入身份验证器 App 上的 6 位验证码。",
-      stepUpOtpHint: "为了你的资产安全，请先完成验证：验证码将发送到你绑定的邮箱或手机。",
-      viaEmail: "邮箱验证码",
-      viaSms: "短信验证码",
-      channel: "接收方式",
+      stepUpOtpHint: "为了你的资产安全，请先完成验证。",
 
       siteCheck: "请确认你访问的是",
       securityNote: "{{brand}} 不会以任何理由索要你的密码或验证码，请勿泄露给他人。",
@@ -129,10 +126,7 @@ export default {
       totpCode: "Authenticator code",
       stepUpTitle: "Security check",
       stepUpTotpHint: "Enter the 6-digit code from your authenticator app.",
-      stepUpOtpHint: "To keep your assets safe, confirm it is you first: a code goes to your bound email or phone.",
-      viaEmail: "By email",
-      viaSms: "By SMS",
-      channel: "Send to",
+      stepUpOtpHint: "To keep your assets safe, confirm it is you first.",
 
       siteCheck: "Make sure you are on",
       securityNote: "{{brand}} will never ask for your password or codes. Do not share them with anyone.",

@@ -19,8 +19,9 @@
 // notifications, devices,
 // the profile (the drawn username, a rename, an avatar uploaded and
 // removed), the App download page and entries, closed product lines
-// (hidden, their terminals not open, the wind-down page), the language
-// switch, a first visit's language and sign-out. Script errors fail the run; every API
+// (hidden, their terminals not open, the wind-down page), the step-up's
+// channel cards, the language switch, a first visit's language and
+// sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
 import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, firstVisitLocale, legendClear, menuOnTop, note, ok, pickLanguage, sleep, start, withApps, withProducts } from "./lib.mjs";
@@ -723,6 +724,28 @@ try {
     await shot("8d-wind-down");
   });
   ok("with spot and USDⓈ-M closed: no trade menu nor USDⓈ-M entry, no spot category or switch, only coin-margined markets listed and found, their terminals not open, the futures USDT to move out under 待处置");
+
+  // 8e. The step-up's channels (F32): the authenticator's 绑定 on the
+  // security page asks for a step-up, which (no app bound) offers a card
+  // per channel, side by side and equally wide: this account's email,
+  // masked, chosen; the SMS greyed 未绑定 (it signed up by email). Closed,
+  // nothing changes.
+  await go("/account/security");
+  await waitText("身份验证器");
+  await clickButton("绑定"); // the authenticator's, before the phone number's
+  await page.waitForSelector('[role="dialog"] [role="radiogroup"]', { visible: true, timeout: 20000 });
+  const channelCards = await page.$$eval('[role="dialog"] [role="radio"]', (rs) =>
+    rs.map((r) => ({ text: r.innerText.replace(/\s+/g, " ").trim(), checked: r.getAttribute("aria-checked") === "true", disabled: r.disabled, width: Math.round(r.getBoundingClientRect().width) })),
+  );
+  const maskedEmail = `${email[0]}***@example.com`;
+  const [byEmail, bySms] = channelCards;
+  if (channelCards.length !== 2 || !byEmail.checked || byEmail.disabled || !byEmail.text.includes(maskedEmail) || !bySms.disabled || !bySms.text.includes("未绑定") || byEmail.width !== bySms.width) {
+    throw new Error(`the step-up's channel cards: ${JSON.stringify(channelCards)}`);
+  }
+  await shot("8e-step-up");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector('[role="dialog"]', { hidden: true, timeout: 10000 });
+  ok(`the step-up offers a card per channel: the email (${maskedEmail}) chosen, the SMS greyed 未绑定`);
 
   // 9. Settings: English switches the site's language at once; so does
   // Traditional Chinese (design 2026-10-06 繁体中文), shown on the key pages

@@ -6,6 +6,13 @@
 export default {
   ui: {
     captcha: { noKey: "此構建沒有配置人機驗證站點金鑰（TURNSTILE_SITE_KEY）" },
+    otpChannel: {
+      label: "驗證碼接收方式",
+      name: { EMAIL: "電子郵件驗證碼", SMS: "簡訊驗證碼" },
+      yours: { EMAIL: "已綁定的電子郵件", SMS: "已綁定的手機" },
+      unbound: "未綁定",
+      only: "驗證碼將傳送到 {{target}}",
+    },
     clear: "清除",
     max: "最大",
     searchCoin: "搜尋幣種",

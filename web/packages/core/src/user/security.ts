@@ -90,6 +90,28 @@ export function markBound(qc: QueryClient, kind: IdentityKind, mask: string): vo
 /** The mask shown for an identity the server says is bound but the page never saw. */
 export const UNKNOWN_MASK = "••••";
 
+/** A way a step-up code can go: its channel, the masked email or phone when known, and whether the account has it. */
+export type StepUpChannel = { channel: OtpChannel; target?: string; bound: boolean };
+
+/**
+ * stepUpChannels lists the two ways a step-up code can go (F32) from the
+ * identities the page knows: a kind it has not seen is not bound. Knowing
+ * none (the reads failed), it offers both without targets and leaves a
+ * channel that is not bound to the server to refuse.
+ */
+export function stepUpChannels(bound: BoundIdentities | undefined): StepUpChannel[] {
+  const known = Boolean(bound?.EMAIL || bound?.PHONE);
+  return [
+    { channel: "EMAIL", target: bound?.EMAIL, bound: !known || Boolean(bound?.EMAIL) },
+    { channel: "SMS", target: bound?.PHONE, bound: !known || Boolean(bound?.PHONE) },
+  ];
+}
+
+/** firstChannel is the channel a step-up starts on: the first the account has. */
+export function firstChannel(channels: readonly StepUpChannel[]): OtpChannel {
+  return channels.find((c) => c.bound)?.channel ?? "EMAIL";
+}
+
 // ---------------------------------------------------------------------------
 // Binding and rebinding.
 

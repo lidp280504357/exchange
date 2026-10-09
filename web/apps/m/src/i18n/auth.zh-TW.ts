@@ -15,10 +15,7 @@ export default {
     totpCode: "身份驗證器驗證碼",
     stepUpTitle: "安全驗證",
     stepUpTotpHint: "請輸入身份驗證器 App 上的 6 位驗證碼。",
-    stepUpOtpHint: "為了你的資產安全，請先完成驗證：驗證碼將傳送到你綁定的電子郵件或手機。",
-    viaEmail: "電子郵件驗證碼",
-    viaSms: "簡訊驗證碼",
-    channel: "接收方式",
+    stepUpOtpHint: "為了你的資產安全，請先完成驗證。",
 
     siteCheck: "請確認你訪問的是",
     securityNote: "{{brand}} 不會以任何理由索要你的密碼或驗證碼，請勿洩露給他人。",

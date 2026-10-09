@@ -19,3 +19,16 @@ export const Widget: Story = {
     );
   },
 };
+
+/** fill: as wide as the form around it (Cloudflare's flexible size), as the code steps use it (F32). */
+export const Fill: Story = {
+  render: () => {
+    const [token, setToken] = useState("");
+    return (
+      <div className="flex w-[336px] flex-col gap-2">
+        <Turnstile onToken={setToken} fill />
+        <p className="text-xs text-fg-3">token: {token ? `${token.slice(0, 12)}…` : "—"}</p>
+      </div>
+    );
+  },
+};

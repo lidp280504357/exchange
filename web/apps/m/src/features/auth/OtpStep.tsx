@@ -40,7 +40,7 @@ export function OtpStep({ target, onTicket, sentTo, confirmLabel }: OtpStepProps
 
   return (
     <div className="flex flex-col gap-3">
-      {!otp.sent || otp.wait === 0 ? <Turnstile onToken={setCaptcha} generation={generation} /> : null}
+      {!otp.sent || otp.wait === 0 ? <Turnstile onToken={setCaptcha} generation={generation} fill /> : null}
       {!otp.sent ? (
         <Button block size="lg" loading={otp.busy === "send"} disabled={!captcha} onClick={() => void send()}>
           {t("mAuth.sendCode")}

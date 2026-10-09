@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveIdentities, groupSecret, securitySummary, stepUpMethodFor } from "./security";
+import { deriveIdentities, firstChannel, groupSecret, securitySummary, stepUpChannels, stepUpMethodFor } from "./security";
 
 const login = (identity: string, at: string) => ({ identity, created_at: at });
 const changed = (channel: string, mask: string, at: string, old?: string) => {
@@ -50,6 +50,31 @@ describe("step-up for bindings", () => {
     expect(stepUpMethodFor("rebind", "EMAIL", { EMAIL: "a", PHONE: "b" }, false)).toBe("SMS");
     expect(stepUpMethodFor("rebind", "PHONE", { EMAIL: "a", PHONE: "b" }, false)).toBe("EMAIL");
     expect(stepUpMethodFor("rebind", "EMAIL", { EMAIL: "a" }, false)).toBe("EMAIL");
+  });
+});
+
+describe("the step-up's channels (F32)", () => {
+  it("offers both, with their targets, a kind the account lacks not bound", () => {
+    expect(stepUpChannels({ EMAIL: "a***@example.com", PHONE: "+86138****1234" })).toEqual([
+      { channel: "EMAIL", target: "a***@example.com", bound: true },
+      { channel: "SMS", target: "+86138****1234", bound: true },
+    ]);
+    const phoneOnly = stepUpChannels({ PHONE: "+86138****1234" });
+    expect(phoneOnly.map((c) => [c.channel, c.bound])).toEqual([
+      ["EMAIL", false],
+      ["SMS", true],
+    ]);
+    expect(firstChannel(phoneOnly)).toBe("SMS");
+    expect(firstChannel(stepUpChannels({ EMAIL: "a***@example.com" }))).toBe("EMAIL");
+  });
+  it("offers both without targets when it knows neither", () => {
+    for (const none of [undefined, {}]) {
+      expect(stepUpChannels(none).map((c) => [c.channel, c.target, c.bound])).toEqual([
+        ["EMAIL", undefined, true],
+        ["SMS", undefined, true],
+      ]);
+    }
+    expect(firstChannel(stepUpChannels(undefined))).toBe("EMAIL");
   });
 });
 

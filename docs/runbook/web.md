@@ -53,6 +53,9 @@
 - 路由：每个区域在 `pages/<区域>/routes.tsx` 登记页面，`App.tsx` 按外壳（`AppShell`、`TerminalShell`、`AuthShell`）挂载；需要登录的页面 `auth: true`，未登录跳 `/login?next=`。
 - 文案：外壳的在 `src/i18n.ts`，各区域的在 `src/i18n/<区域>.ts`（命名空间 `pcTrade`、`pcAssets` 等）。`routing.tsx` 的 `lazyPage` 与页面 chunk 并行加载该区域文案并注册，首屏不带全部页面的文字。
 - 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()`（身份验证器或邮箱/短信验证码换 step-up 令牌），`OtpStep` 是"人机验证 → 发送验证码 → 6 位码"的共用步骤。
+  - 没绑身份验证器时，验证码的接收方式是两张等宽的渠道卡片（ui `ChannelCards`，两站共用，F32，用户 10-10 要求）：图标、名称（邮箱验证码 / 短信验证码）与脱敏的邮箱或手机号；选中的强调色描边、浅底、右上小勾；账户没有的那种置灰标「未绑定」、不能选；方向键在卡片间移动（radiogroup）；只给一种渠道时不显示选择，只写一行"验证码将发送到 …"。卡片的数据来自 core `stepUpChannels`（由 `useBoundIdentities` 推出：登录记录与身份变更通知里见过的才算绑定；两样都推不出时两张都可选、不写目标，由服务端拒绝没绑的渠道），从账户有的第一种开始（`firstChannel`，只有手机的账户默认短信）。发送后写明发到哪个脱敏地址，验证码框自动聚焦，框内倒计时重发（原有）。
+  - 人机验证（ui `Turnstile`）在 `OtpStep` 里用 `fill`：Cloudflare 的 flexible 尺寸，与表单里的按钮同宽（至少 300 px）；登录、注册、找回密码、绑定与安全验证的验证码步骤都一样。
+  - 冒烟第 8e 步（两站）：新注册的邮箱账户从安全中心绑定身份验证器（PC 点「绑定」，手机点建议里的「绑定身份验证器」）拉起安全验证，两张卡片等宽、邮箱（`e***@example.com`）选中、短信置灰「未绑定」，按 Esc 关闭、不做任何改动。
 - 快捷键：`⌘K`/`Ctrl+K` 全站搜索；终端里 `/` 打开交易对搜索，`B`/`S` 切买卖。
 - 顶栏的下拉菜单（现货交易、合约、资产、账户）只用 CSS：悬停时打开，键盘聚焦时也打开（`group-has-[:focus-visible]`，只认键盘带来的焦点）；点过的菜单项会失焦，所以鼠标点完移开、或键盘按 Enter 跳转后菜单都会收起（B109，用户反馈：以前用 `focus-within`，点击留下的焦点让菜单在鼠标移开后仍开着）。冒烟测试悬停打开"资产"、点"充值"、移开鼠标，要求菜单收起。
 - 杠杆账户（杠杆设计 2026-10-06 §7，批次 E4 的第一部分）：全仓卡片（风险率仪表、总资产/总负债/净资产、各币种的可用/冻结/已借/利息/净资产与借、还、划转）、逐仓列表（每个交易对一张，含强平价估算）、借币利率；三个弹窗共用 core 的 `useMarginForm`：划入的上限是现货可用，划出是账户可用（服务端另按预警线与负债限制），借币是 `max-borrowable`（并写明受哪一界限制），还币是负债与可用的较小者，点"最大"且能还清时发 `ALL`。入口：资产侧栏的"杠杆账户"与资产总览总资产卡里的"杠杆账户"一格（PC `assets-margin`、手机 `margin-entry`，显示净额与占比，点进杠杆页），只对 `MARGIN_TRADE` 资格开放的人、或仍有杠杆资产或负债的人显示（关闭后还能还币、划出）。两站的总资产（资产总览、手机首页资产卡、"我的"资产卡与其占比条、24 小时盈亏估算）计入杠杆账户：各币净额（可用 + 冻结 − 借款 − 利息，可为负）按参考价折算，不打 haircut，与现货、合约同一口径（B102，core `valuePortfolio` 的第三个参数、`useMarginHoldings`：杠杆对用户开放时请求账户，否则只用缓存里的）；资产分布环仍只按现货与合约的币种；`margin.enabled` 对用户关闭时页面顶部说明，借币按钮不可点。仪表分区：低于预警线红，预警线以上两倍间距内黄，再往上绿，无负债显示 999。划转、借币、还币的弹窗（手机是 sheet）的表单组件不进这一页的首屏：页面加载完、浏览器空闲时预载（core `useIdleImport`：load 事件之后 `requestIdleCallback`，最多等 3 秒；没有它的浏览器如 iPhone Safari 在 load 之后 3 秒），预载完再打开立即显示（ui 的 `preloadable`：预载完成后 `React.lazy` 的导入是一个立即兑现的 thenable，渲染时不挂起，React 对 Suspense 显示内容的 300 ms 节流因此不再让第一次打开慢三分之一秒；每个块一个实例，在 `pages/assets/parts/lazyMargin.ts` 里供杠杆页与交易页共用，哪一页预载过另一页都直接用；元素类型始终是同一个 lazy 组件，导入前挂上的实例在导入后不会被重挂；导入失败后换一个新的 lazy 组件，下次挂载重新导入）（B108、B114、B115）。
@@ -87,7 +90,7 @@
   - `WindowList`：按页面滚动的虚拟列表，行情 50 行以上只渲染可见的行。
   - `PillBar`：分类胶囊。
   - 长按切换自选。
-- 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()` 在面板里完成 step-up；面板里再要 step-up 时叠在上面。
+- 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()` 在面板里完成 step-up；面板里再要 step-up 时叠在上面。验证码的接收方式与 PC 同为渠道卡片（ui `ChannelCards` 的 `lg` 尺寸，F32，见 PC 一节）。
 - 触控目标不小于 44 px：页面里直接做大，尺寸用 `size-tap`、`h-tap`、`min-h-tap`，不用 `size-11`、`h-12`（14 px 根字号下只有 38.5、42 px）。共享组件在触屏上（Tailwind 的 `pointer-coarse:`）自己放大：中号与大号按钮、大号输入框、页签、K 线工具栏的周期与指标按钮。共享组件里的小图标按钮（清除、复制、重试、面板关闭）用 `hit-area` 工具类（`packages/ui/src/styles/theme.css`），在触屏上给出 44 px 的点击区，外观不变；`hit-area` 会被横向滚动的容器裁掉，那里要真的做大。
 - 离线：`public/sw.js` 只缓存 `offline.html`，导航请求断网时显示"网络不可用"页；构建产物由 nginx 的 `immutable` 缓存负责，不进 service worker。
 - 文案：外壳的在 `src/i18n.ts`（命名空间 `m`），各区域的在 `src/i18n/<区域>.ts`（`mAuth`、`mTrade`、`mAssets`、`mAccount`、`mMarkets`、`mContent`），随页面加载。

@@ -8,6 +8,8 @@ export type TurnstileProps = {
   onToken: (token: string) => void;
   /** Bump after each submission: a token works once, a new widget gets the next. */
   generation?: number;
+  /** As wide as its container (Cloudflare's flexible size, at least 300 px), like the full-width fields and buttons around it (F32). */
+  fill?: boolean;
   className?: string;
 };
 
@@ -16,7 +18,7 @@ export type TurnstileProps = {
  * theme. End-to-end tests skip it with their bypass token; a build without
  * a site key says so instead of rendering nothing.
  */
-export function Turnstile({ onToken, generation = 0, className }: TurnstileProps) {
+export function Turnstile({ onToken, generation = 0, fill = false, className }: TurnstileProps) {
   const { t } = useTranslation();
   const box = useRef<HTMLDivElement>(null);
   const bypass = e2eCaptchaToken();
@@ -39,6 +41,7 @@ export function Turnstile({ onToken, generation = 0, className }: TurnstileProps
         id = ts.render(box.current, {
           sitekey: siteKey,
           theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
+          size: fill ? "flexible" : "normal",
           callback: (token: string) => latest.current(token),
           "expired-callback": () => latest.current(""),
           "error-callback": () => latest.current(""),
@@ -49,9 +52,9 @@ export function Turnstile({ onToken, generation = 0, className }: TurnstileProps
       cancelled = true;
       if (id && window.turnstile) window.turnstile.remove(id);
     };
-  }, [generation, bypass, siteKey]);
+  }, [generation, bypass, siteKey, fill]);
 
   if (bypass) return null;
   if (!siteKey) return <p className={cn("text-xs text-warn", className)}>{t("ui.captcha.noKey")}</p>;
-  return <div ref={box} className={cn("min-h-[65px]", className)} />;
+  return <div ref={box} className={cn("min-h-[65px]", fill && "w-full", className)} />;
 }

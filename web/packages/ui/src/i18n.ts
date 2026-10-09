@@ -9,6 +9,13 @@ export const uiMessages = {
   "zh-CN": {
     ui: {
       captcha: { noKey: "此构建没有配置人机验证站点密钥（TURNSTILE_SITE_KEY）" },
+      otpChannel: {
+        label: "验证码接收方式",
+        name: { EMAIL: "邮箱验证码", SMS: "短信验证码" },
+        yours: { EMAIL: "已绑定的邮箱", SMS: "已绑定的手机" },
+        unbound: "未绑定",
+        only: "验证码将发送到 {{target}}",
+      },
       clear: "清除",
       max: "最大",
       searchCoin: "搜索币种",
@@ -140,6 +147,13 @@ export const uiMessages = {
   en: {
     ui: {
       captcha: { noKey: "This build has no human-check site key (TURNSTILE_SITE_KEY)" },
+      otpChannel: {
+        label: "Where the code goes",
+        name: { EMAIL: "Email code", SMS: "SMS code" },
+        yours: { EMAIL: "Your bound email", SMS: "Your bound phone" },
+        unbound: "Not linked",
+        only: "The code goes to {{target}}",
+      },
       clear: "Clear",
       max: "Max",
       searchCoin: "Search coins",
