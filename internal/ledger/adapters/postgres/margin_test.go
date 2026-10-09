@@ -213,20 +213,24 @@ func TestRepayReleased(t *testing.T) {
 	order := uuid.NewString()
 	// The order filled 0.0001 BTC: nothing is repaid before the ledger has
 	// settled its trades (B163), then it is.
-	if _, _, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("6"), d("0.0001")); !apperr.Is(err, "LEDGER_TRADES_UNSETTLED") {
+	if _, _, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("6"), d("0.0001"), false); !apperr.Is(err, "LEDGER_TRADES_UNSETTLED") {
 		t.Fatalf("before the settlement: %v", err)
 	}
 	if a, debt, _ := rows(); !a.Equal(d("150")) || !debt.Equal(d("-50")) {
 		t.Fatalf("repaid before the settlement: assets %s, debt %s", a, debt)
 	}
-	if _, err := db.Exec(ctx, `INSERT INTO trades (trade_id, symbol, trade_number, base_asset, quote_asset, price, quantity, quote_quantity,
-		buyer_order_id, buyer_user_id, seller_order_id, seller_user_id, buyer_is_maker, buyer_fee, seller_fee, event_id, executed_at, status,
-		buyer_account_type) VALUES ($1, 'BTC-USDT', 0, 'BTC', 'USDT', 60000, 0.0001, 6, $2, $3, '', '', false, 0, 0, $4, now(), 'SETTLED',
-		'MARGIN_CROSS')`, uuid.NewString(), order, user, uuid.NewString()); err != nil {
-		t.Fatal(err)
+	trade := func(order, status string) {
+		t.Helper()
+		if _, err := db.Exec(ctx, `INSERT INTO trades (trade_id, symbol, trade_number, base_asset, quote_asset, price, quantity, quote_quantity,
+			buyer_order_id, buyer_user_id, seller_order_id, seller_user_id, buyer_is_maker, buyer_fee, seller_fee, event_id, executed_at, status,
+			buyer_account_type) VALUES ($1, 'BTC-USDT', 0, 'BTC', 'USDT', 60000, 0.0001, 6, $2, $3, '', '', false, 0, 0, $4, now(), $5,
+			'MARGIN_CROSS')`, uuid.NewString(), order, user, uuid.NewString(), status); err != nil {
+			t.Fatal(err)
+		}
 	}
+	trade(order, "SETTLED")
 	// 6.0000004 down to USDT's 6 decimals; the interest first.
-	res, repaid, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("6.0000004"), d("0.0001"))
+	res, repaid, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("6.0000004"), d("0.0001"), false)
 	if err != nil || res.JournalID == "" || !repaid.Equal(d("6")) {
 		t.Fatalf("repay: %+v %s %v", res, repaid, err)
 	}
@@ -239,23 +243,38 @@ func TestRepayReleased(t *testing.T) {
 		t.Fatalf("journal: %q %q %v", memo, entry, err)
 	}
 	// Once per order.
-	again, repaid, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("10"), decimal.Zero)
+	again, repaid, err := svc.RepayReleased(ctx, order, user, domain.AccountMarginCross, "", "USDT", d("10"), decimal.Zero, false)
 	if err != nil || !again.Replayed || again.JournalID != res.JournalID || !repaid.IsZero() {
 		t.Fatalf("again: %+v %s %v", again, repaid, err)
 	}
+	// Trades parked as FAILED (B164) are waited for unless the caller says
+	// the order ended long ago; trades not recorded yet are waited for all
+	// the same.
+	parked := uuid.NewString()
+	if _, _, err := svc.RepayReleased(ctx, parked, user, domain.AccountMarginCross, "", "USDT", d("4"), d("0.0002"), true); !apperr.Is(err, "LEDGER_TRADES_UNSETTLED") {
+		t.Fatalf("nothing recorded yet: %v", err)
+	}
+	trade(parked, "SETTLED")
+	trade(parked, "FAILED")
+	if _, _, err := svc.RepayReleased(ctx, parked, user, domain.AccountMarginCross, "", "USDT", d("4"), d("0.0002"), false); !apperr.Is(err, "LEDGER_TRADES_UNSETTLED") {
+		t.Fatalf("a trade parked as FAILED: %v", err)
+	}
+	if _, repaid, err := svc.RepayReleased(ctx, parked, user, domain.AccountMarginCross, "", "USDT", d("4"), d("0.0002"), true); err != nil || !repaid.Equal(d("4")) {
+		t.Fatalf("past the trade parked as FAILED: %s %v", repaid, err)
+	}
 	// At most what is owed.
-	if _, repaid, err := svc.RepayReleased(ctx, uuid.NewString(), user, domain.AccountMarginCross, "", "USDT", d("1000"), decimal.Zero); err != nil || !repaid.Equal(d("44.05")) {
+	if _, repaid, err := svc.RepayReleased(ctx, uuid.NewString(), user, domain.AccountMarginCross, "", "USDT", d("1000"), decimal.Zero, false); err != nil || !repaid.Equal(d("40.05")) {
 		t.Fatalf("all of it: %s %v", repaid, err)
 	}
 	if a, debt, _ := rows(); !a.Equal(d("99.95")) || !debt.IsZero() {
 		t.Fatalf("paid off: assets %s, debt %s", a, debt)
 	}
 	// Nothing owed: nothing posted, and the order may still repay later.
-	none, repaid, err := svc.RepayReleased(ctx, uuid.NewString(), user, domain.AccountMarginCross, "", "USDT", d("5"), decimal.Zero)
+	none, repaid, err := svc.RepayReleased(ctx, uuid.NewString(), user, domain.AccountMarginCross, "", "USDT", d("5"), decimal.Zero, false)
 	if err != nil || none.JournalID != "" || !repaid.IsZero() {
 		t.Fatalf("nothing owed: %+v %s %v", none, repaid, err)
 	}
-	if _, _, err := svc.RepayReleased(ctx, "not-a-uuid", user, domain.AccountMarginCross, "", "USDT", d("1"), decimal.Zero); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, _, err := svc.RepayReleased(ctx, "not-a-uuid", user, domain.AccountMarginCross, "", "USDT", d("1"), decimal.Zero, false); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("a bad order id: %v", err)
 	}
 }

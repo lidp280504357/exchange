@@ -113,7 +113,8 @@ service LedgerService {
   // "auto-repay order <order_id> release"), which margin-service follows as
   // an automatic repayment, as it does a trade's. Once per order: a repeat
   // returns the first outcome. It waits for the order's trades to settle
-  // (filled_quantity, B163). Nothing is posted when nothing is owed or
+  // (filled_quantity, B163; past the ones parked as FAILED only when
+  // skip_failed_trades, B164). Nothing is posted when nothing is owed or
   // available.
   rpc RepayReleased(RepayReleasedRequest) returns (RepayReleasedResponse);
 }
@@ -562,6 +563,12 @@ message RepayReleasedRequest {
   // settlement gives back is there to repay. Empty or "0" waits for
   // nothing.
   string filled_quantity = 7;
+  // Set once the order ended long ago (B164): its trades the ledger parked
+  // as FAILED, which settle only once their cause is fixed, then count
+  // toward filled_quantity and the repayment takes what the account holds
+  // (the ledger logs it). Trades it has not recorded yet are waited for
+  // all the same.
+  bool skip_failed_trades = 8;
 }
 
 message RepayReleasedResponse {

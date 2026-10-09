@@ -196,6 +196,14 @@ groups:
           summary: "an order has waited {{ $value }} seconds for its freeze (ledger or margin-service unreachable?); recovery takes the 100 oldest each pass"
           runbook: docs/runbook/trading.md
 
+      - alert: TradingOrderReleasesStuck
+        expr: max by (job) (trading_orders_unreleased_oldest_seconds) > 900
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "a finished order has waited {{ $value }} seconds for its release (ledger unreachable, or a margin order's repayment waiting for its trades: the ledger's settlement behind, or trades parked as FAILED)"
+          runbook: docs/runbook/trading.md
+
       - alert: LedgerReconciliationStopped
         expr: increase(ledger_reconcile_runs_total[3h]) == 0
         labels: {severity: warning}

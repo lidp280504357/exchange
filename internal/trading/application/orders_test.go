@@ -31,10 +31,11 @@ type emitted struct {
 }
 
 type memStore struct {
-	mu     sync.Mutex
-	orders map[string]domain.Order
-	fills  map[string]domain.Fill // by trade and order
-	events []emitted
+	mu       sync.Mutex
+	orders   map[string]domain.Order
+	fills    map[string]domain.Fill // by trade and order
+	events   []emitted
+	attempts map[string]time.Time // release attempts that failed, by order
 }
 
 func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
@@ -194,10 +195,13 @@ type fakeLedger struct {
 	debts       map[string]string
 	debtErr     error    // MarginDebt's answer when set
 	repays      []string // RepayReleased's repayments: "account order up-to asset"
-	repayCalls  []string // RepayReleased's calls: "order filled <quantity>"
+	repayCalls  []string // RepayReleased's calls: "order filled <quantity>[ skip-failed]"
 	// settled is what the ledger has settled of every order (B163): a
 	// call with more filled is refused as unsettled; nil settles all.
+	// parked is what it parked as FAILED, which counts only for a call
+	// that skips them (B164).
 	settled *decimal.Decimal
+	parked  decimal.Decimal
 }
 
 func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset string) (decimal.Decimal, error) {
@@ -212,9 +216,15 @@ func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset strin
 
 func (l *fakeLedger) MarginBorrowers(context.Context) (int, error) { return len(l.debts), nil }
 
-func (l *fakeLedger) RepayReleased(_ context.Context, a domain.Account, asset string, upTo, filled decimal.Decimal, orderID string) (decimal.Decimal, error) {
-	l.repayCalls = append(l.repayCalls, orderID+" filled "+filled.String())
-	if l.settled != nil && filled.GreaterThan(*l.settled) {
+func (l *fakeLedger) RepayReleased(_ context.Context, a domain.Account, asset string, upTo, filled decimal.Decimal, skipFailed bool,
+	orderID string,
+) (decimal.Decimal, error) {
+	call := orderID + " filled " + filled.String()
+	if skipFailed {
+		call += " skip-failed"
+	}
+	l.repayCalls = append(l.repayCalls, call)
+	if l.settled != nil && filled.GreaterThan(*l.settled) && (!skipFailed || filled.GreaterThan(l.settled.Add(l.parked))) {
 		return decimal.Zero, apperr.New(apperr.KindUnavailable, "LEDGER_TRADES_UNSETTLED", "not settled yet")
 	}
 	l.repays = append(l.repays, string(a.Type)+" "+orderID+" "+upTo.String()+" "+asset)

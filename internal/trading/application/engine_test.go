@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/trading/domain"
+	"github.com/skill/exchange/internal/trading/ports"
 )
 
 type memFills memRepos
@@ -59,14 +62,55 @@ func (r memFills) LastTrade(_ context.Context, symbol string) (decimal.Decimal, 
 	return last.Price, last.ExecutedAt, nil
 }
 
+func unreleased(o domain.Order) bool {
+	return !o.Released && o.FreezeState == domain.FreezeDone && o.Status.Terminal()
+}
+
+// Unreleased takes the longest untried first, as the store does: since
+// the order finished, or since its last failed try.
 func (r memOrders) Unreleased(_ context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
 	var out []domain.Order
 	for _, o := range r.s.orders {
-		if !o.Released && o.FreezeState == domain.FreezeDone && o.Status.Terminal() && o.UpdatedAt.Before(cutoff) {
+		if unreleased(o) && o.UpdatedAt.Before(cutoff) {
 			out = append(out, o)
 		}
 	}
+	next := func(o domain.Order) time.Time {
+		if at, ok := r.s.attempts[o.ID]; ok {
+			return at
+		}
+		return o.UpdatedAt
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if a, b := next(out[i]), next(out[j]); !a.Equal(b) {
+			return a.Before(b)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out[:min(len(out), limit)], nil
+}
+
+func (r memOrders) ReleaseAttempted(_ context.Context, orderID string, at time.Time) error {
+	if o, ok := r.s.orders[orderID]; ok && !o.Released {
+		if r.s.attempts == nil {
+			r.s.attempts = map[string]time.Time{}
+		}
+		r.s.attempts[orderID] = at
+	}
+	return nil
+}
+
+func (r memOrders) UnreleasedStats(context.Context) (int, time.Time, error) {
+	n, oldest := 0, time.Time{}
+	for _, o := range r.s.orders {
+		if unreleased(o) {
+			n++
+			if oldest.IsZero() || o.UpdatedAt.Before(oldest) {
+				oldest = o.UpdatedAt
+			}
+		}
+	}
+	return n, oldest, nil
 }
 
 func update(orderID string, seq int64, status domain.Status, filled, quote, reason string) domain.Update {
@@ -255,7 +299,9 @@ func TestABorrowingOrderRepaysWhatCameBackAsItEnds(t *testing.T) {
 // A repayment waits for its trades' settlement (B163): while the ledger
 // has settled less than the order filled it refuses, the order stays
 // unreleased and the next pass tries again, the passes going on past it
-// to the other orders; an hour after the order ended it no longer waits.
+// to the other orders; no failure within repayQuiet of the order's end
+// (B164). An hour after the order ended the trades the ledger parked as
+// FAILED no longer hold it; the ones it has not recorded still do.
 func TestARepaymentWaitsForItsTradesSettlement(t *testing.T) {
 	svc, _, led, c := newService()
 	ctx := context.Background()
@@ -284,8 +330,7 @@ func TestARepaymentWaitsForItsTradesSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.t = c.t.Add(repayGrace + time.Second)
-	n, err := svc.RecoverReleases(ctx)
-	if n != 1 || !apperr.Is(errors.Unwrap(err), "LEDGER_TRADES_UNSETTLED") {
+	if n, err := svc.RecoverReleases(ctx); n != 1 || err != nil {
 		t.Fatalf("first pass: %d %v", n, err)
 	}
 	if got, _ := svc.Get(ctx, "u1", byQty.ID); got.Released || len(led.repays) != 1 || led.repays[0] != "MARGIN_CROSS "+canceled.ID+" 50 USDT" {
@@ -298,21 +343,88 @@ func TestARepaymentWaitsForItsTradesSettlement(t *testing.T) {
 		t.Fatalf("settled: %d %v %v", n, err, led.repays)
 	}
 
-	// One whose trades never settle is repaid an hour on, without waiting.
+	// One whose trades do not settle: waiting is a failure past repayQuiet,
+	// and goes on an hour on while the ledger has not recorded them.
 	stuck := place("stuck", true)
 	if err := svc.OnUpdate(ctx, update(stuck.ID, 5, domain.StatusFilled, "0.001", "60", "")); err != nil {
 		t.Fatal(err)
 	}
 	led.settled = &nothing
 	c.t = c.t.Add(repayGrace + time.Second)
-	if n, _ := svc.RecoverReleases(ctx); n != 0 {
-		t.Fatalf("still waiting: %d", n)
+	if n, err := svc.RecoverReleases(ctx); n != 0 || err != nil {
+		t.Fatalf("still waiting: %d %v", n, err)
+	}
+	c.t = c.t.Add(repayQuiet)
+	if n, err := svc.RecoverReleases(ctx); n != 0 || !apperr.Is(errors.Unwrap(err), "LEDGER_TRADES_UNSETTLED") {
+		t.Fatalf("waiting past repayQuiet: %d %v", n, err)
 	}
 	c.t = c.t.Add(repayWait)
-	if n, err := svc.RecoverReleases(ctx); err != nil || n != 1 {
-		t.Fatalf("an hour on: %d %v", n, err)
+	if n, _ := svc.RecoverReleases(ctx); n != 0 {
+		t.Fatalf("not recorded, an hour on: %d", n)
 	}
-	if last := led.repayCalls[len(led.repayCalls)-1]; last != stuck.ID+" filled 0" {
+	if last := led.repayCalls[len(led.repayCalls)-1]; last != stuck.ID+" filled 0.001 skip-failed" {
 		t.Fatalf("calls %v", led.repayCalls)
+	}
+	// Parked as FAILED: they no longer hold it.
+	led.parked = d("0.001")
+	if n, err := svc.RecoverReleases(ctx); err != nil || n != 1 || led.repays[len(led.repays)-1] != "MARGIN_CROSS "+stuck.ID+" 6 USDT" {
+		t.Fatalf("parked as FAILED, an hour on: %d %v %v", n, err, led.repays)
+	}
+	for _, call := range led.repayCalls[:len(led.repayCalls)-2] {
+		if strings.HasSuffix(call, "skip-failed") {
+			t.Fatalf("skipped the failed trades within the hour: %v", led.repayCalls)
+		}
+	}
+}
+
+// A release that does not complete goes to the back (B164): the next
+// pass takes the orders that waited longest since their end or their last
+// try first, so ones that keep failing do not starve the rest.
+func TestAFailedReleaseGoesToTheBack(t *testing.T) {
+	svc, store, led, c := newService()
+	ctx := context.Background()
+	first, _ := svc.Place(ctx, buy("c1"))
+	c.t = c.t.Add(time.Second)
+	second, _ := svc.Place(ctx, buy("c2"))
+	led.unfreezeErr = apperr.Unavailable(errors.New("ledger down"))
+	for i, o := range []domain.Order{first, second} {
+		if err := svc.OnUpdate(ctx, update(o.ID, int64(10+i), domain.StatusCanceled, "0", "0", "USER")); err == nil {
+			t.Fatal("released with the ledger down")
+		}
+		c.t = c.t.Add(time.Second)
+	}
+	c.t = c.t.Add(time.Minute)
+	queue := func() []string {
+		t.Helper()
+		list, err := store.Read().Orders().Unreleased(ctx, c.t, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, o := range list {
+			ids = append(ids, o.ClientOrderID)
+		}
+		return ids
+	}
+	if got := queue(); !slices.Equal(got, []string{"c1", "c2"}) {
+		t.Fatalf("before: %v", got)
+	}
+	if n, err := svc.RecoverReleases(ctx); n != 0 || err == nil {
+		t.Fatalf("ledger down: %d %v", n, err)
+	}
+	if !store.attempts[first.ID].Equal(c.t) || !store.attempts[second.ID].Equal(c.t) {
+		t.Fatalf("attempts %v", store.attempts)
+	}
+	// Tried in this order, they keep it; the one that fails next goes behind.
+	c.t = c.t.Add(time.Second)
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Orders().ReleaseAttempted(ctx, first.ID, c.t) }); err != nil {
+		t.Fatal(err)
+	}
+	if got := queue(); !slices.Equal(got, []string{"c2", "c1"}) {
+		t.Fatalf("after: %v", got)
+	}
+	ended, _ := svc.Get(ctx, "u1", first.ID)
+	if n, age, err := svc.Unreleased(ctx); n != 2 || err != nil || age != c.t.Sub(ended.UpdatedAt) {
+		t.Fatalf("stats: %d %s %v", n, age, err)
 	}
 }

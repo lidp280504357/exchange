@@ -273,7 +273,7 @@ func (freezeOK) MarginDebt(context.Context, domain.Account, string) (decimal.Dec
 
 func (freezeOK) MarginBorrowers(context.Context) (int, error) { return 0, nil }
 
-func (freezeOK) RepayReleased(context.Context, domain.Account, string, decimal.Decimal, decimal.Decimal, string) (decimal.Decimal, error) {
+func (freezeOK) RepayReleased(context.Context, domain.Account, string, decimal.Decimal, decimal.Decimal, bool, string) (decimal.Decimal, error) {
 	return decimal.Zero, nil
 }
 
@@ -391,5 +391,55 @@ func TestEngineColumnsFillsAndReleases(t *testing.T) {
 	}
 	if none, when, err := store.Read().Fills().LastTrade(ctx, "ETH-USDT"); err != nil || !none.IsZero() || !when.IsZero() {
 		t.Fatalf("a symbol without trades: %s, %v", none, err)
+	}
+}
+
+// A release that did not complete goes to the back of Unreleased (B164):
+// the longest untried first, since the order finished or since its last
+// try. UnreleasedStats counts the finished orders not released and tells
+// when the longest finished one did.
+func TestFailedReleasesGoToTheBack(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	user, at := uuid.NewString(), time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	var ids []string
+	for i := range 3 {
+		o := order(t, user, limitBuy(), at)
+		o.FreezeState = domain.FreezeDone
+		if err := store.Read().Orders().Insert(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		if !o.Apply(domain.Update{OrderID: o.ID, Seq: 3, Status: domain.StatusCanceled, Reason: "USER"}, at.Add(time.Duration(i)*time.Minute)) {
+			t.Fatal("apply")
+		}
+		if err := store.Read().Orders().Update(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, o.ID)
+	}
+	queue := func() []string {
+		t.Helper()
+		list, err := store.Read().Orders().Unreleased(ctx, time.Now(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, o := range list {
+			out = append(out, o.ID)
+		}
+		return out
+	}
+	if got := queue(); !slices.Equal(got, ids) {
+		t.Fatalf("by their end: %v, want %v", got, ids)
+	}
+	if err := store.Read().Orders().ReleaseAttempted(ctx, ids[0], time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := queue(); !slices.Equal(got, []string{ids[1], ids[2], ids[0]}) {
+		t.Fatalf("the one tried last behind: %v", got)
+	}
+	n, oldest, err := store.Read().Orders().UnreleasedStats(ctx)
+	if err != nil || n != 3 || !oldest.Equal(at) {
+		t.Fatalf("stats: %d %s %v", n, oldest, err)
 	}
 }

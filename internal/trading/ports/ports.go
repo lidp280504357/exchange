@@ -62,8 +62,16 @@ type OrderRepo interface {
 	// returns when the oldest was created.
 	PendingStats(ctx context.Context) (int, time.Time, error)
 	// Unreleased returns funded orders that finished before cutoff and
-	// whose unused funds are not released yet.
+	// whose unused funds are not released yet, the longest untried first
+	// (since they finished, or since their last try: B164).
 	Unreleased(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error)
+	// ReleaseAttempted records a try at an order's release that did not
+	// complete, which sends it to the back of Unreleased.
+	ReleaseAttempted(ctx context.Context, orderID string, at time.Time) error
+	// UnreleasedStats counts the funded orders that finished and whose
+	// release did not complete, and returns when the longest finished one
+	// did.
+	UnreleasedStats(ctx context.Context) (int, time.Time, error)
 }
 
 // FillRepo stores each side of the trades.
@@ -100,8 +108,11 @@ type Ledger interface {
 	// for its freeze ends, up to upTo of the account's debt of asset from
 	// what it holds available (B160); once per order, and only once the
 	// order's settled trades come to filled (B163: a refusal to retry
-	// before; zero waits for nothing). It returns what was repaid.
-	RepayReleased(ctx context.Context, account domain.Account, asset string, upTo, filled decimal.Decimal, orderID string) (decimal.Decimal, error)
+	// before; zero waits for nothing), with skipFailed its trades the
+	// ledger parked as FAILED counted too (B164). It returns what was
+	// repaid.
+	RepayReleased(ctx context.Context, account domain.Account, asset string, upTo, filled decimal.Decimal, skipFailed bool,
+		orderID string) (decimal.Decimal, error)
 	// MarginDebt returns what a margin account owes of asset, the principal
 	// and the interest (zero without a debt).
 	MarginDebt(ctx context.Context, account domain.Account, asset string) (decimal.Decimal, error)

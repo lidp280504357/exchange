@@ -299,9 +299,32 @@ func (r orders) query(ctx context.Context, sql string, args ...any) ([]domain.Or
 	return out, rows.Err()
 }
 
+// unreleased matches orders_unreleased_next_idx (trading 00009).
+const unreleased = `released = false AND status IN ('FILLED', 'CANCELED', 'REJECTED', 'EXPIRED') AND freeze_state = 'FROZEN'`
+
 func (r orders) Unreleased(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
-	return r.query(ctx, `SELECT `+columns+` FROM orders WHERE released = false AND freeze_state = 'FROZEN'
-		AND status IN ('FILLED', 'CANCELED', 'REJECTED', 'EXPIRED') AND updated_at < $1 ORDER BY updated_at LIMIT $2`, cutoff, limit)
+	return r.query(ctx, `SELECT `+columns+` FROM orders WHERE `+unreleased+` AND updated_at < $1
+		ORDER BY COALESCE(release_attempted_at, updated_at) LIMIT $2`, cutoff, limit)
+}
+
+func (r orders) ReleaseAttempted(ctx context.Context, orderID string, at time.Time) error {
+	if _, err := r.q.Exec(ctx, `UPDATE orders SET release_attempted_at = $2 WHERE id = $1 AND released = false`, orderID, at); err != nil {
+		return fmt.Errorf("record a release attempt: %w", err)
+	}
+	return nil
+}
+
+func (r orders) UnreleasedStats(ctx context.Context) (int, time.Time, error) {
+	var n int
+	var oldest *time.Time
+	err := r.q.QueryRow(ctx, `SELECT count(*), min(updated_at) FROM orders WHERE `+unreleased).Scan(&n, &oldest)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("count unreleased orders: %w", err)
+	}
+	if oldest == nil {
+		return n, time.Time{}, nil
+	}
+	return n, *oldest, nil
 }
 
 func (r repos) Fills() ports.FillRepo { return fills(r) }

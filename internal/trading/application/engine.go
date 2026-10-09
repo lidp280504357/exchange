@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/trading/domain"
@@ -45,11 +44,15 @@ func (s *Service) OnUpdate(ctx context.Context, u domain.Update) error {
 // beyond the trade prices, and the ledger settles them on its own.
 // RecoverReleases repays it, past this (its cutoff is as long); the ledger
 // still refuses while the order's settled trades fall short of what it
-// filled (B163), and the next pass tries again. repayWait is how long that
-// goes on: past it the repayment takes what the account holds then (a
-// trade the ledger parked as FAILED settles only by an operator's hand).
+// filled (B163), and the next pass tries again, for as long as it takes
+// (alert TradingOrderReleasesStuck). Past repayWait its trades the ledger
+// parked as FAILED, which settle only once their cause is fixed, no longer
+// hold it (B164): the repayment then takes what the account holds. A
+// refusal within repayQuiet of the order's end is logged at Debug (a
+// settlement some seconds behind is routine), later ones at Warn.
 const (
 	repayGrace = 10 * time.Second
+	repayQuiet = 5 * time.Minute
 	repayWait  = time.Hour
 )
 
@@ -74,12 +77,9 @@ func (s *Service) release(ctx context.Context, o domain.Order) error {
 		if s.Now().Sub(o.UpdatedAt) < repayGrace {
 			return nil // RecoverReleases repays it, and marks it released
 		}
-		filled := o.FilledQuantity
-		if s.Now().Sub(o.UpdatedAt) > repayWait {
-			filled = decimal.Zero // no longer waits for the settlement
-		}
+		skipFailed := s.Now().Sub(o.UpdatedAt) > repayWait // B164
 		call, cancel := s.bounded(ctx)
-		repaid, err := s.Ledger.RepayReleased(call, o.Account(), o.FrozenAsset, repay, filled, o.ID)
+		repaid, err := s.Ledger.RepayReleased(call, o.Account(), o.FrozenAsset, repay, o.FilledQuantity, skipFailed, o.ID)
 		cancel()
 		if err != nil {
 			return err
@@ -101,9 +101,11 @@ func (s *Service) release(ctx context.Context, o domain.Order) error {
 
 // RecoverReleases releases finished orders whose release did not complete
 // (a ledger outage while the update was handled, a repayment waiting for
-// its trades' settlement). One that fails is logged and left for the next
-// pass while the others go on (B163); it returns how many it released and
-// the first failure.
+// its trades' settlement), the longest untried first. One that fails is
+// sent to the back (B164) and left for a later pass while the others go
+// on (B163); a repayment still waiting within repayQuiet of its order's
+// end is no failure. It returns how many it released and the first
+// failure.
 func (s *Service) RecoverReleases(ctx context.Context) (int, error) {
 	orders, err := s.Store.Read().Orders().Unreleased(ctx, s.Now().Add(-10*time.Second), 100)
 	if err != nil {
@@ -115,20 +117,43 @@ func (s *Service) RecoverReleases(ctx context.Context) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		if err := s.release(ctx, o); err != nil {
-			s.Log.WarnContext(ctx, "an order's release did not complete; the next pass tries again", "order_id", o.ID, "error", err)
-			failed++
-			if first == nil {
-				first = err
-			}
+		err := s.release(ctx, o)
+		if err == nil {
+			n++
 			continue
 		}
-		n++
+		if aerr := s.Store.Tx(ctx, func(r ports.Repos) error { return r.Orders().ReleaseAttempted(ctx, o.ID, s.Now()) }); aerr != nil {
+			s.Log.WarnContext(ctx, "recording a release attempt failed", "order_id", o.ID, "error", aerr)
+		}
+		if apperr.Is(err, codeTradesUnsettled) && s.Now().Sub(o.UpdatedAt) < repayQuiet {
+			s.Log.DebugContext(ctx, "an order's repayment waits for its trades' settlement", "order_id", o.ID, "error", err)
+			continue
+		}
+		s.Log.WarnContext(ctx, "an order's release did not complete; a later pass tries again", "order_id", o.ID, "error", err)
+		failed++
+		if first == nil {
+			first = err
+		}
 	}
 	if first != nil {
 		return n, fmt.Errorf("%d of %d releases did not complete: %w", failed, len(orders), first)
 	}
 	return n, nil
+}
+
+// codeTradesUnsettled is the ledger's answer while an order's trades are
+// not all settled (LEDGER_TRADES_UNSETTLED, B163).
+const codeTradesUnsettled = "LEDGER_TRADES_UNSETTLED"
+
+// Unreleased counts the finished orders whose release did not complete
+// and tells how long ago the longest finished one did (zero without
+// any), for the gauges behind alert TradingOrderReleasesStuck (B164).
+func (s *Service) Unreleased(ctx context.Context) (int, time.Duration, error) {
+	n, oldest, err := s.Store.Read().Orders().UnreleasedStats(ctx)
+	if err != nil || n == 0 {
+		return n, 0, err
+	}
+	return n, max(s.Now().Sub(oldest), 0), nil
 }
 
 // OnFill records one side of a trade.

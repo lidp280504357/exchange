@@ -160,7 +160,8 @@ type LedgerServiceClient interface {
 	// "auto-repay order <order_id> release"), which margin-service follows as
 	// an automatic repayment, as it does a trade's. Once per order: a repeat
 	// returns the first outcome. It waits for the order's trades to settle
-	// (filled_quantity, B163). Nothing is posted when nothing is owed or
+	// (filled_quantity, B163; past the ones parked as FAILED only when
+	// skip_failed_trades, B164). Nothing is posted when nothing is owed or
 	// available.
 	RepayReleased(ctx context.Context, in *RepayReleasedRequest, opts ...grpc.CallOption) (*RepayReleasedResponse, error)
 }
@@ -528,7 +529,8 @@ type LedgerServiceServer interface {
 	// "auto-repay order <order_id> release"), which margin-service follows as
 	// an automatic repayment, as it does a trade's. Once per order: a repeat
 	// returns the first outcome. It waits for the order's trades to settle
-	// (filled_quantity, B163). Nothing is posted when nothing is owed or
+	// (filled_quantity, B163; past the ones parked as FAILED only when
+	// skip_failed_trades, B164). Nothing is posted when nothing is owed or
 	// available.
 	RepayReleased(context.Context, *RepayReleasedRequest) (*RepayReleasedResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()

@@ -76,16 +76,16 @@ func (r trades) Update(ctx context.Context, t domain.Trade) error {
 	return nil
 }
 
-func (r trades) SettledOfMarginOrder(ctx context.Context, orderID string) (decimal.Decimal, error) {
+func (r trades) MarginOrderTrades(ctx context.Context, orderID string) (settled, failed decimal.Decimal, err error) {
 	// The predicates match the partial indexes of ledger 00011.
-	var settled decimal.Decimal
-	err := r.q.QueryRow(ctx, `SELECT COALESCE(sum(quantity), 0) FROM trades WHERE status = 'SETTLED' AND (
+	err = r.q.QueryRow(ctx, `SELECT COALESCE(sum(quantity) FILTER (WHERE status = 'SETTLED'), 0),
+		COALESCE(sum(quantity) FILTER (WHERE status = 'FAILED'), 0) FROM trades WHERE
 		(buyer_order_id = $1 AND buyer_account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED'))
-		OR (seller_order_id = $1 AND seller_account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED')))`, orderID).Scan(&settled)
+		OR (seller_order_id = $1 AND seller_account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED'))`, orderID).Scan(&settled, &failed)
 	if err != nil {
-		return decimal.Zero, fmt.Errorf("settled trades of order %s: %w", orderID, err)
+		return decimal.Zero, decimal.Zero, fmt.Errorf("trades of order %s: %w", orderID, err)
 	}
-	return settled, nil
+	return settled, failed, nil
 }
 
 func (r trades) List(ctx context.Context, status string, limit int) ([]domain.Trade, error) {

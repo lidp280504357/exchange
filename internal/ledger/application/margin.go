@@ -165,10 +165,15 @@ var ErrTradesUnsettled = apperr.New(apperr.KindUnavailable, "LEDGER_TRADES_UNSET
 // from its available balance, interest first (domain.RepayReleasedPosting),
 // once per order: a repeat returns the first journal. Only once the
 // order's settled trades come to filled, the quantity it filled (B163):
-// before, ErrTradesUnsettled (a zero filled waits for nothing). The zero
-// Result and a zero amount when nothing was owed or available (nothing is
-// kept then, so a later call may still repay).
-func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountType, scope, asset string, upTo, filled decimal.Decimal) (Result, decimal.Decimal, error) {
+// before, ErrTradesUnsettled (a zero filled waits for nothing). With
+// skipFailed its trades parked as FAILED count too, logged (B164: the
+// caller sets it once the order ended long ago; they settle only once
+// their cause is fixed), the ones not recorded yet still waited for. The
+// zero Result and a zero amount when nothing was owed or available
+// (nothing is kept then, so a later call may still repay).
+func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountType, scope, asset string, upTo, filled decimal.Decimal,
+	skipFailed bool,
+) (Result, decimal.Decimal, error) {
 	if _, err := uuid.Parse(orderID); err != nil {
 		return Result{}, decimal.Zero, apperr.Invalid("order_id must be a UUID")
 	}
@@ -188,9 +193,9 @@ func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountTyp
 		return Result{}, decimal.Zero, nil
 	}
 	var res Result
-	repaid := decimal.Zero
+	repaid, skipped := decimal.Zero, decimal.Zero
 	err = s.Store.Tx(ctx, func(r ports.Repos) error {
-		res, repaid = Result{}, decimal.Zero
+		res, repaid, skipped = Result{}, decimal.Zero, decimal.Zero
 		if j, err := r.Journals().ByIdemKey(ctx, domain.ReleaseRepayKey(orderID)); err != nil || j != nil {
 			if j != nil {
 				res = Result{JournalID: j.ID, Seq: j.Seq, Replayed: true}
@@ -198,12 +203,16 @@ func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountTyp
 			return err
 		}
 		if filled.IsPositive() {
-			settled, err := r.Trades().SettledOfMarginOrder(ctx, orderID)
+			settled, failed, err := r.Trades().MarginOrderTrades(ctx, orderID)
 			if err != nil {
 				return err
 			}
 			if settled.LessThan(filled) {
-				return ErrTradesUnsettled.WithDetail("settled", settled.String()).WithDetail("filled", filled.String())
+				if !skipFailed || settled.Add(failed).LessThan(filled) {
+					return ErrTradesUnsettled.WithDetail("settled", settled.String()).WithDetail("failed", failed.String()).
+						WithDetail("filled", filled.String())
+				}
+				skipped = failed
 			}
 		}
 		keys := []domain.AccountKey{ref.Assets(asset), ref.DebtRow(asset), ref.InterestRow(asset)}
@@ -225,6 +234,10 @@ func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountTyp
 		repaid = p.Lines[0].Amount.Neg()
 		return nil
 	})
+	if err == nil && skipped.IsPositive() && s.Log != nil {
+		s.Log.WarnContext(ctx, "an order's repayment went ahead past its trades parked as FAILED; what their settlement gives back stays borrowed",
+			"order_id", orderID, "failed_quantity", skipped.String(), "filled", filled.String(), "repaid", repaid.String())
+	}
 	return res, repaid, err
 }
 

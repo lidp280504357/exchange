@@ -95,9 +95,10 @@ type TradeRepo interface {
 	// List returns up to limit trades, newest first, optionally of one
 	// status.
 	List(ctx context.Context, status string, limit int) ([]domain.Trade, error)
-	// SettledOfMarginOrder sums the base quantity of the settled trades of
-	// an order on a margin account (B163).
-	SettledOfMarginOrder(ctx context.Context, orderID string) (decimal.Decimal, error)
+	// MarginOrderTrades sums the base quantity of an order's trades on a
+	// margin account, the settled ones and the ones parked as FAILED
+	// (B163, B164).
+	MarginOrderTrades(ctx context.Context, orderID string) (settled, failed decimal.Decimal, err error)
 }
 
 // FuturesRepo stores the settlement requests of derivatives-service.

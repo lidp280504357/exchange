@@ -86,6 +86,22 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'trading_orders_unreleased_oldest_seconds{job="spot-trading-service"}'
+        values: '0 0 1000 1060 1120 1180 1240 1300 1360 1420'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TradingOrderReleasesStuck
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: TradingOrderReleasesStuck
+        exp_alerts:
+          - exp_labels: {severity: warning, job: spot-trading-service}
+            exp_annotations:
+              summary: "a finished order has waited 1360 seconds for its release (ledger unreachable, or a margin order's repayment waiting for its trades: the ledger's settlement behind, or trades parked as FAILED)"
+              runbook: docs/runbook/trading.md
+
+  - interval: 1m
+    input_series:
       - series: 'kafka_consumer_records_total{job="ledger-service", group="ledger-service", topic="user.events", result="dlq"}'
         values: '0 0 0 1 1'
       - series: 'kafka_consumer_records_total{job="ledger-service", group="ledger-service", topic="user.events", result="ok"}'

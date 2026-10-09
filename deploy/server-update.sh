@@ -118,16 +118,18 @@ pull_app_image() {
 # build_app_image 拉不到时在服务器上构建应用镜像（与 compose 里 x-app 的 build 段相同：仓库根目录为上下文、
 # deploy/docker/Dockerfile、VERSION=短提交号），标成 exchange-app:next。基础镜像与 Actions 一样先从 mirror.gcr.io
 # 拉（AWS ECR Public 曾对 Actions 回 429，B89）；只有拉基础镜像失败（不是编译失败）才改用 Dockerfile 默认的 ECR Public。
+# 带 --pull：基础镜像是浮动标签（golang:1.27-alpine、alpine:3.22），不带时用服务器上缓存的旧版本，例如修了标准库漏洞的
+# Go 补丁版出来以后仍用旧的（审查 IC，2026-10-09）。
 build_app_image() {
   local log rc=0
   log=$(mktemp)
-  sudo docker build -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" \
+  sudo docker build --pull -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" \
     --build-arg GO_IMAGE=mirror.gcr.io/library/golang:1.27-alpine --build-arg RUNTIME_IMAGE=mirror.gcr.io/library/alpine:3.22 \
     -t exchange-app:next . 2>&1 | tee "$log" || rc=$?
   if [ "$rc" != 0 ] && grep -qiE 'mirror\.gcr\.io[^ ]*: (failed to resolve source metadata|.*(429|too ?many ?requests|denied|unauthorized|timeout|no such host|connection reset|EOF|unexpected status))' "$log"; then
     echo "== 从 mirror.gcr.io 拉基础镜像失败，改用 AWS ECR Public 构建"
     rc=0
-    sudo docker build -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" -t exchange-app:next . || rc=$?
+    sudo docker build --pull -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" -t exchange-app:next . || rc=$?
   fi
   rm -f "$log"
   return "$rc"

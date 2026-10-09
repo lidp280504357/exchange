@@ -123,7 +123,8 @@ func (s *Server) RepayReleased(ctx context.Context, req *ledgerv1.RepayReleasedR
 			return nil, err
 		}
 	}
-	res, repaid, err := s.svc.RepayReleased(ctx, req.GetOrderId(), req.GetUserId(), req.GetAccountType(), req.GetScope(), req.GetAsset(), upTo, filled)
+	res, repaid, err := s.svc.RepayReleased(ctx, req.GetOrderId(), req.GetUserId(), req.GetAccountType(), req.GetScope(), req.GetAsset(), upTo, filled,
+		req.GetSkipFailedTrades())
 	if err != nil {
 		return nil, err
 	}

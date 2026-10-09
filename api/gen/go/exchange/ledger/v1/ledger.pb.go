@@ -3589,8 +3589,14 @@ type RepayReleasedRequest struct {
 	// settlement gives back is there to repay. Empty or "0" waits for
 	// nothing.
 	FilledQuantity string `protobuf:"bytes,7,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Set once the order ended long ago (B164): its trades the ledger parked
+	// as FAILED, which settle only once their cause is fixed, then count
+	// toward filled_quantity and the repayment takes what the account holds
+	// (the ledger logs it). Trades it has not recorded yet are waited for
+	// all the same.
+	SkipFailedTrades bool `protobuf:"varint,8,opt,name=skip_failed_trades,json=skipFailedTrades,proto3" json:"skip_failed_trades,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RepayReleasedRequest) Reset() {
@@ -3670,6 +3676,13 @@ func (x *RepayReleasedRequest) GetFilledQuantity() string {
 		return x.FilledQuantity
 	}
 	return ""
+}
+
+func (x *RepayReleasedRequest) GetSkipFailedTrades() bool {
+	if x != nil {
+		return x.SkipFailedTrades
+	}
+	return false
 }
 
 type RepayReleasedResponse struct {
@@ -3995,7 +4008,7 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\binterest\x18\x06 \x01(\tR\binterest\"\x18\n" +
 	"\x16ListMarginDebtsRequest\"O\n" +
 	"\x17ListMarginDebtsResponse\x124\n" +
-	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts\"\xd7\x01\n" +
+	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts\"\x85\x02\n" +
 	"\x14RepayReleasedRequest\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
@@ -4003,7 +4016,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x14\n" +
 	"\x05asset\x18\x05 \x01(\tR\x05asset\x12\x13\n" +
 	"\x05up_to\x18\x06 \x01(\tR\x04upTo\x12'\n" +
-	"\x0ffilled_quantity\x18\a \x01(\tR\x0efilledQuantity\"f\n" +
+	"\x0ffilled_quantity\x18\a \x01(\tR\x0efilledQuantity\x12,\n" +
+	"\x12skip_failed_trades\x18\b \x01(\bR\x10skipFailedTrades\"f\n" +
 	"\x15RepayReleasedResponse\x125\n" +
 	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\x12\x16\n" +
 	"\x06repaid\x18\x02 \x01(\tR\x06repaid2\xa5\x13\n" +

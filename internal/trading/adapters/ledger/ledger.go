@@ -38,10 +38,12 @@ func (c *Client) Unfreeze(ctx context.Context, key string, a domain.Account, ass
 
 // RepayReleased repays what an order borrowed, up to upTo, as it ends
 // (B160; ledger-service RepayReleased).
-func (c *Client) RepayReleased(ctx context.Context, a domain.Account, asset string, upTo, filled decimal.Decimal, orderID string) (decimal.Decimal, error) {
+func (c *Client) RepayReleased(ctx context.Context, a domain.Account, asset string, upTo, filled decimal.Decimal, skipFailed bool,
+	orderID string,
+) (decimal.Decimal, error) {
 	resp, err := c.c.RepayReleased(ctx, &ledgerv1.RepayReleasedRequest{
 		OrderId: orderID, UserId: a.UserID, AccountType: accountType(a), Scope: a.Scope, Asset: asset, UpTo: upTo.String(),
-		FilledQuantity: filled.String(),
+		FilledQuantity: filled.String(), SkipFailedTrades: skipFailed,
 	})
 	if err != nil {
 		return decimal.Zero, err

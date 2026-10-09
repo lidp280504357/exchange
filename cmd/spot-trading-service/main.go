@@ -127,10 +127,12 @@ func setup(ctx context.Context, a *app.App) error {
 
 // recoverLoop finishes, every few seconds, orders whose freeze outcome
 // was not recorded and finished orders whose unused funds were not
-// released (a crash or a ledger or margin-service outage midway), and
-// reports how many orders still wait and for how long the oldest has: a
-// recovery pass takes the 100 oldest, so orders stuck at the front would
-// starve the rest (alert TradingOrdersPendingFreeze).
+// released (a crash or a ledger or margin-service outage midway, a margin
+// order's repayment waiting for its trades' settlement), and reports how
+// many orders still wait and for how long the oldest has: a recovery pass
+// takes the 100 oldest, so orders stuck at the front would starve the
+// rest (alert TradingOrdersPendingFreeze), and a release waits for as
+// long as its trades take to settle (alert TradingOrderReleasesStuck).
 func recoverLoop(a *app.App, svc *application.Service) func(context.Context) error {
 	pending := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "trading_orders_pending_freeze",
@@ -139,7 +141,14 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 	oldest := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "trading_orders_pending_freeze_oldest_seconds", Help: "How long the oldest of them has waited; 0 without any.",
 	})
-	a.Metrics().MustRegister(pending, oldest)
+	unreleased := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "trading_orders_unreleased",
+		Help: "Finished orders whose release (unused funds, a margin order's repayment) did not complete yet, the ones that finished in the last 10 seconds included.",
+	})
+	unreleasedOldest := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "trading_orders_unreleased_oldest_seconds", Help: "How long ago the longest finished of them did; 0 without any.",
+	})
+	a.Metrics().MustRegister(pending, oldest, unreleased, unreleasedOldest)
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
@@ -157,6 +166,12 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 			} else {
 				pending.Set(float64(n))
 				oldest.Set(age.Seconds())
+			}
+			if n, age, err := svc.Unreleased(count); err != nil {
+				a.Logger().WarnContext(ctx, "counting unreleased orders failed", "error", err)
+			} else {
+				unreleased.Set(float64(n))
+				unreleasedOldest.Set(age.Seconds())
 			}
 			cancel()
 			// Each pass ends within 30 seconds; every call in it within the
