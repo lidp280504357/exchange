@@ -364,6 +364,7 @@ func TestUserIDsOf(t *testing.T) {
 		{"/list", `{"user_id":"` + a + `"}`},
 		{"/list", `{"user_ids":"` + a + `"}`},
 		{"/list", ``},
+		{"/list", `null`},
 	} {
 		if _, _, err := read(http.MethodPost, bad.target, bad.body); apperr.From(err).Code != apperr.CodeInvalidArgument {
 			t.Fatalf("%s %.60s: %v", bad.target, bad.body, err)

@@ -162,7 +162,7 @@ seed() {
 # mark tags the bots BOT and HOUSE SYSTEM (L0); see the top. HOUSE without
 # an account in user-service is noted, not an error.
 mark() {
-  local bots house
+  local bots house out
   bots=$(sim | jq -r '[.bots[].user_id] | join(",")')
   if [[ -n $bots ]]; then
     ctl user-service users kind --user "$bots" --kind BOT --reason "the simulated market's bots (astra.sh mark)" </dev/null | tail -1
@@ -171,8 +171,18 @@ mark() {
   fi
   house=$(ssh exchange "cd $INFRA && sed -n 's/^HOUSE_USER_ID=//p' apps.env" | tr -d '"' | head -1)
   if [[ -n $house ]]; then
-    ctl user-service users kind --user "$house" --kind SYSTEM --reason "HOUSE, every trade's counterparty (astra.sh mark)" </dev/null ||
-      echo "note: HOUSE ($house) has no account in user-service: nothing to mark" >&2
+    # HOUSE need not have an account in user-service; any other failure
+    # (the connection, the service, the arguments) is one (B177).
+    if ! out=$(ctl user-service users kind --user "$house" --kind SYSTEM --reason "HOUSE, every trade's counterparty (astra.sh mark)" </dev/null 2>&1); then
+      if grep -q 'COMMON_NOT_FOUND' <<<"$out"; then
+        echo "note: HOUSE ($house) has no account in user-service: nothing to mark" >&2
+      else
+        printf 'astra.sh mark: HOUSE (%s) was not marked SYSTEM:\n%s\n' "$house" "$out" >&2
+        return 1
+      fi
+    else
+      printf '%s\n' "$out"
+    fi
   fi
 }
 

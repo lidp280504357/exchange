@@ -64,9 +64,12 @@ func UserIDsOf(w http.ResponseWriter, r *http.Request) (only, exclude []string, 
 	if q := r.URL.Query(); q.Has("user_ids") || q.Has("exclude_user_ids") {
 		return nil, nil, apperr.Invalid("a POST list takes user_ids and exclude_user_ids in its body")
 	}
-	var body UserIDFilter
+	var body *UserIDFilter
 	if err := DecodeJSON(w, r, &body); err != nil {
 		return nil, nil, err
+	}
+	if body == nil { // a bare null (B181); {} names no accounts
+		return nil, nil, apperr.Invalid("the body must be a JSON object")
 	}
 	if body.UserIDs != nil && body.ExcludeUserIDs != nil {
 		return nil, nil, apperr.Invalid("user_ids and exclude_user_ids exclude each other")
