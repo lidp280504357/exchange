@@ -65,3 +65,28 @@ func (l CrossLiquidation) ClearanceFee(available decimal.Decimal, decimals int32
 // insurance fund's part of a loss, less the fee charged (Fee, once the
 // ledger's outcomes are applied).
 func (f Fill) Flow() decimal.Decimal { return f.RealizedPnL.Add(f.Insurance).Sub(f.Fee) }
+
+// ParkedFlow is what the ledger's outcomes of a parked fill's moves, once
+// booked, add to the flow the fill was stored with (FillPlan.Assumed: the
+// insurance fund paying nothing of a loss, a partial fee waived whole): the
+// fund's part of its losses, and less of its partial fees waived than
+// assumed taken off (review C74 ①).
+func ParkedFlow(moves []Move, outcomes []Outcome) decimal.Decimal {
+	flow := decimal.Zero
+	for i, m := range moves {
+		if i >= len(outcomes) {
+			break
+		}
+		switch m.Type {
+		case MoveLoss:
+			flow = flow.Add(outcomes[i].Insurance)
+		case MoveFee:
+			assumed := decimal.Zero
+			if m.Partial {
+				assumed = m.Amount
+			}
+			flow = flow.Add(outcomes[i].Waived.Sub(assumed))
+		}
+	}
+	return flow
+}

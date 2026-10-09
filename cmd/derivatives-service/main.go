@@ -198,6 +198,9 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 					a.Logger().InfoContext(ctx, "recovered", "step", name, "count", n)
 				}
 			}
+			if _, err := svc.ObserveReduceOnly(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "reduce-only check failed", "error", err)
+			}
 		}
 	}
 }

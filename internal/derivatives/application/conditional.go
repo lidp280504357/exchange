@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -111,10 +112,14 @@ func (s *Service) CreateConditional(ctx context.Context, req domain.ConditionalR
 	return out, err
 }
 
-// CancelConditional cancels one of the user's active conditional orders.
+// CancelConditional cancels one of the user's active conditional orders,
+// under the user's lock like its trigger (review C69).
 func (s *Service) CancelConditional(ctx context.Context, userID, id string) (domain.Conditional, error) {
 	var out domain.Conditional
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.LockUser(ctx, userID); err != nil {
+			return err
+		}
 		cd, err := r.Conditionals().Get(ctx, id)
 		if err != nil || cd.UserID != userID {
 			return domain.ErrOrderNotFound
@@ -159,9 +164,12 @@ func (s *Service) Conditionals(ctx context.Context, userID, symbol, status, curs
 // Trigger checks the active conditional orders against their trigger
 // prices, once per call (every second). A triggered one places its order
 // through Place (client_order_id = its ID, so a retry after a crash finds
-// the same order): TRIGGERED with the order, or FAILED with the refusal
-// (e.g. the position is being liquidated). One whose position is gone,
-// or turned around, is CANCELED (NO_POSITION).
+// the same order): TRIGGERED with the order in the order's transaction,
+// or FAILED with the refusal (e.g. the position is being liquidated). One
+// whose position is gone, or turned around, is CANCELED (NO_POSITION).
+// Every end is under the user's lock and only of an active one: a
+// conditional its user canceled, or that ended with its position, after
+// it was read here places nothing and keeps its end (review C69).
 func (s *Service) Trigger(ctx context.Context) (int, error) {
 	active, err := s.Store.Read().Conditionals().Active(ctx, "")
 	if err != nil {
@@ -179,16 +187,20 @@ func (s *Service) Trigger(ctx context.Context) (int, error) {
 		}
 		pos := byside(held)[cd.PositionSide]
 		closes := (cd.Side == domain.Sell && pos.Qty.IsPositive()) || (cd.Side == domain.Buy && pos.Qty.IsNegative())
-		status, reason, orderID := domain.ConditionalTriggered, "", ""
+		status, reason := domain.ConditionalTriggered, ""
 		if !closes {
 			status, reason = domain.ConditionalCanceled, "NO_POSITION"
 		} else {
+			// The order ends the conditional TRIGGERED in its own
+			// transaction, and is not placed once the conditional has ended
+			// since it was read here (review C69).
 			req := cd.OrderRequest(pos)
-			req.ClientOrderID, req.Kind = cd.ID, domain.Kind(cd.Kind)
-			o, err := s.Place(ctx, req)
+			req.ClientOrderID, req.Kind, req.Conditional = cd.ID, domain.Kind(cd.Kind), cd.ID
+			_, err := s.Place(ctx, req)
 			switch e := apperr.From(err); {
 			case err == nil:
-				orderID = o.ID
+			case errors.Is(err, domain.ErrConditionalEnded):
+				continue
 			case e.Kind == apperr.KindInternal || e.Kind == apperr.KindUnavailable:
 				s.Log.WarnContext(ctx, "conditional order not placed; retried", "conditional_id", cd.ID, "error", err)
 				continue
@@ -196,9 +208,20 @@ func (s *Service) Trigger(ctx context.Context) (int, error) {
 				status, reason = domain.ConditionalFailed, e.Code
 			}
 		}
-		cd.Status, cd.Reason, cd.OrderID, cd.UpdatedAt = status, reason, orderID, s.Now()
-		if err := s.Store.Tx(ctx, func(r ports.Repos) error { return r.Conditionals().Update(ctx, cd) }); err != nil {
-			return n, err
+		if status != domain.ConditionalTriggered {
+			cd.Status, cd.Reason, cd.UpdatedAt = status, reason, s.Now()
+			err := s.Store.Tx(ctx, func(r ports.Repos) error {
+				if err := r.LockUser(ctx, cd.UserID); err != nil {
+					return err
+				}
+				return r.Conditionals().Update(ctx, cd)
+			})
+			if errors.Is(err, domain.ErrConditionalEnded) {
+				continue // ended otherwise meanwhile
+			}
+			if err != nil {
+				return n, err
+			}
 		}
 		s.Log.InfoContext(ctx, "conditional order triggered", "conditional_id", cd.ID, "kind", cd.Kind, "status", status,
 			"reason", reason, "price", price.String(), "at", time.Now().UTC())

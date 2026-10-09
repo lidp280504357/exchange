@@ -349,7 +349,10 @@ check "[.items[] | select(.account_type == \"FUTURES\") | .amount | tonumber | f
   "the fee $D_FEE in D's ledger as INSURANCE_CONTRIBUTION (the liquidation left $D_LEFT, its equity at the take-over $D_EQUITY)"
 call GET "/v1/derivatives/account?asset=ASTRA" "" "${!D_AUTH}"
 expect 200 - "D's ASTRA FUTURES account"
-check '(.wallet_balance | tonumber) == 0 and (.frozen | tonumber) == 0' "D's account at zero"
+# What the liquidation left beyond its equity at the take-over stays
+# (review C74 ③): the rest of it is D's available balance.
+check "((.available | tonumber) - ([$D_LEFT - $D_FEE, 0] | max) | fabs) < 0.000001 and (.frozen | tonumber) == 0 and (.liquidating | not)" \
+  "D's account: what the fee left of it (0 unless the liquidation left more than the equity)"
 eventually 60 "D was told: CONTRACT_LIQUIDATED" notice D CONTRACT_LIQUIDATED
 
 echo "== the price, the bots and B's position back"

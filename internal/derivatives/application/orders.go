@@ -29,7 +29,10 @@ import (
 // contract under reduce-only takes only those, and so does a closed product
 // line (PRODUCT_CLOSED, products.go). A cross account being liquidated
 // takes no cross order and no opening order on the contracts settled in
-// its asset (crossliquidation.go).
+// its asset (crossliquidation.go). The order of a take-profit or
+// stop-loss (req.Conditional) ends it TRIGGERED in the same transaction,
+// under the user's lock, and is refused once it has ended: canceled by
+// its user or with its position meanwhile (review C69).
 func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, error) {
 	if req.ClientOrderID != "" {
 		if prev, err := s.Store.Read().Orders().ByClientID(ctx, req.UserID, req.ClientOrderID); err == nil {
@@ -60,6 +63,10 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 			prev = &p
 			return nil
 		} else if !errors.Is(err, domain.ErrOrderNotFound) {
+			return err
+		}
+		cd, err := conditionalOf(ctx, r, req.Conditional)
+		if err != nil {
 			return err
 		}
 		set, err := settings(ctx, r, req.UserID, c)
@@ -111,6 +118,12 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		if err := r.Orders().Insert(ctx, o); err != nil {
 			return err
 		}
+		if cd.ID != "" {
+			cd.Status, cd.Reason, cd.OrderID, cd.UpdatedAt = domain.ConditionalTriggered, "", o.ID, s.Now()
+			if err := r.Conditionals().Update(ctx, cd); err != nil {
+				return err
+			}
+		}
 		if o.FreezeState == domain.FreezeDone { // nothing to freeze
 			return s.accept(ctx, r, o, c)
 		}
@@ -126,6 +139,19 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		return s.fund(ctx, o)
 	}
 	return o, nil
+}
+
+// conditionalOf returns the take-profit or stop-loss placing an order
+// (none for the others), domain.ErrConditionalEnded once it is no longer
+// active.
+func conditionalOf(ctx context.Context, r ports.Repos, id string) (cd domain.Conditional, err error) {
+	if id == "" {
+		return cd, nil
+	}
+	if cd, err = r.Conditionals().Get(ctx, id); err == nil && cd.Status != domain.ConditionalActive {
+		err = domain.ErrConditionalEnded
+	}
+	return cd, err
 }
 
 // checkOpening checks what an opening order needs.

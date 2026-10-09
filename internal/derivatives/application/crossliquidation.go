@@ -113,6 +113,39 @@ func (s *Service) takeOverOpened(ctx context.Context, liq *domain.CrossLiquidati
 	}
 }
 
+// parkedCrossFlow adds to the open liquidation of a cross account what a
+// fill of it the ledger had refused (parked, its flow counted with the
+// outcomes assumed then) turned out to add once booked: the insurance
+// fund's part of its loss above all (review C74 ①). Only a fill from the
+// take-over on had its flow counted; one parked before it is left as it
+// is: the ledger lagged the positions when the liquidation was recorded, an
+// insurance-fund outage at the take-over (the runbook says so).
+func (s *Service) parkedCrossFlow(ctx context.Context, r ports.Repos, p ports.PendingSettlement, outcomes []domain.Outcome) error {
+	l, err := r.CrossLiquidations().Open(ctx, p.UserID, p.Request.Asset)
+	if err != nil || l == nil {
+		return err
+	}
+	f, err := r.Fills().Get(ctx, p.TradeID, p.Side)
+	if err != nil {
+		return err
+	}
+	if f.ExecutedAt.Before(l.StartedAt) {
+		return nil
+	}
+	o, err := r.Orders().Get(ctx, f.OrderID)
+	if errors.Is(err, domain.ErrOrderNotFound) {
+		return nil // HOUSE's side
+	}
+	if err != nil || o.MarginMode != domain.Cross {
+		return err
+	}
+	flow := domain.ParkedFlow(p.Request.Moves, outcomes)
+	if flow.IsZero() {
+		return nil
+	}
+	return r.CrossLiquidations().AddFlow(ctx, l.ID, flow)
+}
+
 // crossLiquidating refuses what a cross account being liquidated does not
 // take.
 func crossLiquidating(ctx context.Context, r ports.Repos, userID, asset string) error {
@@ -130,8 +163,18 @@ func crossLiquidating(ctx context.Context, r ports.Repos, userID, asset string) 
 // cross accounts whose liquidation is over, and returns how many ended.
 func (s *Service) SettleCrossLiquidations(ctx context.Context) (int, error) {
 	open, err := s.Store.Read().CrossLiquidations().AllOpen(ctx)
-	if err != nil || len(open) == 0 {
+	if err != nil {
 		return 0, err
+	}
+	// How long the oldest has been open (review C74 ②): seconds as a rule;
+	// the alert DerivativesCrossLiquidationStuck says when one is not.
+	oldest := 0.0
+	for _, l := range open {
+		oldest = max(oldest, s.Now().Sub(l.StartedAt).Seconds())
+	}
+	s.Metrics.CrossOpenOldest.Set(oldest)
+	if len(open) == 0 {
+		return 0, nil
 	}
 	contracts, err := s.Instruments.Contracts(ctx)
 	if err != nil {

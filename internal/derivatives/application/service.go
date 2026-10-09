@@ -70,6 +70,12 @@ type Metrics struct {
 	// Liquidations counts the steps: warning, takeover, order, adl,
 	// cleared.
 	Liquidations *prometheus.CounterVec
+	// ReduceOnlyFresh is 1 for a contract under reduce-only while its mark
+	// price is fresh (ObserveReduceOnly, review C70).
+	ReduceOnlyFresh *prometheus.GaugeVec
+	// CrossOpenOldest is how long the oldest open cross liquidation has
+	// been open, in seconds (review C74 ②).
+	CrossOpenOldest prometheus.Gauge
 }
 
 // NewMetrics registers the metrics with reg.
@@ -95,7 +101,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, step := range []string{"warning", "takeover", "order", "adl", "cleared"} {
 		m.Liquidations.WithLabelValues(step)
 	}
-	reg.MustRegister(m.Fills, m.Parked, m.Reconciled, m.LastReconcile, m.Liquidations)
+	m.ReduceOnlyFresh = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "derivatives_contract_reduce_only_mark_fresh",
+		Help: "1 while the contract is reduce-only although its mark price is fresh: lifting it is by hand (review C70).",
+	}, []string{"symbol"})
+	m.CrossOpenOldest = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "derivatives_cross_liquidation_open_oldest_seconds",
+		Help: "How long the oldest open cross liquidation has been open (0: none); a cross account being liquidated takes no opening order and lets nothing out.",
+	})
+	reg.MustRegister(m.Fills, m.Parked, m.Reconciled, m.LastReconcile, m.Liquidations, m.ReduceOnlyFresh, m.CrossOpenOldest)
 	return m
 }
 

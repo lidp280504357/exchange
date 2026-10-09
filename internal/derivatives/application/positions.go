@@ -389,6 +389,11 @@ func (s *Service) Account(ctx context.Context, userID, asset string) (domain.Sum
 	for _, o := range orders {
 		sum.OrderMargin = sum.OrderMargin.Add(o.Unreleased())
 	}
+	l, err := r.CrossLiquidations().Open(ctx, userID, asset)
+	if err != nil {
+		return domain.Summary{}, err
+	}
+	sum.Liquidating = l != nil
 	return sum, nil
 }
 
@@ -426,6 +431,42 @@ func (s *Service) CrossUnrealizedPnL(ctx context.Context, userID, asset string) 
 		return decimal.Zero, err
 	}
 	return s.crossUnrealized(ctx, s.Store.Read(), userID, asset)
+}
+
+// ObserveReduceOnly sets, for every contract not delisted, whether it is
+// under reduce-only while its mark price is fresh (the metric
+// derivatives_contract_reduce_only_mark_fresh), and returns how many are:
+// reduce-only is lifted by hand once the price is back (LiftReduceOnly),
+// and the alert DerivativesReduceOnlyWithFreshMark says when one has
+// waited for that 10 minutes (review C70: the platform coin's perpetuals
+// stayed reduce-only for two days after a 30-second spot closure).
+func (s *Service) ObserveReduceOnly(ctx context.Context) (int, error) {
+	contracts, err := s.Instruments.Contracts(ctx)
+	if err != nil {
+		return 0, err
+	}
+	states, err := s.Store.Read().Contracts().All(ctx)
+	if err != nil {
+		return 0, err
+	}
+	reduceOnly := map[string]bool{}
+	for _, st := range states {
+		reduceOnly[st.Symbol] = st.ReduceOnly
+	}
+	n := 0
+	for _, c := range contracts {
+		if c.Status == "DELISTED" {
+			s.Metrics.ReduceOnlyFresh.DeleteLabelValues(c.Symbol)
+			continue
+		}
+		_, fresh := s.Marks.Mark(c.Symbol)
+		v := 0.0
+		if reduceOnly[c.Symbol] && fresh {
+			v, n = 1, n+1
+		}
+		s.Metrics.ReduceOnlyFresh.WithLabelValues(c.Symbol).Set(v)
+	}
+	return n, nil
 }
 
 // OnDegraded puts a contract under reduce-only (risk.events

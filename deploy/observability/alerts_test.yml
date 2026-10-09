@@ -395,6 +395,44 @@ tests:
 
   - interval: 1m
     input_series:
+      # A cross liquidation open for minutes (review C74 ②): 0 none, then the
+      # oldest open one's age, past 300 s from the sixth minute on.
+      - series: 'derivatives_cross_liquidation_open_oldest_seconds{job="derivatives-service"}'
+        values: '0 3 60 120 180 240 300 360 420 480'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DerivativesCrossLiquidationStuck
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: DerivativesCrossLiquidationStuck
+        exp_alerts:
+          - exp_labels: {severity: warning, job: derivatives-service}
+            exp_annotations:
+              summary: "a cross account's liquidation has been open for 420 seconds (seconds as a rule): the account takes no opening order and lets nothing out meanwhile; see which cross positions, orders or parked settlements hold it"
+              runbook: docs/runbook/derivatives.md
+
+  - interval: 1m
+    input_series:
+      # Reduce-only with a fresh mark from the first minute on (review C70);
+      # another contract only for its first five.
+      - series: 'derivatives_contract_reduce_only_mark_fresh{job="derivatives-service", symbol="ASTRA-USD-PERP"}'
+        values: '0 1x12'
+      - series: 'derivatives_contract_reduce_only_mark_fresh{job="derivatives-service", symbol="BTC-USDT-PERP"}'
+        values: '1x5 0x7'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: DerivativesReduceOnlyWithFreshMark
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DerivativesReduceOnlyWithFreshMark
+        exp_alerts:
+          - exp_labels: {severity: warning, job: derivatives-service, symbol: ASTRA-USD-PERP}
+            exp_annotations:
+              summary: "ASTRA-USD-PERP has been reduce-only for 10 minutes while its mark price is fresh; reduce-only is lifted by hand: check why it was degraded, then lift it (the console's contracts page, or exchangectl derivatives resume ASTRA-USD-PERP)"
+              runbook: docs/runbook/derivatives.md
+
+  - interval: 1m
+    input_series:
       - series: 'derivatives_reconcile_mismatches{job="derivatives-service", check="PNL_CLEARING_MATCHES_POSITIONS"}'
         values: '0 1 1'
     alert_rule_test:

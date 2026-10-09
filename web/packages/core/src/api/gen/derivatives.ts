@@ -295,8 +295,10 @@ export interface components {
             cross_unrealized_pnl: components["schemas"]["Decimal"];
             /** @description wallet_balance + unrealized_pnl. */
             margin_balance: components["schemas"]["Decimal"];
-            /** @description What may move to SPOT now, min(available, available + cross_unrealized_pnl). */
+            /** @description What may move to SPOT now, min(available, available + cross_unrealized_pnl); 0 while liquidating. */
             transferable: components["schemas"]["Decimal"];
+            /** @description The account's cross positions are being liquidated (review C68, C74): from the take-over until what the liquidation leaves has gone to the insurance fund as the clearance fee, seconds as a rule. Meanwhile no cross order, no opening order and no isolated margin added on the contracts settled in this asset, and no transfer out (DERIV_POSITION_LIQUIDATING). */
+            liquidating: boolean;
         };
         ContractSettings: {
             symbol: string;

@@ -129,6 +129,10 @@ type Summary struct {
 	UnrealizedPnL  decimal.Decimal
 	// CrossUnrealizedPnL counts the cross positions only.
 	CrossUnrealizedPnL decimal.Decimal
+	// Liquidating: the account's cross positions are being liquidated
+	// (review C74 ④); until what that leaves has gone to the insurance
+	// fund nothing may leave the account.
+	Liquidating bool
 }
 
 // WalletBalance is available + frozen.

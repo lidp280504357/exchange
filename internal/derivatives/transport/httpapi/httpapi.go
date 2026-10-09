@@ -83,6 +83,7 @@ type accountJSON struct {
 	CrossUnrealizedPnL string `json:"cross_unrealized_pnl"`
 	MarginBalance      string `json:"margin_balance"`
 	Transferable       string `json:"transferable"`
+	Liquidating        bool   `json:"liquidating"`
 }
 
 func (h *Handler) account(w http.ResponseWriter, r *http.Request) {
@@ -95,11 +96,15 @@ func (h *Handler) account(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	transferable := domain.Transferable(s.Available, s.CrossUnrealizedPnL)
+	if s.Liquidating {
+		transferable = decimal.Zero
+	}
 	httpx.WriteJSON(w, http.StatusOK, accountJSON{
 		Asset: s.Asset, WalletBalance: s.WalletBalance().String(), Available: s.Available.String(), Frozen: s.Frozen.String(),
 		OrderMargin: s.OrderMargin.String(), PositionMargin: s.PositionMargin.String(), UnrealizedPnL: s.UnrealizedPnL.String(),
 		CrossUnrealizedPnL: s.CrossUnrealizedPnL.String(), MarginBalance: s.MarginBalance().String(),
-		Transferable: domain.Transferable(s.Available, s.CrossUnrealizedPnL).String(),
+		Transferable: transferable.String(), Liquidating: s.Liquidating,
 	})
 }
 

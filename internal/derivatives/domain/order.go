@@ -223,6 +223,10 @@ type Request struct {
 	// Kind is set for the orders a take-profit or stop-loss places; the
 	// user's own are USER.
 	Kind Kind
+	// Conditional is the take-profit or stop-loss placing the order: Place
+	// refuses it once that has ended (ErrConditionalEnded) and ends it
+	// TRIGGERED with the order in the order's transaction (review C69).
+	Conditional string
 }
 
 // Defaults fills in the time in force (GTC, IOC for market orders).

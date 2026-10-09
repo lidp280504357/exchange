@@ -8,9 +8,11 @@
 # (market_house_quoted_share against the reference market's book, before
 # and during), BTC-USDT-PERP's index and mark follow (the mark computed,
 # PLATFORM) and so does a margin account holding BTC, and a cross short of
-# the perpetual at 100x on 1 USDT is liquidated: what the liquidation left
-# goes to the insurance fund as the clearance fee and the account ends at
-# zero (review C68); afterwards the event
+# the perpetual at 100x on about 1 USDT is liquidated: what the liquidation
+# left goes to the insurance fund as the clearance fee (the equity at the
+# take-over at most), an isolated long of ETH-USDT-PERP beside it keeps its
+# margin, and transfers out are refused while it lasts (review C68, C74);
+# afterwards the event
 # is DONE, the ticker within 0.05% of the reference market, the spike in
 # the 1m candles, the perpetual's mark back on its own source once the
 # reference market's mark has streamed 5 seconds (the C40 rule). The
@@ -192,25 +194,67 @@ done_event() { # done_event: the event DONE, its record as JSON in EVENT_JSON
   [[ $(jq -r .status <<<"$EVENT_JSON") == DONE ]]
 }
 
-# A cross short of the perpetual at 100x on 1 USDT (review C68): the event
-# with risk takes it over (about +0.75%), the liquidation closes it against
-# HOUSE and what the liquidation left - the clearance fee, often 0 while
-# the mark runs up a percent a second - goes to the insurance fund; the
-# account ends at zero and the user is told.
-echo "== a cross short of $PERP at 100x for the event to liquidate"
-call POST /v1/account/transfers '{"asset":"USDT","amount":"1","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+# A cross short of the perpetual at 100x on about 1 USDT (review C68, C74):
+# the event with risk takes it over (about +0.75%), the liquidation closes
+# it against HOUSE and what the liquidation left - the clearance fee, the
+# equity at the take-over at most and often 0 while the mark runs up a
+# percent a second - goes to the insurance fund, and the user is told.
+# Beside it an isolated long of ETH-USDT-PERP, which the clearance fee
+# does not touch; and while the event runs a transfer of 1000 USDT out of
+# FUTURES every half second, more than the account holds so that nothing
+# moves: refused 409 DERIV_POSITION_LIQUIDATING while the liquidation lasts.
+ETH=ETH-USDT-PERP
+echo "== an isolated long of $ETH and a cross short of $PERP at 100x for the event to liquidate"
+call GET "/v1/market/$ETH/mark-price" ""
+expect 200 - "$ETH's mark price"
+# A market order reserves margin and fee at its protection price (5% off
+# the mark): what is not used comes back after the fill.
+ETH_IN=$(jq -rn --argjson m "$(jq -r .mark_price <<<"$BODY")" '0.01 * $m * 1.05 * (1 / 20 + 0.0005) * 1.01 * 1000000 | ceil / 1000000')
+call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$ETH_IN\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" \
+  "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-futures-eth"
+expect 201 - "$ETH_IN USDT to FUTURES for the isolated long"
+call PUT "/v1/derivatives/settings/$ETH" '{"margin_mode":"ISOLATED","leverage":20}' "${AUTH[@]}"
+expect 200 - "$ETH isolated, 20x"
+call POST /v1/derivatives/orders "{\"symbol\":\"$ETH\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\"}" "${AUTH[@]}"
+expect 202 - "a market long of 0.01 $ETH"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'call POST /v1/derivatives/orders "{\"symbol\":\"$ETH\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"reduce_only\":true}" "${AUTH[@]}" || true'
+held_on() { # held_on SYMBOL N: N positions of the user on SYMBOL (BODY)
+  call GET "/v1/derivatives/positions?symbol=$1" "" "${AUTH[@]}" && [[ $STATUS == 200 ]] && jq -e ".positions | length == $2" <<<"$BODY" >/dev/null
+}
+eventually 20 "the isolated long is open" held_on "$ETH" 1
+ETH_MARGIN=$(jq -r '.positions[0].margin' <<<"$BODY")
+call POST /v1/account/transfers '{"asset":"USDT","amount":"0.9","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
   "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-futures"
-expect 201 - "1 USDT to FUTURES"
+expect 201 - "0.9 USDT to FUTURES for the cross short"
 call PUT "/v1/derivatives/settings/$PERP" '{"margin_mode":"CROSS","leverage":100}' "${AUTH[@]}"
 expect 200 - "cross, 100x"
 call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.001\"}" "${AUTH[@]}"
 expect 202 - "a market short of 0.001"
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.001\",\"reduce_only\":true}" "${AUTH[@]}" || true'
-positions() { call GET "/v1/derivatives/positions?symbol=$PERP" "" "${AUTH[@]}" && [[ $STATUS == 200 ]] && jq -e ".positions | length == $1" <<<"$BODY" >/dev/null; }
-eventually 20 "the short is open" positions 1
+eventually 20 "the short is open" held_on "$PERP" 1
 LIQ_PRICE=$(jq -r '.positions[0].liquidation_price' <<<"$BODY")
-echo "     its estimated liquidation price $LIQ_PRICE"
+echo "     the long's margin $ETH_MARGIN; the short's estimated liquidation price $LIQ_PRICE"
+# probe: the transfers out while the event runs, one line each in
+# $WORK/probe: when the answer came (this machine's clock), the HTTP status
+# and the error code.
+probe() {
+  local i code
+  for i in $(seq 90); do
+    [[ -f $WORK/probe.stop ]] && return 0
+    code=$(curl -s --connect-timeout 5 -m 10 -o "$WORK/probe.body" -w '%{http_code}' -X POST "$BASE/v1/account/transfers" \
+      -H 'Content-Type: application/json' "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-probe-$i" \
+      -d '{"asset":"USDT","amount":"1000","from_account_type":"FUTURES","to_account_type":"SPOT"}' || true)
+    printf '%s %s %s\n' "$(date +%s)" "$code" "$(jq -r '.code // "-"' "$WORK/probe.body" 2>/dev/null || echo -)" >>"$WORK/probe"
+    sleep 0.5
+  done
+}
+: >"$WORK/probe"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'touch "$WORK/probe.stop"'
+probe &
+PROBE=$!
 
 echo "== an event with risk (the default)"
 start true
@@ -249,34 +293,61 @@ eventually 120 "$PERP's mark back on $MARK_BEFORE" mark_back
 EVENT=""
 
 echo "== the cross short after the event"
+touch "$WORK/probe.stop"
+wait "$PROBE" || true
 completed() {
   call GET "/v1/notifications?limit=20" "" "${AUTH[@]}" && [[ $STATUS == 200 ]] &&
     jq -e '[.items[] | select(.type == "CONTRACT_LIQUIDATED")] | length == 1' <<<"$BODY" >/dev/null
 }
-if positions 0; then
-  echo "ok   liquidated"
+# The account's cross liquidation as derivatives-service records it:
+# status, equity at the take-over, what it left, the fee, when it started
+# and ended (epoch seconds).
+LIQ_SQL="SELECT concat_ws(' ', status, trim_scale(equity), trim_scale(balance + flows), coalesce(trim_scale(fee)::text, '-'), floor(extract(epoch FROM started_at)), coalesce(ceil(extract(epoch FROM done_at))::text, '-')) FROM derivatives.cross_liquidations WHERE user_id = '$USER_ID'"
+cleared() { read -r LIQ_STATUS LIQ_EQUITY LIQ_LEFT LIQ_FEE LIQ_FROM LIQ_TO <<<"$(pg "$LIQ_SQL")" && [[ $LIQ_STATUS == DONE ]]; }
+if [[ $LIQ_PRICE =~ ^[0-9.]+$ && $(jq -n "$BASE * (1 + 0.6 * ($F - 1)) > $LIQ_PRICE * 1.001") == true ]] || [[ -n $(pg "$LIQ_SQL") ]]; then
+  eventually 30 "the cross short liquidated (flat)" held_on "$PERP" 0
+  eventually 30 "its cross liquidation over (DONE)" cleared
+  echo "     equity at the take-over $LIQ_EQUITY, left $LIQ_LEFT, clearance fee $LIQ_FEE, $((LIQ_TO - LIQ_FROM)) s"
+  jq -en --argjson fee "$LIQ_FEE" --argjson left "$LIQ_LEFT" --argjson eq "$LIQ_EQUITY" \
+    '([$left, $eq, 0] | sort | .[1]) as $want | $fee <= $want and $want - $fee < 0.000001' >/dev/null ||
+    { echo "FAIL the clearance fee $LIQ_FEE, while the liquidation left $LIQ_LEFT (equity at the take-over $LIQ_EQUITY)" >&2; exit 1; }
+  echo "ok   the clearance fee is what the liquidation left, the equity at the take-over at most"
   eventually 30 "the user is told the liquidation completed (CONTRACT_LIQUIDATED)" completed
-  FEE=$(jq -r '[.items[] | select(.type == "CONTRACT_LIQUIDATED")][0].data.clearance_fee' <<<"$BODY")
-  [[ $FEE =~ ^[0-9.]+$ ]] || { echo "FAIL the notice names no clearance fee: $BODY" >&2; exit 1; }
+  check "[.items[] | select(.type == \"CONTRACT_LIQUIDATED\")][0].data.clearance_fee | tonumber == $LIQ_FEE" "the notice names the fee"
   call GET "/v1/account/ledger?asset=USDT&type=INSURANCE_CONTRIBUTION" "" "${AUTH[@]}"
   expect 200 - "the user's insurance fund entries"
-  if [[ $(jq -n "$FEE > 0") == true ]]; then
-    check "[.items[] | select(.account_type == \"FUTURES\")] | length == 1 and ((.[0].amount | tonumber | fabs) == $FEE)" \
-      "what the liquidation left, $FEE USDT, went to the insurance fund as the clearance fee"
-  else
-    check '[.items[] | select(.account_type == "FUTURES")] | length == 0' "nothing was left: no clearance fee (the fund paid the loss beyond the account)"
-  fi
+  check "[.items[] | select(.account_type == \"FUTURES\") | .amount | tonumber | fabs] | (add // 0) == $LIQ_FEE" \
+    "the bill has the fee as INSURANCE_CONTRIBUTION (none when it is 0)"
+  # What the liquidation left beyond the equity stays, and so does the
+  # isolated long's margin: available is the rest, frozen the margin.
   call GET /v1/derivatives/account "" "${AUTH[@]}"
   expect 200 - "the FUTURES account"
-  check '(.wallet_balance | tonumber) == 0 and (.frozen | tonumber) == 0' "the account at zero"
-elif [[ $LIQ_PRICE =~ ^[0-9.]+$ && $(jq -n "$BASE * (1 + 0.6 * ($F - 1)) > $LIQ_PRICE * 1.001") == true ]]; then
-  echo "FAIL the mark passed the short's liquidation price $LIQ_PRICE but the short is open: $BODY" >&2
-  exit 1
+  check "((.available | tonumber) - ([$LIQ_LEFT - $LIQ_FEE, 0] | max) | fabs) < 0.000001 and (.frozen | tonumber) == $ETH_MARGIN and (.liquidating | not)" \
+    "available what the fee left of the account, frozen the isolated long's margin, liquidating no more"
+  kept() { held_on "$ETH" 1 && [[ $(jq -r '.positions[0].margin' <<<"$BODY") == "$ETH_MARGIN" ]]; }
+  eventually 20 "the isolated long kept its margin $ETH_MARGIN" kept
+  # The transfers out while it lasted.
+  if awk '$2 == 201' "$WORK/probe" | grep -q .; then
+    echo "FAIL a transfer of 1000 USDT out of FUTURES went through: $(cat "$WORK/probe")" >&2
+    exit 1
+  fi
+  REFUSED=$(awk '$3 == "DERIV_POSITION_LIQUIDATING" && $2 == 409' "$WORK/probe" | wc -l | tr -d ' ')
+  if ((REFUSED > 0)); then
+    echo "ok   transfers out refused while it lasted: $REFUSED times 409 DERIV_POSITION_LIQUIDATING (of $(wc -l <"$WORK/probe" | tr -d ' '))"
+  elif (($(awk -v a="$LIQ_FROM" -v b="$LIQ_TO" '$1 > a + 1 && $1 < b - 1' "$WORK/probe" | wc -l) > 0)); then
+    echo "FAIL transfers out answered while the account was liquidated, none refused: $(cat "$WORK/probe")" >&2
+    exit 1
+  else
+    echo "note: the liquidation ($((LIQ_TO - LIQ_FROM)) s) fell between two transfers out: the refusal is the application tests' (TestACrossAccountBeingLiquidatedKeepsItsBalance)"
+  fi
 else
   echo "note: the event (factor $F from $BASE) stayed below the short's liquidation price $LIQ_PRICE; closing it"
   call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.001\",\"reduce_only\":true}" "${AUTH[@]}"
   expect 202 - "the short closed"
 fi
+call POST /v1/derivatives/orders "{\"symbol\":\"$ETH\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"reduce_only\":true}" "${AUTH[@]}"
+expect 202 - "the isolated long closed"
+eventually 20 "flat on $ETH" held_on "$ETH" 0
 
 echo "== an event without risk"
 start false

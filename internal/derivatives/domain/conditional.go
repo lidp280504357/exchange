@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,6 +27,11 @@ const (
 // ErrTriggerImmediate is a trigger the price already reached.
 var ErrTriggerImmediate = apperr.New(apperr.KindUnprocessable, "DERIV_TRIGGER_IMMEDIATE",
 	"the trigger price is already reached; place an order instead")
+
+// ErrConditionalEnded is a conditional order that is no longer active when
+// something would end it or place its order: canceled by its user, ended
+// with its position, triggered (review C69).
+var ErrConditionalEnded = errors.New("the conditional order is no longer active")
 
 // Conditional is a take-profit or stop-loss: when its trigger price is
 // reached it places an order that only closes the position.

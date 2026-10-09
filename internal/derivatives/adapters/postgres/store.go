@@ -352,6 +352,20 @@ func (r fills) SetSettled(ctx context.Context, tradeID string, side domain.Side)
 	return nil
 }
 
+func (r fills) Get(ctx context.Context, tradeID string, side domain.Side) (domain.Fill, error) {
+	var f domain.Fill
+	err := r.q.QueryRow(ctx, `SELECT `+fillColumns+` FROM fills WHERE trade_id = $1 AND side = $2`, tradeID, side).Scan(
+		&f.TradeID, &f.Side, &f.OrderID, &f.UserID, &f.Symbol, &f.PositionSide, &f.Maker, &f.Price, &f.Qty,
+		&f.ClosedQty, &f.Fee, &f.FeeWaived, &f.RealizedPnL, &f.Insurance, &f.Liquidation, &f.Seq, &f.ExecutedAt, &f.Settled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Fill{}, domain.ErrOrderNotFound
+	}
+	if err != nil {
+		return domain.Fill{}, fmt.Errorf("get fill: %w", err)
+	}
+	return f, nil
+}
+
 func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error) {
 	var beforeTrade, beforeSide any // NULL: the first page
 	if before != "" {
@@ -810,9 +824,13 @@ func (r conditionals) Update(ctx context.Context, c domain.Conditional) error {
 	if c.OrderID != "" {
 		order = c.OrderID
 	}
-	if _, err := r.q.Exec(ctx, `UPDATE conditional_orders SET status = $2, reason = $3, order_id = $4, updated_at = $5
-		WHERE conditional_id = $1`, c.ID, c.Status, c.Reason, order, c.UpdatedAt); err != nil {
+	tag, err := r.q.Exec(ctx, `UPDATE conditional_orders SET status = $2, reason = $3, order_id = $4, updated_at = $5
+		WHERE conditional_id = $1 AND status = 'ACTIVE'`, c.ID, c.Status, c.Reason, order, c.UpdatedAt)
+	if err != nil {
 		return fmt.Errorf("update conditional order: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrConditionalEnded
 	}
 	return nil
 }

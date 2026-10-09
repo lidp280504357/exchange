@@ -568,7 +568,7 @@ components:
     FuturesAccount:
       type: object
       required: [asset, wallet_balance, available, frozen, order_margin, position_margin, unrealized_pnl,
-        cross_unrealized_pnl, margin_balance, transferable]
+        cross_unrealized_pnl, margin_balance, transferable, liquidating]
       properties:
         asset:
           type: string
@@ -595,8 +595,15 @@ components:
           description: wallet_balance + unrealized_pnl.
           $ref: './market.yaml#/components/schemas/Decimal'
         transferable:
-          description: What may move to SPOT now, min(available, available + cross_unrealized_pnl).
+          description: What may move to SPOT now, min(available, available + cross_unrealized_pnl); 0 while liquidating.
           $ref: './market.yaml#/components/schemas/Decimal'
+        liquidating:
+          type: boolean
+          description: >-
+            The account's cross positions are being liquidated (review C68, C74): from the take-over until what the
+            liquidation leaves has gone to the insurance fund as the clearance fee, seconds as a rule. Meanwhile no cross
+            order, no opening order and no isolated margin added on the contracts settled in this asset, and no transfer
+            out (DERIV_POSITION_LIQUIDATING).
     ContractSettings:
       type: object
       required: [symbol, position_mode, margin_mode, leverage, updated_at]

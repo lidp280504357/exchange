@@ -73,6 +73,7 @@ SELECT count(*) FILTER (WHERE settled_at IS NULL) AS waiting, sum(amount) AS net
 - 触发价格：标记价（`trigger_by=MARK`，默认，需新鲜）或最新成交价（`LAST`，服务重启后先取最近一笔合约成交）。多头的止盈在价格 ≥ 触发价时触发、止损在 ≤ 时触发；空头相反。下单时价格已经越过触发价会被拒（`DERIV_TRIGGER_IMMEDIATE`）。
 - 触发后（每秒检查一次）按条件单下一张只平仓的订单：市价（受保护的 IOC，默认）或给定价格的限价单；数量为条件单的数量，不填则平掉剩余全部，且不超过当时仓位。订单 `kind` 为 `TAKE_PROFIT`/`STOP_LOSS`，`client_order_id` 是条件单 ID，所以崩溃后重试不会重复下单。
 - 状态：`ACTIVE` → `TRIGGERED`（带所下订单 ID），或 `FAILED`（下单被拒，`reason` 是错误码，例如仓位正在强平），或 `CANCELED`（用户撤销 `USER`，或触发时仓位已平或已反向 `NO_POSITION`）。
+- 并发（审查 C69）：触发循环在事务外读出生效的条件单，用户撤销或强平接管可能就在这之后结束了它。所以条件单的每次结束都在用户锁下、只结束仍是 `ACTIVE` 的（存储层 `UPDATE ... AND status = 'ACTIVE'`，不是就答 `domain.ErrConditionalEnded`，后来的结束不会覆盖先到的）；触发下的单与它的 `TRIGGERED` 在同一个事务里（`Request.Conditional`），下单前先在锁下重读条件单，已结束就不下单。撤销（`CancelConditional`）也拿用户锁。单测 `conditional_test.go`：用户撤销后迟到的触发不下单、强平接管结束的止损不被迟到的触发改成 `FAILED`、存储层不改已结束的、对冲模式下接管只结束被接管那一侧的条件单。
 
 ## 强平与 ADL
 
@@ -89,7 +90,9 @@ SELECT count(*) FILTER (WHERE settled_at IS NULL) AS waiting, sum(amount) AS net
 - 仓位平完后 `liquidating`、预警标记自动清除。
 - **强平清算费**（全仓，审查 C68，用户决定 2026-10-09，币安的做法）：逐仓强平时仓位剩下的保证金本来就进保险基金（上面的"强平单"）；全仓强平完成后，账户这次强平剩下的钱也划入保险基金，账户归零。强平循环每秒检查进行中的全仓强平（`SettleCrossLiquidations`）：该资产的合约上没有未平的全仓仓位、没有生效或还占着预留的全仓订单、该用户没有等账本重试的结算（`pending_settlements`）时算作完成。清算费 = min（`balance` + `flows`，触发时权益，此刻的可用余额），按结算资产精度向下取，不为正时为 0；先存进这条记录（`fee`），再以账本 `SettleFutures` 的单个 `INSURANCE` 动作记账（分录 `INSURANCE_CONTRIBUTION`，幂等键 `cross-liquidation:<强平ID>`），然后记为 `DONE` 并发 `CrossLiquidationCompleted`（`derivatives.liquidation.events`，带 `clearance_fee`）。记账应答丢失时下一轮按存下的同一金额、同一个键重记（账本回放第一次的结果，与此时余额无关）；账本拒绝（可用余额少于清算费）时不入账，清空 `fee` 下一轮重算。强平期间转入的钱、逐仓放回的保证金不在 `balance` + `flows` 里，清算费拿不到（上限还有此刻的可用余额）。预估强平价不变（清算费只拿强平后剩下的钱）。
   - 通知：接管时的 `CONTRACT_LIQUIDATING` 写明"强平完成后，剩余保证金将作为强平清算费划入保险基金"（逐仓写"该仓位剩余的保证金将作为强平清算费划入保险基金"）；完成时发 `CONTRACT_LIQUIDATED`（站内信 + 邮件，三语）："全仓仓位已全部平仓，剩余保证金 X 已作为强平清算费划入保险基金"，清算费为 0 时写"账户没有剩余保证金（超出账户的亏损由保险基金承担）"。清算费在用户的资金流水里是一条 `INSURANCE_CONTRIBUTION`（逐仓强平的剩余保证金也是这个分录）；两站的显示名「强平清算费」与强平记录里的清算费由合约数据前端会话做（F24）。网关对 `CrossLiquidationCompleted` 不推 `risk` 频道（通知走 `notifications`）。
-  - 等账本重试的结算存在时强平不算完成：保险基金不足停放的全仓成交按"假定结果"记了 `flows`（保险基金补 0），重试成功后不回改；这种情况下亏损超过了账户，剩下的本来就是 0，清算费为 0。
+  - 等账本重试的结算存在时强平不算完成。保险基金不足停放的全仓成交先按"假定结果"记 `flows`（保险基金补 0、可免的手续费全免）；恢复循环重试记账成功时，在同一事务里把实际结果与假定的差（保险基金补的、账本实际免掉的手续费与假定的差）加进这次强平的 `flows`（审查 C74 ①，`domain.ParkedFlow`，单测 `TestAParkedCrossFillCountsWhatTheFundPaid`：对冲的另一侧之后平仓赚回来的钱因此照样进清算费）。接管之前就已停放的成交不补：记强平时账本本来就落后于仓位（接管时保险基金已经不足），这种情况按事故处理，补足保险基金后核对该用户的清算费。
+  - 账户摘要 `GET /v1/derivatives/account` 带 `liquidating`（审查 C74 ④）：该结算资产的全仓强平进行中为 `true`，此时 `transferable` 为 0。
+  - 指标 `derivatives_cross_liquidation_open_oldest_seconds`：进行中最久的那条全仓强平已经多少秒（没有为 0，每秒更新）；告警 `DerivativesCrossLiquidationStuck`（超过 300 秒持续 1 分钟，审查 C74 ②）。正常几秒就结束，卡住时按下面"一条全仓强平长时间停在 `OPEN`"查。
 
 指标：`derivatives_liquidation_steps_total{step}`（warning、takeover、order、adl、cleared：全仓强平完成、清算费已记）。日志：`position taken over for liquidation`、`position auto-deleveraged`、`cross account liquidation started`（带 `balance`、`equity`）、`cross account liquidation over`（带 `left`、`clearance_fee`）、`cross liquidation fee refused; worked out again`，强平循环的 `cross liquidation fees not booked`（记账失败，下一秒重试）。
 
@@ -111,7 +114,7 @@ FROM derivatives.cross_liquidations ORDER BY started_at DESC LIMIT 20;
 - market-data-service 连续 10 秒算不出该合约的标记价（价源不足），发 `risk.events` 的 `SystemDegraded`，合约服务的消费组 `derivatives-service-risk` 收到后置位；
 - 合约服务自己发现：有未平仓位的合约，标记价已超过 10 秒没更新（服务启动 30 秒后才判断），原因 `MARK_PRICE_STALE`。
 
-"风控服务不可用"这一条暂不适用：合约服务不依赖 risk-service 做同步检查。标记价恢复后也**不会**自动解除，需人工确认：管理后台「合约」页（权限 `derivatives.write`，标记价未恢复时按钮不可用，动作有审计事件 `admin.derivatives.reduce_only_lifted`），或命令行：
+"风控服务不可用"这一条暂不适用：合约服务不依赖 risk-service 做同步检查。标记价恢复后也**不会**自动解除（指标 `derivatives_contract_reduce_only_mark_fresh{symbol}` 在只减仓且标记价新鲜时为 1，恢复循环每 5 秒更新；告警 `DerivativesReduceOnlyWithFreshMark` 在持续 10 分钟时提醒去解除，审查 C70：2026-10-07 现货关闭约 30 秒让平台币永续只减仓了两天才被发现），需人工确认：管理后台「合约」页（权限 `derivatives.write`，标记价未恢复时按钮不可用，动作有审计事件 `admin.derivatives.reduce_only_lifted`），或命令行：
 
 ```bash
 ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchangectl derivatives states
@@ -204,7 +207,7 @@ WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，�
 - 流动性：两个合约都由 HOUSE 按币安合约盘口提供（开关 `market.house_liquidity` 允许全部合约，见 [market-maker.md](market-maker.md)）。`HOUSE_USER_ID` 沿用原做市账户，其 FUTURES 账户由 `scripts/ops/house.sh seed` 注资到 2,000,000 USDT（`exchangectl ledger house-margin`）；测试服 HOUSE 在每个合约上多空各最多接 5,000,000 USDT（`HOUSE_CONTRACT_CAP`），到上限后该方向没有报价。阶段 3 的挂单做市（`MARKET_MAKER_CONTRACTS`、开关 `market.maker`）已随 ADR-0015 退役。
 - 保险基金用模拟资金注资：`exchangectl ledger insurance-fund --amount 1000000 --reason "测试环境保险基金" --key insurance-seed-1`（ledger-service 容器里执行，需 `ledger.manual_adjustment`）。
 - 端到端：`scripts/e2e/contracts.sh`（规格与阶梯：BTC-USDT-PERP 的档位与 `test.json` 一致、币安的 12 档 150 倍到 300,000 USDT，BTC、ETH 最高 150 倍；标记价、资金费率、两个合约的盘口）、`scripts/e2e/derivatives.sh`（两个用户在 ETH-USDT-PERP 上各自与 HOUSE 开多、开空，杠杆到合约第一档为止（从规格读，ETH 150 倍，超一倍答 `DERIV_LEVERAGE_EXCEEDED`），挂单预留与撤单，只减仓市价平仓，按成交核对盈亏、手续费与余额，转回，最后跑对账）、`scripts/e2e/house.sh` 的合约部分（两个合约各开平一次）、`scripts/e2e/funding.sh`（资金费，见下）、`scripts/e2e/admin.sh` 的合约部分（合约状态、只减仓、状态往返、强平监控、双人审批的保险基金注资）；故障注入 `scripts/fault/contract-degrade.sh`（降级与人工解除）。
-- 资金费端到端靠一对**常驻对冲仓位**：`funding.sh` 第一次运行时注册两个用户，各转 100 USDT 到合约账户，在 ETH-USDT-PERP 上用市价单分别与 HOUSE 开多、开空 0.01 张后保持不平（B4 之前开的那一对在 BTC-USDT-PERP 上 0.001 张，状态文件没有合约名时按它处理），邮箱与随机密码记在本机 `~/.cache/exchange-e2e/`（`E2E_STATE_DIR` 可改，不进仓库）；之后每次运行登录这两个用户（超过 7 天未登录时从开发收件箱取登录挑战验证码），逐个检查开仓以来每个资金费时间点：双方都有记录、费率等于 market-data-service 结算的费率、付款方付 仓位数量 × 结算标记价 × |费率| 向上取整、收款方向下取整。仓位没了（被平或被减仓）就重新开一对。强平本身依赖真实价格波动，端到端无法稳定触发，由应用层测试覆盖（`internal/derivatives/application` 的强平、ADL、全仓强平用例，设置 `TEST_POSTGRES_DSN` 时在真实库上跑；强平清算费见 `crossliquidation_test.go`：账户归零而强平期间转入与逐仓放回的钱留给用户、什么都没剩时不收、记账应答丢失按同一金额重记、被拒重算、强平期间不收开仓单与追加保证金、接管后才成交的挂单一并接管、资金费计入）。例外是 `scripts/e2e/price-event.sh`：带风控的价格事件把 BTC-USDT-PERP 的标记价抬高约 16%，脚本事先用 1 USDT 开一个 100 倍全仓空单，核对它被强平、收到 `CONTRACT_LIQUIDATED`、清算费（可能为 0）记成该用户的 `INSURANCE_CONTRIBUTION`、合约账户归零（审查 C68）；`derivatives.sh`、`coinm.sh` 核对普通平仓不产生清算费。
+- 资金费端到端靠一对**常驻对冲仓位**：`funding.sh` 第一次运行时注册两个用户，各转 100 USDT 到合约账户，在 ETH-USDT-PERP 上用市价单分别与 HOUSE 开多、开空 0.01 张后保持不平（B4 之前开的那一对在 BTC-USDT-PERP 上 0.001 张，状态文件没有合约名时按它处理），邮箱与随机密码记在本机 `~/.cache/exchange-e2e/`（`E2E_STATE_DIR` 可改，不进仓库）；之后每次运行登录这两个用户（超过 7 天未登录时从开发收件箱取登录挑战验证码），逐个检查开仓以来每个资金费时间点：双方都有记录、费率等于 market-data-service 结算的费率、付款方付 仓位数量 × 结算标记价 × |费率| 向上取整、收款方向下取整。仓位没了（被平或被减仓）就重新开一对。强平本身依赖真实价格波动，端到端无法稳定触发，由应用层测试覆盖（`internal/derivatives/application` 的强平、ADL、全仓强平用例，设置 `TEST_POSTGRES_DSN` 时在真实库上跑；强平清算费见 `crossliquidation_test.go`：账户归零而强平期间转入与逐仓放回的钱留给用户、什么都没剩时不收、记账应答丢失按同一金额重记、被拒重算、强平期间不收开仓单与追加保证金、接管后才成交的挂单一并接管、资金费计入）。例外是 `scripts/e2e/price-event.sh`：带风控的价格事件把 BTC-USDT-PERP 的标记价抬高（目标 16%，HOUSE 亏损上限会把它压小，2026-10-10 那次是 1.45%），脚本事先开一个 ETH-USDT-PERP 的 20 倍逐仓多单，再用约 1 USDT 开一个 100 倍全仓空单，事件期间每半秒请求把 1000 USDT 划出合约账户（多于账户余额，什么都不会划走）；之后核对空单被强平、强平记录 `DONE`、清算费 = min（剩下的，触发时权益）且与通知和资金流水的 `INSURANCE_CONTRIBUTION` 一致、可用余额是清算费之外剩下的、冻结的正是逐仓多单的保证金且多单还在、`liquidating` 已为 `false`，强平期间的划出答 409 `DERIV_POSITION_LIQUIDATING`（强平只有一两秒、两次请求都没落在其中时只记一句说明；有请求落在其中却没被拒则失败）（审查 C68、C74 ③）；事件幅度到不了强平价时把空单平掉、跳过这些；`derivatives.sh`、`coinm.sh` 核对普通平仓不产生清算费。
 - 资金费轮次：`exchangectl derivatives funding [--symbol S] [--limit N]` 列出最近的轮次（费率、标记价、仓位数、已结算数、付出、收到、保险基金垫付）；有轮次等费率超过 2 小时 10 分钟仍未跳过、或收到的多于付出加保险基金时以非零退出（`funding.sh` 每次都跑）。
 
 ## 查看

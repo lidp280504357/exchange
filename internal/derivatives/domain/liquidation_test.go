@@ -48,3 +48,28 @@ func TestAFillsFlow(t *testing.T) {
 		t.Fatalf("a loss the fund paid part of: %s", f.Flow())
 	}
 }
+
+// What a parked fill's booking adds to the flow it was stored with (review
+// C74 ①): the fund's part of its losses; of a fee that may be waived, what
+// the ledger waived beyond the whole assumed; of one that may not, what it
+// waived.
+func TestAParkedFillsFlow(t *testing.T) {
+	moves := []Move{
+		{Type: MoveUnfreeze, Amount: d("600")},
+		{Type: MoveLoss, Amount: d("750")},
+		{Type: MoveFee, Amount: d("15.375"), Partial: true},
+		{Type: MoveFee, Amount: d("2")},
+	}
+	outcomes := []Outcome{
+		{User: d("0")},
+		{User: d("-723.5"), Insurance: d("26.5")},
+		{Waived: d("15.375")},
+		{Waived: d("0.5"), User: d("-1.5")},
+	}
+	if got := ParkedFlow(moves, outcomes); !got.Equal(d("27")) {
+		t.Fatalf("flow %s", got)
+	}
+	if got := ParkedFlow(moves, outcomes[:1]); !got.IsZero() {
+		t.Fatalf("without outcomes %s", got)
+	}
+}

@@ -46,6 +46,10 @@ func crossTakenOver(t *testing.T, r *rig, alice, bob string) {
 	if _, err := r.svc.CrossUnrealizedPnL(ctx, alice, "USDT"); apperr.From(err).Code != "DERIV_POSITION_LIQUIDATING" {
 		t.Fatalf("a transfer out while the account is liquidated: %v", err)
 	}
+	// The account says so (review C74 ④).
+	if sum, err := r.svc.Account(ctx, alice, "USDT"); err != nil || !sum.Liquidating {
+		t.Fatalf("the account while it is liquidated %+v %v", sum, err)
+	}
 }
 
 // liquidate has the engine fill alice's liquidation order at price.
@@ -121,6 +125,9 @@ func TestACrossLiquidationLeavesTheAccountAtZero(t *testing.T) {
 	}
 	if _, err := r.svc.CrossUnrealizedPnL(ctx, alice, "USDT"); err != nil {
 		t.Fatalf("a transfer out once it is over: %v", err)
+	}
+	if sum, err := r.svc.Account(ctx, alice, "USDT"); err != nil || sum.Liquidating {
+		t.Fatalf("the account once it is over %+v %v", sum, err)
 	}
 	r.reconcile(t)
 }
@@ -396,6 +403,80 @@ func TestFundingDuringACrossLiquidationCounts(t *testing.T) {
 	}
 	if !r.ledger.available[alice].IsZero() {
 		t.Fatalf("alice %s", r.ledger.available[alice])
+	}
+	r.reconcile(t)
+}
+
+// A cross liquidation fill the ledger refused (the insurance fund empty) is
+// stored with the outcomes assumed then: nothing from the fund. Once
+// booked, what the fund paid counts towards what the liquidation leaves
+// (review C74 ①). Here alice's hedged long, closed after it, brings the
+// account back above zero: 133.4625 left, and the clearance fee takes the
+// equity at the take-over, 108.5 (without the fund's 26.5 and the 15.375
+// fee the ledger waived counted, it took 91.5875).
+func TestAParkedCrossFillCountsWhatTheFundPaid(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice, bob, carol := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	r.fund(alice, "800")
+	r.fund(bob, "10000")
+	r.fund(carol, "10000")
+	hedge, fifty := domain.Hedge, int32(50)
+	if _, err := r.svc.UpdateSettings(ctx, alice, perp.Symbol, application.SettingsChange{PositionMode: &hedge, Leverage: &fifty}); err != nil {
+		t.Fatal(err)
+	}
+	order := func(side domain.Side, ps domain.PositionSide, qty string) domain.Order {
+		t.Helper()
+		o, err := r.svc.Place(ctx, domain.Request{
+			UserID: alice, Symbol: perp.Symbol, Side: side, PositionSide: ps, Type: domain.Limit, Price: d("60000"), Qty: d(qty),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	// 800 - the 600 and 60 of margin - the 15 and 1.5 of fees: 123.5.
+	r.trade(t, r.place(t, bob, domain.Buy, "60000", "0.5", false), order(domain.Sell, domain.SideShort, "0.5"), "60000")
+	r.trade(t, r.place(t, bob, domain.Sell, "60000", "0.05", false), order(domain.Buy, domain.SideLong, "0.05"), "60000")
+	// At 61500 the equity is 783.5 - 0.45 x 1500 = 108.5, under the 135.3
+	// of maintenance: both sides are taken over.
+	r.monitor(t, "61500")
+	r.monitor(t, "61500")
+	list, _, err := r.svc.List(ctx, alice, perp.Symbol, "ACTIVE", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liq := map[domain.Side]domain.Order{}
+	for _, o := range list {
+		if o.Kind == domain.KindLiquidation {
+			liq[o.Side] = o
+		}
+	}
+	if len(liq) != 2 {
+		t.Fatalf("liquidation orders %+v", list)
+	}
+	// The short closes at 61500 losing 750 with 723.5 in the account: the
+	// fund is empty, the ledger refuses, the fill is parked.
+	r.ledger.insurance = decimal.Zero
+	r.trade(t, r.placeOn(t, perp.Symbol, carol, domain.Sell, "61500", "0.5"), liq[domain.Buy], "61500")
+	if n, err := r.store.Read().Pending().CountOf(ctx, alice); err != nil || n != 1 {
+		t.Fatalf("parked: %d %v", n, err)
+	}
+	r.ledger.insurance = d("1000000")
+	if n, err := r.svc.RetryPending(ctx); err != nil || n != 1 {
+		t.Fatalf("retried: %d %v", n, err)
+	}
+	// The long closes at 61500: 75 made, the 1.5375 fee.
+	r.trade(t, r.placeOn(t, perp.Symbol, carol, domain.Buy, "61500", "0.05"), liq[domain.Sell], "61500")
+	if !r.ledger.available[alice].Equal(d("133.4625")) {
+		t.Fatalf("alice %s", r.ledger.available[alice])
+	}
+	insurance := r.ledger.insurance
+	if n, err := r.svc.SettleCrossLiquidations(ctx); err != nil || n != 1 {
+		t.Fatalf("settle: %d %v", n, err)
+	}
+	if fee := r.ledger.insurance.Sub(insurance); !fee.Equal(d("108.5")) || !r.ledger.available[alice].Equal(d("24.9625")) {
+		t.Fatalf("the fee %s, alice %s", fee, r.ledger.available[alice])
 	}
 	r.reconcile(t)
 }

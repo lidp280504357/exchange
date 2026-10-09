@@ -147,6 +147,9 @@ type ConditionalRepo interface {
 	Insert(ctx context.Context, c domain.Conditional) error
 	// Get returns the conditional order, or domain.ErrOrderNotFound.
 	Get(ctx context.Context, id string) (domain.Conditional, error)
+	// Update ends an active conditional order: its new status, reason
+	// and order. domain.ErrConditionalEnded when it is no longer active,
+	// so that an end never overwrites another (review C69).
 	Update(ctx context.Context, c domain.Conditional) error
 	// Active returns the active conditional orders of symbol ("" for all).
 	Active(ctx context.Context, symbol string) ([]domain.Conditional, error)
@@ -187,6 +190,8 @@ type FillRepo interface {
 	Insert(ctx context.Context, f domain.Fill) error
 	// SetSettled marks a parked fill settled.
 	SetSettled(ctx context.Context, tradeID string, side domain.Side) error
+	// Get returns the side of the trade, or domain.ErrOrderNotFound.
+	Get(ctx context.Context, tradeID string, side domain.Side) (domain.Fill, error)
 	// OfUser returns a page of the user's fills, newest first; before is
 	// "<trade id>:<side>" of the previous page's last fill.
 	OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error)

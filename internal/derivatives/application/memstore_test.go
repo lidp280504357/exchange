@@ -276,6 +276,14 @@ func (r memFills) Insert(_ context.Context, f domain.Fill) error {
 	return nil
 }
 
+func (r memFills) Get(_ context.Context, tradeID string, side domain.Side) (domain.Fill, error) {
+	f, ok := r.st.fills[fillKey(tradeID, side)]
+	if !ok {
+		return domain.Fill{}, domain.ErrOrderNotFound
+	}
+	return f, nil
+}
+
 func (r memFills) SetSettled(_ context.Context, tradeID string, side domain.Side) error {
 	f := r.st.fills[fillKey(tradeID, side)]
 	f.Settled = true
@@ -548,6 +556,9 @@ func (r memConds) Get(_ context.Context, id string) (domain.Conditional, error) 
 }
 
 func (r memConds) Update(_ context.Context, c domain.Conditional) error {
+	if cur, ok := r.st.conds[c.ID]; !ok || cur.Status != domain.ConditionalActive {
+		return domain.ErrConditionalEnded
+	}
 	r.st.conds[c.ID] = c
 	return nil
 }

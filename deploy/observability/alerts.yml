@@ -181,6 +181,22 @@ groups:
           summary: "derivatives reconciliation check {{ $labels.check }} found {{ $value }} mismatches"
           runbook: docs/runbook/derivatives.md
 
+      - alert: DerivativesReduceOnlyWithFreshMark
+        expr: max by (job, symbol) (derivatives_contract_reduce_only_mark_fresh) == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.symbol }} has been reduce-only for 10 minutes while its mark price is fresh; reduce-only is lifted by hand: check why it was degraded, then lift it (the console's contracts page, or exchangectl derivatives resume {{ $labels.symbol }})"
+          runbook: docs/runbook/derivatives.md
+
+      - alert: DerivativesCrossLiquidationStuck
+        expr: max by (job) (derivatives_cross_liquidation_open_oldest_seconds) > 300
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "a cross account's liquidation has been open for {{ $value }} seconds (seconds as a rule): the account takes no opening order and lets nothing out meanwhile; see which cross positions, orders or parked settlements hold it"
+          runbook: docs/runbook/derivatives.md
+
       - alert: DerivativesSettlementParked
         expr: sum by (job) (increase(derivatives_settlements_parked_total[15m])) > 0
         labels: {severity: critical}

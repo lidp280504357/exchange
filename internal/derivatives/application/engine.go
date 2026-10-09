@@ -330,6 +330,9 @@ func (s *Service) RetryPending(ctx context.Context) (int, error) {
 				if err := r.Fills().SetSettled(ctx, p.TradeID, p.Side); err != nil {
 					return err
 				}
+				if err := s.parkedCrossFlow(ctx, r, p, outcomes); err != nil {
+					return err
+				}
 			}
 			booked++
 			return r.Pending().Delete(ctx, p.IdemKey)
