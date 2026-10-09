@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { platformApi, unwrap } from "../api/client";
-import { setBrandVariable } from "../i18n/index";
+import { followFallbackLocale, setBrandVariable } from "../i18n/index";
 import { qk } from "../query/keys";
 import { useSettings } from "../settings/store";
 import type { ContentMode } from "../content/markdown";
@@ -96,11 +96,17 @@ export function applyBranding(p: PlatformProfile, defaults: HeadDefaults = DEFAU
 
 /**
  * useBrandingEffects applies the profile to the page and to the strings
- * (i18n {{brand}}) whenever it changes; the sites call it once at their
- * root and read the profile with useBranding.
+ * (i18n {{brand}}, and the fallback language of a visitor who has not
+ * chosen one) whenever it changes; the sites call it once at their root
+ * and read the profile with useBranding.
  */
 export function useBrandingEffects(): PlatformProfile {
   const p = useBranding();
+  // A visitor who has not chosen a language: the browser's, else the platform's fallback (F30), once the profile is read.
+  const fallback = usePlatformProfile().data?.default_locale;
+  useEffect(() => {
+    if (fallback) followFallbackLocale(fallback);
+  }, [fallback]);
   useEffect(() => {
     // A page that set no title of its own shows the name (index.html has the built-in one).
     if (globalThis.document && document.title === brand) document.title = p.name;

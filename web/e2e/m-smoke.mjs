@@ -19,7 +19,7 @@
 // closed product lines (hidden, their terminals not open, the wind-down page),
 // the language switch and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
-import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, legendClear, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
+import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, legendClear, ok, pickLanguage, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.astras.vip" : APP);
@@ -503,11 +503,12 @@ try {
   // 9. Settings: English switches the site's language at once (the page
   // and its header); so does Traditional Chinese (design 2026-10-06
   // 繁体中文), shown on the key pages in the Traditional fonts
-  // (screenshots to check the widths), and back.
+  // (screenshots to check the widths), and back. The language is a dropdown
+  // of each language's own and English name (F30).
   await go("/account/settings");
-  await clickButton("English");
+  await pickLanguage(page, "语言", "English");
   await waitText("Time zone", 10000);
-  await clickButton("繁體中文");
+  await pickLanguage(page, "Language", "繁體中文");
   await waitText("時區", 10000);
   for (const [path, text] of [["/", "總資產估值"], ["/markets", "現貨"], ["/trade/BTC-USDT", "買入"], ["/assets", "總資產估值"], ["/help", "幫助中心"]]) {
     await go(path);
@@ -517,7 +518,7 @@ try {
   const fonts = await page.evaluate(() => getComputedStyle(document.documentElement).fontFamily);
   if (!fonts.includes("PingFang TC")) throw new Error(`Traditional Chinese without its fonts: ${fonts}`);
   await go("/account/settings");
-  await clickButton("简体中文");
+  await pickLanguage(page, "語言", "简体中文");
   await waitText("时区", 10000);
   ok("the language setting switches the site to English, to Traditional Chinese (five key pages, its fonts) and back");
 

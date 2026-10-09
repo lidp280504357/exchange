@@ -3,7 +3,7 @@ import { initReactI18next } from "react-i18next";
 import { ApiError } from "../api/errors";
 import { formatAmount } from "../format/number";
 import { DEFAULT_BRAND } from "../platform/profile";
-import { LOCALES, useSettings, type Locale } from "../settings/store";
+import { browserTags, LOCALES, negotiateLocale, useSettings, type Locale } from "../settings/store";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
 import { zhTW } from "./zh-TW";
@@ -83,10 +83,36 @@ export function registerMessages(messages: LocaleMessages): void {
   }
 }
 
-/** setLocale switches the language and remembers it (one the app does not offer is Simplified Chinese). */
+/**
+ * setLocale switches to the language the user chose and remembers it as
+ * chosen: the browser and the platform's fallback no longer decide (one
+ * the app does not offer is Simplified Chinese).
+ */
 export function setLocale(wanted: Locale): void {
   const locale = offered.includes(wanted) ? wanted : "zh-CN";
-  useSettings.getState().set({ locale });
+  useSettings.getState().set({ locale, localeChosen: true });
+  showLocale(locale);
+}
+
+/**
+ * followFallbackLocale takes the platform's fallback language (its profile's
+ * default_locale, the console's 回退语言) for a visitor who has not chosen
+ * one: the first of the browser's preferences the site has, else that
+ * language (F30). It is remembered for the next page start; a chosen
+ * language stays.
+ */
+export function followFallbackLocale(fallback: Locale): void {
+  const s = useSettings.getState();
+  const kept = offered.includes(fallback) ? fallback : "en";
+  if (s.fallbackLocale !== kept) s.set({ fallbackLocale: kept });
+  if (s.localeChosen) return;
+  const locale = negotiateLocale(browserTags(), kept);
+  if (locale === s.locale || !offered.includes(locale)) return;
+  s.set({ locale });
+  showLocale(locale);
+}
+
+function showLocale(locale: Locale): void {
   void i18n.changeLanguage(locale);
   if (globalThis.document) document.documentElement.lang = locale;
 }

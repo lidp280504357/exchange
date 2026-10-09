@@ -11,11 +11,24 @@ export type Locale = "zh-CN" | "zh-TW" | "en";
 export const LOCALES: readonly Locale[] = ["zh-CN", "zh-TW", "en"];
 /** Each language's name in itself, the same whatever the page's language. */
 export const LOCALE_NAMES: Record<Locale, string> = { "zh-CN": "简体中文", "zh-TW": "繁體中文", en: "English" };
+/** Each language's name in English, beside its own in the pickers. */
+export const LOCALE_ENGLISH_NAMES: Record<Locale, string> = { "zh-CN": "Simplified Chinese", "zh-TW": "Traditional Chinese", en: "English" };
+
+/** A site language with its names: the one list every language picker shows (F30). */
+export type Language = { locale: Locale; name: string; english: string };
+export const LANGUAGES: readonly Language[] = LOCALES.map((locale) => ({ locale, name: LOCALE_NAMES[locale], english: LOCALE_ENGLISH_NAMES[locale] }));
 /** green-up: green rises, red falls (default); red-up swaps them. */
 export type UpDown = "green-up" | "red-up";
 
 export type Settings = {
   locale: Locale;
+  /**
+   * Whether the user chose the language. Until they do, it follows the
+   * browser's preferences, then the platform's fallback language (F30).
+   */
+  localeChosen: boolean;
+  /** The platform's fallback language (its profile's default_locale) as last read: English until then. */
+  fallbackLocale: Locale;
   /** An IANA zone such as Asia/Shanghai; "" follows the browser. */
   timeZone: string;
   upDown: UpDown;
@@ -32,28 +45,61 @@ type SettingsState = Settings & {
 };
 
 /**
- * localeOf maps a browser language tag to a site language: Traditional
- * Chinese for zh-Hant and Taiwan, Hong Kong and Macao (design 2026-10-06
- * 繁体中文 §2.1), Simplified for the other Chinese, English for the rest.
+ * matchLocale maps a browser language tag to the site language for it, or
+ * null when the site has none: Traditional Chinese for zh-Hant and Taiwan,
+ * Hong Kong and Macao (design 2026-10-06 繁体中文 §2.1), Simplified for the
+ * other Chinese, English for any English.
  */
-export function localeOf(tag: string): Locale {
-  const t = tag.toLowerCase();
-  if (!t.startsWith("zh")) return "en";
+export function matchLocale(tag: string): Locale | null {
+  const t = tag.trim().toLowerCase();
+  if (t === "en" || t.startsWith("en-")) return "en";
+  if (t !== "zh" && !t.startsWith("zh-")) return null;
   if (t.includes("-hant")) return "zh-TW";
   if (t.includes("-hans")) return "zh-CN";
   return /^zh-(tw|hk|mo)\b/.test(t) ? "zh-TW" : "zh-CN";
 }
 
-/** browserLocale is the first visit's language: the browser's first preference. */
-function browserLocale(): Locale {
+/** localeOf maps a browser language tag to a site language, English for one the site does not have. */
+export function localeOf(tag: string): Locale {
+  return matchLocale(tag) ?? "en";
+}
+
+/**
+ * negotiateLocale picks the language of a visitor who has not chosen one
+ * (F30): the first of the browser's preferences (most wanted first) the
+ * site has, else the platform's fallback language.
+ */
+export function negotiateLocale(tags: readonly string[], fallback: Locale): Locale {
+  for (const tag of tags) {
+    const locale = matchLocale(tag);
+    if (locale) return locale;
+  }
+  return fallback;
+}
+
+/** browserTags lists the browser's language preferences, most wanted first. */
+export function browserTags(): readonly string[] {
   const nav = globalThis.navigator;
-  return localeOf(nav?.languages?.[0] ?? nav?.language ?? "zh-CN");
+  if (nav?.languages?.length) return nav.languages;
+  return nav?.language ? [nav.language] : [];
+}
+
+/**
+ * restoredLocale is the language a page starts in: the user's choice, kept
+ * on the device; else negotiated afresh, the browser's preferences may
+ * have changed since (F30).
+ */
+export function restoredLocale(saved: Partial<Pick<Settings, "locale" | "localeChosen" | "fallbackLocale">>, tags: readonly string[]): Locale {
+  if (saved.localeChosen && saved.locale) return saved.locale;
+  return negotiateLocale(tags, saved.fallbackLocale ?? "en");
 }
 
 export const useSettings = create<SettingsState>()(
   persist(
     (set) => ({
-      locale: browserLocale(),
+      locale: negotiateLocale(browserTags(), "en"),
+      localeChosen: false,
+      fallbackLocale: "en",
       timeZone: "",
       upDown: "green-up",
       confirmOrders: true,
@@ -62,7 +108,16 @@ export const useSettings = create<SettingsState>()(
       contractUnit: "CONT",
       set: (patch) => set(patch),
     }),
-    { name: "exchange.settings", version: 1 },
+    {
+      name: "exchange.settings",
+      version: 2,
+      // Before version 2 every kept language counted as chosen: a user's switch stays.
+      migrate: (saved, version) => (version < 2 ? { ...(saved as Settings), localeChosen: true } : saved) as SettingsState,
+      merge: (saved, current) => {
+        const s = (saved ?? {}) as Partial<Settings>;
+        return { ...current, ...s, locale: restoredLocale(s, browserTags()) };
+      },
+    },
   ),
 );
 

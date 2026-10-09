@@ -1,6 +1,7 @@
-import { LOCALE_NAMES, LOCALES, setLocale, useSettings, type Locale, type UpDown } from "@exchange/core";
+import { setLocale, useSettings, type UpDown } from "@exchange/core";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
 import { Combobox, RadioGroup, Switch, TimeText, listItem, useNow, cn, type ComboboxItem } from "@exchange/ui";
+import { LanguageSelect } from "@exchange/ui/components/LanguageSelect";
 import { ChartCandlestick, Clock, Languages, SlidersHorizontal } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -26,19 +27,8 @@ export default function Settings() {
     <AccountLayout title={t("pcAccount.settings.title")} subtitle={t("pcAccount.settings.subtitle")}>
       <Card index={0} icon={<Languages size={18} />} title={t("pcAccount.settings.display")}>
         <Row label={t("pcAccount.settings.language")} desc={t("pcAccount.settings.languageDesc")}>
-          <RadioGroup
-            orientation="horizontal"
-            variant="card"
-            value={locale}
-            onValueChange={(v) => setLocale(v as Locale)}
-            aria-label={t("pcAccount.settings.language")}
-            className="[&>label]:min-w-40"
-            options={LOCALES.map((l) => ({
-              value: l,
-              label: <span lang={l}>{LOCALE_NAMES[l]}</span>,
-              description: t(`pcAccount.settings.langDesc.${l}`),
-            }))}
-          />
+          {/* A dropdown of core's language list, each by its own and its English name (F30). */}
+          <LanguageSelect value={locale} onValueChange={setLocale} aria-label={t("pcAccount.settings.language")} className="w-80" />
         </Row>
         <Row label={t("pcAccount.settings.timeZone")} desc={t("pcAccount.settings.timeZoneDesc")}>
           <div className="flex flex-col items-end gap-2">

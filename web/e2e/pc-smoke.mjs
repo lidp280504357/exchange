@@ -23,7 +23,7 @@
 // switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, note, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
+import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, legendClear, menuOnTop, note, ok, pickLanguage, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -727,11 +727,11 @@ try {
   // 9. Settings: English switches the site's language at once; so does
   // Traditional Chinese (design 2026-10-06 繁体中文), shown on the key pages
   // in the Traditional fonts (screenshots to check the widths), and back.
+  // The language is a dropdown of each language's own and English name (F30).
   await go("/account/settings");
-  await page.waitForSelector('button[role="radio"][value="en"]', { visible: true });
-  await page.click('button[role="radio"][value="en"]');
+  await pickLanguage(page, "语言", "English");
   await page.waitForFunction(() => document.querySelector("header")?.innerText.includes("Markets"), { timeout: 10000 });
-  await page.click('button[role="radio"][value="zh-TW"]');
+  await pickLanguage(page, "Language", "繁體中文");
   await page.waitForFunction(() => document.documentElement.lang === "zh-TW" && document.querySelector("header")?.innerText.includes("資產"), { timeout: 10000 });
   for (const [path, text] of [["/", "漲幅榜"], ["/markets", "即時行情"], ["/trade/BTC-USDT", "限價"], ["/assets", "資產總覽"], ["/help", "幫助中心"]]) {
     await go(path);
@@ -741,8 +741,7 @@ try {
   const fonts = await page.evaluate(() => getComputedStyle(document.documentElement).fontFamily);
   if (!fonts.includes("PingFang TC")) throw new Error(`Traditional Chinese without its fonts: ${fonts}`);
   await go("/account/settings");
-  await page.waitForSelector('button[role="radio"][value="zh-CN"]', { visible: true });
-  await page.click('button[role="radio"][value="zh-CN"]');
+  await pickLanguage(page, "語言", "简体中文");
   await page.waitForFunction(() => document.documentElement.lang === "zh-CN" && document.querySelector("header")?.innerText.includes("资产"), { timeout: 10000 });
   ok("the language setting switches the site to English, to Traditional Chinese (five key pages, its fonts) and back");
 

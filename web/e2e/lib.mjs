@@ -349,6 +349,22 @@ export function withApps(page, apps, fn) {
   return withAnswer(page, "/v1/platform/apps", apps, fn);
 }
 
+/**
+ * pickLanguage chooses a language in the settings page's language dropdown
+ * (F30): opens it by its name in the page's current language (label), then
+ * picks the option by the language's own name.
+ */
+export async function pickLanguage(page, label, name) {
+  const trigger = `button[role="combobox"][aria-label="${label}"]`;
+  await page.waitForSelector(trigger, { visible: true, timeout: 20000 });
+  await page.click(trigger);
+  await page.waitForSelector('[role="option"]', { visible: true, timeout: 10000 });
+  for (const option of await page.$$('[role="option"]')) {
+    if ((await option.evaluate((o) => o.querySelector("[lang]")?.textContent.trim())) === name) return option.click();
+  }
+  throw new Error(`the language dropdown has no ${name}`);
+}
+
 /** note prints what a run could not check here, without failing it. */
 export const note = (what) => console.log("note " + what);
 

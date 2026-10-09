@@ -154,7 +154,6 @@ export default {
       display: "語言與時區",
       language: "語言",
       languageDesc: "介面顯示的語言",
-      langDesc: { "zh-CN": "中文（簡體）", "zh-TW": "中文（繁體）", en: "英語" },
       timeZone: "時區",
       timeZoneDesc: "圖表、訂單和記錄的時間都按這個時區顯示",
       followBrowser: "跟隨瀏覽器（{{zone}}）",

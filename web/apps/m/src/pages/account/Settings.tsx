@@ -1,8 +1,9 @@
-import { LOCALE_NAMES, LOCALES, routes, selectSignedIn, setLocale, useSession, useSettings, type Locale, type UpDown } from "@exchange/core";
+import { routes, selectSignedIn, setLocale, useSession, useSettings, type UpDown } from "@exchange/core";
 import { useAppEntry } from "@exchange/core/platform/apps";
 import { browserTimeZone, zoneLabel, zoneOffset, zoneOptions } from "@exchange/core/user/preferences";
 import { useProfile } from "@exchange/core/user/profile";
-import { RadioGroup, Segmented, Skeleton, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
+import { RadioGroup, Skeleton, Switch, TimeText, cn, useNow, type ComboboxItem } from "@exchange/ui";
+import { LanguageSelect } from "@exchange/ui/components/LanguageSelect";
 import { MyAvatar } from "@exchange/ui/profile/MyAvatar";
 import { ChevronRight, Clock, Download } from "lucide-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
@@ -42,14 +43,8 @@ export default function Settings() {
         <Group index={0}>
           <div className="flex flex-col gap-3 p-4">
             <RowText label={t("mAccount.settings.language")} desc={t("mAccount.settings.languageDesc")} />
-            <Segmented
-              block
-              size="lg"
-              value={locale}
-              onValueChange={(v) => setLocale(v as Locale)}
-              aria-label={t("mAccount.settings.language")}
-              items={LOCALES.map((l) => ({ value: l, label: <span lang={l}>{LOCALE_NAMES[l]}</span> }))}
-            />
+            {/* A dropdown of core's language list, each by its own and its English name (F30). */}
+            <LanguageSelect value={locale} onValueChange={setLocale} size="lg" aria-label={t("mAccount.settings.language")} className="w-full" />
           </div>
           <TimeZoneRow />
         </Group>
