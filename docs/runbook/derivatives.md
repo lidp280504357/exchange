@@ -110,7 +110,7 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 
 故障注入 `scripts/fault/contract-degrade.sh` 演练整个过程：切断 market-data-service 的外网 → 标记价报 `degraded` → 合约只减仓、开仓单被拒 → 恢复外网后仍只减仓（开仓单报 `DERIV_REDUCE_ONLY_MODE`）→ `resume` 后恢复。`scripts/fault/coinm-degrade.sh` 在币本位的 BTC-USD-PERP 上演练同一过程（BTC 保证金、整张开仓，合约不在 TRADING 时跳过）。
 
-部署会重启 market-data-service，标记价可能中断超过 10 秒，合约因此进入只减仓（2026-10-01 有一次 ETH-USDT-PERP 停在只减仓几个小时，直到端到端测试失败才发现）。`deploy/server-update.sh` 最后等 20 秒，解除部署期间开始、原因为 `INDEX_SOURCES` 或 `MARK_PRICE_STALE` 的只减仓，解除人记为 `deploy-<版本>`（`exchangectl` 读 `EXCHANGECTL_ACTOR`）；价源若真断了，10 秒后又会只减仓。部署之外开始的只减仓仍须人工解除。
+部署会重启 market-data-service，标记价可能中断超过 10 秒，合约因此进入只减仓（2026-10-01 有一次 ETH-USDT-PERP 停在只减仓几个小时，直到端到端测试失败才发现）。`deploy/server-update.sh` 最后等 20 秒，解除部署期间开始、原因为 `INDEX_SOURCES` 或 `MARK_PRICE_STALE` 的只减仓，解除人记为 `deploy-<版本>`（`exchangectl` 读 `EXCHANGECTL_ACTOR`）；价源若真断了，10 秒后又会只减仓。端到端脚本自己造成的同样自己解除：`scripts/e2e/trading.sh` 关闭现货片刻会让平台币永续只减仓，结束时用同一口径解除关闭以后开始的（`lift_reduce_only`，解除人 `e2e-trading.sh`，B165）。其余部署之外开始的只减仓仍须人工解除（后台重开产品线时列出关闭期间开始的并可一键解除是 A92）。
 
 ## 产品线开关（产品线开关设计 2026-10-07，批次 K1b）
 

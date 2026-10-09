@@ -140,3 +140,40 @@ exchangectl() {
   args=$(printf '%q ' "$@")
   remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl $args"
 }
+
+# server_now prints the test server's time (RFC 3339, UTC), to compare with
+# the times its services record.
+server_now() {
+  remote "date -u +%Y-%m-%dT%H:%M:%SZ"
+}
+
+# lift_reduce_only SINCE ACTOR [SECONDS] lifts, as the deploy does
+# (deploy/server-update.sh), the contracts that went reduce-only at or
+# after SINCE (server_now) for a stale index or mark price (INDEX_SOURCES,
+# MARK_PRICE_STALE), each once its mark price is fresh again, audited as
+# ACTOR; other reasons are left alone. A script that stopped what a mark
+# price hangs on lifts what it caused (B165: spot trading closed stops the
+# platform coin's perpetuals, whose index is its spot market, and opening
+# it again does not lift them). It waits up to SECONDS (200) in all, then
+# fails naming the contracts still stale.
+lift_reduce_only() {
+  local since=$1 actor=$2 deadline=$((SECONDS + ${3:-200})) left symbol mark lifted
+  while :; do
+    left=$(exchangectl derivatives states |
+      awk -v since="$since" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}')
+    [[ -z $left ]] && return 0
+    if ((SECONDS >= deadline)); then
+      echo "FAIL still reduce-only since $since, the mark price not fresh: $(tr '\n' ' ' <<<"$left")- by hand once it is: exchangectl derivatives resume <contract>" >&2
+      return 1
+    fi
+    lifted=""
+    for symbol in $left; do
+      mark=$(compose "exec -T market-data-service wget -qO- http://127.0.0.1:8090/v1/market/$symbol/mark-price" 2>/dev/null) || continue
+      grep -q '"degraded":false' <<<"$mark" || continue
+      remote "sudo docker compose $COMPOSE_FILES exec -T -e EXCHANGECTL_ACTOR=$actor derivatives-service /app/exchangectl derivatives resume $symbol" >/dev/null
+      echo "ok   $symbol went reduce-only since $since (its mark price stale); lifted now that it is fresh"
+      lifted=1
+    done
+    [[ -n $lifted ]] || sleep 15
+  done
+}
