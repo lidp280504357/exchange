@@ -30,9 +30,8 @@ import (
 // settled, closed and hidden. Its spot orders are canceled, what its
 // margin accounts hold without a debt goes back to spot, its spot and
 // futures balances go to the ADJUSTMENT account (MANUAL_ADJUSTMENT, the
-// key purge:<user>:<account>:<asset>), it is closed (an account under
-// review or frozen is first made active again: the state machine closes
-// only an active one; auth ends its sessions) and marked purged.
+// key purge:<user>:<account>:<asset>), it is closed whatever its status
+// (auth ends its sessions) and marked purged.
 //
 // What needs derivatives-service's or margin-service's own way out (L4b:
 // flatten, settle) is skipped and listed: contract positions and orders,
@@ -406,11 +405,6 @@ func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, 
 		r := s.rows[0]
 		o.skip, o.detail = skipBalance, fmt.Sprintf("%s %s %s", r.account, r.asset, r.available.Add(r.frozen))
 		return nil
-	}
-	if c.status != domain.StatusActive && c.status != domain.StatusClosed {
-		if err := p.act.setStatus(ctx, c.id, domain.StatusActive, p.actor, "before closing it"); err != nil {
-			return fmt.Errorf("make it active before closing it: %w", err)
-		}
 	}
 	if c.status != domain.StatusClosed {
 		if err := p.act.setStatus(ctx, c.id, domain.StatusClosed, p.actor, p.opts.reason); err != nil {

@@ -152,9 +152,9 @@ func runPurge(t *testing.T, w *purgeWorld, dry bool) (string, error) {
 
 // The purge (L4) settles what it can and skips the rest with the reason:
 // balances go to ADJUSTMENT (a margin account's through spot), spot orders
-// are canceled and waited for, an account under review or frozen is made
-// active before it is closed, then it is marked purged; exempt accounts,
-// contract positions, a margin debt and a withdrawal in flight are left.
+// are canceled and waited for, the account is closed whatever its status
+// and marked purged; exempt accounts, contract positions, a margin debt
+// and a withdrawal in flight are left.
 func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 	w := newPurgeWorld()
 	out, err := runPurge(t, w, false)
@@ -163,16 +163,16 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 	}
 	for _, want := range []string{
 		"sweep plain FUTURES BTC 0.01", "sweep plain SPOT USDT 100", "status plain CLOSED", "purged plain",
-		"status review ACTIVE", "status review CLOSED", "purged review",
+		"status review CLOSED", "purged review",
 		"cancel ordering", "sweep ordering SPOT USDT 10", "purged ordering",
-		"out margin MARGIN_CROSS USDT 20", "sweep margin SPOT USDT 21", "status margin ACTIVE", "status margin CLOSED", "purged margin",
+		"out margin MARGIN_CROSS USDT 20", "sweep margin SPOT USDT 21", "status margin CLOSED", "purged margin",
 	} {
 		if !slices.Contains(w.log, want) {
 			t.Errorf("missing %q in\n%s", want, strings.Join(w.log, "\n"))
 		}
 	}
-	if i, j := slices.Index(w.log, "status review ACTIVE"), slices.Index(w.log, "status review CLOSED"); i > j {
-		t.Errorf("active before closed: %v", w.log)
+	if slices.ContainsFunc(w.log, func(l string) bool { return strings.HasSuffix(l, " ACTIVE") }) {
+		t.Errorf("an account under review or frozen is closed as it is: %v", w.log)
 	}
 	for _, id := range []string{"kept", "hedged", "owing", "leaving"} {
 		if w.purged[id] || slices.ContainsFunc(w.log, func(l string) bool { return strings.Contains(l, " "+id) }) {

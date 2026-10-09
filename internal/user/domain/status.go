@@ -13,11 +13,13 @@ import (
 var ErrStatusTransition = apperr.New(apperr.KindConflict, "USER_STATUS_TRANSITION_INVALID", "this account status change is not allowed")
 
 // transitions is appendix B: ACTIVE <-> RISK_REVIEW; ACTIVE/RISK_REVIEW ->
-// FROZEN; FROZEN -> ACTIVE; ACTIVE -> CLOSED.
+// FROZEN; FROZEN -> ACTIVE; any status -> CLOSED, which is final (the
+// coordinator 2026-10-10, for the test-account purge: an account under
+// review or frozen is closed as it is).
 var transitions = map[string][]string{
 	StatusActive:     {StatusRiskReview, StatusFrozen, StatusClosed},
-	StatusRiskReview: {StatusActive, StatusFrozen},
-	StatusFrozen:     {StatusActive},
+	StatusRiskReview: {StatusActive, StatusFrozen, StatusClosed},
+	StatusFrozen:     {StatusActive, StatusClosed},
 }
 
 // CheckTransition reports whether an account may move from one status to

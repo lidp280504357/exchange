@@ -12,6 +12,7 @@ func TestTransitions(t *testing.T) {
 		{StatusActive, StatusRiskReview}: true, {StatusRiskReview, StatusActive}: true,
 		{StatusActive, StatusFrozen}: true, {StatusRiskReview, StatusFrozen}: true,
 		{StatusFrozen, StatusActive}: true, {StatusActive, StatusClosed}: true,
+		{StatusRiskReview, StatusClosed}: true, {StatusFrozen, StatusClosed}: true,
 	}
 	all := []string{StatusActive, StatusRiskReview, StatusFrozen, StatusClosed}
 	for _, from := range all {

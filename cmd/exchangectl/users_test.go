@@ -42,8 +42,8 @@ func TestUsersStatus(t *testing.T) {
 	if err != nil || !strings.Contains(out, "ACTIVE -> FROZEN") {
 		t.Fatalf("freeze: %v\n%s", err, out)
 	}
-	if _, err := run("status", id, "--to", "CLOSED", "--reason", "USER_REQUEST"); err == nil {
-		t.Fatal("FROZEN -> CLOSED must be refused")
+	if _, err := run("status", id, "--to", "RISK_REVIEW", "--reason", "RISK_RULE"); err == nil {
+		t.Fatal("FROZEN -> RISK_REVIEW must be refused")
 	}
 	out, err = run("show", id)
 	if err != nil || !strings.Contains(out, `"Status": "FROZEN"`) || !strings.Contains(out, "SUSPICIOUS_LOGIN") {

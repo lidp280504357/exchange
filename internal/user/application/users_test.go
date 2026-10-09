@@ -304,9 +304,9 @@ func TestCreateAndStatusChanges(t *testing.T) {
 	if ok, reason, _ := svc.CheckEligibility(ctx, id, domain.FeatureTransfer, "", ""); ok || reason != domain.ReasonFrozen {
 		t.Fatalf("frozen transfer: %v %s", ok, reason)
 	}
-	_, err = svc.ChangeStatus(ctx, id, "CLOSED", "USER_REQUEST", "cli:ops", "")
+	_, err = svc.ChangeStatus(ctx, id, "RISK_REVIEW", "RISK_RULE", "cli:ops", "")
 	if !apperr.Is(err, "USER_STATUS_TRANSITION_INVALID") {
-		t.Fatalf("frozen -> closed: %v", err)
+		t.Fatalf("frozen -> under review: %v", err)
 	}
 	if _, err := svc.ChangeStatus(ctx, id, "ACTIVE", "REVIEW_CLEARED", "cli:ops", ""); err != nil {
 		t.Fatal(err)
