@@ -507,6 +507,8 @@ try {
   }
   await go("/risk");
   await waitText("market.house_liquidity");
+  // The flags described in Chinese (A103, A104): account.transfer's.
+  await waitText("现货与合约账户之间的划转");
   await t.shot("3b-house");
   ok("futures, every user's positions and the liquidation log, HOUSE (results, exposure, inventory, pairs, every contract's net position, its caps with what each does and a change's preview), and the flags");
 

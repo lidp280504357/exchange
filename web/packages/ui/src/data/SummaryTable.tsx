@@ -30,14 +30,19 @@ export type SummaryTableProps = {
    * and summaries, the title in bold.
    */
   variant?: "items" | "fields";
+  /** Fields only: a 96px label column, for a narrow card. */
+  narrow?: boolean;
+  /** Fields only: no row opens, so no column is kept for the arrow. */
+  noArrows?: boolean;
   className?: string;
   children: ReactNode;
 };
 
 // The columns: item, status, summary, action, arrow - wide (item 280px,
-// status 100px), compact (item 160px) or fields (label 136px). The details
-// start under the status column (the item's width and the gap and padding
-// before it).
+// status 100px), compact (item 160px), fields (label 136px, or 96px
+// narrow; without the arrow's column when no row opens). The details start
+// under the status column (the item's width and the gap and padding before
+// it).
 const layouts = {
   wide: {
     grid: "md:grid-cols-[280px_100px_minmax(0,1fr)_auto_28px]",
@@ -54,16 +59,36 @@ const layouts = {
     noStatus: "md:grid-cols-[136px_minmax(0,1fr)_auto_28px]",
     details: "md:pl-[calc(136px_+_2rem)]",
   },
+  fieldsPlain: {
+    grid: "md:grid-cols-[136px_minmax(0,1fr)_auto]",
+    noStatus: "md:grid-cols-[136px_minmax(0,1fr)_auto]",
+    details: "md:pl-[calc(136px_+_2rem)]",
+  },
+  narrow: {
+    grid: "md:grid-cols-[96px_minmax(0,1fr)_auto_28px]",
+    noStatus: "md:grid-cols-[96px_minmax(0,1fr)_auto_28px]",
+    details: "md:pl-[calc(96px_+_2rem)]",
+  },
+  narrowPlain: {
+    grid: "md:grid-cols-[96px_minmax(0,1fr)_auto]",
+    noStatus: "md:grid-cols-[96px_minmax(0,1fr)_auto]",
+    details: "md:pl-[calc(96px_+_2rem)]",
+  },
 };
 
 type LayoutName = keyof typeof layouts;
 
 const Layout = createContext<{ noStatus: boolean; layout: LayoutName }>({ noStatus: false, layout: "wide" });
 
+/** isFields is a fields layout (grey labels, lower rows); plain is one without the arrow's column. */
+const isFields = (l: LayoutName) => l !== "wide" && l !== "compact";
+const isPlain = (l: LayoutName) => l === "fieldsPlain" || l === "narrowPlain";
+
 /** SummaryTable holds SummaryRows under their headings. */
-export function SummaryTable({ label, headings, noStatus = false, compact = false, variant = "items", className, children }: SummaryTableProps) {
+export function SummaryTable({ label, headings, noStatus = false, compact = false, variant = "items", narrow = false, noArrows = false, className, children }: SummaryTableProps) {
   const { t } = useTranslation();
-  const layout: LayoutName = variant === "fields" ? "fields" : compact ? "compact" : "wide";
+  const layout: LayoutName =
+    variant === "fields" ? (narrow ? (noArrows ? "narrowPlain" : "narrow") : noArrows ? "fieldsPlain" : "fields") : compact ? "compact" : "wide";
   const l = layouts[layout];
   noStatus = noStatus || variant === "fields";
   return (
@@ -78,9 +103,11 @@ export function SummaryTable({ label, headings, noStatus = false, compact = fals
             <span role="columnheader">
               <span className="sr-only">{t("ui.summary.action")}</span>
             </span>
-            <span role="columnheader">
-              <span className="sr-only">{t("ui.summary.details")}</span>
-            </span>
+            {!isPlain(layout) && (
+              <span role="columnheader">
+                <span className="sr-only">{t("ui.summary.details")}</span>
+              </span>
+            )}
           </div>
         )}
         <div role="rowgroup" className="divide-y divide-line-1">
@@ -115,10 +142,11 @@ export function SummaryRow({ title, source, status, summary, details, action, de
   const { t } = useTranslation();
   const { noStatus, layout } = useContext(Layout);
   const l = layouts[layout];
-  const fields = layout === "fields";
+  const fields = isFields(layout);
+  const plain = isPlain(layout);
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
-  const openable = details !== undefined && details !== null && details !== false;
+  const openable = !plain && details !== undefined && details !== null && details !== false;
   const toggle = () => openable && setOpen((o) => !o);
   return (
     <div role="row" className="even:bg-bg-2/40" data-testid={rest["data-testid"]} data-open={openable ? open : undefined}>
@@ -152,24 +180,26 @@ export function SummaryRow({ title, source, status, summary, details, action, de
         <div role="cell" className="whitespace-nowrap text-sm" onClick={(e) => e.stopPropagation()}>
           {action}
         </div>
-        <div role="cell" className="flex justify-end">
-          {openable && (
-            <button
-              type="button"
-              aria-expanded={open}
-              aria-controls={id}
-              aria-label={t(open ? "ui.summary.collapse" : "ui.summary.expand")}
-              title={t(open ? "ui.summary.collapse" : "ui.summary.expand")}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggle();
-              }}
-              className="grid size-7 place-items-center rounded-1 text-fg-3 hover:bg-bg-3 hover:text-fg-1"
-            >
-              <ChevronDown size={16} className={cn("transition-transform", open && "rotate-180")} />
-            </button>
-          )}
-        </div>
+        {!plain && (
+          <div role="cell" className="flex justify-end">
+            {openable && (
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={id}
+                aria-label={t(open ? "ui.summary.collapse" : "ui.summary.expand")}
+                title={t(open ? "ui.summary.collapse" : "ui.summary.expand")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle();
+                }}
+                className="grid size-7 place-items-center rounded-1 text-fg-3 hover:bg-bg-3 hover:text-fg-1"
+              >
+                <ChevronDown size={16} className={cn("transition-transform", open && "rotate-180")} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {openable && open && (
         <div id={id} role="cell" aria-colspan={noStatus ? 4 : 5} className={cn("border-t border-line-1 bg-bg-1 px-4 py-3 text-sm text-fg-2", l.details)}>

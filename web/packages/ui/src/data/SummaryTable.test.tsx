@@ -43,6 +43,20 @@ describe("SummaryTable", () => {
     expect(screen.queryByText("Blocking")).toBeNull();
   });
 
+  it("lists a record's fields with grey labels, keeping no arrow's column when nothing folds", () => {
+    render(
+      <SummaryTable label="deposit" variant="fields" noArrows>
+        <SummaryRow data-testid="net" title="Network" summary="TRON" details={<span>never shown</span>} />
+      </SummaryTable>,
+    );
+    const row = screen.getByTestId("net");
+    expect(screen.getByText("Network").className).toContain("text-fg-3");
+    expect(row.querySelector("button[aria-expanded]")).toBeNull();
+    expect(row.querySelectorAll("[role=cell]").length).toBe(3);
+    fireEvent.click(screen.getByText("TRON"));
+    expect(screen.queryByText("never shown")).toBeNull();
+  });
+
   it("sets switch keys and account types in a text as tags, and nothing else", () => {
     render(<span data-testid="t">{withKeys("开关 market.house_liquidity 与 HOUSE 库存，账本 INSURANCE_FUND（各结算币）")}</span>);
     const tags = Array.from(screen.getByTestId("t").querySelectorAll("code")).map((c) => c.textContent);

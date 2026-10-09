@@ -28,7 +28,11 @@ export default function Users() {
   const open = useOpenUser();
   const filters = useFilters(KEYS);
   const f = filters.values;
-  const q = { status: f.status, region: f.region?.toUpperCase(), q: f.q, from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
+  // A keyword from the address or a saved view is checked as the search box checks it (A104): one the services would
+  // refuse filters nothing, and the box says so.
+  const keyword = f.q?.trim() ?? "";
+  const keywordOk = keyword === "" || (keywordFits(keyword) && !invalid(keyword));
+  const q = { status: f.status, region: f.region?.toUpperCase(), q: keywordOk ? keyword : "", from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
   const list = useCursorList<UserSummary>(["admin", "users", q], async (cursor) =>
     adminData(await adminApi.GET("/admin/v1/users", { params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: pageSize() } } })),
   );
@@ -47,7 +51,7 @@ export default function Users() {
   );
   return (
     <Page title={t("admin.nav.users")}>
-      <UserSearch keyword={f.q ?? ""} onFound={open} onKeyword={(k) => filters.set({ q: k })} />
+      <UserSearch keyword={keyword} keywordOk={keywordOk} onFound={open} onKeyword={(k) => filters.set({ q: k })} />
       <FilterBar
         page="users"
         filters={filters}
@@ -74,7 +78,9 @@ const keywordFits = (s: string) => [...s].length >= 2 && [...s].length <= 64;
  * UserSearch (A93): on Enter, an exact ID, email, phone or username opens the user (B167); anything else filters the
  * list by it as a keyword (kept in the address, so views save it); only what no account could match is refused.
  */
-function UserSearch({ keyword, onFound, onKeyword }: { keyword: string; onFound: (id: string) => void; onKeyword: (q: string) => void }) {
+function UserSearch({
+  keyword, keywordOk, onFound, onKeyword,
+}: { keyword: string; keywordOk: boolean; onFound: (id: string) => void; onKeyword: (q: string) => void }) {
   const { t } = useTranslation();
   const [q, setQ] = useState(keyword);
   const [busy, setBusy] = useState(false);
@@ -115,8 +121,10 @@ function UserSearch({ keyword, onFound, onKeyword }: { keyword: string; onFound:
         data-testid="users-search"
       />
       {keyword && (
-        <span className="text-xs text-fg-3" data-testid="users-keyword">
-          {t("admin.users.keyword")}：<span className="font-medium text-fg-1">{keyword}</span> · {t("admin.users.keywordHint")}
+        <span className="text-xs text-fg-3" data-testid="users-keyword" data-ok={keywordOk}>
+          {t("admin.users.keyword")}：<span className="font-medium text-fg-1">{keyword}</span>
+          {t("admin.summary.clause")}
+          {keywordOk ? t("admin.users.keywordHint") : <span className="text-warn-strong">{t("admin.users.keywordUnused")}</span>}
         </span>
       )}
     </div>

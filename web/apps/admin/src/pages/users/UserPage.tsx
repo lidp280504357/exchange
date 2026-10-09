@@ -126,6 +126,7 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
       </div>
       <Fields
         label={t("admin.user.tabs.profile")}
+        narrow
         items={[
           { label: t("admin.user.registered"), value: <TimeText value={user.created_at} /> },
           { label: t("admin.user.lastLogin"), value: sec.data ? <TimeText value={sec.data.last_login_at} /> : "—" },

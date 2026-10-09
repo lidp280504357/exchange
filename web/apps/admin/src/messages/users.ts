@@ -10,6 +10,7 @@ export const usersZh = {
       keyword: "关键字",
       keywordHint: "用户名、邮箱或手机号里含有它的账户（不分大小写）",
       keywordLength: "没有完全匹配的账户；按关键字筛选需 2–64 个字符",
+      keywordUnused: "关键字需 2–64 个字符、不含不可见字符，列表没有按它筛选",
     },
     user: {
       back: "用户列表",
@@ -165,6 +166,7 @@ export const usersEn = {
       keyword: "Keyword",
       keywordHint: "Accounts whose username, email or phone contains it (any case)",
       keywordLength: "No account matches it exactly; a keyword to filter by has 2 to 64 characters",
+      keywordUnused: "A keyword has 2 to 64 characters and no invisible ones: the list is not filtered by it",
     },
     user: {
       back: "Users",

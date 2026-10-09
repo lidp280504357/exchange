@@ -22,15 +22,18 @@ export type Field = {
 
 /**
  * Fields lists a record's values, one a row; columns splits them into that
- * many tables side by side on a wide screen (in their order, top to bottom).
+ * many tables side by side on a wide screen (in their order, top to bottom);
+ * narrow has a 96px label column, for a narrow card. No column is kept for
+ * an arrow when no value folds.
  */
-export function Fields({ label, items, columns = 1, className }: { label: string; items: Field[]; columns?: 1 | 2 | 3; className?: string }) {
+export function Fields({ label, items, columns = 1, narrow, className }: { label: string; items: Field[]; columns?: 1 | 2 | 3; narrow?: boolean; className?: string }) {
   const per = Math.ceil(items.length / columns);
   const groups = Array.from({ length: columns }, (_, i) => items.slice(i * per, (i + 1) * per)).filter((g) => g.length > 0);
+  const folds = items.some((f) => f.details !== undefined && f.details !== null);
   return (
     <div className={cn("grid gap-3", columns === 2 && "lg:grid-cols-2", columns === 3 && "lg:grid-cols-2 xl:grid-cols-3", className)}>
       {groups.map((g, i) => (
-        <SummaryTable key={i} label={label} variant="fields">
+        <SummaryTable key={i} label={label} variant="fields" narrow={narrow} noArrows={!folds}>
           {g.map((f, j) => (
             <SummaryRow
               key={f.key ?? (typeof f.label === "string" ? f.label : `field-${i}-${j}`)}
