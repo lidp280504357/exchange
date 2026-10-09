@@ -1,4 +1,4 @@
-import { errorText } from "@exchange/core";
+import { errorText, formatDecimal } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
 import { KeyTag, ShortList, Skeleton, SummaryRow, SummaryTable } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -8,7 +8,7 @@ import { Link } from "react-router";
 import { useEnum } from "../../kit/enums";
 import { TimeText } from "../../kit/format";
 import { Card } from "../../kit/Page";
-import { Amount, AmountGrid } from "../../kit/summary";
+import { Amount } from "../../kit/summary";
 
 // The status cards the overview and the system health page share, and the
 // reconciliation's checks the health and ledger pages share.
@@ -106,7 +106,13 @@ export function CustodySummary({ className, style }: { className?: string; style
                   : { tone: "success", label: t("admin.summary.custody.up") }
             }
             summary={
-              !o.configured ? t("admin.overview.custodyOff") : o.error ? <span className="break-all">{o.error}</span> : t("admin.summary.custody.coins", { n: o.coins.length })
+              !o.configured ? (
+                t("admin.overview.custodyOff")
+              ) : o.error ? (
+                <span className="break-all">{t("admin.overview.custodyDown", { error: o.error })}</span>
+              ) : (
+                t("admin.overview.custodyOk", { n: o.coins.length })
+              )
             }
           />
           <SummaryRow
@@ -120,7 +126,15 @@ export function CustodySummary({ className, style }: { className?: string; style
               )
             }
             details={
-              short.length > 3 ? <AmountGrid rows={short.map((c) => [c.asset, c.shortfall])} problem={() => true} /> : undefined
+              short.length > 3 ? (
+                <ul className="flex flex-col gap-1">
+                  {short.map((c) => (
+                    <li key={`${c.holder}/${c.asset}`} className="text-danger-strong">
+                      {t("admin.overview.custodyShort", { asset: c.asset, amount: formatDecimal(c.shortfall) })}
+                    </li>
+                  ))}
+                </ul>
+              ) : undefined
             }
           />
           <SummaryRow

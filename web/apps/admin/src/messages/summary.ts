@@ -54,7 +54,7 @@ export const summaryZh = {
       caps: { cap: "额度", key: "键名", unit: "单位", lower: "调低时", raise: "调高时" },
       welcome: { now: "当前赠送", none: "不赠送", given: "新账户赠送", version: "账本设置，版本 {{v}}", master: "总闸", from: "现在", to: "改为" },
       custody: {
-        link: "连接", up: "正常", down: "中断", off: "未配置", coins: "{{n}} 个币种",
+        link: "连接", up: "正常", down: "中断", off: "未配置",
         balances: "托管余额", short: "短缺", enough: "充足", noShort: "没有短缺",
         callbacks: "回调", look: "待处理", fine: "正常", noCallbacks: "没有待处理的回调",
         submitted: "在途提现", inFlight: "处理中", none: "无", noSubmitted: "没有在托管方处理中的提现",
@@ -115,7 +115,7 @@ export const summaryEn = {
       caps: { cap: "Cap", key: "Key", unit: "Unit", lower: "Lowered", raise: "Raised" },
       welcome: { now: "Credits now", none: "Nothing given", given: "New accounts get", version: "Ledger setting, version {{v}}", master: "Master switch", from: "Now", to: "To" },
       custody: {
-        link: "Link", up: "Up", down: "Down", off: "Not set up", coins: "{{n}} coins",
+        link: "Link", up: "Up", down: "Down", off: "Not set up",
         balances: "Balances", short: "Short", enough: "Enough", noShort: "Short of nothing",
         callbacks: "Callbacks", look: "To look at", fine: "Fine", noCallbacks: "No callback to look at",
         submitted: "Withdrawals", inFlight: "In flight", none: "None", noSubmitted: "No withdrawal with the custodian",

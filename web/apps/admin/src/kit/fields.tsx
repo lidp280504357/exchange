@@ -33,7 +33,8 @@ export function Fields({ label, items, columns = 1, narrow, className }: { label
   return (
     <div className={cn("grid gap-3", columns === 2 && "lg:grid-cols-2", columns === 3 && "lg:grid-cols-2 xl:grid-cols-3", className)}>
       {groups.map((g, i) => (
-        <SummaryTable key={i} label={label} variant="fields" narrow={narrow} noArrows={!folds}>
+        // Side by side, each table named apart (A105).
+        <SummaryTable key={i} label={groups.length > 1 ? `${label} ${i + 1}/${groups.length}` : label} variant="fields" narrow={narrow} noArrows={!folds}>
           {g.map((f, j) => (
             <SummaryRow
               key={f.key ?? (typeof f.label === "string" ? f.label : `field-${i}-${j}`)}

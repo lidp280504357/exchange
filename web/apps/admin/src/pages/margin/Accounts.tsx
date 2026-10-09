@@ -158,6 +158,7 @@ function AccountDrawer({ admin, row, onClose }: { admin: Admin; row: MarginAccou
         <Fields
           label={t("admin.margin.accounts.detail")}
           columns={2}
+          narrow
           items={[
             { key: "user", label: t("admin.common.user"), value: <UserCell id={a.user_id} /> },
             { key: "key", label: t("admin.margin.accountKey"), value: <KeyTag>{keyOf(a)}</KeyTag> },

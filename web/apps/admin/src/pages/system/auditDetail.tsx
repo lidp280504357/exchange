@@ -52,8 +52,8 @@ export function diff(before: unknown, after: unknown): { changed: DiffRow[]; sam
   return { changed, same };
 }
 
-/** A change an entry describes: a title (an entity and key) with its before and after values, when known. */
-type Change = { title?: string; before?: unknown; after?: unknown; known: boolean };
+/** A change an entry describes: its title's parts (an entity, a key, an action, a version) with its before and after values, when known. */
+type Change = { title?: string[]; before?: unknown; after?: unknown; known: boolean };
 
 /** changesOf reads what an entry changed; null when its details are not a change. */
 export function changesOf(payload: Payload): Change[] | null {
@@ -67,7 +67,7 @@ export function changesOf(payload: Payload): Change[] | null {
   if ("before" in details || "after" in details) return [{ before: details.before, after: details.after, known: true }];
   if (Array.isArray(details.changes)) {
     return (details.changes as Payload[]).map((c) => ({
-      title: [c.entity, c.key, c.action, c.version !== undefined ? `v${String(c.version)}` : ""].filter(Boolean).join(" · "),
+      title: [c.entity, c.key, c.action, c.version !== undefined ? `v${String(c.version)}` : ""].filter(Boolean).map(String),
       before: c.before,
       after: c.after,
       known: "before" in c || "after" in c,
@@ -181,7 +181,14 @@ function ChangeView({ change }: { change: Change }) {
   }
   return (
     <div className="flex flex-col gap-1.5">
-      {change.title && <div className="font-mono text-xs text-fg-2">{change.title}</div>}
+      {change.title && change.title.length > 0 && (
+        // Its parts as tags, not joined with " · " (A105).
+        <div className="flex flex-wrap gap-1.5">
+          {change.title.map((part, i) => (
+            <KeyTag key={i}>{part}</KeyTag>
+          ))}
+        </div>
+      )}
       {body}
     </div>
   );
