@@ -370,26 +370,32 @@ export async function pickLanguage(page, label, name) {
 /**
  * firstVisitLocale opens the site in a fresh browser profile (no saved
  * settings) whose languages are tags, on device ({viewport, userAgent}),
- * and returns the page's language on its first screen (F30, F33:
- * negotiated from the browser's languages, else the platform's fallback
- * language). A first screen in one language that turns into another once
- * the platform's profile is in comes back as "en then zh-CN" (the flash
- * F33 removed). A first screen that waited for the profile and gave up
- * (its 1.5 s ran out or the read failed: core awaitFallbackLocale's
- * marks) did not have the language to draw in: it tries again, three
- * times in all, then returns null for the caller to note (F34). A page
- * that did not wait at all still fails.
+ * and returns {locale}: the page's language on its first screen (F30,
+ * F33: negotiated from the browser's languages, else the platform's
+ * fallback language). A first screen in one language that turns into
+ * another once the platform's profile is in comes back as "en then
+ * zh-CN" (the flash F33 removed). A first screen that waited for the
+ * profile and went on without it (core awaitFallbackLocale's marks:
+ * "timeout", its 1.5 s ran out; "failed", the read failed) had no
+ * fallback language to draw in, so it says nothing either way: it tries
+ * again, three times in all, then returns {locale: null, gaveUp: [how each
+ * ended]} for the caller to note (F34). A page that did not wait at all
+ * still comes back as "en then …".
  */
 export async function firstVisitLocale(page, app, path, tags, device = {}) {
+  const gaveUp = [];
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { first, settled, gaveUp } = await openFirstVisit(page, app, path, tags, device);
-    if (first === settled) return first;
-    if (!gaveUp) return `${first} then ${settled}`;
+    const { first, settled, ended } = await openFirstVisit(page, app, path, tags, device);
+    if (ended === "timeout" || ended === "failed") {
+      gaveUp.push(ended);
+      continue;
+    }
+    return { locale: first === settled ? first : `${first} then ${settled}` };
   }
-  return null;
+  return { locale: null, gaveUp };
 }
 
-/** openFirstVisit is one of firstVisitLocale's visits: its first screen's language, the settled one, and whether its wait gave up. */
+/** openFirstVisit is one of firstVisitLocale's visits: its first screen's language, the settled one, and how its wait ended (null: no wait). */
 async function openFirstVisit(page, app, path, tags, device) {
   const ctx = await page.browser().createBrowserContext();
   try {
@@ -414,13 +420,19 @@ async function openFirstVisit(page, app, path, tags, device) {
     profile.catch(() => {}); // awaited below; a failure before that is the one to report
     await visit.goto(app + path, { waitUntil: "domcontentloaded", timeout: 60000 });
     await visit.waitForFunction(() => window.__firstScreenLang !== undefined, { timeout: 30000, polling: 100 });
+    // How the first screen's wait ended: marked before the first render.
+    const ended = await visit.evaluate(
+      () =>
+        performance
+          .getEntriesByType("mark")
+          .map((m) => m.name.match(/^fallback-locale:(read|failed|timeout)$/)?.[1])
+          .find(Boolean) ?? null,
+    );
+    const first = await visit.evaluate(() => window.__firstScreenLang);
+    if (ended === "timeout" || ended === "failed") return { first, settled: null, ended }; // nothing to settle
     await profile;
     await new Promise((r) => setTimeout(r, 500)); // the effects that follow the profile
-    return await visit.evaluate(() => ({
-      first: window.__firstScreenLang,
-      settled: document.documentElement.lang,
-      gaveUp: performance.getEntriesByType("mark").some((m) => m.name === "fallback-locale:timeout" || m.name === "fallback-locale:failed"),
-    }));
+    return { first, settled: await visit.evaluate(() => document.documentElement.lang), ended };
   } finally {
     await ctx.close();
   }
@@ -437,9 +449,10 @@ export const note = (what) => console.log("note " + what);
  * not on every platform's Chrome): the caller notes it and goes on (F29).
  */
 export async function decodeQr(page, element) {
+  const can = await page.evaluate(async () => "BarcodeDetector" in window && (await BarcodeDetector.getSupportedFormats()).includes("qr_code"));
+  if (!can) return null; // before the screenshot, which would be for nothing (F31)
   const png = await element.screenshot({ encoding: "base64" });
   return page.evaluate(async (b64) => {
-    if (!("BarcodeDetector" in window) || !(await BarcodeDetector.getSupportedFormats()).includes("qr_code")) return null;
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
     const codes = await new BarcodeDetector({ formats: ["qr_code"] }).detect(bitmap);
