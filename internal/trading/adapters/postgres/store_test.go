@@ -273,7 +273,7 @@ func (freezeOK) MarginDebt(context.Context, domain.Account, string) (decimal.Dec
 
 func (freezeOK) MarginBorrowers(context.Context) (int, error) { return 0, nil }
 
-func (freezeOK) RepayReleased(context.Context, domain.Account, string, decimal.Decimal, string) (decimal.Decimal, error) {
+func (freezeOK) RepayReleased(context.Context, domain.Account, string, decimal.Decimal, decimal.Decimal, string) (decimal.Decimal, error) {
 	return decimal.Zero, nil
 }
 

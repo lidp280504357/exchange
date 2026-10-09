@@ -67,6 +67,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - gRPC 的答复只有两类（审查 CM 的 C8，交易服务据此判断）：**拒绝**是 `InvalidArgument`、`FailedPrecondition`、`AlreadyExists`、`PermissionDenied`，或 `Unavailable` + `MARGIN_PRICE_UNAVAILABLE`，订单被拒；**结果未知**是 `Internal` 与其它 `Unavailable`，交易服务的恢复稍后用同一个 `order_id` 再问。依赖返回的 `NotFound`（例如不认识的交易对）改成 `InvalidArgument`（错误码不变），依赖的限流与鉴权失败改成 `Unavailable`，所以 margin-service 不会答 `NotFound`、`ResourceExhausted`、`Unauthenticated`、`Unimplemented`。
 - 冻结、撤单释放与结算都在杠杆账户的资产行上：账本按成交事件里双方的账户记 `MARGIN_TRADE_SETTLE`（HOUSE 一侧照旧 `MARKET_MAKER`），`trades` 表记下双方账户与是否自动还款，停住的成交重试时同样处理。
 - `AUTO_REPAY`：结算的同一事务里，账本用这一方到账的资产（扣过手续费）先还利息、再还本金，至多还清该资产的负债，单独记一笔 `MARGIN_REPAY`（键 `trade-repay:<成交>:<buyer|seller>`，备注带订单号）。margin-service 消费 `ledger.events` 认出这些分录（消费组 `margin-service-ledger`），记成 `AUTO_REPAY` 的还款，同时更新借款簿与池子，并发 `MarginRepaid`。消费有延迟，不变量 7 的检查会跳过最近 1 分钟内变动过的借款。
+- 订单结束时还借款（B160/B163，交易服务与账本做，本服务不用改）：杠杆账户上用 `AUTO_BORROW` 借过币的订单结束后，交易服务调账本 `RepayReleased`，把冻结里回来的在该单借款额度内还掉，键 `trade-repay:release:<订单ID>`、备注 `auto-repay order <订单ID> release`——前缀同上，本服务照样记成 `AUTO_REPAY` 还款。按数量的市价买按保护价冻结也就按它借币，价格带在成交结算时放回，这部分会还掉；限价买的价格改善（成交价低于限价省下的）**有意不还**，照旧留作借款（与币安一致，端到端「限价买借款 = 限价 × 数量 − 自有」按此核对）；撤销或部分成交的借币单还掉未用的冻结。账本在该单的成交没全部结算前拒绝（`LEDGER_TRADES_UNSETTLED`），交易服务的恢复任务下一轮再来，一小时后不再等。见 [trading.md](trading.md)、[ledger.md](ledger.md)。
 
 ## 整点计息
 

@@ -251,3 +251,68 @@ func TestABorrowingOrderRepaysWhatCameBackAsItEnds(t *testing.T) {
 		t.Fatalf("again: %d %v %v", n, err, led.repays)
 	}
 }
+
+// A repayment waits for its trades' settlement (B163): while the ledger
+// has settled less than the order filled it refuses, the order stays
+// unreleased and the next pass tries again, the passes going on past it
+// to the other orders; an hour after the order ended it no longer waits.
+func TestARepaymentWaitsForItsTradesSettlement(t *testing.T) {
+	svc, _, led, c := newService()
+	ctx := context.Background()
+	svc.Margin = &fakeMargin{borrowed: "50"}
+	svc.Features = switches{flags.KeyMarginEnabled: true, flags.KeyMarginAutoBorrow: true}
+	svc.Prices = fixedAnchor{d("60000")}
+	nothing := decimal.Zero
+	led.settled = &nothing
+	place := func(id string, market bool) domain.Order {
+		r := marginBuy(id, domain.AccountMarginCross, domain.SideEffectAutoBorrow)
+		if market {
+			r.Type, r.Price = domain.TypeMarket, decimal.Zero
+		}
+		o, err := svc.Place(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	byQty := place("by-qty", true)
+	if err := svc.OnUpdate(ctx, update(byQty.ID, 3, domain.StatusFilled, "0.001", "60", "")); err != nil {
+		t.Fatal(err)
+	}
+	canceled := place("canceled", false) // nothing filled: nothing to wait for
+	if err := svc.OnUpdate(ctx, update(canceled.ID, 4, domain.StatusCanceled, "0", "0", "USER")); err != nil {
+		t.Fatal(err)
+	}
+	c.t = c.t.Add(repayGrace + time.Second)
+	n, err := svc.RecoverReleases(ctx)
+	if n != 1 || !apperr.Is(errors.Unwrap(err), "LEDGER_TRADES_UNSETTLED") {
+		t.Fatalf("first pass: %d %v", n, err)
+	}
+	if got, _ := svc.Get(ctx, "u1", byQty.ID); got.Released || len(led.repays) != 1 || led.repays[0] != "MARGIN_CROSS "+canceled.ID+" 50 USDT" {
+		t.Fatalf("first pass: released %v, repays %v", got.Released, led.repays)
+	}
+	// Settled: the next pass repays it.
+	all := d("0.001")
+	led.settled = &all
+	if n, err := svc.RecoverReleases(ctx); err != nil || n != 1 || len(led.repays) != 2 || led.repays[1] != "MARGIN_CROSS "+byQty.ID+" 6 USDT" {
+		t.Fatalf("settled: %d %v %v", n, err, led.repays)
+	}
+
+	// One whose trades never settle is repaid an hour on, without waiting.
+	stuck := place("stuck", true)
+	if err := svc.OnUpdate(ctx, update(stuck.ID, 5, domain.StatusFilled, "0.001", "60", "")); err != nil {
+		t.Fatal(err)
+	}
+	led.settled = &nothing
+	c.t = c.t.Add(repayGrace + time.Second)
+	if n, _ := svc.RecoverReleases(ctx); n != 0 {
+		t.Fatalf("still waiting: %d", n)
+	}
+	c.t = c.t.Add(repayWait)
+	if n, err := svc.RecoverReleases(ctx); err != nil || n != 1 {
+		t.Fatalf("an hour on: %d %v", n, err)
+	}
+	if last := led.repayCalls[len(led.repayCalls)-1]; last != stuck.ID+" filled 0" {
+		t.Fatalf("calls %v", led.repayCalls)
+	}
+}

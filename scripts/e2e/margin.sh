@@ -245,9 +245,9 @@ BYQ=$(jq -r '30 / (.asks[0][0] | tonumber) * 1000 | floor / 1000' <<<"$BODY")
 place "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"$BYQ\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_BORROW\"}"
 eventually 40 "the market buy by quantity is FILLED against HOUSE" status_is "$ORDER" FILLED
 COST=$(jq -r .filled_quote <<<"$BODY")
-cost_borrowed() { # the loan: what the fill cost beyond the 20 free (its first hour's interest paid first)
+cost_borrowed() { # the loan: what the fill cost beyond the 20 free (its first hour's interest paid first), no less (B163)
   call GET /v1/margin/loans "" "${AUTH[@]}" && [[ $STATUS == 200 ]] &&
-    jq -e --argjson cost "$COST" '[.items[] | select(.asset == "USDT")][0] | (.principal | tonumber) <= $cost - 20 + 0.001' <<<"$BODY" >/dev/null
+    jq -e --argjson cost "$COST" '[.items[] | select(.asset == "USDT")][0] | (.principal | tonumber) as $p | $p <= $cost - 20 + 0.001 and $p >= $cost - 20 - 0.000001' <<<"$BODY" >/dev/null
 }
 eventually 45 "the band repaid about 10 s after the fill: the loan is what $COST USDT cost beyond the 20 free" cost_borrowed
 SOLD=$(jq -rn --argjson q "$BYQ" '$q * 0.999 * 1000 | floor / 1000')

@@ -204,3 +204,51 @@ func TestSameAs(t *testing.T) {
 		t.Fatal("another price or side is another order")
 	}
 }
+
+// BorrowToRepay (B160, the cases of B163 ④): what came back of a finished
+// order's freeze, at most what it borrowed; nothing without a borrow or
+// off a margin account.
+func TestBorrowToRepay(t *testing.T) {
+	margin := func(req domain.Request, borrowed string) domain.Order {
+		t.Helper()
+		req.UserID, req.Symbol, req.AccountType = "u", "BTC-USDT", domain.AccountMarginCross
+		o, err := check(t, req, "60000.05")
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.Borrowed = d(borrowed)
+		return o
+	}
+	end := func(o domain.Order, filled, quote string) domain.Order {
+		o.Status, o.FilledQuantity, o.FilledQuote = domain.StatusCanceled, d(filled), d(quote)
+		return o
+	}
+	for _, c := range []struct {
+		name  string
+		order domain.Order
+		want  string
+	}{
+		// 60 frozen, 0.0004 filled at the limit's 60000 or below: 36 unused.
+		{"a limit buy partly filled", end(margin(limit(domain.SideBuy, "60000", "0.001"), "50"), "0.0004", "23.99"), "36"},
+		// Its price improvement stays borrowed: nothing unused.
+		{"a limit buy filled whole", end(margin(limit(domain.SideBuy, "60000", "0.001"), "50"), "0.001", "59.5"), "0"},
+		// 100 frozen, 96.006 spent: 3.994 back, at most the 2 borrowed.
+		{"a market buy by total", end(margin(domain.Request{Side: domain.SideBuy, Type: domain.TypeMarket, QuoteAmount: d("100")}, "2"), "0.0016", "96.006"), "2"},
+		// 66.00005 frozen at the protection, 36.00003 spent: 30.00002 back.
+		{"a market buy by quantity partly filled", end(margin(domain.Request{Side: domain.SideBuy, Type: domain.TypeMarket, Quantity: d("0.001")}, "40"), "0.0006", "36.00003"), "30.00002"},
+		// A short sale borrowed 0.4 BTC of the 0.5 it froze; 0.3 unsold.
+		{"a sell partly filled", end(margin(limit(domain.SideSell, "60000", "0.5"), "0.4"), "0.2", "12000"), "0.3"},
+		{"nothing borrowed", end(margin(limit(domain.SideBuy, "60000", "0.001"), "0"), "0", "0"), "0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.order.BorrowToRepay(); !got.Equal(d(c.want)) {
+				t.Fatalf("got %s, want %s", got, c.want)
+			}
+		})
+	}
+	spot, _ := check(t, limit(domain.SideBuy, "60000", "0.001"), "0")
+	spot.Borrowed = d("50")
+	if got := end(spot, "0", "0").BorrowToRepay(); !got.IsZero() {
+		t.Fatalf("a spot order: %s", got)
+	}
+}

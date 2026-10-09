@@ -76,6 +76,18 @@ func (r trades) Update(ctx context.Context, t domain.Trade) error {
 	return nil
 }
 
+func (r trades) SettledOfMarginOrder(ctx context.Context, orderID string) (decimal.Decimal, error) {
+	// The predicates match the partial indexes of ledger 00011.
+	var settled decimal.Decimal
+	err := r.q.QueryRow(ctx, `SELECT COALESCE(sum(quantity), 0) FROM trades WHERE status = 'SETTLED' AND (
+		(buyer_order_id = $1 AND buyer_account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED'))
+		OR (seller_order_id = $1 AND seller_account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED')))`, orderID).Scan(&settled)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("settled trades of order %s: %w", orderID, err)
+	}
+	return settled, nil
+}
+
 func (r trades) List(ctx context.Context, status string, limit int) ([]domain.Trade, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+tradeColumns+` FROM trades WHERE ($1 = '' OR status = $1)
 		ORDER BY recorded_at DESC, trade_id LIMIT $2`, status, limit)

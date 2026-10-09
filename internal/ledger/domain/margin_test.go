@@ -204,3 +204,53 @@ func TestScopedFreeze(t *testing.T) {
 		t.Fatal("a SPOT freeze hashes differently through the scoped path")
 	}
 }
+
+// RepayReleasedPosting (B160): up to the cap, interest first, at most what
+// is owed and what the account holds available (B163 ④); nothing without
+// either.
+func TestRepayReleasedPosting(t *testing.T) {
+	user, order := uuid.NewString(), uuid.NewString()
+	cross := MarginRef{UserID: user, AccountType: AccountMarginCross}
+	rows := func(available, debt, interest string) map[AccountKey]Account {
+		return map[AccountKey]Account{
+			cross.Assets("USDT"):      {Key: cross.Assets("USDT"), Available: d(available)},
+			cross.DebtRow("USDT"):     {Key: cross.DebtRow("USDT"), Available: d(debt)},
+			cross.InterestRow("USDT"): {Key: cross.InterestRow("USDT"), Available: d(interest)},
+		}
+	}
+	for _, c := range []struct {
+		name, upTo, available, debt, interest string
+		paid, toInterest, toDebt              string // "" when nothing is posted
+	}{
+		{"the cap", "6", "100", "-50", "-0.05", "6", "0.05", "5.95"},
+		{"what is owed", "100", "100", "-50", "-0.05", "50.05", "0.05", "50"},
+		{"what is available", "6", "4", "-50", "-0.05", "4", "0.05", "3.95"},
+		{"interest only", "0.01", "100", "-50", "-0.05", "0.01", "0.01", ""},
+		{"nothing available", "6", "0", "-50", "-0.05", "", "", ""},
+		{"nothing owed", "6", "100", "0", "0", "", "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p, ok := RepayReleasedPosting(cross, "USDT", order, d(c.upTo), rows(c.available, c.debt, c.interest))
+			if c.paid == "" {
+				if ok {
+					t.Fatalf("posted %+v", p)
+				}
+				return
+			}
+			if !ok || p.EntryType != EntryMarginRepay || p.IdemKey != ReleaseRepayKey(order) || p.Validate() != nil ||
+				p.Memo != "auto-repay order "+order+" release" || !p.Lines[0].Amount.Equal(d(c.paid).Neg()) {
+				t.Fatalf("posting %+v", p)
+			}
+			got := map[AccountKey]decimal.Decimal{}
+			for _, l := range p.Lines[1:] {
+				got[l.Account] = l.Amount
+			}
+			if c.toInterest != "" && !got[cross.InterestRow("USDT")].Equal(d(c.toInterest)) {
+				t.Fatalf("to interest %v", got)
+			}
+			if c.toDebt != "" && !got[cross.DebtRow("USDT")].Equal(d(c.toDebt)) {
+				t.Fatalf("to debt %v", got)
+			}
+		})
+	}
+}

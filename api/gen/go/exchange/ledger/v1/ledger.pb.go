@@ -3582,9 +3582,15 @@ type RepayReleasedRequest struct {
 	Asset       string `protobuf:"bytes,5,opt,name=asset,proto3" json:"asset,omitempty"`
 	// The most to repay (decimal string): what the order borrowed, at most
 	// what came back of its freeze.
-	UpTo          string `protobuf:"bytes,6,opt,name=up_to,json=upTo,proto3" json:"up_to,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	UpTo string `protobuf:"bytes,6,opt,name=up_to,json=upTo,proto3" json:"up_to,omitempty"`
+	// The base quantity the order filled (B163): the repayment waits until
+	// the order's settled trades come to it, failing with
+	// LEDGER_TRADES_UNSETTLED (UNAVAILABLE) before, so what their
+	// settlement gives back is there to repay. Empty or "0" waits for
+	// nothing.
+	FilledQuantity string `protobuf:"bytes,7,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RepayReleasedRequest) Reset() {
@@ -3655,6 +3661,13 @@ func (x *RepayReleasedRequest) GetAsset() string {
 func (x *RepayReleasedRequest) GetUpTo() string {
 	if x != nil {
 		return x.UpTo
+	}
+	return ""
+}
+
+func (x *RepayReleasedRequest) GetFilledQuantity() string {
+	if x != nil {
+		return x.FilledQuantity
 	}
 	return ""
 }
@@ -3982,14 +3995,15 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\binterest\x18\x06 \x01(\tR\binterest\"\x18\n" +
 	"\x16ListMarginDebtsRequest\"O\n" +
 	"\x17ListMarginDebtsResponse\x124\n" +
-	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts\"\xae\x01\n" +
+	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts\"\xd7\x01\n" +
 	"\x14RepayReleasedRequest\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
 	"\faccount_type\x18\x03 \x01(\tR\vaccountType\x12\x14\n" +
 	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x14\n" +
 	"\x05asset\x18\x05 \x01(\tR\x05asset\x12\x13\n" +
-	"\x05up_to\x18\x06 \x01(\tR\x04upTo\"f\n" +
+	"\x05up_to\x18\x06 \x01(\tR\x04upTo\x12'\n" +
+	"\x0ffilled_quantity\x18\a \x01(\tR\x0efilledQuantity\"f\n" +
 	"\x15RepayReleasedResponse\x125\n" +
 	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\x12\x16\n" +
 	"\x06repaid\x18\x02 \x01(\tR\x06repaid2\xa5\x13\n" +

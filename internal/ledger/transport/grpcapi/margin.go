@@ -117,7 +117,13 @@ func (s *Server) RepayReleased(ctx context.Context, req *ledgerv1.RepayReleasedR
 	if err != nil {
 		return nil, err
 	}
-	res, repaid, err := s.svc.RepayReleased(ctx, req.GetOrderId(), req.GetUserId(), req.GetAccountType(), req.GetScope(), req.GetAsset(), upTo)
+	filled := decimal.Zero
+	if req.GetFilledQuantity() != "" {
+		if filled, err = amount(req.GetFilledQuantity()); err != nil {
+			return nil, err
+		}
+	}
+	res, repaid, err := s.svc.RepayReleased(ctx, req.GetOrderId(), req.GetUserId(), req.GetAccountType(), req.GetScope(), req.GetAsset(), upTo, filled)
 	if err != nil {
 		return nil, err
 	}

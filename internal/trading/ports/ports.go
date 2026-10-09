@@ -98,9 +98,10 @@ type Ledger interface {
 	Unfreeze(ctx context.Context, key string, account domain.Account, asset string, amount decimal.Decimal, orderID string) error
 	// RepayReleased repays, as an order on a margin account that borrowed
 	// for its freeze ends, up to upTo of the account's debt of asset from
-	// what it holds available (B160); once per order. It returns what was
-	// repaid.
-	RepayReleased(ctx context.Context, account domain.Account, asset string, upTo decimal.Decimal, orderID string) (decimal.Decimal, error)
+	// what it holds available (B160); once per order, and only once the
+	// order's settled trades come to filled (B163: a refusal to retry
+	// before; zero waits for nothing). It returns what was repaid.
+	RepayReleased(ctx context.Context, account domain.Account, asset string, upTo, filled decimal.Decimal, orderID string) (decimal.Decimal, error)
 	// MarginDebt returns what a margin account owes of asset, the principal
 	// and the interest (zero without a debt).
 	MarginDebt(ctx context.Context, account domain.Account, asset string) (decimal.Decimal, error)

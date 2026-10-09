@@ -193,7 +193,11 @@ type fakeLedger struct {
 	accounts    []domain.Account
 	debts       map[string]string
 	debtErr     error    // MarginDebt's answer when set
-	repays      []string // RepayReleased's calls: "account order up-to asset"
+	repays      []string // RepayReleased's repayments: "account order up-to asset"
+	repayCalls  []string // RepayReleased's calls: "order filled <quantity>"
+	// settled is what the ledger has settled of every order (B163): a
+	// call with more filled is refused as unsettled; nil settles all.
+	settled *decimal.Decimal
 }
 
 func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset string) (decimal.Decimal, error) {
@@ -208,7 +212,11 @@ func (l *fakeLedger) MarginDebt(_ context.Context, a domain.Account, asset strin
 
 func (l *fakeLedger) MarginBorrowers(context.Context) (int, error) { return len(l.debts), nil }
 
-func (l *fakeLedger) RepayReleased(_ context.Context, a domain.Account, asset string, upTo decimal.Decimal, orderID string) (decimal.Decimal, error) {
+func (l *fakeLedger) RepayReleased(_ context.Context, a domain.Account, asset string, upTo, filled decimal.Decimal, orderID string) (decimal.Decimal, error) {
+	l.repayCalls = append(l.repayCalls, orderID+" filled "+filled.String())
+	if l.settled != nil && filled.GreaterThan(*l.settled) {
+		return decimal.Zero, apperr.New(apperr.KindUnavailable, "LEDGER_TRADES_UNSETTLED", "not settled yet")
+	}
 	l.repays = append(l.repays, string(a.Type)+" "+orderID+" "+upTo.String()+" "+asset)
 	return upTo, nil
 }

@@ -155,13 +155,20 @@ func (s *Service) FreezeScoped(ctx context.Context, idemKey, entryType, userID, 
 	return s.Post(ctx, p)
 }
 
+// ErrTradesUnsettled answers RepayReleased while the order's trades are
+// not all settled (B163): what their settlement gives back is not in the
+// account yet. The caller tries again.
+var ErrTradesUnsettled = apperr.New(apperr.KindUnavailable, "LEDGER_TRADES_UNSETTLED", "the order's trades are not all settled yet; try again")
+
 // RepayReleased repays, as an order on a margin account that borrowed
 // for its freeze ends (B160), up to upTo of the account's debt of asset
 // from its available balance, interest first (domain.RepayReleasedPosting),
-// once per order: a repeat returns the first journal. The zero Result and
-// a zero amount when nothing was owed or available (nothing is kept then,
-// so a later call may still repay).
-func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountType, scope, asset string, upTo decimal.Decimal) (Result, decimal.Decimal, error) {
+// once per order: a repeat returns the first journal. Only once the
+// order's settled trades come to filled, the quantity it filled (B163):
+// before, ErrTradesUnsettled (a zero filled waits for nothing). The zero
+// Result and a zero amount when nothing was owed or available (nothing is
+// kept then, so a later call may still repay).
+func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountType, scope, asset string, upTo, filled decimal.Decimal) (Result, decimal.Decimal, error) {
 	if _, err := uuid.Parse(orderID); err != nil {
 		return Result{}, decimal.Zero, apperr.Invalid("order_id must be a UUID")
 	}
@@ -189,6 +196,15 @@ func (s *Service) RepayReleased(ctx context.Context, orderID, userID, accountTyp
 				res = Result{JournalID: j.ID, Seq: j.Seq, Replayed: true}
 			}
 			return err
+		}
+		if filled.IsPositive() {
+			settled, err := r.Trades().SettledOfMarginOrder(ctx, orderID)
+			if err != nil {
+				return err
+			}
+			if settled.LessThan(filled) {
+				return ErrTradesUnsettled.WithDetail("settled", settled.String()).WithDetail("filled", filled.String())
+			}
 		}
 		keys := []domain.AccountKey{ref.Assets(asset), ref.DebtRow(asset), ref.InterestRow(asset)}
 		accounts, err := r.Accounts().Lock(ctx, keys)

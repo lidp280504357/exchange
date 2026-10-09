@@ -112,7 +112,8 @@ service LedgerService {
   // owed: a MARGIN_REPAY journal keyed trade-repay:release:<order_id> (memo
   // "auto-repay order <order_id> release"), which margin-service follows as
   // an automatic repayment, as it does a trade's. Once per order: a repeat
-  // returns the first outcome. Nothing is posted when nothing is owed or
+  // returns the first outcome. It waits for the order's trades to settle
+  // (filled_quantity, B163). Nothing is posted when nothing is owed or
   // available.
   rpc RepayReleased(RepayReleasedRequest) returns (RepayReleasedResponse);
 }
@@ -555,6 +556,12 @@ message RepayReleasedRequest {
   // The most to repay (decimal string): what the order borrowed, at most
   // what came back of its freeze.
   string up_to = 6;
+  // The base quantity the order filled (B163): the repayment waits until
+  // the order's settled trades come to it, failing with
+  // LEDGER_TRADES_UNSETTLED (UNAVAILABLE) before, so what their
+  // settlement gives back is there to repay. Empty or "0" waits for
+  // nothing.
+  string filled_quantity = 7;
 }
 
 message RepayReleasedResponse {
