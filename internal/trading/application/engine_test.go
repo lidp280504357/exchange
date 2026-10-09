@@ -3,9 +3,11 @@ package application
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -426,5 +428,73 @@ func TestAFailedReleaseGoesToTheBack(t *testing.T) {
 	ended, _ := svc.Get(ctx, "u1", first.ID)
 	if n, age, err := svc.Unreleased(ctx); n != 2 || err != nil || age != c.t.Sub(ended.UpdatedAt) {
 		t.Fatalf("stats: %d %s %v", n, age, err)
+	}
+}
+
+// records keeps the level and message of every log record.
+type records struct {
+	mu   sync.Mutex
+	logs []string
+}
+
+func (r *records) Enabled(context.Context, slog.Level) bool { return true }
+func (r *records) Handle(_ context.Context, rec slog.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logs = append(r.logs, rec.Level.String()+" "+rec.Message)
+	return nil
+}
+func (r *records) WithAttrs([]slog.Attr) slog.Handler { return r }
+func (r *records) WithGroup(string) slog.Handler      { return r }
+
+func (r *records) count(prefix string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, l := range r.logs {
+		if strings.HasPrefix(l, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// A release that keeps failing is logged at Warn once a minute per order,
+// at Debug in between (B166: a pass every 5 seconds made it 12 a minute).
+func TestAFailingReleaseWarnsOnceAMinute(t *testing.T) {
+	svc, _, led, c := newService()
+	ctx := context.Background()
+	logs := &records{}
+	svc.Log = slog.New(logs)
+	o, _ := svc.Place(ctx, buy("c1"))
+	led.unfreezeErr = apperr.Unavailable(errors.New("ledger down"))
+	if err := svc.OnUpdate(ctx, update(o.ID, 10, domain.StatusCanceled, "0", "0", "USER")); err == nil {
+		t.Fatal("released with the ledger down")
+	}
+	const msg = "an order's release did not complete"
+	c.t = c.t.Add(time.Minute)
+	for range 6 {
+		if _, err := svc.RecoverReleases(ctx); err == nil {
+			t.Fatal("a pass with the ledger down")
+		}
+		c.t = c.t.Add(5 * time.Second)
+	}
+	if w, d := logs.count("WARN "+msg), logs.count("DEBUG "+msg); w != 1 || d != 5 {
+		t.Fatalf("within a minute: %d at Warn, %d at Debug", w, d)
+	}
+	c.t = c.t.Add(time.Minute)
+	if _, err := svc.RecoverReleases(ctx); err == nil {
+		t.Fatal("a pass with the ledger down")
+	}
+	if w := logs.count("WARN " + msg); w != 2 {
+		t.Fatalf("a minute on: %d at Warn", w)
+	}
+	// Released: forgotten, so a later failure of it warns at once.
+	led.unfreezeErr = nil
+	if n, err := svc.RecoverReleases(ctx); err != nil || n != 1 {
+		t.Fatalf("released: %d %v", n, err)
+	}
+	if svc.releaseWarns.last[o.ID] != (time.Time{}) {
+		t.Fatal("still remembered")
 	}
 }

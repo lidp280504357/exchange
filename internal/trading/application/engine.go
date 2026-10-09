@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,6 +121,7 @@ func (s *Service) RecoverReleases(ctx context.Context) (int, error) {
 		}
 		err := s.release(ctx, o)
 		if err == nil {
+			s.releaseWarns.forget(o.ID)
 			n++
 			continue
 		}
@@ -129,7 +132,12 @@ func (s *Service) RecoverReleases(ctx context.Context) (int, error) {
 			s.Log.DebugContext(ctx, "an order's repayment waits for its trades' settlement", "order_id", o.ID, "error", err)
 			continue
 		}
-		s.Log.WarnContext(ctx, "an order's release did not complete; a later pass tries again", "order_id", o.ID, "error", err)
+		level := slog.LevelDebug
+		if s.releaseWarns.due(o.ID, s.Now()) {
+			level = slog.LevelWarn
+		}
+		s.Log.Log(ctx, level, "an order's release did not complete; a later pass tries again (logged at Warn once a minute)",
+			"order_id", o.ID, "error", err)
 		failed++
 		if first == nil {
 			first = err
@@ -144,6 +152,45 @@ func (s *Service) RecoverReleases(ctx context.Context) (int, error) {
 // codeTradesUnsettled is the ledger's answer while an order's trades are
 // not all settled (LEDGER_TRADES_UNSETTLED, B163).
 const codeTradesUnsettled = "LEDGER_TRADES_UNSETTLED"
+
+// releaseWarns remembers when each order's failing release was last logged
+// at Warn: a pass every 5 seconds would otherwise log each waiting order 12
+// times a minute (B166); in between it logs at Debug. The gauges and alert
+// TradingOrderReleasesStuck carry the state.
+type releaseWarns struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+// warnEvery is how often one order's failing release is logged at Warn.
+const warnEvery = time.Minute
+
+// due reports whether the order's failure is to be logged at Warn now, and
+// if so notes it; orders not seen for ten minutes are forgotten.
+func (w *releaseWarns) due(orderID string, now time.Time) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.last == nil {
+		w.last = map[string]time.Time{}
+	}
+	if at, ok := w.last[orderID]; ok && now.Sub(at) < warnEvery {
+		return false
+	}
+	w.last[orderID] = now
+	for id, at := range w.last {
+		if now.Sub(at) > 10*warnEvery {
+			delete(w.last, id)
+		}
+	}
+	return true
+}
+
+// forget drops an order whose release completed.
+func (w *releaseWarns) forget(orderID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.last, orderID)
+}
 
 // Unreleased counts the finished orders whose release did not complete
 // and tells how long ago the longest finished one did (zero without

@@ -69,6 +69,8 @@ type Service struct {
 		n  int
 		at time.Time
 	}
+	// releaseWarns samples RecoverReleases' warnings per order.
+	releaseWarns releaseWarns
 }
 
 // bounded is ctx with the call timeout.
