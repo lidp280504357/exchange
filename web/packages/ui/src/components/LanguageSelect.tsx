@@ -27,6 +27,7 @@ export function LanguageSelect({ value, onValueChange, size = "md", className, "
         items={LANGUAGES.map((l) => ({
           value: l.locale,
           label: l.name,
+          lang: l.locale,
           description: l.english !== l.name ? l.english : undefined,
           keywords: [l.english, l.locale],
         }))}

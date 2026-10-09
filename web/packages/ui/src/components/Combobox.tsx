@@ -11,6 +11,8 @@ export type ComboboxItem = {
   value: string;
   /** The main text, e.g. a coin symbol. */
   label: string;
+  /** The label's language when it isn't the page's (a language's own name): its font and how screen readers say it. */
+  lang?: string;
   /** The second line, e.g. the coin's name. */
   description?: string;
   icon?: ReactNode;
@@ -151,7 +153,9 @@ export function Combobox({
               {selected ? (
                 <>
                   {selected.icon}
-                  <span className="truncate">{selected.label}</span>
+                  <span className="truncate" lang={selected.lang}>
+                    {selected.label}
+                  </span>
                 </>
               ) : (
                 <span className="text-fg-3">{placeholder ?? t("ui.select")}</span>
@@ -207,7 +211,9 @@ export function Combobox({
               >
                 {item.icon}
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-fg-1">{item.label}</span>
+                  <span className="truncate text-sm font-medium text-fg-1" lang={item.lang}>
+                    {item.label}
+                  </span>
                   {item.description && <span className="truncate text-xs text-fg-3">{item.description}</span>}
                 </span>
                 {item.trailing && <span className="shrink-0 text-xs text-fg-2">{item.trailing}</span>}

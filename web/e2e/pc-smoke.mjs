@@ -20,10 +20,10 @@
 // the profile (the drawn username, a rename, an avatar uploaded and
 // removed), the App download page and entries, closed product lines
 // (hidden, their terminals not open, the wind-down page), the language
-// switch and sign-out. Script errors fail the run; every API
+// switch, a first visit's language and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, legendClear, menuOnTop, note, ok, pickLanguage, sleep, start, withApps, withProducts } from "./lib.mjs";
+import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, firstVisitLocale, legendClear, menuOnTop, note, ok, pickLanguage, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -744,6 +744,19 @@ try {
   await pickLanguage(page, "語言", "简体中文");
   await page.waitForFunction(() => document.documentElement.lang === "zh-CN" && document.querySelector("header")?.innerText.includes("资产"), { timeout: 10000 });
   ok("the language setting switches the site to English, to Traditional Chinese (five key pages, its fonts) and back");
+
+  // 9b. A first visit's language (F30, F33): the first of the browser's languages the site has,
+  // else the platform's fallback language, already on the first screen.
+  const fallbackLocale = (await (await fetch(`${API}/v1/platform/profile`)).json()).default_locale;
+  for (const [tags, want] of [
+    [["ja"], fallbackLocale],
+    [["zh-HK", "en"], "zh-TW"],
+    [["fr", "en-GB"], "en"],
+  ]) {
+    const got = await firstVisitLocale(page, APP, "/", tags);
+    if (got !== want) throw new Error(`a first visit with ${tags.join(",")} starts in ${got}, not ${want}`);
+  }
+  ok(`a first visit starts in its browser's language, else the platform's fallback (${fallbackLocale}): ja → ${fallbackLocale}, zh-HK → zh-TW, fr,en-GB → en`);
 
   // 10. Sign out.
   await go("/");

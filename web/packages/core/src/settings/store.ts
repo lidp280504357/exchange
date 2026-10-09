@@ -27,8 +27,8 @@ export type Settings = {
    * browser's preferences, then the platform's fallback language (F30).
    */
   localeChosen: boolean;
-  /** The platform's fallback language (its profile's default_locale) as last read: English until then. */
-  fallbackLocale: Locale;
+  /** The platform's fallback language (its profile's default_locale) as last read; null until then. */
+  fallbackLocale: Locale | null;
   /** An IANA zone such as Asia/Shanghai; "" follows the browser. */
   timeZone: string;
   upDown: UpDown;
@@ -64,17 +64,22 @@ export function localeOf(tag: string): Locale {
   return matchLocale(tag) ?? "en";
 }
 
-/**
- * negotiateLocale picks the language of a visitor who has not chosen one
- * (F30): the first of the browser's preferences (most wanted first) the
- * site has, else the platform's fallback language.
- */
-export function negotiateLocale(tags: readonly string[], fallback: Locale): Locale {
+/** preferredLocale is the first of the browser's preferences (most wanted first) the site has, or null. */
+export function preferredLocale(tags: readonly string[]): Locale | null {
   for (const tag of tags) {
     const locale = matchLocale(tag);
     if (locale) return locale;
   }
-  return fallback;
+  return null;
+}
+
+/**
+ * negotiateLocale picks the language of a visitor who has not chosen one
+ * (F30): the first of the browser's preferences the site has, else the
+ * platform's fallback language.
+ */
+export function negotiateLocale(tags: readonly string[], fallback: Locale): Locale {
+  return preferredLocale(tags) ?? fallback;
 }
 
 /** browserTags lists the browser's language preferences, most wanted first. */
@@ -99,7 +104,7 @@ export const useSettings = create<SettingsState>()(
     (set) => ({
       locale: negotiateLocale(browserTags(), "en"),
       localeChosen: false,
-      fallbackLocale: "en",
+      fallbackLocale: null,
       timeZone: "",
       upDown: "green-up",
       confirmOrders: true,
@@ -136,4 +141,15 @@ export function applySettings(s: Settings, theme: "dark" | "light" = "dark"): vo
   root.lang = s.locale;
   root.dataset.updown = s.upDown;
   root.dataset.theme = theme;
+}
+
+/**
+ * needsFallbackLocale is whether the first screen waits for the platform's
+ * fallback language (F33): a visitor who has not chosen a language, whose
+ * browser asks for none the site has, on a device that has not read the
+ * platform's yet. Everyone else starts at once in their language.
+ */
+export function needsFallbackLocale(): boolean {
+  const s = useSettings.getState();
+  return !s.localeChosen && s.fallbackLocale === null && preferredLocale(browserTags()) === null;
 }

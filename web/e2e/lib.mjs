@@ -352,17 +352,61 @@ export function withApps(page, apps, fn) {
 /**
  * pickLanguage chooses a language in the settings page's language dropdown
  * (F30): opens it by its name in the page's current language (label), then
- * picks the option by the language's own name.
+ * picks the option by the language's own name - in the dropdown's list, or
+ * the searchable list it becomes past six languages (F33).
  */
 export async function pickLanguage(page, label, name) {
-  const trigger = `button[role="combobox"][aria-label="${label}"]`;
+  const trigger = `main button[aria-label="${label}"]`;
   await page.waitForSelector(trigger, { visible: true, timeout: 20000 });
   await page.click(trigger);
   await page.waitForSelector('[role="option"]', { visible: true, timeout: 10000 });
   for (const option of await page.$$('[role="option"]')) {
-    if ((await option.evaluate((o) => o.querySelector("[lang]")?.textContent.trim())) === name) return option.click();
+    const own = await option.evaluate((o) => (o.querySelector("[lang]")?.textContent ?? o.innerText.split("\n")[0]).trim());
+    if (own === name) return option.click();
   }
   throw new Error(`the language dropdown has no ${name}`);
+}
+
+/**
+ * firstVisitLocale opens the site in a fresh browser profile (no saved
+ * settings) whose languages are tags, on device ({viewport, userAgent}),
+ * and returns the page's language on its first screen (F30, F33:
+ * negotiated from the browser's languages, else the platform's fallback
+ * language). A first screen in one language that turns into another once
+ * the platform's profile is in comes back as "en then zh-CN" (the flash
+ * F33 removed).
+ */
+export async function firstVisitLocale(page, app, path, tags, device = {}) {
+  const ctx = await page.browser().createBrowserContext();
+  try {
+    const visit = await ctx.newPage();
+    if (device.viewport) await visit.setViewport(device.viewport);
+    if (device.userAgent) await visit.setUserAgent(device.userAgent);
+    await visit.evaluateOnNewDocument((t) => {
+      Object.defineProperty(navigator, "languages", { get: () => t });
+      Object.defineProperty(navigator, "language", { get: () => t[0] });
+      // The language when React first draws into #root (replacing index.html's
+      // static placeholder): watched from the end of parsing, which comes
+      // before any module script runs, so the first change there is React's.
+      document.addEventListener("readystatechange", () => {
+        if (document.readyState !== "interactive") return;
+        new MutationObserver((_, observer) => {
+          window.__firstScreenLang = document.documentElement.lang;
+          observer.disconnect();
+        }).observe(document.getElementById("root"), { childList: true });
+      });
+    }, tags);
+    const profile = visit.waitForResponse((r) => new URL(r.url()).pathname === "/v1/platform/profile", { timeout: 30000 });
+    profile.catch(() => {}); // awaited below; a failure before that is the one to report
+    await visit.goto(app + path, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await visit.waitForFunction(() => window.__firstScreenLang !== undefined, { timeout: 30000, polling: 100 });
+    await profile;
+    await new Promise((r) => setTimeout(r, 500)); // the effects that follow the profile
+    const [first, settled] = await visit.evaluate(() => [window.__firstScreenLang, document.documentElement.lang]);
+    return first === settled ? first : `${first} then ${settled}`;
+  } finally {
+    await ctx.close();
+  }
 }
 
 /** note prints what a run could not check here, without failing it. */

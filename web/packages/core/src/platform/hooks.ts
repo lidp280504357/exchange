@@ -1,20 +1,34 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { platformApi, unwrap } from "../api/client";
 import { followFallbackLocale, setBrandVariable } from "../i18n/index";
 import { qk } from "../query/keys";
-import { useSettings } from "../settings/store";
+import { needsFallbackLocale, useSettings } from "../settings/store";
 import type { ContentMode } from "../content/markdown";
 import { brandForeground, contentMode, creditsText, DEFAULT_BRAND, DEFAULT_PROFILE, normalizeProfile, textOf, type PlatformProfile } from "./profile";
 
+const fetchProfile = async () => normalizeProfile(await unwrap(platformApi.GET("/v1/platform/profile")));
+
 /** usePlatformProfile reads the profile, again every minute (it changes without a build). */
 export function usePlatformProfile() {
-  return useQuery({
-    queryKey: qk.platform,
-    queryFn: async () => normalizeProfile(await unwrap(platformApi.GET("/v1/platform/profile"))),
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  });
+  return useQuery({ queryKey: qk.platform, queryFn: fetchProfile, staleTime: 60_000, refetchInterval: 60_000 });
+}
+
+/**
+ * awaitFallbackLocale reads the profile before the first screen when its
+ * fallback language decides the visitor's (needsFallbackLocale: a first
+ * visit in a language the site lacks), at most `limit` ms, and applies it,
+ * so the page does not start in English and turn into another language a
+ * moment later (F33). Everyone else it lets through at once; the profile
+ * it read serves usePlatformProfile.
+ */
+export async function awaitFallbackLocale(queryClient: QueryClient, limit = 1500): Promise<void> {
+  if (!needsFallbackLocale()) return;
+  const read = queryClient
+    .fetchQuery({ queryKey: qk.platform, queryFn: fetchProfile, staleTime: 60_000 })
+    .then((p) => followFallbackLocale(p.default_locale))
+    .catch(() => undefined);
+  await Promise.race([read, new Promise((resolve) => setTimeout(resolve, limit))]);
 }
 
 /** useBranding returns the profile, the built-in one until (and while not) read. */

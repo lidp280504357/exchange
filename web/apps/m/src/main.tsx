@@ -1,4 +1,5 @@
 import { applySettings, createLive, createQueryClient, initI18n, LiveProvider, reportVitals, restoreSession, useSettings } from "@exchange/core";
+import { awaitFallbackLocale } from "@exchange/core/platform/index";
 import { prefersReducedMotion, uiMessages } from "@exchange/ui";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
@@ -33,7 +34,10 @@ const app = (
   </QueryClientProvider>
 );
 
-createRoot(document.getElementById("root")!).render(import.meta.env.DEV ? <StrictMode>{app}</StrictMode> : app);
+// A first visit in a language the site lacks waits (at most 1.5 s) for the platform's fallback language (F33).
+void awaitFallbackLocale(queryClient).finally(() =>
+  createRoot(document.getElementById("root")!).render(import.meta.env.DEV ? <StrictMode>{app}</StrictMode> : app),
+);
 
 // The service worker gives pages opened offline a "网络不可用" page (design §7.1).
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
