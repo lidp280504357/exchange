@@ -66,15 +66,14 @@ export function MarginDialog({ kind, init, onClose }: { kind: MarginActionKind; 
   const title = kind === "transfer" ? t("pcMargin.dialog.transferTitle") : kind === "borrow" ? t("pcMargin.dialog.borrowTitle") : t("pcMargin.dialog.repayTitle");
   const submitText =
     kind === "transfer" ? t("pcMargin.dialog.submitTransfer") : kind === "borrow" ? t("pcMargin.dialog.submitBorrow") : t("pcMargin.dialog.submitRepay");
+  // While what it hangs on is read, the maximum is a dash rather than a 0 (F23).
+  const maxArgs = { amount: f.maxPending ? "—" : formatAmount(f.max, shown), asset: f.asset };
   const maxText =
     kind === "transfer"
-      ? t(f.direction === "OUT" ? "pcMargin.dialog.maxOut" : f.repayOnly ? "pcMargin.dialog.maxInRepay" : "pcMargin.dialog.maxIn", {
-          amount: formatAmount(f.max, shown),
-          asset: f.asset,
-        })
+      ? t(f.direction === "OUT" ? "pcMargin.dialog.maxOut" : f.repayOnly ? "pcMargin.dialog.maxInRepay" : "pcMargin.dialog.maxIn", maxArgs)
       : kind === "borrow"
-        ? t("pcMargin.dialog.maxBorrow", { amount: formatAmount(f.max, shown), asset: f.asset })
-        : t("pcMargin.dialog.maxRepay", { amount: formatAmount(f.max, shown), asset: f.asset });
+        ? t("pcMargin.dialog.maxBorrow", maxArgs)
+        : t("pcMargin.dialog.maxRepay", maxArgs);
 
   return (
     <Dialog

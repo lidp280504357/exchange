@@ -70,6 +70,28 @@ export function inwardOf(repayOnly: boolean, pending: boolean, owing: readonly s
   return !repayOnly || pending || owing.length > 0;
 }
 
+/** What a transfer form changes by itself (transferTurn): its direction, whether it turned itself, its asset. */
+export type TransferTurn = { direction?: Direction; forcedOut?: boolean; asset?: string };
+
+/**
+ * transferTurn is what a transfer form changes by itself, or null (F20,
+ * F22): to "out" while no transfer in is offered, noting that it turned
+ * itself; back to "in" once one is offered again, only if it had turned
+ * itself (an "out" the user chose stays); while a transfer in only repays,
+ * a coin the account does not owe gives way to one it does. Nothing while
+ * the accounts are read. The form starts the amount afresh on each turn.
+ */
+export function transferTurn(
+  s: { direction: Direction; forcedOut: boolean; asset: string },
+  c: { pending: boolean; inward: boolean; repayOnly: boolean; owing: readonly string[] },
+): TransferTurn | null {
+  if (c.pending) return null;
+  if (!c.inward && s.direction === "IN") return { direction: "OUT", forcedOut: true };
+  if (c.inward && s.forcedOut && s.direction === "OUT") return { direction: "IN", forcedOut: false };
+  if (c.repayOnly && s.direction === "IN" && c.owing.length > 0 && !c.owing.includes(s.asset)) return { asset: c.owing[0] };
+  return null;
+}
+
 export type Direction = "IN" | "OUT";
 
 export type MarginFormInit = { account?: MarginAccountType; symbol?: string; asset?: string; direction?: Direction };
@@ -160,26 +182,16 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   // No transfer in to offer (the account owes nothing while spot is closed):
   // out only, back to in once there is one again (another account, an
   // isolated pair chosen); and a coin it does not owe gives way to one it
-  // does. Each turn starts the amount afresh.
+  // does (transferTurn). Each turn starts the amount afresh.
   useEffect(() => {
-    if (accounts.isPending) return;
-    const restart = () => {
-      setAmountState("");
-      setError(null);
-      setAll(false);
-    };
-    if (!inward && direction === "IN") {
-      setDirectionState("OUT");
-      setForcedOut(true);
-      restart();
-    } else if (inward && forcedOut && direction === "OUT") {
-      setDirectionState("IN");
-      setForcedOut(false);
-      restart();
-    } else if (repayOnly && direction === "IN" && owing.length > 0 && !owing.includes(asset)) {
-      setAssetState(owing[0]!);
-      restart();
-    }
+    const turn = transferTurn({ direction, forcedOut, asset }, { pending: accounts.isPending, inward, repayOnly, owing });
+    if (!turn) return;
+    if (turn.direction) setDirectionState(turn.direction);
+    if (turn.forcedOut !== undefined) setForcedOut(turn.forcedOut);
+    if (turn.asset) setAssetState(turn.asset);
+    setAmountState("");
+    setError(null);
+    setAll(false);
   }, [accounts.isPending, inward, forcedOut, repayOnly, direction, owing, asset]);
   const row = balanceOf(owner, asset);
   const decimals = assetDecimals(assets.data?.assets, asset, 8);

@@ -67,15 +67,14 @@ export function MarginSheet({ kind, init, onClose }: { kind: MarginActionKind; i
   const title = kind === "transfer" ? t("mMargin.dialog.transferTitle") : kind === "borrow" ? t("mMargin.dialog.borrowTitle") : t("mMargin.dialog.repayTitle");
   const submitText =
     kind === "transfer" ? t("mMargin.dialog.submitTransfer") : kind === "borrow" ? t("mMargin.dialog.submitBorrow") : t("mMargin.dialog.submitRepay");
+  // While what it hangs on is read, the maximum is a dash rather than a 0 (F23).
+  const maxArgs = { amount: f.maxPending ? "—" : formatAmount(f.max, shown), asset: f.asset };
   const maxText =
     kind === "transfer"
-      ? t(f.direction === "OUT" ? "mMargin.dialog.maxOut" : f.repayOnly ? "mMargin.dialog.maxInRepay" : "mMargin.dialog.maxIn", {
-          amount: formatAmount(f.max, shown),
-          asset: f.asset,
-        })
+      ? t(f.direction === "OUT" ? "mMargin.dialog.maxOut" : f.repayOnly ? "mMargin.dialog.maxInRepay" : "mMargin.dialog.maxIn", maxArgs)
       : kind === "borrow"
-        ? t("mMargin.dialog.maxBorrow", { amount: formatAmount(f.max, shown), asset: f.asset })
-        : t("mMargin.dialog.maxRepay", { amount: formatAmount(f.max, shown), asset: f.asset });
+        ? t("mMargin.dialog.maxBorrow", maxArgs)
+        : t("mMargin.dialog.maxRepay", maxArgs);
 
   return (
     <Sheet

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountOf, assetChoices, inwardOf, keyFor, settle, transferInMax, transferOutMax } from "./form";
+import { accountOf, assetChoices, inwardOf, keyFor, settle, transferInMax, transferOutMax, transferTurn } from "./form";
 
 describe("forms", () => {
   const cross = {
@@ -66,6 +66,41 @@ describe("inwardOf", () => {
     expect(inwardOf(true, true, [])).toBe(true);
     expect(inwardOf(true, false, [])).toBe(false);
     expect(inwardOf(true, false, ["USDT"])).toBe(true);
+  });
+});
+
+describe("transferTurn", () => {
+  const idle = { pending: false, inward: true, repayOnly: true, owing: ["USDT"] };
+
+  it("waits for the accounts, then turns to out while no transfer in is offered (F22)", () => {
+    const form = { direction: "IN" as const, forcedOut: false, asset: "USDT" };
+    expect(transferTurn(form, { ...idle, pending: true, inward: true, owing: [] })).toBeNull();
+    expect(transferTurn(form, { ...idle, inward: false, owing: [] })).toEqual({ direction: "OUT", forcedOut: true });
+    expect(transferTurn(form, idle)).toBeNull();
+  });
+
+  it("turns back to in once one is offered, only if it had turned itself (F22)", () => {
+    expect(transferTurn({ direction: "OUT", forcedOut: true, asset: "USDT" }, idle)).toEqual({ direction: "IN", forcedOut: false });
+    expect(transferTurn({ direction: "OUT", forcedOut: false, asset: "USDT" }, idle)).toBeNull();
+    expect(transferTurn({ direction: "OUT", forcedOut: true, asset: "USDT" }, { ...idle, inward: false, owing: [] })).toBeNull();
+  });
+
+  it("gives a coin the account does not owe way to one it does while a transfer in only repays (F20)", () => {
+    expect(transferTurn({ direction: "IN", forcedOut: false, asset: "BTC" }, idle)).toEqual({ asset: "USDT" });
+    expect(transferTurn({ direction: "IN", forcedOut: false, asset: "BTC" }, { ...idle, repayOnly: false })).toBeNull();
+    expect(transferTurn({ direction: "OUT", forcedOut: false, asset: "BTC" }, idle)).toBeNull();
+  });
+
+  it("follows a user from cross to an isolated account without a pair and back (F22)", () => {
+    let form: { direction: "IN" | "OUT"; forcedOut: boolean; asset: string } = { direction: "IN", forcedOut: false, asset: "USDT" };
+    const apply = (c: typeof idle) => {
+      const turn = transferTurn(form, c);
+      if (turn) form = { direction: turn.direction ?? form.direction, forcedOut: turn.forcedOut ?? form.forcedOut, asset: turn.asset ?? form.asset };
+    };
+    apply({ ...idle, inward: false, owing: [] });
+    expect(form).toEqual({ direction: "OUT", forcedOut: true, asset: "USDT" });
+    apply(idle);
+    expect(form).toEqual({ direction: "IN", forcedOut: false, asset: "USDT" });
   });
 });
 
