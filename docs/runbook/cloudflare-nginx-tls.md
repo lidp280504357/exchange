@@ -11,6 +11,8 @@
 5. **Caching → Cache Rules**：新建规则，路径以 `/v1/` 开头的请求 **Bypass cache**。
 6. **DNS**：`astras.vip`（A，代理开）；以后管理后台加 `admin.astras.vip`（A，代理开），并用 Cloudflare Access 或 nginx `allow` 限制来源 IP。
 
+- **IPv6 兼容（用户 2026-10-10 决定：登录记录优先显示 IPv4）**：客户端 IP 取自 `CF-Connecting-IP`，即客户端连到 Cloudflare 时用的地址；双栈客户端默认走 IPv6，记录里就是 IPv6。服务端无法"同一连接改取 IPv4"，只能让客户端用 IPv4 连：在 Cloudflare 把该域名的 **IPv6 Compatibility 关掉**（DNS 只答 A 记录）。免费套餐的控制台开关是只读的，用 API 改：`curl -X PATCH https://api.cloudflare.com/client/v4/zones/<ZONE_ID>/settings/ipv6 -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data '{"value":"off"}'`（令牌只在本机 `.env`，不进仓库）。关掉后双栈客户端走 IPv4，纯 IPv6 客户端经运营商 NAT64 也会以 IPv4 到达；`cloudflare-real-ip.conf` 仍保留 ips-v6 名单。正式环境同样关闭（launch.md 步 1）。
+
 ## 二、把证书放到测试服
 
 ```bash
