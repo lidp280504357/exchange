@@ -69,7 +69,10 @@ export function MarginSheet({ kind, init, onClose }: { kind: MarginActionKind; i
     kind === "transfer" ? t("mMargin.dialog.submitTransfer") : kind === "borrow" ? t("mMargin.dialog.submitBorrow") : t("mMargin.dialog.submitRepay");
   const maxText =
     kind === "transfer"
-      ? t(f.direction === "IN" ? "mMargin.dialog.maxIn" : "mMargin.dialog.maxOut", { amount: formatAmount(f.max, shown), asset: f.asset })
+      ? t(f.direction === "OUT" ? "mMargin.dialog.maxOut" : f.repayOnly ? "mMargin.dialog.maxInRepay" : "mMargin.dialog.maxIn", {
+          amount: formatAmount(f.max, shown),
+          asset: f.asset,
+        })
       : kind === "borrow"
         ? t("mMargin.dialog.maxBorrow", { amount: formatAmount(f.max, shown), asset: f.asset })
         : t("mMargin.dialog.maxRepay", { amount: formatAmount(f.max, shown), asset: f.asset });
@@ -101,7 +104,9 @@ export function MarginSheet({ kind, init, onClose }: { kind: MarginActionKind; i
             ]}
           />
         )}
-        {kind === "transfer" && f.direction === "IN" && f.repayOnly && <p className="-mt-2 text-xs text-fg-3">{t("mMargin.dialog.repayOnlyIn")}</p>}
+        {kind === "transfer" && f.direction === "IN" && f.repayOnly && !f.loading && (
+          <p className="-mt-2 text-xs text-fg-3 tabular-nums">{t("mMargin.dialog.repayOnlyIn", { amount: formatAmount(owed(f.row), shown), asset: f.asset })}</p>
+        )}
         <FormField label={t("mMargin.dialog.account")}>
           <Segmented
             block

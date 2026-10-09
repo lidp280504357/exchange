@@ -47,6 +47,29 @@ export function transferOutMax(b: { free: string; net: string }): string {
   const max = dec.min(b.free, b.net);
   return dec.sign(max) > 0 ? dec.normalize(max) : "0";
 }
+
+/**
+ * transferInMax is what may move into a margin account of an asset at
+ * most: the SPOT balance; while spot is closed (repayOnly) no more than the
+ * account owes of it, the debt rounded up to the asset's decimals so it can
+ * be repaid in full (margin-service takes any amount of an owed asset; the
+ * form keeps to the debt, as its hint says; F22).
+ */
+export function transferInMax(spot: string, b: { borrowed: string; interest: string }, repayOnly: boolean, decimals: number): string {
+  if (!repayOnly) return spot;
+  const debt = owed(b);
+  return dec.sign(debt) > 0 ? dec.min(spot, dec.round(debt, decimals, "up")) : "0";
+}
+
+/**
+ * inwardOf is whether a transfer in is offered: always, but while spot is
+ * closed only for an account that owes something; until the accounts are
+ * read it is offered, so a dialog opened on "in" shows it chosen (F22).
+ */
+export function inwardOf(repayOnly: boolean, pending: boolean, owing: readonly string[]): boolean {
+  return !repayOnly || pending || owing.length > 0;
+}
+
 export type Direction = "IN" | "OUT";
 
 export type MarginFormInit = { account?: MarginAccountType; symbol?: string; asset?: string; direction?: Direction };
@@ -96,11 +119,11 @@ export function assetChoices(
 /**
  * useMarginForm holds one transfer, borrow or repay form: its account,
  * asset and amount, what may move at most (transfers in: the SPOT
- * balance; out: the account's free balance, the server also keeping the
- * margin level at the warning level; borrowing: max-borrowable; repaying:
- * the debt as far as the free balance goes), the amount's issue and the
- * call. Repaying "all" sends ALL, so the interest of the hour that ends
- * meanwhile is repaid too.
+ * balance, no more than the debt while spot is closed; out: the account's
+ * free balance, the server also keeping the margin level at the warning
+ * level; borrowing: max-borrowable; repaying: the debt as far as the free
+ * balance goes), the amount's issue and the call. Repaying "all" sends
+ * ALL, so the interest of the hour that ends meanwhile is repaid too.
  */
 export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {}) {
   const accounts = useMarginAccounts();
@@ -118,6 +141,8 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   const [all, setAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // Whether the form turned itself to "out" (no transfer in to offer): it turns back to "in" once one is.
+  const [forcedOut, setForcedOut] = useState(false);
 
   const isolatedPairs = useMemo(() => (pairs.data?.items ?? []).filter((p) => p.isolated), [pairs.data]);
   const pair = isolatedPairs.find((p) => p.symbol === symbol);
@@ -127,24 +152,42 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   const spotOpen = useOpenProducts().spot;
   const repayOnly = kind === "transfer" && !spotOpen;
   const owing = useMemo(() => (owner?.balances ?? []).filter(hasDebt).map((b) => b.asset), [owner]);
-  const inward = !repayOnly || owing.length > 0;
+  const inward = inwardOf(repayOnly, accounts.isPending, owing);
   const choices = useMemo(
     () => assetChoices(kind, account, pair, terms.data, owner, { direction, repayOnly }),
     [kind, account, pair, terms.data, owner, direction, repayOnly],
   );
-  // No transfer in to offer (the account owes nothing while spot is closed): out only; and a coin it does not owe gives way to one it does.
+  // No transfer in to offer (the account owes nothing while spot is closed):
+  // out only, back to in once there is one again (another account, an
+  // isolated pair chosen); and a coin it does not owe gives way to one it
+  // does. Each turn starts the amount afresh.
   useEffect(() => {
-    if (!repayOnly || accounts.isPending) return;
-    if (!inward && direction === "IN") setDirectionState("OUT");
-    else if (direction === "IN" && owing.length > 0 && !owing.includes(asset)) setAssetState(owing[0]!);
-  }, [repayOnly, accounts.isPending, inward, direction, owing, asset]);
+    if (accounts.isPending) return;
+    const restart = () => {
+      setAmountState("");
+      setError(null);
+      setAll(false);
+    };
+    if (!inward && direction === "IN") {
+      setDirectionState("OUT");
+      setForcedOut(true);
+      restart();
+    } else if (inward && forcedOut && direction === "OUT") {
+      setDirectionState("IN");
+      setForcedOut(false);
+      restart();
+    } else if (repayOnly && direction === "IN" && owing.length > 0 && !owing.includes(asset)) {
+      setAssetState(owing[0]!);
+      restart();
+    }
+  }, [accounts.isPending, inward, forcedOut, repayOnly, direction, owing, asset]);
   const row = balanceOf(owner, asset);
   const decimals = assetDecimals(assets.data?.assets, asset, 8);
   const borrowable = useMaxBorrowable(account, symbol, asset, kind === "borrow");
   const term = terms.data?.find((a) => a.asset === asset);
 
   let max: string;
-  if (kind === "transfer") max = direction === "IN" ? availableOf(balances.data?.balances, "SPOT", asset) : transferOutMax(row);
+  if (kind === "transfer") max = direction === "IN" ? transferInMax(availableOf(balances.data?.balances, "SPOT", asset), row, repayOnly, decimals) : transferOutMax(row);
   else if (kind === "borrow") max = borrowable.data?.amount ?? "0";
   else max = repayMax(row);
   max = dec.sign(max) > 0 ? dec.round(max, decimals, "down") : "0";
@@ -169,6 +212,7 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   };
   const setDirection = (d: Direction) => {
     setDirectionState(d);
+    setForcedOut(false);
     setAmountState("");
     clear();
   };
@@ -241,7 +285,12 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
     decimals,
     max,
     limitedBy: kind === "borrow" ? borrowable.data?.limited_by : undefined,
-    maxPending: kind === "borrow" ? borrowable.isPending && borrowable.fetchStatus !== "idle" : kind === "transfer" && direction === "IN" ? balances.isPending : accounts.isPending,
+    maxPending:
+      kind === "borrow"
+        ? borrowable.isPending && borrowable.fetchStatus !== "idle"
+        : kind === "transfer" && direction === "IN"
+          ? balances.isPending || (repayOnly && accounts.isPending)
+          : accounts.isPending,
     issue,
     loading,
     ready,

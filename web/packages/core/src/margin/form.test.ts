@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountOf, assetChoices, keyFor, settle, transferOutMax } from "./form";
+import { accountOf, assetChoices, inwardOf, keyFor, settle, transferInMax, transferOutMax } from "./form";
 
 describe("forms", () => {
   const cross = {
@@ -47,6 +47,25 @@ describe("transferOutMax", () => {
     expect(transferOutMax({ free: "120", net: "20" })).toBe("20");
     expect(transferOutMax({ free: "5", net: "20" })).toBe("5");
     expect(transferOutMax({ free: "5", net: "-3" })).toBe("0");
+  });
+});
+
+describe("transferInMax", () => {
+  it("is the SPOT balance; while spot is closed no more than the debt, rounded up to repay it in full (F22)", () => {
+    const debt = { borrowed: "100", interest: "0.0010001" };
+    expect(transferInMax("500", debt, false, 6)).toBe("500");
+    expect(transferInMax("500", debt, true, 6)).toBe("100.001001");
+    expect(transferInMax("20", debt, true, 6)).toBe("20");
+    expect(transferInMax("500", { borrowed: "0", interest: "0" }, true, 6)).toBe("0");
+  });
+});
+
+describe("inwardOf", () => {
+  it("offers a transfer in, while spot is closed only to an account that owes, and until the accounts are read (F22)", () => {
+    expect(inwardOf(false, false, [])).toBe(true);
+    expect(inwardOf(true, true, [])).toBe(true);
+    expect(inwardOf(true, false, [])).toBe(false);
+    expect(inwardOf(true, false, ["USDT"])).toBe(true);
   });
 });
 
