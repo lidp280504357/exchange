@@ -182,7 +182,7 @@ func TestTheCapsAPI(t *testing.T) {
 	if code, _ = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"level":"-1","version":2,"actor":"a","reason":"r"}`); code != 400 {
 		t.Fatalf("below zero: %d", code)
 	}
-	for _, bad := range []string{`"contract_leverage":"0"`, `"contract_leverage":"126"`, `"symbol":"0"`, `"safety":"0"`, `"total":"2e15"`} {
+	for _, bad := range []string{`"contract_leverage":"0"`, `"contract_leverage":"1001"`, `"symbol":"0"`, `"safety":"0"`, `"total":"2e15"`} {
 		if code, got = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{`+bad+`,"version":2,"actor":"a","reason":"r"}`); code != 400 ||
 			got["code"] != "COMMON_INVALID_ARGUMENT" {
 			t.Fatalf("out of bounds %s: %d %v", bad, code, got)

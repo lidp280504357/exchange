@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -129,3 +130,55 @@ func TestRuntimeCaps(t *testing.T) {
 }
 
 func ptr(v decimal.Decimal) *decimal.Decimal { return &v }
+
+// brokenSpecs cannot read the specs.
+type brokenSpecs struct{ specList }
+
+func (brokenSpecs) Specs(context.Context) ([]domain.Spec, error) {
+	return nil, errors.New("instrument-service down")
+}
+
+// A new contract leverage goes up to the highest leverage of the contracts
+// HOUSE quotes, read from their specs as the change is made (review C73:
+// leverage per contract as Binance has it, 150 for BTC and ETH since
+// 2026-10-10); without the specs nothing changes it.
+func TestTheContractLeverageFollowsTheSpecs(t *testing.T) {
+	p, _, _, _ := newRig(t)
+	ctx := context.Background()
+	perp := perpSpec
+	perp.MaxLeverage = 150
+	coin := domain.Spec{
+		Symbol: "BTC-USD-PERP", Base: "BTC", Quote: "USD", TickSize: d("0.1"), LotSize: d("1"), Contract: true,
+		Settle: "BTC", ContractSize: d("100"), MaxLeverage: 125,
+	}
+	p.specs = specList{btcSpec, perp, coin}
+	caps := NewCaps(&memCaps{}, p, slog.New(slog.DiscardHandler))
+	if err := caps.Start(ctx, DefaultConfig().Caps); err != nil {
+		t.Fatal(err)
+	}
+	change := func(leverage string) error {
+		_, err := caps.Change(ctx, domain.CapsChange{
+			Patch: domain.CapsPatch{ContractLeverage: ptr(d(leverage))}, Version: caps.Get().Version, Actor: "a", Reason: "r",
+		})
+		return err
+	}
+	if e := apperr.From(change("151")); e.Code != "COMMON_INVALID_ARGUMENT" || e.Details["max_leverage"] != "150" {
+		t.Fatalf("151x past the specs' 150x: %v", e)
+	}
+	if err := change("100"); err != nil {
+		t.Fatalf("100x: %v", err)
+	}
+	if err := change("150"); err != nil || !caps.Get().Caps.ContractLeverage.Equal(d("150")) {
+		t.Fatalf("150x: %+v %v", caps.Get(), err)
+	}
+	p.specs = brokenSpecs{}
+	if e := apperr.From(change("120")); e.Kind != apperr.KindUnavailable {
+		t.Fatalf("without the specs: %v", e)
+	}
+	// The other caps change without them.
+	if _, err := caps.Change(ctx, domain.CapsChange{
+		Patch: domain.CapsPatch{Safety: ptr(d("2000"))}, Version: caps.Get().Version, Actor: "a", Reason: "r",
+	}); err != nil {
+		t.Fatalf("another cap: %v", err)
+	}
+}

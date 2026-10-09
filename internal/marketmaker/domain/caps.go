@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -40,6 +41,10 @@ type CapsChange struct {
 	ApprovalID string
 	Reason     string
 	SignedBy   string
+	// MaxLeverage is the highest leverage of the contracts HOUSE quotes,
+	// from their specs (review C73): a new contract leverage may not go
+	// past it. Zero when HOUSE quotes none.
+	MaxLeverage decimal.Decimal
 }
 
 // CapsRecord is a change as kept: what was set and what it replaced (none
@@ -67,11 +72,14 @@ var ErrCapsStep = apperr.New(apperr.KindInvalid, "HOUSE_CAPS_STEP",
 
 // The bounds of the caps (review FL, C47): amounts in USDT up to
 // MaxCapAmount (far beyond any book, and well inside the columns), the
-// contract leverage from 1 to MaxContractLeverage, and one change moving a
-// cap by at most CapsMaxStep times either way.
+// contract leverage from 1 to the highest leverage of the contracts HOUSE
+// quotes (CapsChange.MaxLeverage, review C73: leverage per contract as
+// Binance has it, the user's decision of 2026-10-10) and never past
+// MaxContractLeverage, and one change moving a cap by at most CapsMaxStep
+// times either way.
 var (
 	MaxCapAmount        = decimal.New(1, 15)
-	MaxContractLeverage = decimal.NewFromInt(125)
+	MaxContractLeverage = decimal.NewFromInt(1000)
 	CapsMaxStep         = decimal.NewFromInt(10)
 )
 
@@ -86,7 +94,7 @@ func (c Caps) Validate() error {
 		switch {
 		case f.name == "contract_leverage":
 			if f.v.LessThan(decimal.NewFromInt(1)) || f.v.GreaterThan(MaxContractLeverage) {
-				return apperr.Invalid("contract_leverage must be from 1 to 125")
+				return apperr.Invalid("contract_leverage must be from 1 to " + MaxContractLeverage.String())
 			}
 		case f.name == "level" && f.v.IsNegative():
 			return apperr.Invalid("level must not be below zero (zero: levels whole)")
@@ -138,6 +146,10 @@ func (c CapsChange) Next(cur Caps) (Caps, error) {
 	}
 	if err := next.Validate(); err != nil {
 		return Caps{}, err
+	}
+	if c.Patch.ContractLeverage != nil && c.MaxLeverage.IsPositive() && next.ContractLeverage.GreaterThan(c.MaxLeverage) {
+		return Caps{}, apperr.Invalid(fmt.Sprintf("contract_leverage must be from 1 to %s, the highest leverage of the contracts HOUSE quotes",
+			c.MaxLeverage)).WithDetail("max_leverage", c.MaxLeverage.String())
 	}
 	before := cur.fields()
 	for i, f := range next.fields() {

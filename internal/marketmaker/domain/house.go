@@ -26,6 +26,10 @@ type Spec struct {
 	// ContractSize USD (coin-margined design 2026-10-06 §2).
 	Settle       string
 	ContractSize decimal.Decimal
+	// MaxLeverage is a contract's highest leverage, its first risk tier's
+	// (max_leverage of the specs): the most HOUSE's contract leverage may
+	// be is the highest of the contracts it quotes (review C73).
+	MaxLeverage int32
 	// Halted: the pair is not TRADING; HOUSE does not quote it, but its
 	// reference market still prices its base asset.
 	Halted bool

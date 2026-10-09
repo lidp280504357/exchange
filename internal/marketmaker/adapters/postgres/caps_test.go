@@ -67,7 +67,7 @@ func TestHouseCaps(t *testing.T) {
 		t.Fatalf("read %+v %v %v", got, ok, err)
 	}
 	// The table keeps to the bounds too (review FP, C48).
-	for _, set := range []string{"contract_leverage = 0", "contract_leverage = 126", "symbol = 0", "total = 2e15", "level = -1"} {
+	for _, set := range []string{"contract_leverage = 0", "contract_leverage = 1001", "symbol = 0", "total = 2e15", "level = -1"} {
 		if _, err := db.Exec(ctx, "UPDATE house_caps SET "+set); err == nil {
 			t.Errorf("the table took %s", set)
 		}

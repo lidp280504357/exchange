@@ -2,12 +2,16 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/skill/exchange/internal/marketmaker/domain"
 	"github.com/skill/exchange/internal/marketmaker/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // capsReload is how often the stored caps are read again: a change made
@@ -56,9 +60,18 @@ func (c *Caps) Get() domain.StoredCaps {
 // Change checks, stores and applies a change: the store applies it to the
 // caps it locks (out of bounds or too large a step is refused there); one
 // made on caps that changed meanwhile is refused (domain.ErrCapsVersion).
+// A new contract leverage is bounded by the highest leverage of the
+// contracts HOUSE quotes, read from their specs then (review C73).
 func (c *Caps) Change(ctx context.Context, ch domain.CapsChange) (domain.StoredCaps, error) {
 	if err := ch.Validate(); err != nil {
 		return domain.StoredCaps{}, err
+	}
+	if ch.Patch.ContractLeverage != nil {
+		highest, err := c.highestLeverage(ctx)
+		if err != nil {
+			return domain.StoredCaps{}, err
+		}
+		ch.MaxLeverage = highest
 	}
 	stored, err := c.store.Change(ctx, ch, c.now())
 	if err != nil {
@@ -68,6 +81,22 @@ func (c *Caps) Change(ctx context.Context, ch domain.CapsChange) (domain.StoredC
 		"approval_id", ch.ApprovalID, "reason", ch.Reason, "signed_by", ch.SignedBy)
 	c.apply(ctx, stored)
 	return stored, nil
+}
+
+// highestLeverage is the highest leverage of the contracts HOUSE quotes
+// (their specs' max_leverage), zero when it quotes none.
+func (c *Caps) highestLeverage(ctx context.Context) (decimal.Decimal, error) {
+	specs, err := c.pub.specs.Specs(ctx)
+	if err != nil {
+		return decimal.Zero, apperr.Unavailable(fmt.Errorf("contract specs: %w", err))
+	}
+	var high int32
+	for _, s := range specs {
+		if s.Contract {
+			high = max(high, s.MaxLeverage)
+		}
+	}
+	return decimal.NewFromInt32(high), nil
 }
 
 // Changes returns the latest changes, newest first: 20 unless told, at

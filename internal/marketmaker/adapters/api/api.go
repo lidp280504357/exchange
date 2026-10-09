@@ -58,9 +58,11 @@ type instrumentRow struct {
 	LotSize         string  `json:"lot_size"`
 	Status          string  `json:"status"`
 	ReferenceSymbol *string `json:"reference_symbol"`
-	// A contract's settlement asset and, coin-margined, its face value.
+	// A contract's settlement asset and, coin-margined, its face value;
+	// its highest leverage.
 	SettleAsset  string `json:"settle_asset"`
 	ContractSize string `json:"contract_size"`
+	MaxLeverage  int32  `json:"max_leverage"`
 }
 
 // reference is the row's reference symbol, "" when it has none.
@@ -79,7 +81,7 @@ func (r instrumentRow) spec(contract bool) (domain.Spec, bool) {
 	}
 	s := domain.Spec{Symbol: r.Symbol, Base: r.BaseAsset, Quote: r.QuoteAsset, TickSize: tick, LotSize: lot, Contract: contract}
 	if contract {
-		s.Settle = r.SettleAsset
+		s.Settle, s.MaxLeverage = r.SettleAsset, r.MaxLeverage
 		if s.Settle == "" {
 			s.Settle = r.QuoteAsset // a contract from before the coin-margined ones
 		}
