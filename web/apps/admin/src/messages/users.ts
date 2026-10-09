@@ -2,6 +2,14 @@
 // the console's main message files and merged into them in i18n.ts.
 export const usersZh = {
   admin: {
+    // The users list's search box and filters (A93), over the main strings.
+    users: {
+      lookupHint: "用户 ID、邮箱、手机号或用户名；回车：完全匹配就打开该用户，否则按关键字筛选列表",
+      regionHint: "如 SG",
+      searchInvalid: "输入有误：最多 254 个字符，不能含不可见字符",
+      keyword: "关键字",
+      keywordHint: "用户名、邮箱或手机号里含有它的账户（不分大小写）",
+    },
     user: {
       back: "用户列表",
       title: "用户详情",
@@ -148,6 +156,14 @@ export const usersZh = {
 
 export const usersEn = {
   admin: {
+    // The users list's search box and filters (A93), over the main strings.
+    users: {
+      lookupHint: "A user ID, email, phone or username; Enter opens an exact match, else filters the list by the keyword",
+      regionHint: "e.g. SG",
+      searchInvalid: "Invalid input: at most 254 characters, no invisible ones",
+      keyword: "Keyword",
+      keywordHint: "Accounts whose username, email or phone contains it (any case)",
+    },
     user: {
       back: "Users",
       title: "User",

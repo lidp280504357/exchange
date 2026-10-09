@@ -572,7 +572,7 @@ func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list, next, err := h.Svc.ListUsers(r.Context(), principal(r), ports.UserQuery{
-		Status: q.Get("status"), Region: q.Get("region"), CreatedFrom: from, CreatedBefore: to, Cursor: q.Get("cursor"),
+		Status: q.Get("status"), Region: q.Get("region"), Q: q.Get("q"), CreatedFrom: from, CreatedBefore: to, Cursor: q.Get("cursor"),
 		Limit: intParam(q, "limit"),
 	})
 	if err != nil {

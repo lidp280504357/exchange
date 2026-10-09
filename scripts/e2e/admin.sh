@@ -59,22 +59,21 @@ source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/remote.sh"
 
 # Every curl of this script over HTTP/1.1, the shared call's to the user
-# site too (it takes $CURL_HOME/.curlrc): on 2026-10-09 the user site's
-# GET /v1/platform/apps failed the same way as the console's answers below.
+# site too (curl reads $CURL_HOME/.curlrc - and so not ~/.curlrc, which this
+# run leaves out): on 2026-10-07 the Mac's curl (8.7.1) failed three answers
+# the console had sent (nginx logged them 200) with an HTTP/2 framing error,
+# exit 16, which call does not retry - a GET, a POST and a part's PUT, hours
+# apart - and on 2026-10-09 the user site's GET /v1/platform/apps.
 printf '%s\n' '--http1.1' >"$WORK/.curlrc"
 export CURL_HOME=$WORK
 
 CSRF=(-H 'X-Admin-CSRF: 1')
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
-# acall is call on the console's domain, over HTTP/1.1: on 2026-10-07 the
-# Mac's curl (8.7.1) failed three answers the console had sent (nginx
-# logged them 200) with an HTTP/2 framing error, exit 16, which call does
-# not retry - a GET, a POST and a part's PUT, hours apart. The script's
-# own curls (the event stream, the downloads) say --http1.1 too.
+# acall is call on the console's domain.
 acall() {
   local user_base=$BASE rc=0
   BASE=$ADMIN_BASE
-  call "$@" --http1.1 || rc=$?
+  call "$@" || rc=$?
   BASE=$user_base
   return $rc
 }
@@ -223,6 +222,44 @@ expect 200 - "OPERATOR finds the account by email"
 check ".user.id == \"$USER_ID\" and .user.status == \"ACTIVE\"" "the account"
 as OPERATOR GET "/admin/v1/users/lookup?q=$USER_ID" ""
 expect 200 - "and by ID"
+
+# The users list's search (A93, B167): a username opens the account; a
+# keyword that names none is 404 (not 400) and lists the accounts that
+# contain it, by email (auth-service) or username (user-service); the
+# region filter narrows them; only an input no account could match is 400.
+as AUDITOR GET "/admin/v1/users/$USER_ID" ""
+USERNAME=$(jq -r '.username // ""' <<<"$BODY")
+REGION=$(jq -r '.region // ""' <<<"$BODY")
+if [[ -z $USERNAME || -z $REGION ]]; then
+  echo "skip the users list's search: this user-service gives no usernames"
+else
+  as OPERATOR GET "/admin/v1/users/lookup?q=$(tr '[:lower:]' '[:upper:]' <<<"$USERNAME")" ""
+  if [[ $STATUS == 400 ]]; then
+    echo "skip the users list's search: this auth-service is from before B167"
+  else
+    expect 200 - "OPERATOR finds the account by its username, whatever its case"
+    check ".user.id == \"$USER_ID\"" "the account"
+    KEYWORD="admin-user-$RUN"
+    as OPERATOR GET "/admin/v1/users/lookup?q=$KEYWORD" ""
+    expect 404 COMMON_NOT_FOUND "a keyword that names no account is not found, not refused"
+    as AUDITOR GET "/admin/v1/users?q=$KEYWORD&limit=20" ""
+    expect 200 - "the list takes it as a keyword"
+    check "[.items[].id] == [\"$USER_ID\"]" "the account whose email contains it, alone"
+    as AUDITOR GET "/admin/v1/users?q=${USERNAME#user_}&limit=20" ""
+    expect 200 - "a part of the username"
+    check "any(.items[]; .id == \"$USER_ID\") and all(.items[]; .username | ascii_downcase | contains(\"${USERNAME#user_}\"))" \
+      "lists the accounts whose username contains it"
+    OTHER=$([[ $REGION == SG ]] && echo AQ || echo SG)
+    as AUDITOR GET "/admin/v1/users?q=$KEYWORD&region=$REGION" ""
+    expect 200 - "the keyword and the account's region ($REGION)"
+    check "[.items[].id] == [\"$USER_ID\"]" "keep it"
+    as AUDITOR GET "/admin/v1/users?q=$KEYWORD&region=$OTHER" ""
+    expect 200 - "another region ($OTHER)"
+    check '.items == []' "leaves it out"
+    as AUDITOR GET "/admin/v1/users?q=$(printf 'a%.0s' $(seq 1 255))" ""
+    expect 400 COMMON_INVALID_ARGUMENT "a keyword of 255 characters is refused"
+  fi
+fi
 
 echo "== the account's page: notes and tags"
 as AUDITOR GET "/admin/v1/users/$USER_ID" ""
@@ -528,7 +565,7 @@ as ADMIN GET /admin/v1/todo ""
 expect 200 - "the counts waiting"
 check '(.withdrawals | type) == "number" and (.approvals | type) == "number" and (.deposits | type) == "number" and (.partial | length) == 0' \
   "withdrawals, fund operations and deposits"
-events=$(curl -sN --http1.1 --max-time 4 -b "$WORK/ADMIN.jar" "$ADMIN_BASE/admin/v1/events" || true)
+events=$(curl -sN --max-time 4 -b "$WORK/ADMIN.jar" "$ADMIN_BASE/admin/v1/events" || true)
 grep -q '^event: todo' <<<"$events" || { echo "FAIL the event stream: $events" >&2; exit 1; }
 echo "ok   the event stream pushes the counts"
 
@@ -2402,12 +2439,12 @@ else
     expect 200 - "ADMIN shows it"
     check ".public.mode == \"FILE\" and .public.url == \"$APK_URL\" and .public.size == $(fix apk size) and .public.install_url == null and .public.ios_install == null" \
       "the sites get the file, its size and hash"
-    curl -s --http1.1 -o "$WORK/dl.apk" -D "$WORK/dl.headers" -w '%{http_code}' "$APK_URL" >"$WORK/dl.status"
+    curl -s -o "$WORK/dl.apk" -D "$WORK/dl.headers" -w '%{http_code}' "$APK_URL" >"$WORK/dl.status"
     [[ $(cat "$WORK/dl.status") == 200 ]] && [[ $(shasum -a 256 "$WORK/dl.apk" | cut -d' ' -f1) == "$(fix apk sha256)" ]] &&
       grep -qi '^content-disposition: attachment' "$WORK/dl.headers" && grep -qi '^content-type: application/vnd.android.package-archive' "$WORK/dl.headers" ||
       { echo "FAIL downloading $APK_URL: $(cat "$WORK/dl.status")" >&2; cat "$WORK/dl.headers" >&2; exit 1; }
     echo "ok   nginx serves the .apk as it was uploaded, as an attachment"
-    curl -s --http1.1 -o /dev/null -w '%{http_code}' "${APK_URL%/*}/" >"$WORK/dl.status"
+    curl -s -o /dev/null -w '%{http_code}' "${APK_URL%/*}/" >"$WORK/dl.status"
     [[ $(cat "$WORK/dl.status") == 404 ]] || { echo "FAIL the downloads' directory: $(cat "$WORK/dl.status")" >&2; exit 1; }
     echo "ok   no listing of the downloads"
     # An upload in three parts of 10 MiB (review FX, A74 ⑥): sent out of
@@ -2438,7 +2475,7 @@ else
       "joined in order and checked; the first .apk kept"
     BIG_URL=$(jq -r .current.url <<<"$BODY")
     BIG_ID=$(jq -r .current.file_id <<<"$BODY")
-    curl -s --http1.1 -o "$WORK/dl-big.apk" -w '%{http_code}' "$BIG_URL" >"$WORK/dl.status"
+    curl -s -o "$WORK/dl-big.apk" -w '%{http_code}' "$BIG_URL" >"$WORK/dl.status"
     [[ $(cat "$WORK/dl.status") == 200 && $(shasum -a 256 "$WORK/dl-big.apk" | cut -d' ' -f1) == "$(fix big sha256)" ]] ||
       { echo "FAIL downloading $BIG_URL: $(cat "$WORK/dl.status")" >&2; exit 1; }
     echo "ok   nginx serves the $(($(fix big size) >> 20)) MiB .apk whole"
@@ -2453,7 +2490,7 @@ else
       and .public.ios_install == "OTA" and (.public.install_url | startswith("itms-services://?action=download-manifest&url=https%3A%2F%2F"))' \
       "iOS's app, installed over the air"
     IPA_URL=$(jq -r .current.url <<<"$BODY")
-    curl -s --http1.1 -o "$WORK/dl.plist" -w '%{http_code}' "$(jq -r .current.manifest_url <<<"$BODY")" >"$WORK/dl.status"
+    curl -s -o "$WORK/dl.plist" -w '%{http_code}' "$(jq -r .current.manifest_url <<<"$BODY")" >"$WORK/dl.status"
     [[ $(cat "$WORK/dl.status") == 200 ]] && grep -q "<string>$IPA_URL</string>" "$WORK/dl.plist" && grep -q '<string>vip.astras.e2e</string>' "$WORK/dl.plist" ||
       { echo "FAIL the manifest: $(cat "$WORK/dl.status")" >&2; cat "$WORK/dl.plist" >&2; exit 1; }
     echo "ok   its manifest names the .ipa and the bundle"

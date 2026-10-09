@@ -12,6 +12,47 @@ import (
 	"github.com/skill/exchange/internal/platform/apperr"
 )
 
+// The console's search box (A93): an exact ID, email address, phone number
+// or username opens the user (B167); anything else is NOT_FOUND, and the
+// list then takes it as a keyword - user-service matching usernames, with
+// the accounts auth-service finds by email address or phone number. Only
+// what no account could match is refused.
+func TestUserSearch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.users.known[someUser] = ports.User{ID: someUser, Status: "ACTIVE", Username: "user_8c6fbf82"}
+	h.users.usernames = map[string]string{"user_8c6fbf82": someUser}
+	h.users.matches = map[string][]string{"pacminer": {someUser}}
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	auditor := h.login(t, "audit@example.com")
+
+	if v, err := h.svc.FindUser(ctx, auditor, " user_8c6fbf82 "); err != nil || v.User.ID != someUser {
+		t.Fatalf("a username %+v %v", v, err)
+	}
+	if _, err := h.svc.FindUser(ctx, auditor, "pacminer"); code(err) != apperr.CodeNotFound {
+		t.Fatalf("a keyword is no user: %v", err)
+	}
+	for name, q := range map[string]string{"empty": "  ", "too long": strings.Repeat("a", 255), "a control character": "pac\x00miner"} {
+		if _, err := h.svc.FindUser(ctx, auditor, q); code(err) != apperr.CodeInvalidArgument {
+			t.Fatalf("lookup, %s: %v", name, err)
+		}
+	}
+	if len(h.users.asked) != 2 {
+		t.Fatalf("asked %q", h.users.asked)
+	}
+
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Q: " pacminer ", Region: "sg"}); err != nil ||
+		h.users.listed.Q != "pacminer" || !slices.Equal(h.users.listed.UserIDs, []string{someUser}) || h.users.listed.Region != "SG" {
+		t.Fatalf("a keyword listed %+v %v", h.users.listed, err)
+	}
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{UserIDs: []string{someUser}}); err != nil || h.users.listed.UserIDs != nil {
+		t.Fatalf("no keyword, no IDs %+v %v", h.users.listed, err)
+	}
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Q: strings.Repeat("a", 255)}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a keyword too long: %v", err)
+	}
+}
+
 func TestNotesAndTags(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

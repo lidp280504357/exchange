@@ -475,7 +475,7 @@ export interface paths {
         };
         /**
          * Accounts, newest first
-         * @description Needs users.read. Contact data stays in auth-service; find an account by email or phone with users/lookup.
+         * @description Needs users.read. Contact data stays in auth-service; find one account by its ID, email address, phone number or username with users/lookup. A keyword (q, A93) lists the accounts whose username, email address or phone number contains it, whatever the case (B167: user-service matches usernames, auth-service the email addresses and phone numbers, at most 500 of those).
          */
         get: operations["listUsers"];
         put?: never;
@@ -764,8 +764,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Find an account by user ID, email address or phone number
-         * @description Phone numbers in E.164 with the leading "+". Needs users.read.
+         * Find an account by user ID, email address, phone number or username
+         * @description Phone numbers in E.164 with the leading "+"; a username whatever its case (B167). Anything that names no account is 404 - the console then lists the accounts that contain it (GET /admin/v1/users?q=, A93); only an input no account could match (empty, over 254 characters, control characters) is 400. Needs users.read.
          */
         get: operations["lookupUser"];
         put?: never;
@@ -7689,6 +7689,8 @@ export interface operations {
                 status?: "ACTIVE" | "RISK_REVIEW" | "FROZEN" | "CLOSED";
                 /** @description ISO 3166-1 alpha-2. */
                 region?: string;
+                /** @description A keyword: the accounts whose username, email address or phone number contains it (any case). At most 254 characters without control characters, otherwise 400. */
+                q?: string;
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */

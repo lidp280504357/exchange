@@ -196,8 +196,13 @@ type Balance struct {
 
 // UserQuery selects accounts; empty fields match everything.
 type UserQuery struct {
-	Status        string
-	Region        string
+	Status string
+	Region string
+	// Q keeps the accounts whose username contains it, or that are among
+	// UserIDs: those whose email address or phone number contains it
+	// (Users.Search; B167, A93).
+	Q             string
+	UserIDs       []string
 	CreatedFrom   time.Time
 	CreatedBefore time.Time
 	Cursor        string
@@ -214,8 +219,12 @@ type UserStats struct {
 
 // Users reads and changes accounts (auth-, user- and ledger-service).
 type Users interface {
-	// Find returns the user of an email address or phone number.
+	// Find returns the user of an email address, a phone number or a
+	// username (B167); NOT_FOUND for anything else.
 	Find(ctx context.Context, identifier string) (string, error)
+	// Search returns the users whose email address or phone number
+	// contains q, at most limit of them, newest first (auth-service, B167).
+	Search(ctx context.Context, q string, limit int) ([]string, error)
 	Get(ctx context.Context, userID string) (User, error)
 	Balances(ctx context.Context, userID string) ([]Balance, error)
 	// ChangeStatus returns the previous status.

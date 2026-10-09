@@ -296,7 +296,16 @@ func (s *Service) FindUser(ctx context.Context, p Principal, query string) (User
 	if err := p.require(domain.PermUsersRead); err != nil {
 		return UserView{}, err
 	}
-	id := strings.TrimSpace(query)
+	// An ID, an email address, a phone number or a username (B167): no
+	// such user is NOT_FOUND, and the console then lists the accounts that
+	// contain it (A93); only what no account could match is refused.
+	id, err := searchText(query)
+	if err != nil {
+		return UserView{}, err
+	}
+	if id == "" {
+		return UserView{}, apperr.Invalid("q is required")
+	}
 	if _, err := uuid.Parse(id); err != nil {
 		if id, err = s.Users.Find(ctx, id); err != nil {
 			return UserView{}, err

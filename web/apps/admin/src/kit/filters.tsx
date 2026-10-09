@@ -63,9 +63,14 @@ export type FilterBarProps = {
   filters: ReturnType<typeof useFilters>;
   /** Actions at the right end (export). */
   extra?: React.ReactNode;
+  /**
+   * Filters the page sets elsewhere (the users list's search box, A93):
+   * reset, saved and restored with the bar's own.
+   */
+  extraKeys?: readonly string[];
 };
 
-export function FilterBar({ page, defs, filters, extra }: FilterBarProps) {
+export function FilterBar({ page, defs, filters, extra, extraKeys = [] }: FilterBarProps) {
   const { t } = useTranslation();
   const [views, setViews] = useState(() => loadViews(page));
   const [naming, setNaming] = useState(false);
@@ -74,9 +79,10 @@ export function FilterBar({ page, defs, filters, extra }: FilterBarProps) {
     setViews(next);
     localStorage.setItem(`admin.views.${page}`, JSON.stringify(next));
   };
-  const active = defs.some((d) => filters.values[d.key]);
+  const keys = [...defs.map((d) => d.key), ...extraKeys];
+  const active = keys.some((k) => filters.values[k]);
   const menu: MenuEntry[] = [
-    ...views.map((v) => ({ key: `view-${v.name}`, label: v.name, onSelect: () => filters.set({ ...Object.fromEntries(defs.map((d) => [d.key, ""])), ...v.values }) })),
+    ...views.map((v) => ({ key: `view-${v.name}`, label: v.name, onSelect: () => filters.set({ ...Object.fromEntries(keys.map((k) => [k, ""])), ...v.values }) })),
     ...(views.length ? [{ type: "separator" as const, key: "sep" }] : []),
     { key: "save", label: t("admin.common.saveView"), icon: <Bookmark size={14} />, disabled: !active, onSelect: () => setNaming(true) },
     ...views.map((v) => ({
@@ -92,7 +98,7 @@ export function FilterBar({ page, defs, filters, extra }: FilterBarProps) {
       {defs.map((d) => (
         <Field key={d.key} def={d} value={filters.values[d.key] ?? ""} onChange={(v) => filters.set({ [d.key]: v })} />
       ))}
-      <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} disabled={!active} onClick={filters.reset}>
+      <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} disabled={!active} onClick={() => filters.set(Object.fromEntries(keys.map((k) => [k, ""])))}>
         {t("admin.common.reset")}
       </Button>
       <DropdownMenu
@@ -113,7 +119,7 @@ export function FilterBar({ page, defs, filters, extra }: FilterBarProps) {
         confirmText={t("admin.common.save")}
         confirmDisabled={!name.trim()}
         onConfirm={() => {
-          const values = Object.fromEntries(defs.map((d) => [d.key, filters.values[d.key] ?? ""]).filter(([, v]) => v));
+          const values = Object.fromEntries(keys.map((k) => [k, filters.values[k] ?? ""]).filter(([, v]) => v));
           store([...views.filter((v) => v.name !== name.trim()), { name: name.trim(), values }]);
           setName("");
           setNaming(false);
@@ -141,7 +147,7 @@ function Field({ def, value, onChange }: { def: FilterDef; value: string; onChan
   );
 }
 
-/** TextFilter commits after a pause in typing or on Enter, not on every key (A5). */
+/** TextFilter commits 300 ms after typing stops, or at once on Enter, not on every key (A5, A93). */
 function TextFilter({ value, onChange, placeholder, label }: { value: string; onChange: (v: string) => void; placeholder?: string; label: string }) {
   const [draft, setDraft] = useState(value);
   const commit = useRef(onChange);
@@ -149,7 +155,7 @@ function TextFilter({ value, onChange, placeholder, label }: { value: string; on
   useEffect(() => setDraft(value), [value]);
   useEffect(() => {
     if (draft.trim() === value) return;
-    const id = setTimeout(() => commit.current(draft.trim()), 500);
+    const id = setTimeout(() => commit.current(draft.trim()), 300);
     return () => clearTimeout(id);
   }, [draft, value]);
   return (

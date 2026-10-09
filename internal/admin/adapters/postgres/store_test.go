@@ -154,6 +154,8 @@ type users struct{}
 
 func (users) Find(context.Context, string) (string, error) { return "", nil }
 
+func (users) Search(context.Context, string, int) ([]string, error) { return nil, nil }
+
 func (users) Get(_ context.Context, id string) (ports.User, error) {
 	return ports.User{ID: id, Status: "ACTIVE", Region: "SG", Language: "en", CreatedAt: time.Now()}, nil
 }

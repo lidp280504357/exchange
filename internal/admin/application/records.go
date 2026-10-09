@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -27,6 +29,19 @@ func (s *Service) ListUsers(ctx context.Context, p Principal, q ports.UserQuery)
 	if !slices.Contains(accountStatuses, q.Status) {
 		return nil, "", apperr.Invalid("status must be ACTIVE, RISK_REVIEW, FROZEN or CLOSED")
 	}
+	var err error
+	if q.Q, err = searchText(q.Q); err != nil {
+		return nil, "", err
+	}
+	q.UserIDs = nil
+	if q.Q != "" {
+		// A keyword (A93): user-service matches the usernames, and the
+		// accounts whose email address or phone number contains it, which
+		// auth-service finds, go along (B167).
+		if q.UserIDs, err = s.Users.Search(ctx, q.Q, searchMatches); err != nil {
+			return nil, "", err
+		}
+	}
 	q.Limit = pageLimit(q.Limit)
 	list, next, err := s.Users.List(ctx, q)
 	if err != nil {
@@ -34,6 +49,26 @@ func (s *Service) ListUsers(ctx context.Context, p Principal, q ports.UserQuery)
 	}
 	list, err = s.withTags(ctx, list)
 	return list, next, err
+}
+
+// The console's search box (A93): an input of at most maxSearch characters
+// (an email address's longest) without control characters, and the
+// accounts whose email address or phone number match it, at most
+// searchMatches (user-service's bound on UserIDs).
+const (
+	maxSearch     = 254
+	searchMatches = 500
+)
+
+// searchText is a search box's input made ready: trimmed, refused (the
+// console's 「输入有误」) only when no account could match it - too long, or
+// with control characters.
+func searchText(q string) (string, error) {
+	q = strings.TrimSpace(q)
+	if utf8.RuneCountInString(q) > maxSearch || strings.IndexFunc(q, unicode.IsControl) >= 0 {
+		return "", apperr.Invalid("the search is too long or has characters no account has")
+	}
+	return q, nil
 }
 
 func checkUserID(id string) error {

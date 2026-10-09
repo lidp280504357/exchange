@@ -54,6 +54,15 @@ func (u Users) Find(ctx context.Context, identifier string) (string, error) {
 	return resp.GetUserId(), nil
 }
 
+// Search returns the users whose email address or phone number contains q.
+func (u Users) Search(ctx context.Context, q string, limit int) ([]string, error) {
+	resp, err := u.Auth.SearchUsers(ctx, &authv1.SearchUsersRequest{Q: q, Limit: int32(min(limit, 500))}) //nolint:gosec // bounded
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetUserIds(), nil
+}
+
 // Get returns an account.
 func (u Users) Get(ctx context.Context, userID string) (ports.User, error) {
 	resp, err := u.User.GetUser(ctx, &userv1.GetUserRequest{UserId: userID})
@@ -116,7 +125,9 @@ func (u Users) ChangeStatus(ctx context.Context, userID, to, reason, actor, note
 
 // List pages through accounts newest first.
 func (u Users) List(ctx context.Context, q ports.UserQuery) ([]ports.User, string, error) {
-	req := &userv1.ListUsersRequest{Status: q.Status, Region: q.Region, Cursor: q.Cursor, Limit: int32(min(q.Limit, 200))} //nolint:gosec // bounded
+	req := &userv1.ListUsersRequest{
+		Status: q.Status, Region: q.Region, Q: q.Q, UserIds: q.UserIDs, Cursor: q.Cursor, Limit: int32(min(q.Limit, 200)), //nolint:gosec // bounded
+	}
 	if !q.CreatedFrom.IsZero() {
 		req.CreatedFrom = timestamppb.New(q.CreatedFrom)
 	}

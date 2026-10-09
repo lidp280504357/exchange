@@ -210,14 +210,28 @@ func (r memTags) Users(_ context.Context, tag string, limit int) ([]string, erro
 	return out, nil
 }
 
-// fakeUsers knows some accounts.
+// fakeUsers knows some accounts; usernames finds one by its username,
+// matches are the accounts whose email address or phone number contains
+// a keyword, listed the list's last query.
 type fakeUsers struct {
-	known    map[string]ports.User
-	balances []ports.Balance
+	known     map[string]ports.User
+	balances  []ports.Balance
+	usernames map[string]string
+	matches   map[string][]string
+	listed    ports.UserQuery
+	asked     []string
 }
 
-func (u *fakeUsers) Find(context.Context, string) (string, error) {
+func (u *fakeUsers) Find(_ context.Context, identifier string) (string, error) {
+	u.asked = append(u.asked, identifier)
+	if id, ok := u.usernames[identifier]; ok {
+		return id, nil
+	}
 	return "", apperr.NotFound("no such user")
+}
+
+func (u *fakeUsers) Search(_ context.Context, q string, _ int) ([]string, error) {
+	return u.matches[q], nil
 }
 
 func (u *fakeUsers) Get(_ context.Context, id string) (ports.User, error) {
@@ -235,7 +249,8 @@ func (u *fakeUsers) ChangeStatus(context.Context, string, string, string, string
 	return "ACTIVE", nil
 }
 
-func (u *fakeUsers) List(context.Context, ports.UserQuery) ([]ports.User, string, error) {
+func (u *fakeUsers) List(_ context.Context, q ports.UserQuery) ([]ports.User, string, error) {
+	u.listed = q
 	var out []ports.User
 	for _, v := range u.known {
 		out = append(out, v)

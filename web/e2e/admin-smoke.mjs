@@ -241,6 +241,23 @@ try {
   // opens the user's page with its tabs.
   await go("/users");
   await rows(3);
+  // The search box and the region filter (A93): a keyword that names no
+  // account filters the list by it, kept in the address; the region
+  // applies as it is typed, without Enter. The reset clears both.
+  await typeInto("[data-testid=users-search]", "e2e-");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("[data-testid=users-keyword]", { timeout: 20000 });
+  await page.waitForFunction(() => new URL(location.href).searchParams.get("q") === "e2e-", { timeout: 5000 });
+  await rows(1);
+  await typeInto('main input[aria-label="地区"]', "sg");
+  await page.waitForFunction(() => new URL(location.href).searchParams.get("region") === "sg", { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+  const regions = await page.$$eval("main tbody tr[data-row-id] td:nth-child(4)", (cells) => cells.map((c) => c.textContent.trim()));
+  if (regions.some((r) => r !== "SG")) throw new Error(`the region filter SG listed ${[...new Set(regions)].join(", ")}`);
+  await clickButton("重置", "main");
+  await page.waitForFunction(() => !new URL(location.href).searchParams.get("q") && !document.querySelector("[data-testid=users-keyword]"), { timeout: 5000 });
+  await rows(3);
+  ok(`users: a keyword filters the list (in the address), the region SG as typed (${regions.length} rows), the reset clears both`);
   await page.waitForSelector("main tbody [data-testid=user-identity]");
   await page.waitForSelector("main tbody [data-testid=user-identity] svg[data-avatar-default]");
   await pressRow("main tbody tr", (timeout) => page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }));
