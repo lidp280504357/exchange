@@ -103,8 +103,10 @@ func TestEveryIntervalsOpenCandleHasTheSpike(t *testing.T) {
 }
 
 // A failed read of the touched minutes leaves an interval unseeded rather
-// than seeded without the spike, and costs the source no request: the next
-// update asks again (reviews C65 ①, C66).
+// than seeded without the spike, and costs the source no request; for
+// storeRetry no open candle is queued or read again, so the feed's updates
+// meanwhile ask the store nothing (one read and one warning, not one per
+// update); an update after it asks again (reviews C65 ①, C66, C67 ③).
 func TestAnOpenCandleWaitsForTheTouchedMinutes(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()
@@ -115,14 +117,26 @@ func TestAnOpenCandleWaitsForTheTouchedMinutes(t *testing.T) {
 	rc := newReferenceRig(spikeHistory())
 	defer rc.wg.Wait()
 	var mu sync.Mutex
-	down := true
+	clock := time.Date(2026, 10, 7, 4, 2, 10, 0, time.UTC)
+	rc.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return clock
+	}
+	down, reads := true, 0
 	rc.overlaid = func(ctx context.Context, symbol string, from, to time.Time) ([]domain.Candle, error) {
 		mu.Lock()
 		defer mu.Unlock()
+		reads++
 		if down {
 			return nil, context.DeadlineExceeded
 		}
 		return store.Read().References().Overlaid(ctx, "binance", symbol, from, to)
+	}
+	asked := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return reads
 	}
 	h := rc.history.(*history)
 	rc.Observe(minute("2026-10-07T04:02:00Z", "84040", "84060", "84020", "84050", "2"))
@@ -133,10 +147,24 @@ func TestAnOpenCandleWaitsForTheTouchedMinutes(t *testing.T) {
 	if n := h.count(domain.Hour4); n != 0 {
 		t.Fatalf("the source asked %d times while the store could not answer (review C66)", n)
 	}
+	// Every interval found midway was queued; the first read failed and the
+	// rest waited.
+	if n := asked(); n != 1 {
+		t.Fatalf("the store asked %d times by one update", n)
+	}
 	mu.Lock()
 	down = false
+	clock = clock.Add(storeRetry - time.Second)
 	mu.Unlock()
 	rc.Observe(minute("2026-10-07T04:02:00Z", "84040", "84070", "84020", "84060", "3"))
+	rc.wg.Wait()
+	if o := rc.open["BTC-USDT"][domain.Hour4]; o != nil || asked() != 1 {
+		t.Fatalf("within storeRetry: seeded %+v, the store asked %d times", o, asked())
+	}
+	mu.Lock()
+	clock = clock.Add(2 * time.Second)
+	mu.Unlock()
+	rc.Observe(minute("2026-10-07T04:02:00Z", "84040", "84070", "84020", "84060", "4"))
 	rc.wg.Wait()
 	if o := rc.open["BTC-USDT"][domain.Hour4]; o == nil || !o.c.High.Equal(d("97440")) {
 		t.Fatalf("seeded once the store answers %+v", o)

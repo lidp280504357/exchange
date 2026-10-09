@@ -24,6 +24,7 @@ API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：PC 站连本机
 
 1. 读 `.env`，把 `POSTGRES_DSN`、`REDIS_URL`、`CLICKHOUSE_DB` 改到 dev 命名空间，设 `KAFKA_NAMESPACE=dev.`（进程环境变量优先于 `.env`）。
 2. 经 ssh 在测试服幂等准备命名空间：建库 `exchange_dev`（PostgreSQL、ClickHouse），`KAFKA_NAMESPACE=dev. topics.sh` 建带前缀的全部 topic。
+   **眼下这一步会失败，本机开发栈暂不可用**（2026-10-08 实测，审查 C67 ①）：测试服的 Redpanda 进程打开文件数的软上限是 1024，按 `topic_fds_per_partition` 5 最多约 204 个分区；正式命名空间已占 114 个（含内部 topic），`dev.` 一套还要约 110 个，建到第 64 个 topic（`dev.derivatives.order.references`）时答 `INVALID_PARTITIONS: unable to create topic ... due to hardware constraints`。内存不是瓶颈：`--memory 2G` 按 `topic_memory_per_partition` 4 MiB 可到 512 个。要恢复，得先由用户定（提高 Redpanda 的打开文件数上限、减少每个 topic 的分区数，或不再用 `dev.` 命名空间）；`scripts/dev.sh` 不加检查。`dev.*` topic 不会被任何脚本删除，要删只手动：先确认没有数据（`rpk topic describe <topic> -p` 的高水位都是 0），再 `rpk topic delete -r '^dev\..*'`（2026-10-07 验证保留方案时建出的 63 个空 `dev.*` topic 就是这样删的）。
 3. `go build` 到 `.dev/bin/`（已被 git 忽略）。命名空间是这次新建的，就打开测试环境也打开的开关：`ledger.welcome_credit`、`account.transfer`、`ledger.manual_adjustment`、`auth.sms`。
 4. 同时启动全部服务（gRPC 按需连接、网关会重试取签名公钥，互不依赖启动顺序），逐个等运维端口的 `/readyz`；instrument-service 就绪后同步参考数据 `deploy/instruments/test.json`。
 5. 打印入口后守护：任一服务退出则打印其日志末尾并停止全部。日志在 `.dev/logs/<服务>.log`（本机默认文本格式，`LOG_FORMAT=json` 可改）。

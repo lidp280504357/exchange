@@ -53,6 +53,10 @@ type ReferenceCandles struct {
 	working bool                                       // the initializer is running
 	cache   map[string]cachedCandles
 	wg      sync.WaitGroup
+
+	// storeDown (under mu) is when the open candles may be read again after
+	// the store failed to answer for a price event's minutes (storeRetry).
+	storeDown time.Time
 }
 
 // initRequest is an open candle to read from the source.
@@ -71,6 +75,12 @@ var initRank = map[domain.Interval]int{
 // initTimeout bounds one read of an open candle, the wait for its turn at
 // the source included.
 const initTimeout = 30 * time.Second
+
+// storeRetry is how long no open candle is read after the store failed to
+// answer for a price event's minutes (review C67 ③): the feed's updates
+// come every second or so, and each would queue them again, read the
+// store again and log the failure.
+const storeRetry = 5 * time.Second
 
 // ReferenceMap tells which listed symbols show which reference market: a
 // pair its own (its reference_symbol), a contract its own perpetual on
@@ -386,6 +396,9 @@ func (rc *ReferenceCandles) initialize(ref string, i domain.Interval) {
 	if _, ok := rc.refs.cached()[ref]; !ok {
 		return // the next update asks again once the mapping is known
 	}
+	if rc.now().Before(rc.storeDown) {
+		return // the store failed a moment ago: an update after storeRetry asks again
+	}
 	rc.pending[key] = true
 	rc.queue = append(rc.queue, initRequest{ref: ref, interval: i})
 	if !rc.working {
@@ -420,8 +433,9 @@ func (rc *ReferenceCandles) initializer() {
 		if m := rc.open[req.ref][domain.Minute1]; m != nil {
 			start = req.interval.Start(m.minute.OpenTime)
 		}
+		down := rc.now().Before(rc.storeDown) // queued before the store failed: asked again later
 		rc.mu.Unlock()
-		if !known || done || start.IsZero() {
+		if !known || done || start.IsZero() || down {
 			rc.forget(req)
 			continue
 		}
@@ -429,6 +443,7 @@ func (rc *ReferenceCandles) initializer() {
 		// The minutes a price event touched first (review C66): a store
 		// that cannot answer costs the source no request.
 		touched, err := rc.touchedIn(ctx, req.ref, req.interval, start)
+		storeFailed := err != nil
 		var got []domain.Candle
 		if err == nil {
 			got, err = rc.history.Klines(ctx, mapped, req.interval, time.Time{}, 1)
@@ -436,6 +451,9 @@ func (rc *ReferenceCandles) initializer() {
 		cancel()
 		rc.mu.Lock()
 		delete(rc.pending, req.ref+"|"+string(req.interval))
+		if storeFailed {
+			rc.storeDown = rc.now().Add(storeRetry)
+		}
 		if err != nil || len(got) == 0 {
 			rc.mu.Unlock()
 			if err != nil {

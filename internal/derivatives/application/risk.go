@@ -227,7 +227,8 @@ func reload(ctx context.Context, r ports.Repos, p domain.Position) (domain.Posit
 // takeOver hands positions to the liquidation engine: their orders are
 // canceled (every cross order of the user on contracts of the same
 // settlement asset for cross positions, the position's own for an
-// isolated one; a take-profit's or stop-loss's order too, review C65 ②)
+// isolated one; a take-profit's or stop-loss's order too, review C65 ②),
+// so are the take-profits and stop-losses waiting on them (review C67 ④),
 // and each is marked liquidating, which refuses the user's orders on it.
 func (s *Service) takeOver(ctx context.Context, positions []domain.Position, contracts map[string]domain.Contract,
 	marks map[string]decimal.Decimal, balance, maintenance decimal.Decimal,
@@ -249,7 +250,7 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 			if !ok || cur.Liquidating {
 				continue
 			}
-			for _, o := range active {
+			for k, o := range active {
 				mine := o.Symbol == cur.Symbol && (o.PositionSide == cur.Side || cur.Side == domain.SideBoth)
 				if cur.MarginMode == domain.Cross && o.MarginMode == domain.Cross {
 					// The cross account in liquidation is the one of the
@@ -265,9 +266,14 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 				if !mine || !canceled(o) {
 					continue
 				}
-				if _, err := s.requestCancel(ctx, r, o); err != nil {
+				// Kept as canceled: a cross order is every cross position's of
+				// its settlement asset, and is canceled once (review C67 ②).
+				if active[k], err = s.requestCancel(ctx, r, o); err != nil {
 					return err
 				}
+			}
+			if err := s.endConditionals(ctx, r, cur); err != nil {
+				return err
 			}
 			cur.Liquidating, cur.LiquidationAttempts, cur.LiquidationAt, cur.UpdatedAt = true, 0, s.Now(), s.Now()
 			saved, err := r.Positions().Save(ctx, cur)
@@ -290,6 +296,32 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 		}
 		return nil
 	})
+}
+
+// ReasonLiquidation ends the take-profits and stop-losses of a position
+// taken over for liquidation.
+const ReasonLiquidation = "LIQUIDATION"
+
+// endConditionals cancels the take-profits and stop-losses waiting on a
+// position taken over (review C67 ④): the liquidation engine closes it, and
+// they would stay ACTIVE until their trigger price was crossed, then end
+// FAILED or NO_POSITION. A contract has at most MaxConditionals active ones
+// per user.
+func (s *Service) endConditionals(ctx context.Context, r ports.Repos, p domain.Position) error {
+	list, err := r.Conditionals().OfUser(ctx, p.UserID, p.Symbol, domain.ConditionalActive, "", MaxConditionals+1)
+	if err != nil {
+		return err
+	}
+	for _, c := range list {
+		if c.PositionSide != p.Side {
+			continue
+		}
+		c.Status, c.Reason, c.UpdatedAt = domain.ConditionalCanceled, ReasonLiquidation, s.Now()
+		if err := r.Conditionals().Update(ctx, c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // continueLiquidation places the next liquidation order of a taken-over
