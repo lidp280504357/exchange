@@ -5,6 +5,7 @@ import {
 import { textOf } from "@exchange/core/platform/index";
 import { Button, EmptyState, ErrorState, QrCode, Skeleton, cn } from "@exchange/ui";
 import { AppCard } from "@exchange/ui/download/AppCard";
+import { PlatformLogo } from "@exchange/ui/download/PlatformLogo";
 import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -95,7 +96,7 @@ function Card({ platform, app, page, index }: { platform: AppPlatform; app: AppD
       notes={textOf(app.notes, locale)}
       qr={
         <>
-          <QrCode value={qrUrl(platform, app, page)} size={132} label={t("pcDownload.qrLabel", { platform: name })} />
+          <QrCode value={qrUrl(platform, app, page)} size={132} label={t("pcDownload.qrLabel", { platform: name })} logo={<PlatformLogo platform={platform} />} />
           <span className="text-center text-xs leading-relaxed text-fg-3">{kind === "iosOta" ? t("pcDownload.scanIos") : t("pcDownload.scan")}</span>
         </>
       }

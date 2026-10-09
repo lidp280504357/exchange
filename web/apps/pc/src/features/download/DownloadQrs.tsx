@@ -1,6 +1,7 @@
 import { routes } from "@exchange/core";
 import { offeredApps, qrUrl, usePlatformApps } from "@exchange/core/platform/apps";
 import { AppQrPanel } from "@exchange/ui/download/AppQrPanel";
+import { PlatformLogo } from "@exchange/ui/download/PlatformLogo";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -22,7 +23,13 @@ export function DownloadQrs() {
       title={t("pcDownload.menu.title")}
       codes={list.map(({ platform, app }) => {
         const caption = t(`pcDownload.platforms.${platform}`);
-        return { key: platform, value: qrUrl(platform, app, page), caption, label: t("pcDownload.qrLabel", { platform: caption }) };
+        return {
+          key: platform,
+          value: qrUrl(platform, app, page),
+          caption,
+          label: t("pcDownload.qrLabel", { platform: caption }),
+          logo: <PlatformLogo platform={platform} />,
+        };
       })}
       empty={<p className="w-56 py-2 text-sm text-fg-3">{apps.isError && !apps.data ? `${t("state.errorTitle")} · ${t("state.errorHint")}` : t("pcDownload.none")}</p>}
       footer={

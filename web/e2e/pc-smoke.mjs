@@ -23,7 +23,7 @@
 // switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
+import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, legendClear, menuOnTop, ok, sleep, start, withApps, withProducts } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -602,8 +602,9 @@ try {
   // console's switch says, also while no app is offered (the top bar's
   // panel then says none is yet); then with the answer of /v1/platform/apps
   // replaced by an uploaded Android app and an App Store link: a card each
-  // with its QR code, the APK's facts and button, the store's button; the
-  // top bar's entry opens a QR code for each, and the footer leads to the
+  // with its QR code (its platform's mark at the centre, F25, read back as
+  // its link), the APK's facts and button, the store's button; the top
+  // bar's entry opens such a QR code for each, and the footer leads to the
   // page; then with the switch off: no entry, the page still opens.
   const served = await page.evaluate(async () => (await fetch("/v1/platform/apps")).json());
   const shown = served.entry?.visible ?? true;
@@ -625,17 +626,34 @@ try {
     const cards = await page.evaluate(() =>
       ["android", "ios"].map((p) => {
         const card = document.querySelector(`[data-testid="app-${p}"]`);
-        return { text: card?.innerText ?? "", qr: card?.querySelectorAll('[role="img"] svg').length ?? 0, href: card?.querySelector("a[href]")?.getAttribute("href") };
+        return {
+          text: card?.innerText ?? "",
+          qr: card?.querySelectorAll('[role="img"] > svg').length ?? 0,
+          mark: card?.querySelector('[data-testid="qr-logo"] svg')?.getAttribute("data-platform"),
+          href: card?.querySelector("a[href]")?.getAttribute("href"),
+        };
       }),
     );
     const [apk, store] = cards;
     for (const want of ["下载 APK", "48.2 MB", "Android 7.0 及以上", "1.2.0"]) if (!apk?.text.includes(want)) throw new Error(`the APK's card has no ${want}: ${apk?.text}`);
     if (!store?.text.includes("前往 App Store") || store.href !== APPS_OFFERED.ios.url) throw new Error(`the App Store card: ${JSON.stringify(store)}`);
     if (apk?.qr !== 1 || store?.qr !== 1) throw new Error(`each card has a QR code: ${apk?.qr}, ${store?.qr}`);
+    // Each code carries its platform's mark (F25) and still reads as its link: the APK's the
+    // download page for Android, the store's the store.
+    const links = { android: `${APP}/download?platform=android`, ios: APPS_OFFERED.ios.url };
+    if (apk?.mark !== "android" || store?.mark !== "ios") throw new Error(`the cards' QR marks: ${apk?.mark}, ${store?.mark}`);
+    for (const p of ["android", "ios"]) {
+      const read = await decodeQr(page, await page.$(`[data-testid="app-${p}"] [role="img"]`));
+      if (read[0] !== links[p]) throw new Error(`the ${p} card's QR code reads ${JSON.stringify(read)}, not ${links[p]}`);
+    }
     await page.hover('header [data-testid="download-menu"]');
     await page.waitForSelector('[data-testid="download-qrs"]', { visible: true, timeout: 10000 });
-    const menuQrs = await page.$$eval('[data-testid="download-qrs"] [role="img"] svg', (svgs) => svgs.length);
+    const menuQrs = await page.$$eval('[data-testid="download-qrs"] [role="img"] > svg', (svgs) => svgs.length);
     if (menuQrs !== 2) throw new Error(`the top bar's download panel has ${menuQrs} QR codes`);
+    const menuMarks = await page.$$eval('[data-testid="download-qrs"] [data-testid="qr-logo"] svg', (svgs) => svgs.map((s) => s.getAttribute("data-platform")));
+    if (menuMarks.join() !== "android,ios") throw new Error(`the top bar's QR marks: ${menuMarks.join()}`);
+    const menuRead = await decodeQr(page, await page.$('[data-testid="download-qrs"]'));
+    if (menuRead.join() !== [links.android, links.ios].join()) throw new Error(`the top bar's QR codes read ${JSON.stringify(menuRead)}`);
     await shot("8c-download");
     await page.mouse.move(720, 700);
     if (!(await page.$('footer a[href="/download"]'))) throw new Error("the footer does not lead to the download page");
@@ -647,7 +665,7 @@ try {
     const [menu, footer] = await entries();
     if (menu || footer) throw new Error(`the console hides the download entries, yet the top bar's ${menu} and the footer's ${footer} show`);
   });
-  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet"'}, the entries ${shown ? "shown" : "hidden"} as the console says; with two apps, a card each (QR code, facts, button), the top bar's two QR codes and the footer's link; with the switch off no entry, the page still opens`);
+  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet"'}, the entries ${shown ? "shown" : "hidden"} as the console says; with two apps, a card each (QR code with its platform's mark, read back as its link; facts, button), the top bar's two such QR codes and the footer's link; with the switch off no entry, the page still opens`);
 
   // 8d. Product lines (design 2026-10-07, product line switches, batch K2):
   // with the answer of /v1/platform/products replaced by spot and the

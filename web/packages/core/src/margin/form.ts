@@ -212,14 +212,17 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
     setError(null);
     setAll(false);
   };
+  // Another account or pair has its own maximum (and maybe another coin): the amount starts afresh.
   const setAccount = (a: MarginAccountType) => {
     setAccountState(a);
+    setAmountState("");
     clear();
   };
   const setSymbol = (s: string) => {
     setSymbolState(s);
     const p = isolatedPairs.find((x) => x.symbol === s);
     if (p && asset !== p.base && asset !== p.quote) setAssetState(p.quote);
+    setAmountState("");
     clear();
   };
   const setDirection = (d: Direction) => {

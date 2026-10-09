@@ -4,8 +4,12 @@ import { QrCode } from "../data/QrCode";
 export type AppQrPanelProps = {
   /** "扫码下载 App". */
   title: string;
-  /** A QR code each: what it holds, its caption ("Android") and its name ("Android 下载二维码", the caption without one). */
-  codes: { key: string; value: string; caption: string; label?: string }[];
+  /**
+   * A QR code each: what it holds, its caption ("Android"), its name
+   * ("Android 下载二维码", the caption without one) and the mark at its
+   * centre (PlatformLogo).
+   */
+  codes: { key: string; value: string; caption: string; label?: string; logo?: ReactNode }[];
   /** The way to the download page, under the codes. */
   footer?: ReactNode;
   /** What shows instead of the codes while no app is offered ("暂未提供 App"). */
@@ -25,7 +29,7 @@ export function AppQrPanel({ title, codes, footer, empty }: AppQrPanelProps) {
         <div className="flex gap-4">
           {codes.map((c) => (
             <figure key={c.key} className="flex flex-col items-center gap-1.5">
-              <QrCode value={c.value} size={112} label={c.label ?? c.caption} />
+              <QrCode value={c.value} size={112} label={c.label ?? c.caption} logo={c.logo} />
               <figcaption className="text-xs text-fg-2">{c.caption}</figcaption>
             </figure>
           ))}
