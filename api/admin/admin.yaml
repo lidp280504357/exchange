@@ -762,11 +762,13 @@ paths:
         - name: q
           in: query
           description: >-
-            A keyword: the accounts whose username, email address or phone number contains it (any case). At most 254
-            characters without control characters, otherwise 400.
+            A keyword: the accounts whose username, email address or phone number contains it (any case). 2 to 64
+            characters once trimmed, as auth-service and user-service take it (B170), without control characters,
+            otherwise 400.
           schema:
             type: string
-            maxLength: 254
+            minLength: 2
+            maxLength: 64
             examples: [pacminer]
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'

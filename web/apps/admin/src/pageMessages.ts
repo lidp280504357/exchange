@@ -5,6 +5,7 @@ import { attemptsEn, attemptsZh } from "./messages/attempts";
 import { coinmEn, coinmZh } from "./messages/coinm";
 import { contentEn, contentZh } from "./messages/content";
 import { custodyEn, custodyZh } from "./messages/custody";
+import { flagsEn, flagsZh } from "./messages/flags";
 import { houseEn, houseZh } from "./messages/house";
 import { identityEn, identityZh } from "./messages/identity";
 import { changesEn, changesZh, instrumentsEn, instrumentsZh, profileEn, profileZh } from "./messages/instruments";
@@ -29,11 +30,11 @@ import { walletEn, walletZh } from "./messages/wallet";
 const pageMessages = {
   "zh-CN": merge(
     {}, usersZh, walletZh, moneyZh, tradingZh, instrumentsZh, systemZh, changesZh, contentZh, reportsZh, profileZh, simZh, attemptsZh, unownedZh,
-    custodyZh, houseZh, simTargetZh, platformZh, pagesZh, marginZh, coinmZh, appsZh, identityZh, productsZh, summaryZh,
+    custodyZh, houseZh, simTargetZh, platformZh, pagesZh, marginZh, coinmZh, appsZh, identityZh, productsZh, summaryZh, flagsZh,
   ),
   en: merge(
     {}, usersEn, walletEn, moneyEn, tradingEn, instrumentsEn, systemEn, changesEn, contentEn, reportsEn, profileEn, simEn, attemptsEn, unownedEn,
-    custodyEn, houseEn, simTargetEn, platformEn, pagesEn, marginEn, coinmEn, appsEn, identityEn, productsEn, summaryEn,
+    custodyEn, houseEn, simTargetEn, platformEn, pagesEn, marginEn, coinmEn, appsEn, identityEn, productsEn, summaryEn, flagsEn,
   ),
 };
 

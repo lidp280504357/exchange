@@ -48,6 +48,7 @@ const Layout = createContext({ noStatus: false, compact: false });
 
 /** SummaryTable holds SummaryRows under their headings. */
 export function SummaryTable({ label, headings, noStatus = false, compact = false, className, children }: SummaryTableProps) {
+  const { t } = useTranslation();
   const l = layouts[compact ? "compact" : "wide"];
   return (
     <Layout.Provider value={{ noStatus, compact }}>
@@ -57,8 +58,13 @@ export function SummaryTable({ label, headings, noStatus = false, compact = fals
             <span role="columnheader">{headings.item}</span>
             {!noStatus && <span role="columnheader">{headings.status}</span>}
             <span role="columnheader">{headings.summary}</span>
-            <span />
-            <span />
+            {/* The action's and the arrow's columns, named for assistive technology only. */}
+            <span role="columnheader">
+              <span className="sr-only">{t("ui.summary.action")}</span>
+            </span>
+            <span role="columnheader">
+              <span className="sr-only">{t("ui.summary.details")}</span>
+            </span>
           </div>
         )}
         <div role="rowgroup" className="divide-y divide-line-1">

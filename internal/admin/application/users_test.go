@@ -48,8 +48,14 @@ func TestUserSearch(t *testing.T) {
 	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{UserIDs: []string{someUser}}); err != nil || h.users.listed.UserIDs != nil {
 		t.Fatalf("no keyword, no IDs %+v %v", h.users.listed, err)
 	}
-	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Q: strings.Repeat("a", 255)}); code(err) != apperr.CodeInvalidArgument {
-		t.Fatalf("a keyword too long: %v", err)
+	// A keyword has 2 to 64 characters, as auth-service and user-service take it (B170), counted as characters.
+	for name, q := range map[string]string{"one character": " a ", "65 characters": strings.Repeat("a", 65), "255 characters": strings.Repeat("a", 255)} {
+		if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Q: q}); code(err) != apperr.CodeInvalidArgument {
+			t.Fatalf("a keyword of %s: %v", name, err)
+		}
+	}
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Q: strings.Repeat("矿", 64)}); err != nil || h.users.listed.Q != strings.Repeat("矿", 64) {
+		t.Fatalf("a keyword of 64 characters: %+v %v", h.users.listed, err)
 	}
 }
 

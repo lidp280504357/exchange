@@ -28,7 +28,7 @@ export default {
     stepCurrent: "進行中",
     stepUpcoming: "未開始",
     stepError: "失敗",
-    summary: { expand: "展開", collapse: "收起", more: "+{{n}}" },
+    summary: { expand: "展開", collapse: "收起", more: "+{{n}}", action: "操作", details: "明細" },
     confirm: {
       target: "操作對象",
       reason: "操作理由",

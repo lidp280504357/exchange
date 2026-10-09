@@ -52,7 +52,7 @@ export const summaryZh = {
       recon: { ok: "一致", bad: "不一致", allOk: "全部一致", some: "{{n}} 处不一致", firstOnly: "只列出前 {{n}} 处" },
       health: { pairs: "{{n}} 个：", haltedAt: "暂停于" },
       caps: { cap: "额度", key: "键名", unit: "单位", lower: "调低时", raise: "调高时" },
-      welcome: { now: "当前赠送", none: "不赠送", given: "新账户赠送", version: "账本设置，版本 {{v}}", master: "总闸" },
+      welcome: { now: "当前赠送", none: "不赠送", given: "新账户赠送", version: "账本设置，版本 {{v}}", master: "总闸", from: "现在", to: "改为" },
     },
   },
 };
@@ -107,7 +107,7 @@ export const summaryEn = {
       recon: { ok: "Consistent", bad: "Mismatched", allOk: "All consistent", some: "{{n}} mismatches", firstOnly: "The first {{n}} only" },
       health: { pairs: "{{n}}:", haltedAt: "halted at" },
       caps: { cap: "Cap", key: "Key", unit: "Unit", lower: "Lowered", raise: "Raised" },
-      welcome: { now: "Credits now", none: "Nothing given", given: "New accounts get", version: "Ledger setting, version {{v}}", master: "Master switch" },
+      welcome: { now: "Credits now", none: "Nothing given", given: "New accounts get", version: "Ledger setting, version {{v}}", master: "Master switch", from: "Now", to: "To" },
     },
   },
 };

@@ -59,7 +59,9 @@ export default function Launch() {
             <span className="text-md font-semibold text-fg-1">{c.ready ? t("admin.launch.ready") : t("admin.launch.notReady", { n: open.length })}</span>
             {!c.ready && <span className="text-sm text-fg-2">{open.map((it) => t(`admin.launch.items.${it.key}.name`)).join(t("admin.summary.sep"))}</span>}
             <span className="text-xs text-fg-3">
-              {t("admin.launch.checkedAt")} <TimeText value={c.checked_at} style="timeSeconds" /> · {t("admin.launch.scope")}
+              {t("admin.launch.checkedAt")} <TimeText value={c.checked_at} style="timeSeconds" />
+              {t("admin.summary.clause")}
+              {t("admin.launch.scope")}
             </span>
           </div>
         </div>

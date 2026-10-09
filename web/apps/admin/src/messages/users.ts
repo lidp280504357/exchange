@@ -9,6 +9,7 @@ export const usersZh = {
       searchInvalid: "输入有误：最多 254 个字符，不能含不可见字符",
       keyword: "关键字",
       keywordHint: "用户名、邮箱或手机号里含有它的账户（不分大小写）",
+      keywordLength: "没有完全匹配的账户；按关键字筛选需 2–64 个字符",
     },
     user: {
       back: "用户列表",
@@ -163,6 +164,7 @@ export const usersEn = {
       searchInvalid: "Invalid input: at most 254 characters, no invisible ones",
       keyword: "Keyword",
       keywordHint: "Accounts whose username, email or phone contains it (any case)",
+      keywordLength: "No account matches it exactly; a keyword to filter by has 2 to 64 characters",
     },
     user: {
       back: "Users",

@@ -1,3 +1,4 @@
+import { formatDecimal } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, ErrorState, FormField, IconButton, Input, KeyTag, Segmented, Select, ShortList, Skeleton, SummaryRow, SummaryTable, Switch } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +12,7 @@ import { Card, Page } from "../../kit/Page";
 import { platformKey, usePlatformProfile } from "../../kit/profile";
 import { launchKey } from "./Launch";
 import { ReadOnly } from "../../kit/ReadOnly";
-import { Amount, AmountGrid, FlagState, positive } from "../../kit/summary";
+import { Amount, AmountGrid, FlagState, Lines, positive } from "../../kit/summary";
 import { TextsField } from "../../kit/texts";
 
 // The platform's settings (design 2026-10-04 §4.1, §4.2, §5; D2): the
@@ -387,6 +388,9 @@ function WelcomeBody({ setting: s, rows, setRows, edit }: { setting: Setting; ro
   const asked = (rows ?? []).filter((r) => r.asset.trim() !== "");
   const raising = asked.some((r) => Number(r.amount) > Number(now.get(r.asset.trim().toUpperCase()) ?? 0));
   const given = s.credits.filter((c) => positive(c.amount));
+  // A set of credits in words: "10,000 USDT、0.1 BTC", or none given.
+  const creditsText = (cs: { asset: string; amount: string }[]) =>
+    cs.length ? cs.map((c) => `${formatDecimal(c.amount)} ${c.asset}`).join(t("admin.summary.sep")) : t("admin.launch.nothing");
   return (
     <div className="flex flex-col gap-3">
       <SummaryTable label={t("admin.platform.welcome")} noStatus>
@@ -444,10 +448,12 @@ function WelcomeBody({ setting: s, rows, setRows, edit }: { setting: Setting; ro
               title={t(raising ? "admin.platform.welcomeAskTitle" : "admin.platform.welcomeSaveTitle")}
               description={raising ? t("admin.platform.welcomeRaiseHint") : undefined}
               target={
-                <span className="flex flex-col font-mono text-xs">
-                  <span>{s.credits.length ? s.credits.map((c) => `${c.amount} ${c.asset}`).join(" · ") : t("admin.launch.nothing")}</span>
-                  <span>→ {asked.length ? asked.map((r) => `${r.amount || 0} ${r.asset.trim().toUpperCase()}`).join(" · ") : t("admin.launch.nothing")}</span>
-                </span>
+                <Lines
+                  items={[
+                    [t("admin.summary.welcome.from"), creditsText(s.credits)],
+                    [t("admin.summary.welcome.to"), creditsText(asked.map((r) => ({ asset: r.asset.trim().toUpperCase(), amount: r.amount || "0" })))],
+                  ]}
+                />
               }
               confirmWord="welcome"
               run={async (reason) => {

@@ -67,6 +67,9 @@ export default function Users() {
 /** invalid is an input no account could match (A93): over 254 characters, or with invisible ones. */
 const invalid = (s: string) => [...s].length > 254 || /\p{Cc}/u.test(s);
 
+/** keywordFits is a list's keyword as auth-service and user-service take it (B170): 2 to 64 characters. */
+const keywordFits = (s: string) => [...s].length >= 2 && [...s].length <= 64;
+
 /**
  * UserSearch (A93): on Enter, an exact ID, email, phone or username opens the user (B167); anything else filters the
  * list by it as a keyword (kept in the address, so views save it); only what no account could match is refused.
@@ -84,8 +87,11 @@ function UserSearch({ keyword, onFound, onKeyword }: { keyword: string; onFound:
     try {
       onFound(adminData(await adminApi.GET("/admin/v1/users/lookup", { params: { query: { q: query } } })).user.id);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) onKeyword(query);
-      else if (err instanceof ApiError && err.status === 400) toast.error(t("admin.users.searchInvalid"));
+      // No such account: the input as the list's keyword, of 2 to 64 characters (B170).
+      if (err instanceof ApiError && err.status === 404) {
+        if (keywordFits(query)) onKeyword(query);
+        else toast.info(t("admin.users.keywordLength"));
+      } else if (err instanceof ApiError && err.status === 400) toast.error(t("admin.users.searchInvalid"));
       else errorToast(err);
     } finally {
       setBusy(false);

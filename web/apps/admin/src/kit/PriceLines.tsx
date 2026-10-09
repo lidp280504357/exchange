@@ -125,7 +125,7 @@ export function PriceLines({
               <div key={l.key} className="flex items-center gap-2 text-fg-2">
                 <span className={cn("size-2 rounded-full", l.dotClassName)} />
                 <span className="flex-1">{l.label}</span>
-                <span className="font-mono tabular-nums text-fg-1">{v === null || v === undefined ? "—" : format(v)}</span>
+                <span className="tabular-nums text-fg-1">{v === null || v === undefined ? "—" : format(v)}</span>
               </div>
             );
           })}

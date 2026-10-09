@@ -7689,7 +7689,7 @@ export interface operations {
                 status?: "ACTIVE" | "RISK_REVIEW" | "FROZEN" | "CLOSED";
                 /** @description ISO 3166-1 alpha-2. */
                 region?: string;
-                /** @description A keyword: the accounts whose username, email address or phone number contains it (any case). At most 254 characters without control characters, otherwise 400. */
+                /** @description A keyword: the accounts whose username, email address or phone number contains it (any case). 2 to 64 characters once trimmed, as auth-service and user-service take it (B170), without control characters, otherwise 400. */
                 q?: string;
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];

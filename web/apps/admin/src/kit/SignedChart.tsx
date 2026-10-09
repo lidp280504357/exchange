@@ -132,7 +132,7 @@ export function SignedChart({ data, series, height = 240, className, "aria-label
             <div key={s.key} className="flex items-center gap-2 text-fg-2">
               <span className={cn("size-2 rounded-full", dots[s.color])} />
               <span className="flex-1">{s.label}</span>
-              <span className="font-mono tabular-nums text-fg-1">{(s.format ?? plain)(data[hover]!.values[s.key] ?? 0)}</span>
+              <span className="tabular-nums text-fg-1">{(s.format ?? plain)(data[hover]!.values[s.key] ?? 0)}</span>
             </div>
           ))}
         </div>

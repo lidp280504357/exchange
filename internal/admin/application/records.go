@@ -33,6 +33,9 @@ func (s *Service) ListUsers(ctx context.Context, p Principal, q ports.UserQuery)
 	if q.Q, err = searchText(q.Q); err != nil {
 		return nil, "", err
 	}
+	if n := utf8.RuneCountInString(q.Q); q.Q != "" && (n < minKeyword || n > maxKeyword) {
+		return nil, "", apperr.Invalid("a keyword has 2 to 64 characters")
+	}
 	q.UserIDs = nil
 	if q.Q != "" {
 		// A keyword (A93): user-service matches the usernames, and the
@@ -52,11 +55,15 @@ func (s *Service) ListUsers(ctx context.Context, p Principal, q ports.UserQuery)
 }
 
 // The console's search box (A93): an input of at most maxSearch characters
-// (an email address's longest) without control characters, and the
-// accounts whose email address or phone number match it, at most
-// searchMatches (user-service's bound on UserIDs).
+// (an email address's longest) without control characters; as a list's
+// keyword, minKeyword to maxKeyword characters (auth-service's and
+// user-service's bounds, B170), and the accounts whose email address or
+// phone number match it, at most searchMatches (user-service's bound on
+// UserIDs).
 const (
 	maxSearch     = 254
+	minKeyword    = 2
+	maxKeyword    = 64
 	searchMatches = 500
 )
 

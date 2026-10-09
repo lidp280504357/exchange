@@ -226,7 +226,8 @@ expect 200 - "and by ID"
 # The users list's search (A93, B167): a username opens the account; a
 # keyword that names none is 404 (not 400) and lists the accounts that
 # contain it, by email (auth-service) or username (user-service); the
-# region filter narrows them; only an input no account could match is 400.
+# region filter narrows them; only an input no account could match, or a
+# keyword outside 2 to 64 characters (B170), is 400.
 as AUDITOR GET "/admin/v1/users/$USER_ID" ""
 USERNAME=$(jq -r '.username // ""' <<<"$BODY")
 REGION=$(jq -r '.region // ""' <<<"$BODY")
@@ -256,8 +257,11 @@ else
     as AUDITOR GET "/admin/v1/users?q=$KEYWORD&region=$OTHER" ""
     expect 200 - "another region ($OTHER)"
     check '.items == []' "leaves it out"
-    as AUDITOR GET "/admin/v1/users?q=$(printf 'a%.0s' $(seq 1 255))" ""
-    expect 400 COMMON_INVALID_ARGUMENT "a keyword of 255 characters is refused"
+    # A keyword has 2 to 64 characters, as auth-service and user-service take it (B170).
+    as AUDITOR GET "/admin/v1/users?q=a" ""
+    expect 400 COMMON_INVALID_ARGUMENT "a keyword of one character is refused"
+    as AUDITOR GET "/admin/v1/users?q=$(printf 'a%.0s' $(seq 1 65))" ""
+    expect 400 COMMON_INVALID_ARGUMENT "and one of 65"
   fi
 fi
 

@@ -79,7 +79,7 @@ export default function Overview({ admin }: { admin: Admin }) {
               {q.isPending ? (
                 <Skeleton className="mt-2 h-6 w-24" />
               ) : (
-                <div className="relative mt-1.5 truncate font-mono text-xl font-semibold tabular-nums text-fg-1" title={typeof s.value === "string" ? s.value : undefined}>
+                <div className="relative mt-1.5 truncate text-xl font-semibold tabular-nums text-fg-1" title={typeof s.value === "string" ? s.value : undefined}>
                   {s.value ?? "—"}
                 </div>
               )}
