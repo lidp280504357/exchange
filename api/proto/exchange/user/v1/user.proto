@@ -112,7 +112,14 @@ message User {
   // the default.
   string avatar_url = 11;
   string avatar_thumb_url = 12;
+  // HUMAN (a person, every sign-up), BOT (the simulated market's bots),
+  // TEST (the end-to-end scripts' accounts) or SYSTEM (HOUSE and the
+  // like): L0, what the console shows and filters by; nothing else reads
+  // it. Operators and scripts set it (exchangectl users kind, PUT
+  // /internal/users/{id}/kind: api/internal/users.yaml), not the console.
+  string kind = 13;
 }
+
 
 message CreateUserRequest {
   string user_id = 1;
@@ -200,6 +207,9 @@ message ListUsersRequest {
   // the username matches: auth-service's SearchUsers, the email addresses
   // and phone numbers that contain it. At most 500.
   repeated string user_ids = 8;
+  // Only accounts of these kinds (HUMAN, BOT, TEST, SYSTEM; L0); empty for
+  // all.
+  repeated string kinds = 9;
 }
 
 message ListUsersResponse {
@@ -219,6 +229,16 @@ message UserStatsResponse {
   int64 total = 1;
   int64 created_since = 2;
   repeated DayCount days = 3;
+  // The same two counts for each kind (L0), in the order HUMAN, BOT, TEST,
+  // SYSTEM; total and created_since are their sums.
+  repeated KindCount by_kind = 4;
+}
+
+// KindCount is the accounts of one kind.
+message KindCount {
+  string kind = 1;
+  int64 total = 2;
+  int64 created_since = 3;
 }
 
 // DayCount is a number of accounts created on one UTC day.

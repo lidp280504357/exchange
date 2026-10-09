@@ -507,8 +507,14 @@ type User struct {
 	// the default.
 	AvatarUrl      string `protobuf:"bytes,11,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
 	AvatarThumbUrl string `protobuf:"bytes,12,opt,name=avatar_thumb_url,json=avatarThumbUrl,proto3" json:"avatar_thumb_url,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// HUMAN (a person, every sign-up), BOT (the simulated market's bots),
+	// TEST (the end-to-end scripts' accounts) or SYSTEM (HOUSE and the
+	// like): L0, what the console shows and filters by; nothing else reads
+	// it. Operators and scripts set it (exchangectl users kind, PUT
+	// /internal/users/{id}/kind: api/internal/users.yaml), not the console.
+	Kind          string `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -621,6 +627,13 @@ func (x *User) GetAvatarUrl() string {
 func (x *User) GetAvatarThumbUrl() string {
 	if x != nil {
 		return x.AvatarThumbUrl
+	}
+	return ""
+}
+
+func (x *User) GetKind() string {
+	if x != nil {
+		return x.Kind
 	}
 	return ""
 }
@@ -1208,7 +1221,10 @@ type ListUsersRequest struct {
 	// The accounts another service matched on the same keyword, listed with
 	// the username matches: auth-service's SearchUsers, the email addresses
 	// and phone numbers that contain it. At most 500.
-	UserIds       []string `protobuf:"bytes,8,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	UserIds []string `protobuf:"bytes,8,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	// Only accounts of these kinds (HUMAN, BOT, TEST, SYSTEM; L0); empty for
+	// all.
+	Kinds         []string `protobuf:"bytes,9,rep,name=kinds,proto3" json:"kinds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1295,6 +1311,13 @@ func (x *ListUsersRequest) GetQ() string {
 func (x *ListUsersRequest) GetUserIds() []string {
 	if x != nil {
 		return x.UserIds
+	}
+	return nil
+}
+
+func (x *ListUsersRequest) GetKinds() []string {
+	if x != nil {
+		return x.Kinds
 	}
 	return nil
 }
@@ -1407,10 +1430,13 @@ func (x *UserStatsRequest) GetDays() int32 {
 }
 
 type UserStatsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Total         int64                  `protobuf:"varint,1,opt,name=total,proto3" json:"total,omitempty"`
-	CreatedSince  int64                  `protobuf:"varint,2,opt,name=created_since,json=createdSince,proto3" json:"created_since,omitempty"`
-	Days          []*DayCount            `protobuf:"bytes,3,rep,name=days,proto3" json:"days,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Total        int64                  `protobuf:"varint,1,opt,name=total,proto3" json:"total,omitempty"`
+	CreatedSince int64                  `protobuf:"varint,2,opt,name=created_since,json=createdSince,proto3" json:"created_since,omitempty"`
+	Days         []*DayCount            `protobuf:"bytes,3,rep,name=days,proto3" json:"days,omitempty"`
+	// The same two counts for each kind (L0), in the order HUMAN, BOT, TEST,
+	// SYSTEM; total and created_since are their sums.
+	ByKind        []*KindCount `protobuf:"bytes,4,rep,name=by_kind,json=byKind,proto3" json:"by_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1466,6 +1492,74 @@ func (x *UserStatsResponse) GetDays() []*DayCount {
 	return nil
 }
 
+func (x *UserStatsResponse) GetByKind() []*KindCount {
+	if x != nil {
+		return x.ByKind
+	}
+	return nil
+}
+
+// KindCount is the accounts of one kind.
+type KindCount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	CreatedSince  int64                  `protobuf:"varint,3,opt,name=created_since,json=createdSince,proto3" json:"created_since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KindCount) Reset() {
+	*x = KindCount{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KindCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KindCount) ProtoMessage() {}
+
+func (x *KindCount) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KindCount.ProtoReflect.Descriptor instead.
+func (*KindCount) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *KindCount) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *KindCount) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *KindCount) GetCreatedSince() int64 {
+	if x != nil {
+		return x.CreatedSince
+	}
+	return 0
+}
+
 // DayCount is a number of accounts created on one UTC day.
 type DayCount struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1478,7 +1572,7 @@ type DayCount struct {
 
 func (x *DayCount) Reset() {
 	*x = DayCount{}
-	mi := &file_exchange_user_v1_user_proto_msgTypes[23]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1490,7 +1584,7 @@ func (x *DayCount) String() string {
 func (*DayCount) ProtoMessage() {}
 
 func (x *DayCount) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_user_v1_user_proto_msgTypes[23]
+	mi := &file_exchange_user_v1_user_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1503,7 +1597,7 @@ func (x *DayCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DayCount.ProtoReflect.Descriptor instead.
 func (*DayCount) Descriptor() ([]byte, []int) {
-	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{23}
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DayCount) GetDay() string {
@@ -1556,7 +1650,7 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"acceptedAt\"\x96\x01\n" +
 	"\x16GetUserHistoryResponse\x12E\n" +
 	"\x0estatus_changes\x18\x01 \x03(\v2\x1e.exchange.user.v1.StatusChangeR\rstatusChanges\x125\n" +
-	"\bconsents\x18\x02 \x03(\v2\x19.exchange.user.v1.ConsentR\bconsents\"\xb5\x03\n" +
+	"\bconsents\x18\x02 \x03(\v2\x19.exchange.user.v1.ConsentR\bconsents\"\xc9\x03\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
@@ -1572,7 +1666,8 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\x11usernameChangedAt\x12\x1d\n" +
 	"\n" +
 	"avatar_url\x18\v \x01(\tR\tavatarUrl\x12(\n" +
-	"\x10avatar_thumb_url\x18\f \x01(\tR\x0eavatarThumbUrl\"\xd9\x01\n" +
+	"\x10avatar_thumb_url\x18\f \x01(\tR\x0eavatarThumbUrl\x12\x12\n" +
+	"\x04kind\x18\r \x01(\tR\x04kind\"\xd9\x01\n" +
 	"\x11CreateUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12\x1a\n" +
@@ -1609,7 +1704,7 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x14ChangeStatusResponse\x12\x1f\n" +
 	"\vfrom_status\x18\x01 \x01(\tR\n" +
 	"fromStatus\x12\x1b\n" +
-	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\x9b\x02\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\xb1\x02\n" +
 	"\x10ListUsersRequest\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12=\n" +
@@ -1618,18 +1713,24 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x14\n" +
 	"\x05limit\x18\x06 \x01(\x05R\x05limit\x12\f\n" +
 	"\x01q\x18\a \x01(\tR\x01q\x12\x19\n" +
-	"\buser_ids\x18\b \x03(\tR\auserIds\"b\n" +
+	"\buser_ids\x18\b \x03(\tR\auserIds\x12\x14\n" +
+	"\x05kinds\x18\t \x03(\tR\x05kinds\"b\n" +
 	"\x11ListUsersResponse\x12,\n" +
 	"\x05users\x18\x01 \x03(\v2\x16.exchange.user.v1.UserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\"X\n" +
 	"\x10UserStatsRequest\x120\n" +
 	"\x05since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x12\n" +
-	"\x04days\x18\x02 \x01(\x05R\x04days\"~\n" +
+	"\x04days\x18\x02 \x01(\x05R\x04days\"\xb4\x01\n" +
 	"\x11UserStatsResponse\x12\x14\n" +
 	"\x05total\x18\x01 \x01(\x03R\x05total\x12#\n" +
 	"\rcreated_since\x18\x02 \x01(\x03R\fcreatedSince\x12.\n" +
-	"\x04days\x18\x03 \x03(\v2\x1a.exchange.user.v1.DayCountR\x04days\"2\n" +
+	"\x04days\x18\x03 \x03(\v2\x1a.exchange.user.v1.DayCountR\x04days\x124\n" +
+	"\aby_kind\x18\x04 \x03(\v2\x1b.exchange.user.v1.KindCountR\x06byKind\"Z\n" +
+	"\tKindCount\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\x12#\n" +
+	"\rcreated_since\x18\x03 \x01(\x03R\fcreatedSince\"2\n" +
 	"\bDayCount\x12\x10\n" +
 	"\x03day\x18\x01 \x01(\tR\x03day\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count2\xae\a\n" +
@@ -1659,7 +1760,7 @@ func file_exchange_user_v1_user_proto_rawDescGZIP() []byte {
 	return file_exchange_user_v1_user_proto_rawDescData
 }
 
-var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*ResetUsernameRequest)(nil),     // 0: exchange.user.v1.ResetUsernameRequest
 	(*ResetUsernameResponse)(nil),    // 1: exchange.user.v1.ResetUsernameResponse
@@ -1684,50 +1785,52 @@ var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*ListUsersResponse)(nil),        // 20: exchange.user.v1.ListUsersResponse
 	(*UserStatsRequest)(nil),         // 21: exchange.user.v1.UserStatsRequest
 	(*UserStatsResponse)(nil),        // 22: exchange.user.v1.UserStatsResponse
-	(*DayCount)(nil),                 // 23: exchange.user.v1.DayCount
-	(*timestamppb.Timestamp)(nil),    // 24: google.protobuf.Timestamp
+	(*KindCount)(nil),                // 23: exchange.user.v1.KindCount
+	(*DayCount)(nil),                 // 24: exchange.user.v1.DayCount
+	(*timestamppb.Timestamp)(nil),    // 25: google.protobuf.Timestamp
 }
 var file_exchange_user_v1_user_proto_depIdxs = []int32{
 	8,  // 0: exchange.user.v1.ResetUsernameResponse.user:type_name -> exchange.user.v1.User
 	8,  // 1: exchange.user.v1.ResetAvatarResponse.user:type_name -> exchange.user.v1.User
-	24, // 2: exchange.user.v1.StatusChange.at:type_name -> google.protobuf.Timestamp
-	24, // 3: exchange.user.v1.Consent.accepted_at:type_name -> google.protobuf.Timestamp
+	25, // 2: exchange.user.v1.StatusChange.at:type_name -> google.protobuf.Timestamp
+	25, // 3: exchange.user.v1.Consent.accepted_at:type_name -> google.protobuf.Timestamp
 	5,  // 4: exchange.user.v1.GetUserHistoryResponse.status_changes:type_name -> exchange.user.v1.StatusChange
 	6,  // 5: exchange.user.v1.GetUserHistoryResponse.consents:type_name -> exchange.user.v1.Consent
-	24, // 6: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	24, // 7: exchange.user.v1.User.username_changed_at:type_name -> google.protobuf.Timestamp
+	25, // 6: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	25, // 7: exchange.user.v1.User.username_changed_at:type_name -> google.protobuf.Timestamp
 	8,  // 8: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
 	8,  // 9: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
-	24, // 10: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
-	24, // 11: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
+	25, // 10: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
+	25, // 11: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
 	8,  // 12: exchange.user.v1.ListUsersResponse.users:type_name -> exchange.user.v1.User
-	24, // 13: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
-	23, // 14: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
-	9,  // 15: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
-	11, // 16: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
-	13, // 17: exchange.user.v1.UserService.FindUsername:input_type -> exchange.user.v1.FindUsernameRequest
-	15, // 18: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
-	17, // 19: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
-	19, // 20: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
-	21, // 21: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
-	4,  // 22: exchange.user.v1.UserService.GetUserHistory:input_type -> exchange.user.v1.GetUserHistoryRequest
-	0,  // 23: exchange.user.v1.UserService.ResetUsername:input_type -> exchange.user.v1.ResetUsernameRequest
-	2,  // 24: exchange.user.v1.UserService.ResetAvatar:input_type -> exchange.user.v1.ResetAvatarRequest
-	10, // 25: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
-	12, // 26: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
-	14, // 27: exchange.user.v1.UserService.FindUsername:output_type -> exchange.user.v1.FindUsernameResponse
-	16, // 28: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
-	18, // 29: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
-	20, // 30: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
-	22, // 31: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
-	7,  // 32: exchange.user.v1.UserService.GetUserHistory:output_type -> exchange.user.v1.GetUserHistoryResponse
-	1,  // 33: exchange.user.v1.UserService.ResetUsername:output_type -> exchange.user.v1.ResetUsernameResponse
-	3,  // 34: exchange.user.v1.UserService.ResetAvatar:output_type -> exchange.user.v1.ResetAvatarResponse
-	25, // [25:35] is the sub-list for method output_type
-	15, // [15:25] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	25, // 13: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
+	24, // 14: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
+	23, // 15: exchange.user.v1.UserStatsResponse.by_kind:type_name -> exchange.user.v1.KindCount
+	9,  // 16: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
+	11, // 17: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
+	13, // 18: exchange.user.v1.UserService.FindUsername:input_type -> exchange.user.v1.FindUsernameRequest
+	15, // 19: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
+	17, // 20: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
+	19, // 21: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
+	21, // 22: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
+	4,  // 23: exchange.user.v1.UserService.GetUserHistory:input_type -> exchange.user.v1.GetUserHistoryRequest
+	0,  // 24: exchange.user.v1.UserService.ResetUsername:input_type -> exchange.user.v1.ResetUsernameRequest
+	2,  // 25: exchange.user.v1.UserService.ResetAvatar:input_type -> exchange.user.v1.ResetAvatarRequest
+	10, // 26: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
+	12, // 27: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
+	14, // 28: exchange.user.v1.UserService.FindUsername:output_type -> exchange.user.v1.FindUsernameResponse
+	16, // 29: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
+	18, // 30: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
+	20, // 31: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
+	22, // 32: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
+	7,  // 33: exchange.user.v1.UserService.GetUserHistory:output_type -> exchange.user.v1.GetUserHistoryResponse
+	1,  // 34: exchange.user.v1.UserService.ResetUsername:output_type -> exchange.user.v1.ResetUsernameResponse
+	3,  // 35: exchange.user.v1.UserService.ResetAvatar:output_type -> exchange.user.v1.ResetAvatarResponse
+	26, // [26:36] is the sub-list for method output_type
+	16, // [16:26] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_exchange_user_v1_user_proto_init() }
@@ -1741,7 +1844,7 @@ func file_exchange_user_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_user_v1_user_proto_rawDesc), len(file_exchange_user_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

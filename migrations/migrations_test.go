@@ -79,6 +79,17 @@ func TestUsersSchema(t *testing.T) {
 		rejects(t, db, "username "+bad, `INSERT INTO users (id, region, username) VALUES ($1, 'CN', $2)`, uuid.New(), bad)
 	}
 	rejects(t, db, "an avatar that is not an object", `INSERT INTO users (id, region, avatar) VALUES ($1, 'CN', '"x"')`, uuid.New())
+	// Kinds (L0): HUMAN by default, four of them; changes need a user.
+	var kind string
+	if err := db.QueryRow(context.Background(), `SELECT kind FROM users WHERE id = $1`, id).Scan(&kind); err != nil || kind != "HUMAN" {
+		t.Fatalf("new users are HUMAN: %q %v", kind, err)
+	}
+	for _, k := range []string{"BOT", "TEST", "SYSTEM"} {
+		accepts(t, db, `INSERT INTO users (id, region, kind) VALUES ($1, 'CN', $2)`, uuid.New(), k)
+	}
+	rejects(t, db, "an unknown kind", `INSERT INTO users (id, region, kind) VALUES ($1, 'CN', 'ROBOT')`, uuid.New())
+	accepts(t, db, `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason) VALUES ($1, 'HUMAN', 'TEST', 'e2e', 'x')`, id)
+	rejects(t, db, "kind changes need a user", `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason) VALUES ($1, 'HUMAN', 'TEST', 'e2e', 'x')`, uuid.New())
 }
 
 func TestNotifySchema(t *testing.T) {

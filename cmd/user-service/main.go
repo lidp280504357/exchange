@@ -95,6 +95,8 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	userv1.RegisterUserServiceServer(srv, grpcapi.NewServer(svc))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc}).Routes(r)
+	h := &httpapi.Handler{Svc: svc}
+	h.Routes(r)
+	h.InternalRoutes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

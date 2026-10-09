@@ -269,6 +269,11 @@ func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor stri
 	if len(f.IDs) > maxMatchedIDs {
 		return UserPage{}, apperr.Invalid(fmt.Sprintf("at most %d user_ids", maxMatchedIDs))
 	}
+	kinds, err := domain.ParseKinds(f.Kinds)
+	if err != nil {
+		return UserPage{}, err
+	}
+	f.Kinds = kinds
 	f.Q = strings.TrimSpace(f.Q)
 	switch n := utf8.RuneCountInString(f.Q); {
 	case n == 0:
@@ -298,6 +303,55 @@ func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor stri
 		page.Next = pagecursor.Encode(last.CreatedAt, last.ID)
 	}
 	return page, nil
+}
+
+// SetKind sets an account's kind (L0: HUMAN, BOT, TEST or SYSTEM, what the
+// console shows and filters by; nothing else reads it) for an operator, a
+// script or the console: the change is kept with its actor and reason and
+// audited (user.kind_changed). Setting the kind it has changes nothing,
+// and says so.
+func (s *Service) SetKind(ctx context.Context, userID, kind, actor, reason string) (domain.KindChange, bool, error) {
+	c, err := domain.NewKindChange(userID, kind, actor, reason)
+	if err != nil {
+		return domain.KindChange{}, false, err
+	}
+	changed := false
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		changed = false
+		u, err := r.Users().GetForUpdate(ctx, userID)
+		if err != nil {
+			return err
+		}
+		c.From, c.At = u.Kind, s.Now()
+		if u.Kind == c.To {
+			return nil
+		}
+		changed = true
+		if err := r.Users().SetKind(ctx, userID, c.To); err != nil {
+			return err
+		}
+		if err := r.Users().AddKindChange(ctx, c); err != nil {
+			return err
+		}
+		details, _ := json.Marshal(map[string]string{"from": c.From, "to": c.To})
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "user:" + userID, Action: "user.kind_changed", Actor: c.Actor, Reason: c.Reason, Details: string(details),
+		}, "actor", c.Actor)
+	})
+	return c, changed, err
+}
+
+// IDsOfKinds returns the accounts of the kinds (L0: the console leaves the
+// bots, test accounts and HOUSE out of its lists by them), in ID order.
+func (s *Service) IDsOfKinds(ctx context.Context, kinds []string) ([]string, error) {
+	kinds, err := domain.ParseKinds(kinds)
+	if err != nil {
+		return nil, err
+	}
+	if len(kinds) == 0 {
+		return nil, apperr.Invalid("kind is required: HUMAN, BOT, TEST or SYSTEM, one or more")
+	}
+	return s.Store.Read().Users().IDsOfKinds(ctx, kinds)
 }
 
 // FindUsername returns the account a username belongs to, whatever its

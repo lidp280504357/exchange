@@ -28,7 +28,7 @@ func toProto(u domain.User) *userv1.User {
 		Id: u.ID, Status: u.Status, Region: u.Region, Language: u.Language, Timezone: u.Timezone,
 		KycLevel:         int32(u.KYCLevel), //nolint:gosec // small level number
 		AntiPhishingCode: u.AntiPhishingCode, CreatedAt: timestamppb.New(u.CreatedAt),
-		Username: u.Username, AvatarUrl: u.Avatar.URL(), AvatarThumbUrl: u.Avatar.ThumbURL(),
+		Username: u.Username, AvatarUrl: u.Avatar.URL(), AvatarThumbUrl: u.Avatar.ThumbURL(), Kind: u.Kind,
 	}
 	if !u.UsernameChangedAt.IsZero() {
 		out.UsernameChangedAt = timestamppb.New(u.UsernameChangedAt)
@@ -95,7 +95,9 @@ func (s *Server) ChangeStatus(ctx context.Context, req *userv1.ChangeStatusReque
 
 // ListUsers pages through accounts newest first.
 func (s *Server) ListUsers(ctx context.Context, req *userv1.ListUsersRequest) (*userv1.ListUsersResponse, error) {
-	f := ports.UserFilter{Status: req.GetStatus(), Region: req.GetRegion(), Q: req.GetQ(), IDs: req.GetUserIds(), Limit: int(req.GetLimit())}
+	f := ports.UserFilter{
+		Status: req.GetStatus(), Region: req.GetRegion(), Q: req.GetQ(), IDs: req.GetUserIds(), Kinds: req.GetKinds(), Limit: int(req.GetLimit()),
+	}
 	if req.GetCreatedFrom() != nil {
 		f.CreatedFrom = req.GetCreatedFrom().AsTime()
 	}
@@ -140,6 +142,10 @@ func (s *Server) UserStats(ctx context.Context, req *userv1.UserStatsRequest) (*
 	slices.Sort(days)
 	for _, d := range days {
 		resp.Days = append(resp.Days, &userv1.DayCount{Day: d, Count: st.Days[d]})
+	}
+	for _, k := range domain.Kinds {
+		c := st.ByKind[k]
+		resp.ByKind = append(resp.ByKind, &userv1.KindCount{Kind: k, Total: c.Total, CreatedSince: c.CreatedSince})
 	}
 	return resp, nil
 }

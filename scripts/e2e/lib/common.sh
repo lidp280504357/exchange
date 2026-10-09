@@ -146,7 +146,8 @@ wait_resend() {
 }
 
 # register EMAIL DEVICE PASSWORD signs a new APP user up and sets BODY to
-# the token response.
+# the token response. The first one has this run's accounts marked TEST
+# when the script ends (mark_test_accounts).
 register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
   local email=$1 device=$2 password=$3 country=${4:-SG} terms risk
   call GET /v1/auth/terms ""
@@ -156,6 +157,24 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
   otp REGISTER "$email" "$device"
   call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"$password\",\"country\":\"$country\",\"terms_version\":\"$terms\",\"risk_disclosure_version\":\"$risk\",\"device_id\":\"$device\"}" "${APP[@]}"
   expect 201 - "register"
+  if [[ -z $MARKS_TEST_ACCOUNTS ]]; then
+    MARKS_TEST_ACCOUNTS=1
+    at_exit mark_test_accounts
+  fi
+}
+
+# mark_test_accounts marks the accounts this run registered TEST (L0: the
+# console leaves test accounts out of its lists by default), in one call
+# by their emails (e2e-...-$RUN@example.com) through exchangectl in a
+# container on the test server. The kind changes nothing else; a failure
+# only warns.
+MARKS_TEST_ACCOUNTS=""
+mark_test_accounts() {
+  local out name
+  name=$(basename "$0" .sh)
+  if ! out=$(ssh -o ConnectTimeout=20 exchange "cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl users kind --email-like 'e2e-%$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
+    echo "warn: this run's accounts were not marked TEST: $(tail -1 <<<"$out")" >&2
+  fi
 }
 
 # eventually TRIES WHAT CMD... reruns CMD every half second until it

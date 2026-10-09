@@ -54,3 +54,54 @@ func TestUsersStatus(t *testing.T) {
 		t.Fatalf("queued events: %d %v", queued, err)
 	}
 }
+
+// users kind (L0): sets the kind of the accounts named, kept and audited;
+// a run again changes nothing; the kind and the reason are checked.
+func TestUsersKind(t *testing.T) {
+	db := testenv.Postgres(t)
+	ctx := context.Background()
+	if err := migrate.UpPlatform(ctx, db, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, db, migrations.Users(), quiet); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for range 2 {
+		u, _ := domain.NewUser(uuid.NewString(), "SG", "", "")
+		if _, err := postgres.NewStore(db, nil).Read().Users().Create(ctx, u, nil); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	run := func(args ...string) (string, error) {
+		var out bytes.Buffer
+		err := usersWith(ctx, db, args, &out)
+		return out.String(), err
+	}
+	both := ids[0] + "," + ids[1]
+	out, err := run("kind", "--user", both, "--kind", "bot", "--reason", "the simulated market's bots")
+	if err != nil || !strings.Contains(out, "HUMAN -> BOT") || !strings.Contains(out, "2 accounts, 2 changed to BOT") {
+		t.Fatalf("set: %v\n%s", err, out)
+	}
+	if out, err := run("kind", "--user", both, "--kind", "BOT", "--reason", "again"); err != nil || !strings.Contains(out, "2 accounts, 0 changed") {
+		t.Fatalf("again: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"kind", "--user", both, "--kind", "ROBOT", "--reason", "x"},
+		{"kind", "--user", both, "--kind", "BOT"},
+		{"kind", "--kind", "BOT", "--reason", "x"},
+		{"kind", "--user", both, "--email-like", "e2e-%@example.com", "--kind", "TEST", "--reason", "x"},
+	} {
+		if out, err := run(args...); err == nil {
+			t.Fatalf("%v accepted:\n%s", args, out)
+		}
+	}
+	var changes, audits int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_kind_changes WHERE to_kind = 'BOT'`).Scan(&changes); err != nil || changes != 2 {
+		t.Fatalf("changes: %d %v", changes, err)
+	}
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE event_type = 'audit.AdminActionPerformed'`).Scan(&audits); err != nil || audits != 2 {
+		t.Fatalf("audits: %d %v", audits, err)
+	}
+}

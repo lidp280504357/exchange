@@ -25,6 +25,7 @@ type memStore struct {
 	mu        sync.Mutex
 	users     map[string]domain.User
 	changes   []domain.StatusChange
+	kinds     []domain.KindChange
 	events    []proto.Message
 	handled   map[string]bool // inbox: consumer/event ID
 	favorites map[string][]string
@@ -33,9 +34,9 @@ type memStore struct {
 func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	users, changes, events := maps.Clone(s.users), slices.Clone(s.changes), slices.Clone(s.events)
+	users, changes, kinds, events := maps.Clone(s.users), slices.Clone(s.changes), slices.Clone(s.kinds), slices.Clone(s.events)
 	if err := fn(memRepos{s}); err != nil {
-		s.users, s.changes, s.events = users, changes, events
+		s.users, s.changes, s.kinds, s.events = users, changes, kinds, events
 		return err
 	}
 	return nil
@@ -145,6 +146,7 @@ func (r memUsers) List(_ context.Context, f ports.UserFilter) ([]domain.User, er
 	var out []domain.User
 	for _, u := range r.s.users {
 		matched := f.Q == "" || strings.Contains(strings.ToLower(u.Username), strings.ToLower(f.Q)) || slices.Contains(f.IDs, u.ID)
+		matched = matched && (len(f.Kinds) == 0 || slices.Contains(f.Kinds, u.Kind))
 		if matched && (f.Status == "" || u.Status == f.Status) && (f.AfterID == "" || u.CreatedAt.Before(f.AfterTime) ||
 			(u.CreatedAt.Equal(f.AfterTime) && u.ID < f.AfterID)) {
 			out = append(out, u)
@@ -159,6 +161,32 @@ func (r memUsers) List(_ context.Context, f ports.UserFilter) ([]domain.User, er
 	return out[:min(f.Limit, len(out))], nil
 }
 
+func (r memUsers) SetKind(_ context.Context, userID, kind string) error {
+	u, ok := r.s.users[userID]
+	if !ok {
+		return domain.ErrUserNotFound
+	}
+	u.Kind = kind
+	r.s.users[userID] = u
+	return nil
+}
+
+func (r memUsers) AddKindChange(_ context.Context, c domain.KindChange) error {
+	r.s.kinds = append(r.s.kinds, c)
+	return nil
+}
+
+func (r memUsers) IDsOfKinds(_ context.Context, kinds []string) ([]string, error) {
+	out := []string{}
+	for id, u := range r.s.users {
+		if slices.Contains(kinds, u.Kind) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (r memUsers) FindUsername(_ context.Context, name string) (string, error) {
 	for _, u := range r.s.users {
 		if strings.EqualFold(u.Username, name) {
@@ -169,11 +197,15 @@ func (r memUsers) FindUsername(_ context.Context, name string) (string, error) {
 }
 
 func (r memUsers) Stats(_ context.Context, since time.Time, _ int) (ports.UserStats, error) {
-	st := ports.UserStats{Total: int64(len(r.s.users)), Days: map[string]int64{}}
+	st := ports.UserStats{Total: int64(len(r.s.users)), Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
 	for _, u := range r.s.users {
+		c := st.ByKind[u.Kind]
+		c.Total++
 		if !u.CreatedAt.Before(since) {
 			st.CreatedSince++
+			c.CreatedSince++
 		}
+		st.ByKind[u.Kind] = c
 	}
 	return st, nil
 }
@@ -464,6 +496,71 @@ func TestListUsersPages(t *testing.T) {
 	}
 	st, err := svc.UserStats(ctx, base.Add(3*time.Hour), 7)
 	if err != nil || st.Total != 5 || st.CreatedSince != 2 {
+		t.Fatalf("stats %+v %v", st, err)
+	}
+}
+
+// An account's kind (L0): set for an operator or a script with its actor
+// and reason, kept and audited; the kind it has changes nothing; the
+// console lists, filters and counts by it.
+func TestAccountKinds(t *testing.T) {
+	svc, store, _ := newService()
+	ctx := context.Background()
+	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	var ids []string
+	for i := range 4 {
+		id := uuid.NewString()
+		store.users[id] = domain.User{ID: id, Status: domain.StatusActive, Region: "SG", Kind: domain.KindHuman, CreatedAt: base.Add(time.Duration(i) * time.Hour)}
+		ids = append(ids, id)
+	}
+	c, changed, err := svc.SetKind(ctx, ids[0], "bot", "astra.sh", "the simulated market's bot")
+	if err != nil || !changed || c.From != domain.KindHuman || c.To != domain.KindBot {
+		t.Fatalf("set: %+v %v %v", c, changed, err)
+	}
+	if _, changed, err := svc.SetKind(ctx, ids[0], "BOT", "astra.sh", "again"); err != nil || changed {
+		t.Fatalf("again: %v %v", changed, err)
+	}
+	if _, _, err := svc.SetKind(ctx, ids[1], "TEST", "e2e", "the end-to-end scripts' account"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.SetKind(ctx, ids[2], "SYSTEM", "astra.sh", "HOUSE"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.kinds) != 3 || store.kinds[0].Actor != "astra.sh" || store.kinds[0].Reason != "the simulated market's bot" {
+		t.Fatalf("history %+v", store.kinds)
+	}
+	audits := eventsOf[*auditv1.AdminActionPerformed](store)
+	if len(audits) != 3 || audits[0].GetAction() != "user.kind_changed" || audits[0].GetTarget() != "user:"+ids[0] {
+		t.Fatalf("audits %+v", audits)
+	}
+	for _, bad := range []struct{ kind, actor, reason string }{
+		{"ROBOT", "x", "y"}, {"BOT", "", "y"}, {"BOT", "x", ""}, {"BOT", "x", strings.Repeat("r", 201)},
+	} {
+		if _, _, err := svc.SetKind(ctx, ids[3], bad.kind, bad.actor, bad.reason); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("%+v: %v", bad, err)
+		}
+	}
+	if _, _, err := svc.SetKind(ctx, uuid.NewString(), "BOT", "x", "y"); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("unknown account: %v", err)
+	}
+
+	got, err := svc.IDsOfKinds(ctx, []string{"bot", "system", "BOT"})
+	if want := []string{ids[0], ids[2]}; err != nil || !slices.Equal(got, slices.Sorted(slices.Values(want))) {
+		t.Fatalf("bots and system: %v %v", got, err)
+	}
+	if _, err := svc.IDsOfKinds(ctx, nil); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no kind: %v", err)
+	}
+	page, err := svc.ListUsers(ctx, ports.UserFilter{Kinds: []string{"human"}}, "")
+	if err != nil || len(page.Users) != 1 || page.Users[0].ID != ids[3] || page.Users[0].Kind != domain.KindHuman {
+		t.Fatalf("humans: %+v %v", page.Users, err)
+	}
+	if _, err := svc.ListUsers(ctx, ports.UserFilter{Kinds: []string{"ALIEN"}}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("unknown kind: %v", err)
+	}
+	st, err := svc.UserStats(ctx, base.Add(2*time.Hour), 0)
+	if err != nil || st.Total != 4 || st.ByKind[domain.KindHuman].Total != 1 || st.ByKind[domain.KindSystem].CreatedSince != 1 ||
+		st.ByKind[domain.KindBot].CreatedSince != 0 {
 		t.Fatalf("stats %+v %v", st, err)
 	}
 }

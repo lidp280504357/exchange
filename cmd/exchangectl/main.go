@@ -10,6 +10,7 @@
 //	exchangectl flags set <key> [--on|--off] [--allow-regions CN,US] ... --reason "..."
 //	exchangectl users show <user_id>
 //	exchangectl users status <user_id> --to FROZEN --reason SUSPICIOUS_LOGIN [--note "..."]
+//	exchangectl users kind (--user ID[,ID...] | --email-like PATTERN) --kind BOT --reason "..."
 //	exchangectl instruments list
 //	exchangectl instruments apply --file deploy/instruments/test.json --reason "..."
 //	exchangectl instruments pair-status BTC-USDT --to TRADING --reason "..."
@@ -76,6 +77,9 @@ commands:
   users show <user_id>        profile and status history
   users status <user_id> --to STATUS --reason CODE [--note TEXT]
                               change an account status (ACTIVE, RISK_REVIEW, FROZEN, CLOSED)
+  users kind (--user ID[,ID...] | --email-like PATTERN) --kind KIND --reason TEXT
+                              set accounts' kind (HUMAN, BOT, TEST, SYSTEM: the console's only);
+                              --email-like takes a LIKE pattern (e2e-%@example.com); idempotent
   instruments list            assets, networks and trading pairs
   instruments apply --file F --reason TEXT [--dry-run] [--force]
                               make the reference data match a JSON file ("-" for stdin); idempotent;

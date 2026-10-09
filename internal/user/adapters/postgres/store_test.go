@@ -240,6 +240,65 @@ func TestListByKeywordAndFindUsername(t *testing.T) {
 	}
 }
 
+// Kinds (L0): HUMAN until set; the store sets one, keeps the change,
+// lists the accounts of some kinds, filters the console's list and counts
+// each kind; an update of the profile leaves the kind alone.
+func TestAccountKindsStore(t *testing.T) {
+	store, db := setup(t)
+	ctx := context.Background()
+	users := store.Read().Users()
+	var ids []string
+	for range 3 {
+		u, err := domain.NewUser(uuid.NewString(), "SG", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := users.Create(ctx, u, nil); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	if got, _ := users.Get(ctx, ids[0]); got.Kind != domain.KindHuman {
+		t.Fatalf("new: %q", got.Kind)
+	}
+	if err := users.SetKind(ctx, ids[0], domain.KindBot); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.SetKind(ctx, uuid.NewString(), domain.KindBot); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if err := users.SetKind(ctx, ids[1], domain.KindSystem); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.AddKindChange(ctx, domain.KindChange{UserID: ids[0], From: "HUMAN", To: "BOT", Actor: "astra.sh", Reason: "bot", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_kind_changes WHERE user_id = $1 AND to_kind = 'BOT'`, ids[0]).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("history: %d %v", n, err)
+	}
+	got, err := users.IDsOfKinds(ctx, []string{domain.KindBot, domain.KindSystem})
+	if want := slices.Sorted(slices.Values([]string{ids[0], ids[1]})); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("of kinds: %v %v", got, err)
+	}
+	if none, err := users.IDsOfKinds(ctx, []string{domain.KindTest}); err != nil || none == nil || len(none) != 0 {
+		t.Fatalf("none: %v %v", none, err)
+	}
+	list, err := users.List(ctx, ports.UserFilter{Kinds: []string{domain.KindHuman}, Limit: 10})
+	if err != nil || len(list) != 1 || list[0].ID != ids[2] {
+		t.Fatalf("humans: %+v %v", list, err)
+	}
+	u, _ := users.GetForUpdate(ctx, ids[0])
+	u.Language = "en"
+	if after, err := users.Update(ctx, u); err != nil || after.Kind != domain.KindBot {
+		t.Fatalf("an update keeps the kind: %+v %v", after, err)
+	}
+	st, err := users.Stats(ctx, time.Now().Add(-time.Hour), 0)
+	if err != nil || st.Total != 3 || st.ByKind[domain.KindHuman].Total != 1 || st.ByKind[domain.KindBot].CreatedSince != 1 || st.ByKind[domain.KindSystem].Total != 1 {
+		t.Fatalf("stats %+v %v", st, err)
+	}
+}
+
 // Usernames are unique whatever the case, a clash is ErrUsernameTaken on
 // create and update alike; the change time and the avatar round-trip
 // (design 2026-10-07, avatars and usernames).

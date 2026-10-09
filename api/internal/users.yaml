@@ -1,0 +1,135 @@
+openapi: 3.1.0
+info:
+  title: Exchange account kinds, internal API
+  version: 0.1.0
+  description: |
+    L0 (the user, 2026-10-09/10): every account has a kind - HUMAN (a
+    person, every sign-up), BOT (the simulated market's bots), TEST (the
+    end-to-end scripts' accounts) or SYSTEM (HOUSE and the like) - which
+    the admin console shows and filters its user lists and reports by,
+    humans by default. Only the console reads it: nothing trades,
+    charges, notifies or decides by it (the platform coin's bots are a
+    production feature; their zero fees stay MARKET_MAKER_USER_IDS'), and
+    the public API does not show it.
+
+    user-service serves these on the compose network only: the gateway
+    does not route /internal, and a request carrying the caller's
+    X-User-Id (one that came through it) is not served (404). The console
+    reads the kind over gRPC (exchange.user.v1: User.kind,
+    ListUsersRequest.kinds, UserStatsResponse.by_kind) and does not set
+    it.
+    Operators and scripts set kinds with exchangectl users kind (--user,
+    or --email-like for the end-to-end accounts) and scripts/ops/astra.sh
+    mark (the bots BOT, HOUSE SYSTEM).
+servers:
+  - url: http://user-service:8082
+tags:
+  - name: kinds
+paths:
+  /internal/users/{id}/kind:
+    put:
+      operationId: setUserKind
+      summary: Set an account's kind
+      description: |
+        Kept with its actor and reason (user_kind_changes) and audited
+        (user.kind_changed). The kind the account has already changes
+        nothing: changed false, nothing recorded.
+      tags: [kinds]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, reason]
+              additionalProperties: false
+              properties:
+                kind:
+                  $ref: '#/components/schemas/Kind'
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                actor:
+                  type: string
+                  description: Who sets it; "internal" when left out.
+      responses:
+        '200':
+          description: The kind now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, from, to, changed]
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  from:
+                    $ref: '#/components/schemas/Kind'
+                  to:
+                    $ref: '#/components/schemas/Kind'
+                  changed:
+                    type: boolean
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/users/ids:
+    get:
+      operationId: listUserIDsOfKinds
+      summary: The accounts of some kinds
+      description: |
+        Every account of the kinds asked for, in ID order: the console
+        leaves the bots, test accounts and HOUSE out of the lists other
+        services serve it (L2: their exclude_user_ids). An ETag of the list
+        and Cache-Control max-age=60; If-None-Match with it answers 304.
+        No kind, or an unknown one, is 400.
+      tags: [kinds]
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          description: One or more, comma-separated or repeated, whatever the case.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Kind'
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: The accounts.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: max-age=60
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_ids]
+                properties:
+                  user_ids:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+        '304':
+          description: The list is the one If-None-Match names.
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+components:
+  schemas:
+    Kind:
+      type: string
+      enum: [HUMAN, BOT, TEST, SYSTEM]

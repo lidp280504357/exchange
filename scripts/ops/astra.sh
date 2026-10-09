@@ -16,8 +16,17 @@
 #                                 (ledger adjustments, keyed, so a rerun adds
 #                                 nothing), and made fee-free
 #                                 (MARKET_MAKER_USER_IDS; the trading services
-#                                 restart, under the ops lock). Registers only
-#                                 the bots market-sim does not know yet.
+#                                 restart, under the ops lock), then marked
+#                                 (mark). Registers only the bots market-sim
+#                                 does not know yet: on a new server it is
+#                                 a launch step (launch.md), not a test.
+#   scripts/ops/astra.sh mark     the bots' accounts BOT and HOUSE's SYSTEM
+#                                 (L0): the kind the console shows and
+#                                 filters users by, nothing more - nothing
+#                                 trades, charges or decides by it, the
+#                                 bots' zero fees stay MARKET_MAKER_USER_IDS'
+#                                 - and no status changes. Idempotent;
+#                                 accounts there before are marked too.
 #   scripts/ops/astra.sh mint AMOUNT [ASSET]
 #                                 more for the bots (ASTRA by default), spread
 #                                 evenly, audited (ledger adjustments).
@@ -146,6 +155,25 @@ seed() {
     (grep -q '^MARKET_MAKER_USER_IDS=' apps.env || echo 'MARKET_MAKER_USER_IDS=$ids' | sudo tee -a apps.env >/dev/null) &&
     $COMPOSE up -d --wait --wait-timeout 180 spot-trading-service derivatives-service"
   sim | jq '{bots: (.bots | length), roles: ([.bots[].role] | group_by(.) | map({(.[0]): length}) | add)}'
+  echo "== kinds (the console's)"
+  mark
+}
+
+# mark tags the bots BOT and HOUSE SYSTEM (L0); see the top. HOUSE without
+# an account in user-service is noted, not an error.
+mark() {
+  local bots house
+  bots=$(sim | jq -r '[.bots[].user_id] | join(",")')
+  if [[ -n $bots ]]; then
+    ctl user-service users kind --user "$bots" --kind BOT --reason "the simulated market's bots (astra.sh mark)" </dev/null | tail -1
+  else
+    echo "market-sim has no bots: none to mark"
+  fi
+  house=$(ssh exchange "cd $INFRA && sed -n 's/^HOUSE_USER_ID=//p' apps.env" | tr -d '"' | head -1)
+  if [[ -n $house ]]; then
+    ctl user-service users kind --user "$house" --kind SYSTEM --reason "HOUSE, every trade's counterparty (astra.sh mark)" </dev/null ||
+      echo "note: HOUSE ($house) has no account in user-service: nothing to mark" >&2
+  fi
 }
 
 mint() {
@@ -173,6 +201,7 @@ open)
   ctl instrument-service instruments pair-status "$SYMBOL" --to TRADING --reason "ASTRA-USDT opens (design 2026-10-02)" </dev/null
   ;;
 seed) seed ;;
+mark) mark ;;
 mint)
   shift
   mint "$@"

@@ -96,7 +96,7 @@ func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggreg
 type users repos
 
 const userColumns = `id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at, updated_at,
-	username, username_changed_at, avatar`
+	username, username_changed_at, avatar, kind`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
@@ -104,7 +104,7 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	var changed *time.Time
 	var avatar []byte
 	err := row.Scan(&id, &u.Status, &u.Region, &u.Language, &u.Timezone, &u.AntiPhishingCode, &u.KYCLevel, &u.Version, &u.CreatedAt, &u.UpdatedAt,
-		&u.Username, &changed, &avatar)
+		&u.Username, &changed, &avatar, &u.Kind)
 	if err != nil {
 		return u, err
 	}
@@ -265,7 +265,8 @@ func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, err
 		AND ($3::timestamptz IS NULL OR created_at >= $3) AND ($4::timestamptz IS NULL OR created_at < $4)
 		AND ($5::timestamptz IS NULL OR (created_at, id) < ($5, $6::uuid))
 		AND ($8 = '' OR strpos(lower(username), lower($8)) > 0 OR id = ANY($9::uuid[]))
-		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit, f.Q, ids)
+		AND (cardinality($10::text[]) = 0 OR kind = ANY($10))
+		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit, f.Q, ids, kindsOrEmpty(f.Kinds))
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -277,6 +278,51 @@ func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, err
 			return nil, fmt.Errorf("list users: %w", err)
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// kindsOrEmpty keeps a nil filter an empty array (no NULL in the query).
+func kindsOrEmpty(kinds []string) []string {
+	if kinds == nil {
+		return []string{}
+	}
+	return kinds
+}
+
+func (r users) SetKind(ctx context.Context, userID, kind string) error {
+	tag, err := r.q.Exec(ctx, `UPDATE users SET kind = $2, version = version + 1, updated_at = now() WHERE id = $1`, userID, kind)
+	if err != nil {
+		return fmt.Errorf("set kind: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
+func (r users) AddKindChange(ctx context.Context, c domain.KindChange) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`, c.UserID, c.From, c.To, c.Actor, c.Reason, c.At)
+	if err != nil {
+		return fmt.Errorf("record kind change: %w", err)
+	}
+	return nil
+}
+
+func (r users) IDsOfKinds(ctx context.Context, kinds []string) ([]string, error) {
+	rows, err := r.q.Query(ctx, `SELECT id::text FROM users WHERE kind = ANY($1) ORDER BY id`, kindsOrEmpty(kinds))
+	if err != nil {
+		return nil, fmt.Errorf("users of kinds: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("users of kinds: %w", err)
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }
@@ -294,9 +340,24 @@ func (r users) FindUsername(ctx context.Context, name string) (string, error) {
 }
 
 func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
-	out := ports.UserStats{Days: map[string]int64{}}
-	if err := r.q.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE created_at >= $1) FROM users`, since).
-		Scan(&out.Total, &out.CreatedSince); err != nil {
+	out := ports.UserStats{Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
+	kinds, err := r.q.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE created_at >= $1) FROM users GROUP BY kind`, since)
+	if err != nil {
+		return out, fmt.Errorf("user stats: %w", err)
+	}
+	for kinds.Next() {
+		var kind string
+		var c ports.KindCount
+		if err := kinds.Scan(&kind, &c.Total, &c.CreatedSince); err != nil {
+			kinds.Close()
+			return out, fmt.Errorf("user stats: %w", err)
+		}
+		out.ByKind[kind] = c
+		out.Total += c.Total
+		out.CreatedSince += c.CreatedSince
+	}
+	kinds.Close()
+	if err := kinds.Err(); err != nil {
 		return out, fmt.Errorf("user stats: %w", err)
 	}
 	if days <= 0 {

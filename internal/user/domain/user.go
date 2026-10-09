@@ -50,6 +50,9 @@ type User struct {
 	Username          string
 	UsernameChangedAt time.Time
 	Avatar            *Avatar
+	// Kind is HUMAN, BOT, TEST or SYSTEM (kind.go): the console's, set only
+	// through SetKind.
+	Kind string
 }
 
 // Consent is an accepted document version.
@@ -86,5 +89,5 @@ func NewUser(id, region, language, timezone string) (User, error) {
 	if _, err := time.LoadLocation(timezone); err != nil || len(timezone) > 64 {
 		return User{}, apperr.Invalid("timezone must be an IANA time zone")
 	}
-	return User{ID: id, Status: StatusActive, Region: region, Language: language, Timezone: timezone, Username: DrawUsername()}, nil
+	return User{ID: id, Status: StatusActive, Region: region, Language: language, Timezone: timezone, Username: DrawUsername(), Kind: KindHuman}, nil
 }

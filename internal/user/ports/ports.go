@@ -56,6 +56,12 @@ type UserRepo interface {
 	// FindUsername returns the account whose username is name, whatever
 	// the case, or domain.ErrUserNotFound.
 	FindUsername(ctx context.Context, name string) (string, error)
+	// SetKind stores an account's kind (L0); AddKindChange keeps the
+	// change.
+	SetKind(ctx context.Context, userID, kind string) error
+	AddKindChange(ctx context.Context, c domain.KindChange) error
+	// IDsOfKinds returns the accounts of the kinds, in ID order.
+	IDsOfKinds(ctx context.Context, kinds []string) ([]string, error)
 }
 
 // UserFilter selects accounts for the admin console.
@@ -66,8 +72,10 @@ type UserFilter struct {
 	CreatedBefore time.Time
 	// Q, when set, keeps the accounts whose username contains it (any
 	// case) and those among IDs (matched elsewhere on it; B167).
-	Q         string
-	IDs       []string
+	Q   string
+	IDs []string
+	// Kinds, when set, keeps the accounts of these kinds (L0).
+	Kinds     []string
 	AfterTime time.Time
 	AfterID   string
 	Limit     int
@@ -79,6 +87,15 @@ type UserStats struct {
 	CreatedSince int64
 	// Days maps a UTC day (YYYY-MM-DD) to its new accounts.
 	Days map[string]int64
+	// ByKind counts the accounts of each kind (L0), all of them and those
+	// created since.
+	ByKind map[string]KindCount
+}
+
+// KindCount is the accounts of a kind.
+type KindCount struct {
+	Total        int64
+	CreatedSince int64
 }
 
 // FavoriteRepo stores each user's favorite markets.
