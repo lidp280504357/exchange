@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
@@ -259,8 +260,8 @@ type UserPage struct {
 const maxMatchedIDs = 500
 
 // ListUsers pages through accounts newest first for the admin console; a
-// keyword keeps the usernames that contain it and the accounts matched on
-// it elsewhere (B167).
+// keyword (2 to 64 characters, B170) keeps the usernames that contain it
+// and the accounts matched on it elsewhere (B167).
 func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor string) (UserPage, error) {
 	if f.Status != "" && !domain.ValidStatus(f.Status) {
 		return UserPage{}, apperr.Invalid("unknown status " + f.Status)
@@ -268,8 +269,12 @@ func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor stri
 	if len(f.IDs) > maxMatchedIDs {
 		return UserPage{}, apperr.Invalid(fmt.Sprintf("at most %d user_ids", maxMatchedIDs))
 	}
-	if f.Q = strings.TrimSpace(f.Q); f.Q == "" {
+	f.Q = strings.TrimSpace(f.Q)
+	switch n := utf8.RuneCountInString(f.Q); {
+	case n == 0:
 		f.IDs = nil
+	case n < 2 || n > 64:
+		return UserPage{}, apperr.Invalid("q must be 2 to 64 characters")
 	}
 	f.Region = strings.ToUpper(strings.TrimSpace(f.Region))
 	if f.Limit <= 0 || f.Limit > 200 {

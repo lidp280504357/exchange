@@ -167,7 +167,7 @@ lift_reduce_only() {
     left=$(awk -v since="$since" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}' <<<"$states")
     [[ -z $left ]] && return 0
     if ((SECONDS >= deadline)); then
-      echo "FAIL still reduce-only since $since, the mark price not fresh: $(tr '\n' ' ' <<<"$left")- by hand once it is: exchangectl derivatives resume <contract>" >&2
+      echo "FAIL still reduce-only since $since, the mark price not fresh or resume failing: $(tr '\n' ' ' <<<"$left")- by hand once it is: exchangectl derivatives resume <contract>" >&2
       return 1
     fi
     lifted=""

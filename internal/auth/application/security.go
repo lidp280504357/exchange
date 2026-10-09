@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -288,13 +289,14 @@ func (s *AccountService) FindUser(ctx context.Context, identifier string) (strin
 }
 
 // SearchUsers returns the users whose email address or phone number
-// contains q, whatever the case, newest first, at most limit (1 to 500;
-// default 200): the admin console's user list matches them with the
-// usernames (B167).
+// contains q (2 to 64 characters, B170), whatever the case, newest first,
+// at most limit (1 to 500; default 200): the admin console's user list
+// matches them with the usernames (B167).
 func (s *AccountService) SearchUsers(ctx context.Context, q string, limit int) ([]string, error) {
-	if q = strings.TrimSpace(q); q == "" {
-		return nil, apperr.Invalid("q is required")
+	if n := utf8.RuneCountInString(strings.TrimSpace(q)); n < 2 || n > 64 {
+		return nil, apperr.Invalid("q must be 2 to 64 characters")
 	}
+	q = strings.TrimSpace(q)
 	if limit <= 0 {
 		limit = 200
 	}

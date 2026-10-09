@@ -86,7 +86,7 @@ admin-service 经 auth-service 的 gRPC 读写账户安全，权限由后台检�
 - `SetTemporaryPassword`：生成 16 位临时密码（四组四位，去掉易混字符），替换原密码，结束全部会话、清除密码登录锁定，发 `auth.PasswordChanged{via_reset: true}`（与找回密码相同：用户收到邮件，24 小时内的提现转人工审核）。临时密码只在这次应答里，不进日志与审计。
 - `ListIdentityRequests`、`DecideIdentityRequest`：换绑审核（上一节）。
 - `FindUser`（后台查找）：含 `@` 的按邮箱、`+` 开头的按手机号（E.164）在 `identities` 找，其余当用户名经 user-service `FindUsername` 找（不分大小写，B167）；格式不对与查不到一样答 404（`COMMON_NOT_FOUND`，以前格式不对答 400）。
-- `SearchUsers`（后台用户列表的关键字，B167）：邮箱或手机号含 `q` 的用户（不分大小写的子串，`strpos`，下划线与百分号不是通配符），每人一次，新到旧（按用户 ID 倒序），最多 `limit`（默认 200，最多 500）；空 `q` 400。结果交给 user-service `ListUsers` 的 `user_ids`（见 [accounts.md](accounts.md)）。
+- `SearchUsers`（后台用户列表的关键字，B167）：邮箱或手机号含 `q` 的用户（不分大小写的子串，`strpos`，下划线与百分号不是通配符），每人一次，新到旧（按用户 ID 倒序），最多 `limit`（默认 200，最多 500）；`q` 去掉首尾空白后要 2 到 64 个字符，否则 400（B170）。结果交给 user-service `ListUsers` 的 `user_ids`（见 [accounts.md](accounts.md)）。
 
 ## 清理
 

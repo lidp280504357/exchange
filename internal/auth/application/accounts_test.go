@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -551,7 +552,13 @@ func TestFindAndSearchUsers(t *testing.T) {
 			t.Fatalf("%q: %v %v", c.q, got, err)
 		}
 	}
-	if _, err := a.acc.SearchUsers(ctx, "  ", 0); !apperr.Is(err, apperr.CodeInvalidArgument) {
-		t.Fatalf("no keyword: %v", err)
+	// 2 to 64 characters (B170).
+	for _, q := range []string{"  ", "a", strings.Repeat("x", 65)} {
+		if _, err := a.acc.SearchUsers(ctx, q, 0); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("keyword %q: %v", q, err)
+		}
+	}
+	if _, err := a.acc.SearchUsers(ctx, strings.Repeat("中", 64), 0); err != nil {
+		t.Fatalf("64 characters: %v", err)
 	}
 }

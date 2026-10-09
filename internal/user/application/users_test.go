@@ -417,8 +417,17 @@ func TestListUsersByKeywordAndFindUsername(t *testing.T) {
 	if got := list(ports.UserFilter{IDs: []string{ids[0]}}); len(got) != 3 {
 		t.Fatalf("IDs without a keyword filter nothing: %v", got)
 	}
-	if _, err := svc.ListUsers(ctx, ports.UserFilter{Q: "x", IDs: make([]string, 501)}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, err := svc.ListUsers(ctx, ports.UserFilter{Q: "xy", IDs: make([]string, 501)}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("too many IDs: %v", err)
+	}
+	// A keyword has 2 to 64 characters (B170).
+	for _, q := range []string{"x", strings.Repeat("y", 65)} {
+		if _, err := svc.ListUsers(ctx, ports.UserFilter{Q: q}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("keyword %q: %v", q, err)
+		}
+	}
+	if _, err := svc.ListUsers(ctx, ports.UserFilter{Q: strings.Repeat("中", 64)}, ""); err != nil {
+		t.Fatalf("64 characters: %v", err)
 	}
 	if id, err := svc.FindUsername(ctx, " satoshi_N "); err != nil || id != ids[1] {
 		t.Fatalf("find: %q %v", id, err)
