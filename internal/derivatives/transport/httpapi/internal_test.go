@@ -55,4 +55,20 @@ func TestTheListsTakeUsersToShowOrLeaveOut(t *testing.T) {
 			t.Fatalf("%s: %d %s", path, w.Code, w.Body)
 		}
 	}
+	// The POST .../list variants take the accounts in their body (review
+	// C76), up to 5,000: not in the query string, one set, UUIDs.
+	for _, c := range []struct{ path, body string }{
+		{"/internal/derivatives/positions/list?user_ids=" + a, `{}`},
+		{"/internal/derivatives/positions/list", `{"user_ids":["` + a + `"],"exclude_user_ids":["` + b + `"]}`},
+		{"/internal/derivatives/risk/list", `{"exclude_user_ids":["bob"]}`},
+		{"/internal/derivatives/risk/list", `[]`},
+	} {
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, c.path, strings.NewReader(c.body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("POST %s %s: %d %s", c.path, c.body, w.Code, w.Body)
+		}
+	}
 }

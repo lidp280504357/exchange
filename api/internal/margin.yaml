@@ -1,0 +1,230 @@
+openapi: 3.1.0
+info:
+  title: Exchange margin account list for the admin console, internal API
+  version: 0.1.0
+  description: |
+    margin-service's list of every user's margin accounts that the console
+    narrows by account (L3 of the user-kind design 2026-10-09, §1 #8): the
+    console's 「杠杆账户」 page and its warnings by margin level. The console
+    shows people by default: it leaves the bots, test accounts and HOUSE
+    out (their IDs from user-service, GET /internal/users/ids in
+    users.yaml) or keeps only some accounts.
+
+    The list has a GET, its filters in the query string, user_ids or
+    exclude_user_ids among them (at most 1,000 accounts), and a POST
+    .../list variant taking the same query string but the accounts in a
+    JSON body (at most 5,000, review C76). Both read the accounts the same
+    way (httpx.UserIDsOf, as wallet.yaml's lists): one of the two sets,
+    UUIDs in any case, each counted once; an empty user_ids lists nothing,
+    an absent or null one is no filter. Accounts named in a POST's query
+    string, both sets, an ID that is no UUID or too many are 400. The
+    accounts are narrowed in the database (= ANY / <> ALL) before they are
+    valued and ordered.
+
+    The service's other internal endpoints are in docs/runbook/margin.md.
+    They are on the compose network only: the gateway does not route
+    /internal, and a request carrying the caller's X-User-Id is not served.
+servers:
+  - url: http://margin-service:8099
+tags:
+  - name: lists
+paths:
+  /internal/margin/accounts:
+    get:
+      operationId: listMarginAccounts
+      summary: Margin accounts, the riskiest first
+      description: |
+        The lowest margin level first; those without liabilities last, by
+        net assets; an account holding and owing nothing is left out. At
+        most 5,000 accounts are valued; truncated says there are more.
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UserIDs'
+        - $ref: '#/components/parameters/ExcludeUserIDs'
+      responses:
+        '200':
+          $ref: '#/components/responses/Accounts'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/margin/accounts/list:
+    post:
+      operationId: listMarginAccountsOfAccounts
+      summary: Margin accounts, the accounts in the body
+      tags: [lists]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Limit'
+      requestBody:
+        $ref: '#/components/requestBodies/Accounts'
+      responses:
+        '200':
+          $ref: '#/components/responses/Accounts'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+components:
+  parameters:
+    UserID:
+      name: user_id
+      in: query
+      description: One user's accounts.
+      schema:
+        type: string
+        format: uuid
+    Account:
+      name: account
+      in: query
+      schema:
+        type: string
+        enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+    Symbol:
+      name: symbol
+      in: query
+      description: An isolated account's pair.
+      schema:
+        type: string
+        examples: [BTC-USDT]
+    Status:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [NORMAL, WARNED, LIQUIDATING, FROZEN]
+    Limit:
+      name: limit
+      in: query
+      description: 1 to 500, 500 by default.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+    UserIDs:
+      name: user_ids
+      in: query
+      description: |
+        Only these accounts (at most 1,000), comma-separated or repeated;
+        present but empty lists nothing. Not with exclude_user_ids.
+      schema:
+        type: array
+        items:
+          type: string
+          format: uuid
+      style: form
+      explode: true
+    ExcludeUserIDs:
+      name: exclude_user_ids
+      in: query
+      description: Past these accounts (at most 1,000), comma-separated or repeated. Not with user_ids.
+      schema:
+        type: array
+        items:
+          type: string
+          format: uuid
+      style: form
+      explode: true
+  requestBodies:
+    Accounts:
+      required: true
+      description: '{} narrows nothing.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Accounts'
+  responses:
+    Accounts:
+      description: The accounts; truncated when there are more.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items, truncated]
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MarginAccount'
+              truncated:
+                type: boolean
+  schemas:
+    Accounts:
+      type: object
+      additionalProperties: false
+      description: One of the two, or neither.
+      properties:
+        user_ids:
+          type: [array, 'null']
+          maxItems: 5000
+          description: Only these accounts; [] lists nothing, null or absent is no filter.
+          items:
+            type: string
+            format: uuid
+        exclude_user_ids:
+          type: [array, 'null']
+          maxItems: 5000
+          description: Past these accounts.
+          items:
+            type: string
+            format: uuid
+    MarginAccount:
+      type: object
+      required: [user_id, account, symbol, leverage, status, margin_level, warn_level, liquidation_level, total_asset,
+        total_liability, net_asset, liquidation_price, warned_at, frozen_by, frozen_reason, frozen_at, unpriced, updated_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        account:
+          type: string
+          enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+        symbol:
+          type: [string, 'null']
+          description: An isolated account's pair.
+        leverage:
+          type: integer
+        status:
+          type: string
+          enum: [NORMAL, WARNED, LIQUIDATING, FROZEN]
+        margin_level:
+          type: [string, 'null']
+          description: Total assets / total liabilities at USDT prices; null without liabilities.
+        warn_level:
+          type: string
+        liquidation_level:
+          type: string
+        total_asset:
+          type: string
+          description: USDT.
+        total_liability:
+          type: string
+          description: USDT, borrowed and interest.
+        net_asset:
+          type: string
+        liquidation_price:
+          type: [string, 'null']
+          description: An isolated account's, at the level its liquidation starts.
+        warned_at:
+          type: [string, 'null']
+          format: date-time
+        frozen_by:
+          type: [string, 'null']
+          description: Only while an administrator froze it.
+        frozen_reason:
+          type: [string, 'null']
+        frozen_at:
+          type: [string, 'null']
+          format: date-time
+        unpriced:
+          type: array
+          description: Assets it holds or owes whose price is stale or never was.
+          items:
+            type: string
+        updated_at:
+          type: string
+          format: date-time

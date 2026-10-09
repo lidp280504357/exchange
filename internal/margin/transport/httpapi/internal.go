@@ -44,6 +44,7 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 		r.Get("/pairs", h.consolePairs)
 		r.Put("/pairs/{symbol}", h.setPair)
 		r.Get("/accounts", h.consoleAccounts)
+		r.Post("/accounts/list", h.consoleAccounts)
 		r.Get("/accounts/{user_id}/{account}", h.consoleAccount)
 		r.Post("/accounts/{user_id}/{account}/freeze", h.freeze)
 		r.Post("/accounts/{user_id}/{account}/unfreeze", h.unfreeze)
@@ -377,11 +378,12 @@ func toConsoleAccount(c application.ConsoleAccount) consoleAccountJSON {
 }
 
 // consoleAccounts lists the margin accounts riskiest first: user_id,
-// user_ids or exclude_user_ids (review L3: the console's real users),
-// account, symbol, status, limit.
+// user_ids or exclude_user_ids (review L3: the console's real users; in
+// the JSON body of POST .../list, up to 5,000, review C76;
+// api/internal/margin.yaml), account, symbol, status, limit.
 func (h *Handler) consoleAccounts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	only, except, err := httpx.UserIDsFrom(r.URL.Query())
+	only, except, err := httpx.UserIDsOf(w, r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

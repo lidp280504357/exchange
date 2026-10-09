@@ -609,7 +609,9 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 		r.Get("/internal/derivatives/contracts", h.overview)
 		r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 		r.Get("/internal/derivatives/risk", h.risk)
+		r.Post("/internal/derivatives/risk/list", h.risk)
 		r.Get("/internal/derivatives/positions", h.openPositions)
+		r.Post("/internal/derivatives/positions/list", h.openPositions)
 		r.Post("/internal/derivatives/positions/close", h.adminClose)
 		r.Get("/internal/derivatives/users/{id}/cross-margin", h.crossMargin)
 		r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
@@ -801,9 +803,11 @@ func (h *Handler) liftReduceOnly(w http.ResponseWriter, r *http.Request) {
 }
 
 // risk lists the positions under watch, of only user_ids or of all but
-// exclude_user_ids (review L3).
+// exclude_user_ids (review L3): in the query string of the GET, in the
+// JSON body of POST .../list (up to 5,000 accounts, review C76;
+// api/internal/derivatives.yaml).
 func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
-	only, except, err := httpx.UserIDsFrom(r.URL.Query())
+	only, except, err := httpx.UserIDsOf(w, r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -818,11 +822,11 @@ func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
 
 // openPositions lists every user's open positions for the admin console,
 // riskiest first: symbol, user_id, user_ids or exclude_user_ids (review
-// L3), watch=true (only those under watch), limit (default 200, at most
-// 1000).
+// L3; in the JSON body of POST .../list, up to 5,000, review C76),
+// watch=true (only those under watch), limit (default 200, at most 1000).
 func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	only, except, err := httpx.UserIDsFrom(q)
+	only, except, err := httpx.UserIDsOf(w, r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

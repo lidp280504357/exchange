@@ -547,6 +547,19 @@ func TestInternalEndpoints(t *testing.T) {
 	if item(body, "user_id", user) != nil {
 		t.Fatalf("all but the user's %v", body)
 	}
+	// The POST .../list variant takes them in its body (review C76).
+	st, body = a.do("POST", "/internal/margin/accounts/list?account=MARGIN_CROSS", `{"user_ids":["`+user+`"]}`)
+	expect(t, "only the user's, in the body", st, body, 200, "")
+	if item(body, "user_id", user) == nil {
+		t.Fatalf("only the user's, in the body %v", body)
+	}
+	st, body = a.do("POST", "/internal/margin/accounts/list", `{"exclude_user_ids":["`+user+`"]}`)
+	expect(t, "all but the user's, in the body", st, body, 200, "")
+	if item(body, "user_id", user) != nil {
+		t.Fatalf("all but the user's, in the body %v", body)
+	}
+	st, body = a.do("POST", "/internal/margin/accounts/list?user_ids="+user, `{}`)
+	expect(t, "accounts in a POST's query string", st, body, 400, apperr.CodeInvalidArgument)
 	path := "/internal/margin/accounts/" + user + "/MARGIN_CROSS"
 	st, body = a.do("POST", path+"/freeze", `{"reason":" "}`, admin...)
 	expect(t, "a freeze without a reason", st, body, 400, apperr.CodeInvalidArgument)
