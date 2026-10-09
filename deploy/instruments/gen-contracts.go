@@ -32,7 +32,9 @@
 //   - the risk tiers are Binance's brackets as its site publishes them
 //     (bapi/futures/v1/friendly/{future,delivery}/common/brackets, no
 //     signature): each bracket's notional cap (USDT; the coin on COIN-M),
-//     its top leverage and maintenance rate;
+//     its top leverage, at most the platform's 125x (BTCUSDT's and
+//     ETHUSDT's first brackets go to 150x), and maintenance rate; the
+//     cumulative deduction is derived from them, as Binance's is;
 //   - the impact notional is 10,000 USD: 10,000 USDT, or 10,000 / the face
 //     value in contracts (as BTC's and ETH's);
 //   - funding as Binance's fundingInfo has it: its interval (4 or 1 hours,
@@ -50,8 +52,12 @@
 //     rule the instruments cannot take gets the default): a contract
 //     takes Binance's funding rate only for periods that end when
 //     Binance's do (market-data runbook; Binance moved 23 of the coins'
-//     USDⓈ-M perpetuals to 4 hours). The console's changes still win at
-//     apply.
+//     USDⓈ-M perpetuals to 4 hours); and its risk tiers, which follow
+//     Binance's brackets as above while it publishes them (B168, the
+//     user 2026-10-09: all as Binance; BTC's and ETH's first perpetuals
+//     had a hand-made 7-tier ladder to 50,000 USDT at 125x), the platform
+//     coin's (no reference) keeping theirs. The console's changes still
+//     win at apply.
 package main
 
 import (
@@ -73,6 +79,10 @@ import (
 // quoteDecimals are USDT's: a contract's prices are in USDT (a COIN-M
 // contract's in USD, priced as USDT).
 const quoteDecimals = 6
+
+// maxLeverage is the platform's top leverage (the user, 2026-10-02; the
+// instruments refuse a tier above it): a bracket above it is taken at it.
+const maxLeverage = 125
 
 type filter struct {
 	FilterType     string `json:"filterType"`
@@ -438,6 +448,33 @@ func main() {
 		c["funding_interval_hours"], c["interest_rate"], c["funding_cap"] = hours, interest, limit
 		refreshed++
 	}
+	// A listed contract's risk tiers follow Binance's brackets (B168, the
+	// rules above) while Binance publishes them for its reference; one it
+	// no longer does keeps its tiers.
+	laddered := 0
+	for _, c := range contracts {
+		ref, _ := c["reference_symbol"].(string)
+		if ref == "" {
+			continue
+		}
+		tiers := linearTiers[ref]
+		if c["margin_type"] == "COIN" {
+			tiers = inverseTiers[ref]
+		}
+		if len(tiers) == 0 {
+			log.Printf("%-18s Binance publishes no risk brackets for %s: its tiers kept", c["symbol"], ref)
+			continue
+		}
+		want := riskTiers(tiers)
+		was, _ := json.Marshal(c["risk_tiers"])
+		now, _ := json.Marshal(want)
+		if bytes.Equal(was, now) {
+			continue
+		}
+		log.Printf("%-18s risk tiers %s -> Binance's %s", c["symbol"], was, now)
+		c["risk_tiers"] = want
+		laddered++
+	}
 	added := 0
 	for _, p := range doc.Pairs {
 		base, quote := p["base_asset"].(string), p["quote_asset"].(string)
@@ -482,7 +519,8 @@ func main() {
 	for _, c := range contracts {
 		n[c["margin_type"].(string)]++
 	}
-	log.Printf("%s: %d contracts (%d USDT-margined, %d coin-margined), %d new, %d with their funding refreshed", *file, len(contracts), n["USDT"], n["COIN"], added, refreshed)
+	log.Printf("%s: %d contracts (%d USDT-margined, %d coin-margined), %d new, %d with their funding refreshed, %d with their risk tiers",
+		*file, len(contracts), n["USDT"], n["COIN"], added, refreshed, laddered)
 }
 
 // contract is the entry of Binance's perpetual r on base: a linear one
@@ -518,20 +556,14 @@ func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tie
 	if up := r.filter("PERCENT_PRICE").MultiplierUp; up != "" {
 		band = decimal.Min(decimal.Max(decimal.RequireFromString(up).Sub(decimal.NewFromInt(1)), band), decimal.NewFromFloat(0.15))
 	}
-	var riskTiers []map[string]any
-	for _, b := range tiers {
-		riskTiers = append(riskTiers, map[string]any{
-			"max_notional": decimal.NewFromFloat(b.NotionalCap).String(), "max_leverage": b.MaxLeverage,
-			"mmr": decimal.NewFromFloat(b.MMR).String(),
-		})
-	}
+	riskTiers := riskTiers(tiers)
 	symbol, quote, margin, settle := base+"-USDT-PERP", "USDT", "USDT", "USDT"
 	minNotional, impact := decimal.NewFromInt(5), decimal.NewFromInt(10000)
 	if inverse {
 		symbol, quote, margin, settle = base+"-USD-PERP", "USD", "COIN", base
 		minNotional, impact = size, decimal.NewFromInt(10000).Div(size).Ceil()
 	}
-	log.Printf("%-18s tick %-10s lot %-8s max %-12s band %-5s %2d tiers to %dx", symbol, tick, lot, maxQty, band, len(riskTiers), tiers[0].MaxLeverage)
+	log.Printf("%-18s tick %-10s lot %-8s max %-12s band %-5s %2d tiers to %vx", symbol, tick, lot, maxQty, band, len(riskTiers), riskTiers[0]["max_leverage"])
 	return map[string]any{
 		"symbol": symbol, "type": "PERPETUAL", "base_asset": base, "quote_asset": quote, "index_symbol": base + "-USDT",
 		"tick_size": tick.String(), "lot_size": lot.String(), "min_quantity": minQty.String(), "max_quantity": maxQty.String(),
@@ -540,6 +572,19 @@ func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tie
 		"fee_tier": "perp", "status": "PREPARE", "margin_type": margin, "settle_asset": settle, "contract_size": size.String(),
 		"reference_symbol": r.Symbol,
 	}
+}
+
+// riskTiers are the instruments' tiers of Binance's brackets: the notional
+// cap, the top leverage (at most maxLeverage) and the maintenance rate.
+func riskTiers(tiers []bracket) []map[string]any {
+	out := make([]map[string]any, 0, len(tiers))
+	for _, b := range tiers {
+		out = append(out, map[string]any{
+			"max_notional": decimal.NewFromFloat(b.NotionalCap).String(), "max_leverage": min(b.MaxLeverage, maxLeverage),
+			"mmr": decimal.NewFromFloat(b.MMR).String(),
+		})
+	}
+	return out
 }
 
 func decimals(d decimal.Decimal) int {

@@ -2,11 +2,10 @@
 # Perpetual contracts end to end (implementation plan §7.3): the contract
 # specifications (task 1), the index price, mark price and funding (task
 # 3) over REST and WebSocket, and every contract's public book: Binance
-# futures' (ADR-0015), which HOUSE offers. BTC's and ETH's linear
-# contracts go to 125x on the same seven-tier ladder; the others listed from
-# Binance (design 2026-10-06 §3.4, G1c) carry its brackets, and the
-# coin-margined ones (§2.1, listed with ?margin_type=COIN) Binance COIN-M's
-# face values and ladders. The mark price needs the reference feed (flag
+# futures' (ADR-0015), which HOUSE offers. Every contract following
+# Binance carries its brackets (B168: BTC's and ETH's linear contracts too,
+# their 150x first brackets taken at 125x), the coin-margined ones (§2.1,
+# listed with ?margin_type=COIN) Binance COIN-M's face values and ladders. The mark price needs the reference feed (flag
 # market.reference_feed, on in the test environment); the books need
 # market.reference_depth to allow the contracts.
 #
@@ -26,7 +25,11 @@ call GET /v1/market/contracts/btc-usdt-perp ""
 expect 200 - "one contract (symbol is case-insensitive)"
 check '.index_symbol == "BTC-USDT" and .funding_interval_hours == 8' "its index and funding interval"
 btc_cap=$(jq -r .funding_cap <<<"$BODY")
-check '[.risk_tiers[] | [.max_notional, .max_leverage, .mmr]] == [["50000",125,"0.004"],["250000",100,"0.005"],["1000000",50,"0.01"],["5000000",20,"0.025"],["20000000",10,"0.05"],["50000000",5,"0.1"],["100000000",2,"0.125"]]' "the risk limit ladder: 125x to 50,000 USDT, down to 2x"
+# Binance's brackets (B168, deploy/instruments/gen-contracts.go), its
+# 150x first bracket taken at the platform's 125x: as the file lists them.
+LADDER=$(jq -c '.contracts[] | select(.symbol == "BTC-USDT-PERP") | [.risk_tiers[] | [.max_notional, .max_leverage, .mmr]]' "$(dirname "$0")/../../deploy/instruments/test.json")
+check "[.risk_tiers[] | [.max_notional, .max_leverage, .mmr]] == $LADDER" "the risk limit ladder as deploy/instruments/test.json lists it"
+check '(.risk_tiers | length) == 12 and .risk_tiers[0].max_notional == "300000" and .risk_tiers[0].max_leverage == 125 and .risk_tiers[-1].max_leverage == 1' "Binance's 12 brackets: 125x to 300,000 USDT, down to 1x"
 call GET /v1/market/contracts/BTC-USDT ""
 expect 404 COMMON_NOT_FOUND "a pair is not a contract"
 
