@@ -58,6 +58,12 @@ source "$(dirname "$0")/lib/common.sh"
 # shellcheck source=lib/remote.sh
 source "$(dirname "$0")/lib/remote.sh"
 
+# Every curl of this script over HTTP/1.1, the shared call's to the user
+# site too (it takes $CURL_HOME/.curlrc): on 2026-10-09 the user site's
+# GET /v1/platform/apps failed the same way as the console's answers below.
+printf '%s\n' '--http1.1' >"$WORK/.curlrc"
+export CURL_HOME=$WORK
+
 CSRF=(-H 'X-Admin-CSRF: 1')
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 # acall is call on the console's domain, over HTTP/1.1: on 2026-10-07 the
