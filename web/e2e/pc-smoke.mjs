@@ -658,7 +658,7 @@ try {
     const menuRead = await decodeQr(page, await page.$('[data-testid="download-qrs"]'));
     if (menuRead === null) unread = true;
     else if (menuRead.join() !== [links.android, links.ios].join()) throw new Error(`the top bar's QR codes read ${JSON.stringify(menuRead)}`);
-    if (unread) note("this Chrome has no BarcodeDetector for QR codes: the download QR codes were not read back");
+    if (unread) note("this Chrome cannot read QR codes (no BarcodeDetector, or one without qr_code): the download QR codes were not read back");
     await shot("8c-download");
     await page.mouse.move(720, 700);
     if (!(await page.$('footer a[href="/download"]'))) throw new Error("the footer does not lead to the download page");
@@ -670,7 +670,7 @@ try {
     const [menu, footer] = await entries();
     if (menu || footer) throw new Error(`the console hides the download entries, yet the top bar's ${menu} and the footer's ${footer} show`);
   });
-  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet"'}, the entries ${shown ? "shown" : "hidden"} as the console says; with two apps, a card each (QR code with its platform's mark, ${unread ? "not read back: no BarcodeDetector here" : "read back as its link"}; facts, button), the top bar's two such QR codes and the footer's link; with the switch off no entry, the page still opens`);
+  ok(`the download page: ${served.android || served.ios ? "the server's apps" : '"no app yet"'}, the entries ${shown ? "shown" : "hidden"} as the console says; with two apps, a card each (QR code with its platform's mark, ${unread ? "not read back: this Chrome cannot read QR codes" : "read back as its link"}; facts, button), the top bar's two such QR codes and the footer's link; with the switch off no entry, the page still opens`);
 
   // 8d. Product lines (design 2026-10-07, product line switches, batch K2):
   // with the answer of /v1/platform/products replaced by spot and the
@@ -778,6 +778,8 @@ try {
     [["fr", "en-GB"], "en"],
   ]) {
     const { locale: got, gaveUp } = await firstVisitLocale(page, APP, "/", tags);
+    // Three failed reads are a profile that cannot be read (F35): that fails; a slow one is noted.
+    if (gaveUp?.every((e) => e === "failed")) throw new Error(`a first visit with ${tags.join(",")}: the platform's profile could not be read, three times`);
     if (gaveUp) note(`a first visit with ${tags.join(",")}: its first screen went on without the platform's profile three times (${gaveUp.join(", ")}); its language not checked`);
     else if (got !== want) throw new Error(`a first visit with ${tags.join(",")} starts in ${got}, not ${want}`);
     seen.push(`${tags.join(",")} → ${got ?? "not checked"}`);

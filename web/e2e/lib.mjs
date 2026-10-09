@@ -445,10 +445,12 @@ export const note = (what) => console.log("note " + what);
  * decodeQr reads the QR codes an element shows, left to right, from one
  * screenshot of it, with Chrome's BarcodeDetector (the download QR codes
  * carry a logo, F25: what matters is that they still read as their links).
- * null when this Chrome cannot read QR codes (BarcodeDetector is on macOS,
- * not on every platform's Chrome): the caller notes it and goes on (F29).
+ * null when this Chrome cannot read QR codes (no BarcodeDetector, or one
+ * without qr_code: it is on macOS, not on every platform's Chrome): the
+ * caller notes it and goes on (F29). A missing element fails either way.
  */
 export async function decodeQr(page, element) {
+  if (!element) throw new Error("decodeQr: no such element on the page");
   const can = await page.evaluate(async () => "BarcodeDetector" in window && (await BarcodeDetector.getSupportedFormats()).includes("qr_code"));
   if (!can) return null; // before the screenshot, which would be for nothing (F31)
   const png = await element.screenshot({ encoding: "base64" });

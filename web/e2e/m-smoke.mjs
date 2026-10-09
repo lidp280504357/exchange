@@ -553,6 +553,8 @@ try {
     [["fr", "en-GB"], "en"],
   ]) {
     const { locale: got, gaveUp } = await firstVisitLocale(page, APP, "/", tags, phone);
+    // Three failed reads are a profile that cannot be read (F35): that fails; a slow one is noted.
+    if (gaveUp?.every((e) => e === "failed")) throw new Error(`a first visit with ${tags.join(",")}: the platform's profile could not be read, three times`);
     if (gaveUp) note(`a first visit with ${tags.join(",")}: its first screen went on without the platform's profile three times (${gaveUp.join(", ")}); its language not checked`);
     else if (got !== want) throw new Error(`a first visit with ${tags.join(",")} starts in ${got}, not ${want}`);
     seen.push(`${tags.join(",")} → ${got ?? "not checked"}`);
