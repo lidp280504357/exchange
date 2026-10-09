@@ -7,6 +7,13 @@ BASE="${BASE:-https://astras.vip}"
 BYPASS="${CAPTCHA_BYPASS_TOKEN:-$(grep '^CAPTCHA_BYPASS_TOKEN=' .env | cut -d= -f2- | tr -d '"')}"
 RUN="$(date +%s)"
 WORK="$(mktemp -d)"
+# Every curl of the scripts over HTTP/1.1 (curl reads $CURL_HOME/.curlrc,
+# not ~/.curlrc): the Mac's curl (8.7.1) fails now and then on HTTP/2 with
+# a framing error, exit 16, on answers the server sent - admin.sh three
+# times on 2026-10-07 (it set this first), custody.sh's raw POST of a
+# forged callback on 2026-10-10, which set -e ended without a word.
+printf '%s\n' '--http1.1' >"$WORK/.curlrc"
+export CURL_HOME=$WORK
 AT_EXIT=()
 # AT_END runs after the at_exit commands (lib/remote.sh closes its ssh
 # connection there, which those commands may still need). An at_exit
