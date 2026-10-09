@@ -68,6 +68,7 @@ ssh exchange sudo docker exec exchange-infra-user-service-1 /app/exchangectl use
   - 端到端：`scripts/e2e/lib/common.sh` 的 `register` 第一次成功后挂一个退出钩子，脚本结束时用一次 `exchangectl users kind --email-like '%-<RUN>@example.com' --kind TEST` 把本次注册的账户标为 `TEST`（端到端的 `e2e-…-<RUN>`、故障注入演练的 `fault-…-<RUN>` 都在内；`astra-bot-NN` 不带 RUN，不受影响；改动人 `e2e-<脚本名>`）；失败只警告，不让用例失败。两站的浏览器冒烟注册的账户（也是 `e2e-…@example.com`）由下面的补标命令覆盖。
 - **存量补标**（测试服 2026-10-10 做过一次，以后可随时重跑，幂等）：`scripts/ops/astra.sh mark`；`exchangectl users kind --email-like 'e2e-%@example.com' --kind TEST --reason "..."`，同样对 `fault-%@example.com`（故障注入演练）与 `h5-%@example.com`（旧 H5 的测试账户）。2026-10-10 补完后测试服是 BOT 24、SYSTEM 1（HOUSE）、TEST 1,619、HUMAN 2。
 - **读**：gRPC `User.kind`、`ListUsersRequest.kinds`（可多值）、`UserStatsResponse.by_kind`（每种类型的总数与某时刻以来的新增，按 HUMAN、BOT、TEST、SYSTEM；`total` 与 `created_since` 是它们的和）。后台默认只看真人（L1）。
+- **清理过的测试账户**（L4，用户 2026-10-10「直接把测试用户清理了吧，需要测试再创建」）：不删行（账本只追加，每条分录都指向账户），而是结清 + 关闭 + 隐藏：挂单撤掉、仓位与借款了结、余额划入 ADJUSTMENT、状态 CLOSED（auth 收到 CLOSED 自动吊销全部会话）之后，user-service 记 `users.purged_at`（迁移 users 00005，`MarkPurged`：只对 CLOSED 账户、只记一次、审计 `user.purged`）。清理过的账户在后台的用户列表与统计里默认不出现（gRPC `ListUsersRequest.include_purged` 才列出；`by_kind` 不计），`GET /internal/users/ids` 仍包含它们（它们的历史订单与流水照样按类型排除）；`User.purged_at` 给出时间。清理工具 `exchangectl users purge` 另见下（L4 其余部分，等合约后端会话的 L4b 接口）。
 
 ## 用户通知
 

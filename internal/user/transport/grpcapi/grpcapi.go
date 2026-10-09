@@ -33,6 +33,9 @@ func toProto(u domain.User) *userv1.User {
 	if !u.UsernameChangedAt.IsZero() {
 		out.UsernameChangedAt = timestamppb.New(u.UsernameChangedAt)
 	}
+	if !u.PurgedAt.IsZero() {
+		out.PurgedAt = timestamppb.New(u.PurgedAt)
+	}
 	return out
 }
 
@@ -97,6 +100,7 @@ func (s *Server) ChangeStatus(ctx context.Context, req *userv1.ChangeStatusReque
 func (s *Server) ListUsers(ctx context.Context, req *userv1.ListUsersRequest) (*userv1.ListUsersResponse, error) {
 	f := ports.UserFilter{
 		Status: req.GetStatus(), Region: req.GetRegion(), Q: req.GetQ(), IDs: req.GetUserIds(), Kinds: req.GetKinds(), Limit: int(req.GetLimit()),
+		IncludePurged: req.GetIncludePurged(),
 	}
 	if req.GetCreatedFrom() != nil {
 		f.CreatedFrom = req.GetCreatedFrom().AsTime()

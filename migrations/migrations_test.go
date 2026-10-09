@@ -90,6 +90,11 @@ func TestUsersSchema(t *testing.T) {
 	rejects(t, db, "an unknown kind", `INSERT INTO users (id, region, kind) VALUES ($1, 'CN', 'ROBOT')`, uuid.New())
 	accepts(t, db, `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason) VALUES ($1, 'HUMAN', 'TEST', 'e2e', 'x')`, id)
 	rejects(t, db, "kind changes need a user", `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason) VALUES ($1, 'HUMAN', 'TEST', 'e2e', 'x')`, uuid.New())
+	// Purged (L4): unset until a purge.
+	var purged *time.Time
+	if err := db.QueryRow(context.Background(), `SELECT purged_at FROM users WHERE id = $1`, id).Scan(&purged); err != nil || purged != nil {
+		t.Fatalf("not purged: %v %v", purged, err)
+	}
 }
 
 func TestNotifySchema(t *testing.T) {

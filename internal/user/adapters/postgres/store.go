@@ -96,21 +96,24 @@ func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggreg
 type users repos
 
 const userColumns = `id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at, updated_at,
-	username, username_changed_at, avatar, kind`
+	username, username_changed_at, avatar, kind, purged_at`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
 	var id uuid.UUID
-	var changed *time.Time
+	var changed, purged *time.Time
 	var avatar []byte
 	err := row.Scan(&id, &u.Status, &u.Region, &u.Language, &u.Timezone, &u.AntiPhishingCode, &u.KYCLevel, &u.Version, &u.CreatedAt, &u.UpdatedAt,
-		&u.Username, &changed, &avatar, &u.Kind)
+		&u.Username, &changed, &avatar, &u.Kind, &purged)
 	if err != nil {
 		return u, err
 	}
 	u.ID = id.String()
 	if changed != nil {
 		u.UsernameChangedAt = *changed
+	}
+	if purged != nil {
+		u.PurgedAt = *purged
 	}
 	if avatar != nil {
 		u.Avatar = &domain.Avatar{}
@@ -265,8 +268,9 @@ func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, err
 		AND ($3::timestamptz IS NULL OR created_at >= $3) AND ($4::timestamptz IS NULL OR created_at < $4)
 		AND ($5::timestamptz IS NULL OR (created_at, id) < ($5, $6::uuid))
 		AND ($8 = '' OR strpos(lower(username), lower($8)) > 0 OR id = ANY($9::uuid[]))
-		AND (cardinality($10::text[]) = 0 OR kind = ANY($10))
-		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit, f.Q, ids, kindsOrEmpty(f.Kinds))
+		AND (cardinality($10::text[]) = 0 OR kind = ANY($10)) AND ($11 OR purged_at IS NULL)
+		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit, f.Q, ids, kindsOrEmpty(f.Kinds),
+		f.IncludePurged)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -310,6 +314,17 @@ func (r users) AddKindChange(ctx context.Context, c domain.KindChange) error {
 	return nil
 }
 
+func (r users) SetPurged(ctx context.Context, userID string, at time.Time) error {
+	tag, err := r.q.Exec(ctx, `UPDATE users SET purged_at = $2, version = version + 1, updated_at = now() WHERE id = $1`, userID, at)
+	if err != nil {
+		return fmt.Errorf("set purged: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 func (r users) IDsOfKinds(ctx context.Context, kinds []string) ([]string, error) {
 	rows, err := r.q.Query(ctx, `SELECT id::text FROM users WHERE kind = ANY($1) ORDER BY id`, kindsOrEmpty(kinds))
 	if err != nil {
@@ -341,7 +356,7 @@ func (r users) FindUsername(ctx context.Context, name string) (string, error) {
 
 func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
 	out := ports.UserStats{Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
-	kinds, err := r.q.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE created_at >= $1) FROM users GROUP BY kind`, since)
+	kinds, err := r.q.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE created_at >= $1) FROM users WHERE purged_at IS NULL GROUP BY kind`, since)
 	if err != nil {
 		return out, fmt.Errorf("user stats: %w", err)
 	}
@@ -365,7 +380,7 @@ func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.User
 	}
 	rows, err := r.q.Query(ctx, `SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*) FROM users
 		WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $1 - 1)) AT TIME ZONE 'UTC'
-		GROUP BY day`, days)
+		AND purged_at IS NULL GROUP BY day`, days)
 	if err != nil {
 		return out, fmt.Errorf("user stats: %w", err)
 	}

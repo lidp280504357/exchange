@@ -53,6 +53,9 @@ type User struct {
 	// Kind is HUMAN, BOT, TEST or SYSTEM (kind.go): the console's, set only
 	// through SetKind.
 	Kind string
+	// PurgedAt is when a closed test account was cleared out (L4); zero
+	// for the others. The console's lists leave purged accounts out.
+	PurgedAt time.Time
 }
 
 // Consent is an accepted document version.

@@ -118,6 +118,9 @@ message User {
   // it. Operators and scripts set it (exchangectl users kind, PUT
   // /internal/users/{id}/kind: api/internal/users.yaml), not the console.
   string kind = 13;
+  // When a closed test account was cleared out (L4: exchangectl users
+  // purge); unset for the others.
+  google.protobuf.Timestamp purged_at = 14;
 }
 
 
@@ -210,6 +213,8 @@ message ListUsersRequest {
   // Only accounts of these kinds (HUMAN, BOT, TEST, SYSTEM; L0); empty for
   // all.
   repeated string kinds = 9;
+  // Purged accounts (L4) are left out unless this is set.
+  bool include_purged = 10;
 }
 
 message ListUsersResponse {
@@ -230,7 +235,8 @@ message UserStatsResponse {
   int64 created_since = 2;
   repeated DayCount days = 3;
   // The same two counts for each kind (L0), in the order HUMAN, BOT, TEST,
-  // SYSTEM; total and created_since are their sums.
+  // SYSTEM; total and created_since are their sums. Purged accounts (L4)
+  // count nowhere.
   repeated KindCount by_kind = 4;
 }
 

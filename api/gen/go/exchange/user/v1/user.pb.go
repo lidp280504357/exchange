@@ -512,7 +512,10 @@ type User struct {
 	// like): L0, what the console shows and filters by; nothing else reads
 	// it. Operators and scripts set it (exchangectl users kind, PUT
 	// /internal/users/{id}/kind: api/internal/users.yaml), not the console.
-	Kind          string `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind string `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
+	// When a closed test account was cleared out (L4: exchangectl users
+	// purge); unset for the others.
+	PurgedAt      *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=purged_at,json=purgedAt,proto3" json:"purged_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -636,6 +639,13 @@ func (x *User) GetKind() string {
 		return x.Kind
 	}
 	return ""
+}
+
+func (x *User) GetPurgedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PurgedAt
+	}
+	return nil
 }
 
 type CreateUserRequest struct {
@@ -1224,7 +1234,9 @@ type ListUsersRequest struct {
 	UserIds []string `protobuf:"bytes,8,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
 	// Only accounts of these kinds (HUMAN, BOT, TEST, SYSTEM; L0); empty for
 	// all.
-	Kinds         []string `protobuf:"bytes,9,rep,name=kinds,proto3" json:"kinds,omitempty"`
+	Kinds []string `protobuf:"bytes,9,rep,name=kinds,proto3" json:"kinds,omitempty"`
+	// Purged accounts (L4) are left out unless this is set.
+	IncludePurged bool `protobuf:"varint,10,opt,name=include_purged,json=includePurged,proto3" json:"include_purged,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1320,6 +1332,13 @@ func (x *ListUsersRequest) GetKinds() []string {
 		return x.Kinds
 	}
 	return nil
+}
+
+func (x *ListUsersRequest) GetIncludePurged() bool {
+	if x != nil {
+		return x.IncludePurged
+	}
+	return false
 }
 
 type ListUsersResponse struct {
@@ -1435,7 +1454,8 @@ type UserStatsResponse struct {
 	CreatedSince int64                  `protobuf:"varint,2,opt,name=created_since,json=createdSince,proto3" json:"created_since,omitempty"`
 	Days         []*DayCount            `protobuf:"bytes,3,rep,name=days,proto3" json:"days,omitempty"`
 	// The same two counts for each kind (L0), in the order HUMAN, BOT, TEST,
-	// SYSTEM; total and created_since are their sums.
+	// SYSTEM; total and created_since are their sums. Purged accounts (L4)
+	// count nowhere.
 	ByKind        []*KindCount `protobuf:"bytes,4,rep,name=by_kind,json=byKind,proto3" json:"by_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1650,7 +1670,7 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"acceptedAt\"\x96\x01\n" +
 	"\x16GetUserHistoryResponse\x12E\n" +
 	"\x0estatus_changes\x18\x01 \x03(\v2\x1e.exchange.user.v1.StatusChangeR\rstatusChanges\x125\n" +
-	"\bconsents\x18\x02 \x03(\v2\x19.exchange.user.v1.ConsentR\bconsents\"\xc9\x03\n" +
+	"\bconsents\x18\x02 \x03(\v2\x19.exchange.user.v1.ConsentR\bconsents\"\x82\x04\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
@@ -1667,7 +1687,8 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\n" +
 	"avatar_url\x18\v \x01(\tR\tavatarUrl\x12(\n" +
 	"\x10avatar_thumb_url\x18\f \x01(\tR\x0eavatarThumbUrl\x12\x12\n" +
-	"\x04kind\x18\r \x01(\tR\x04kind\"\xd9\x01\n" +
+	"\x04kind\x18\r \x01(\tR\x04kind\x127\n" +
+	"\tpurged_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\bpurgedAt\"\xd9\x01\n" +
 	"\x11CreateUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12\x1a\n" +
@@ -1704,7 +1725,7 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x14ChangeStatusResponse\x12\x1f\n" +
 	"\vfrom_status\x18\x01 \x01(\tR\n" +
 	"fromStatus\x12\x1b\n" +
-	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\xb1\x02\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\xd8\x02\n" +
 	"\x10ListUsersRequest\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12=\n" +
@@ -1714,7 +1735,9 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x05limit\x18\x06 \x01(\x05R\x05limit\x12\f\n" +
 	"\x01q\x18\a \x01(\tR\x01q\x12\x19\n" +
 	"\buser_ids\x18\b \x03(\tR\auserIds\x12\x14\n" +
-	"\x05kinds\x18\t \x03(\tR\x05kinds\"b\n" +
+	"\x05kinds\x18\t \x03(\tR\x05kinds\x12%\n" +
+	"\x0einclude_purged\x18\n" +
+	" \x01(\bR\rincludePurged\"b\n" +
 	"\x11ListUsersResponse\x12,\n" +
 	"\x05users\x18\x01 \x03(\v2\x16.exchange.user.v1.UserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1798,39 +1821,40 @@ var file_exchange_user_v1_user_proto_depIdxs = []int32{
 	6,  // 5: exchange.user.v1.GetUserHistoryResponse.consents:type_name -> exchange.user.v1.Consent
 	25, // 6: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	25, // 7: exchange.user.v1.User.username_changed_at:type_name -> google.protobuf.Timestamp
-	8,  // 8: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
-	8,  // 9: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
-	25, // 10: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
-	25, // 11: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
-	8,  // 12: exchange.user.v1.ListUsersResponse.users:type_name -> exchange.user.v1.User
-	25, // 13: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
-	24, // 14: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
-	23, // 15: exchange.user.v1.UserStatsResponse.by_kind:type_name -> exchange.user.v1.KindCount
-	9,  // 16: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
-	11, // 17: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
-	13, // 18: exchange.user.v1.UserService.FindUsername:input_type -> exchange.user.v1.FindUsernameRequest
-	15, // 19: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
-	17, // 20: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
-	19, // 21: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
-	21, // 22: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
-	4,  // 23: exchange.user.v1.UserService.GetUserHistory:input_type -> exchange.user.v1.GetUserHistoryRequest
-	0,  // 24: exchange.user.v1.UserService.ResetUsername:input_type -> exchange.user.v1.ResetUsernameRequest
-	2,  // 25: exchange.user.v1.UserService.ResetAvatar:input_type -> exchange.user.v1.ResetAvatarRequest
-	10, // 26: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
-	12, // 27: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
-	14, // 28: exchange.user.v1.UserService.FindUsername:output_type -> exchange.user.v1.FindUsernameResponse
-	16, // 29: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
-	18, // 30: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
-	20, // 31: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
-	22, // 32: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
-	7,  // 33: exchange.user.v1.UserService.GetUserHistory:output_type -> exchange.user.v1.GetUserHistoryResponse
-	1,  // 34: exchange.user.v1.UserService.ResetUsername:output_type -> exchange.user.v1.ResetUsernameResponse
-	3,  // 35: exchange.user.v1.UserService.ResetAvatar:output_type -> exchange.user.v1.ResetAvatarResponse
-	26, // [26:36] is the sub-list for method output_type
-	16, // [16:26] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	25, // 8: exchange.user.v1.User.purged_at:type_name -> google.protobuf.Timestamp
+	8,  // 9: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
+	8,  // 10: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
+	25, // 11: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
+	25, // 12: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
+	8,  // 13: exchange.user.v1.ListUsersResponse.users:type_name -> exchange.user.v1.User
+	25, // 14: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
+	24, // 15: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
+	23, // 16: exchange.user.v1.UserStatsResponse.by_kind:type_name -> exchange.user.v1.KindCount
+	9,  // 17: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
+	11, // 18: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
+	13, // 19: exchange.user.v1.UserService.FindUsername:input_type -> exchange.user.v1.FindUsernameRequest
+	15, // 20: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
+	17, // 21: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
+	19, // 22: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
+	21, // 23: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
+	4,  // 24: exchange.user.v1.UserService.GetUserHistory:input_type -> exchange.user.v1.GetUserHistoryRequest
+	0,  // 25: exchange.user.v1.UserService.ResetUsername:input_type -> exchange.user.v1.ResetUsernameRequest
+	2,  // 26: exchange.user.v1.UserService.ResetAvatar:input_type -> exchange.user.v1.ResetAvatarRequest
+	10, // 27: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
+	12, // 28: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
+	14, // 29: exchange.user.v1.UserService.FindUsername:output_type -> exchange.user.v1.FindUsernameResponse
+	16, // 30: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
+	18, // 31: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
+	20, // 32: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
+	22, // 33: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
+	7,  // 34: exchange.user.v1.UserService.GetUserHistory:output_type -> exchange.user.v1.GetUserHistoryResponse
+	1,  // 35: exchange.user.v1.UserService.ResetUsername:output_type -> exchange.user.v1.ResetUsernameResponse
+	3,  // 36: exchange.user.v1.UserService.ResetAvatar:output_type -> exchange.user.v1.ResetAvatarResponse
+	27, // [27:37] is the sub-list for method output_type
+	17, // [17:27] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_exchange_user_v1_user_proto_init() }

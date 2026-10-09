@@ -60,8 +60,11 @@ type UserRepo interface {
 	// change.
 	SetKind(ctx context.Context, userID, kind string) error
 	AddKindChange(ctx context.Context, c domain.KindChange) error
-	// IDsOfKinds returns the accounts of the kinds, in ID order.
+	// IDsOfKinds returns the accounts of the kinds, in ID order (purged
+	// ones too: their history stays theirs).
 	IDsOfKinds(ctx context.Context, kinds []string) ([]string, error)
+	// SetPurged notes when an account was purged (L4).
+	SetPurged(ctx context.Context, userID string, at time.Time) error
 }
 
 // UserFilter selects accounts for the admin console.
@@ -75,10 +78,12 @@ type UserFilter struct {
 	Q   string
 	IDs []string
 	// Kinds, when set, keeps the accounts of these kinds (L0).
-	Kinds     []string
-	AfterTime time.Time
-	AfterID   string
-	Limit     int
+	Kinds []string
+	// IncludePurged lists the purged accounts too (L4).
+	IncludePurged bool
+	AfterTime     time.Time
+	AfterID       string
+	Limit         int
 }
 
 // UserStats are the admin console's account counts.

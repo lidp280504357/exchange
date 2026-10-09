@@ -341,6 +341,39 @@ func (s *Service) SetKind(ctx context.Context, userID, kind, actor, reason strin
 	return c, changed, err
 }
 
+// MarkPurged notes that a closed test account was cleared out (L4: its
+// orders, positions and loans ended and its balances moved to the
+// ADJUSTMENT account, by exchangectl users purge), audited as user.purged;
+// the console's lists and counts leave it out from then on. Once: an
+// account purged already is left as it is (false).
+func (s *Service) MarkPurged(ctx context.Context, userID, actor, reason string) (bool, error) {
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return false, apperr.Invalid("the actor and the reason are required")
+	}
+	marked := false
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		marked = false
+		u, err := r.Users().GetForUpdate(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if !u.PurgedAt.IsZero() {
+			return nil
+		}
+		if u.Status != domain.StatusClosed {
+			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "only a closed account is purged").WithDetail("status", u.Status)
+		}
+		if err := r.Users().SetPurged(ctx, userID, s.Now()); err != nil {
+			return err
+		}
+		marked = true
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "user:" + userID, Action: "user.purged", Actor: actor, Reason: reason, Details: "{}",
+		}, "actor", actor)
+	})
+	return marked, err
+}
+
 // IDsOfKinds returns the accounts of the kinds (L0: the console leaves the
 // bots, test accounts and HOUSE out of its lists by them), in ID order.
 func (s *Service) IDsOfKinds(ctx context.Context, kinds []string) ([]string, error) {

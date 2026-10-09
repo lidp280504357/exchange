@@ -297,6 +297,26 @@ func TestAccountKindsStore(t *testing.T) {
 	if err != nil || st.Total != 3 || st.ByKind[domain.KindHuman].Total != 1 || st.ByKind[domain.KindBot].CreatedSince != 1 || st.ByKind[domain.KindSystem].Total != 1 {
 		t.Fatalf("stats %+v %v", st, err)
 	}
+	// Purged (L4): out of the lists and counts unless asked, in its kind's IDs.
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if err := users.SetPurged(ctx, ids[0], at); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := users.Get(ctx, ids[0]); !got.PurgedAt.Equal(at) {
+		t.Fatalf("purged at %v", got.PurgedAt)
+	}
+	if list, _ := users.List(ctx, ports.UserFilter{Limit: 10}); len(list) != 2 {
+		t.Fatalf("hidden: %d", len(list))
+	}
+	if list, _ := users.List(ctx, ports.UserFilter{IncludePurged: true, Limit: 10}); len(list) != 3 {
+		t.Fatalf("asked for: %d", len(list))
+	}
+	if st, _ := users.Stats(ctx, time.Now().Add(-time.Hour), 1); st.Total != 2 || st.ByKind[domain.KindBot].Total != 0 {
+		t.Fatalf("counts %+v", st)
+	}
+	if bots, _ := users.IDsOfKinds(ctx, []string{domain.KindBot}); len(bots) != 1 {
+		t.Fatalf("its kind's IDs %v", bots)
+	}
 }
 
 // Usernames are unique whatever the case, a clash is ErrUsernameTaken on

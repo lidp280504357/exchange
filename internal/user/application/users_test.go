@@ -146,7 +146,7 @@ func (r memUsers) List(_ context.Context, f ports.UserFilter) ([]domain.User, er
 	var out []domain.User
 	for _, u := range r.s.users {
 		matched := f.Q == "" || strings.Contains(strings.ToLower(u.Username), strings.ToLower(f.Q)) || slices.Contains(f.IDs, u.ID)
-		matched = matched && (len(f.Kinds) == 0 || slices.Contains(f.Kinds, u.Kind))
+		matched = matched && (len(f.Kinds) == 0 || slices.Contains(f.Kinds, u.Kind)) && (f.IncludePurged || u.PurgedAt.IsZero())
 		if matched && (f.Status == "" || u.Status == f.Status) && (f.AfterID == "" || u.CreatedAt.Before(f.AfterTime) ||
 			(u.CreatedAt.Equal(f.AfterTime) && u.ID < f.AfterID)) {
 			out = append(out, u)
@@ -176,6 +176,16 @@ func (r memUsers) AddKindChange(_ context.Context, c domain.KindChange) error {
 	return nil
 }
 
+func (r memUsers) SetPurged(_ context.Context, userID string, at time.Time) error {
+	u, ok := r.s.users[userID]
+	if !ok {
+		return domain.ErrUserNotFound
+	}
+	u.PurgedAt = at
+	r.s.users[userID] = u
+	return nil
+}
+
 func (r memUsers) IDsOfKinds(_ context.Context, kinds []string) ([]string, error) {
 	out := []string{}
 	for id, u := range r.s.users {
@@ -199,6 +209,10 @@ func (r memUsers) FindUsername(_ context.Context, name string) (string, error) {
 func (r memUsers) Stats(_ context.Context, since time.Time, _ int) (ports.UserStats, error) {
 	st := ports.UserStats{Total: int64(len(r.s.users)), Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
 	for _, u := range r.s.users {
+		if !u.PurgedAt.IsZero() {
+			st.Total--
+			continue
+		}
 		c := st.ByKind[u.Kind]
 		c.Total++
 		if !u.CreatedAt.Before(since) {
@@ -562,5 +576,47 @@ func TestAccountKinds(t *testing.T) {
 	if err != nil || st.Total != 4 || st.ByKind[domain.KindHuman].Total != 1 || st.ByKind[domain.KindSystem].CreatedSince != 1 ||
 		st.ByKind[domain.KindBot].CreatedSince != 0 {
 		t.Fatalf("stats %+v %v", st, err)
+	}
+}
+
+// A purged account (L4): only a closed one, once, audited; the console's
+// lists and counts leave it out unless asked, its kind's ID list keeps it.
+func TestMarkPurged(t *testing.T) {
+	svc, store, _ := newService()
+	ctx := context.Background()
+	open, closed := uuid.NewString(), uuid.NewString()
+	for _, u := range []domain.User{
+		{ID: open, Status: domain.StatusActive, Kind: domain.KindTest, Region: "SG"},
+		{ID: closed, Status: domain.StatusClosed, Kind: domain.KindTest, Region: "SG"},
+	} {
+		store.users[u.ID] = u
+	}
+	if _, err := svc.MarkPurged(ctx, open, "cli:ops", "test account"); !apperr.Is(err, apperr.CodeConflict) {
+		t.Fatalf("an open account: %v", err)
+	}
+	if marked, err := svc.MarkPurged(ctx, closed, "cli:ops", "test account"); err != nil || !marked {
+		t.Fatalf("closed: %v %v", marked, err)
+	}
+	if marked, err := svc.MarkPurged(ctx, closed, "cli:ops", "again"); err != nil || marked {
+		t.Fatalf("again: %v %v", marked, err)
+	}
+	if _, err := svc.MarkPurged(ctx, closed, "", "x"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no actor: %v", err)
+	}
+	audits := eventsOf[*auditv1.AdminActionPerformed](store)
+	if len(audits) != 1 || audits[0].GetAction() != "user.purged" || audits[0].GetTarget() != "user:"+closed {
+		t.Fatalf("audits %+v", audits)
+	}
+	if page, err := svc.ListUsers(ctx, ports.UserFilter{}, ""); err != nil || len(page.Users) != 1 || page.Users[0].ID != open {
+		t.Fatalf("hidden: %+v %v", page.Users, err)
+	}
+	if page, err := svc.ListUsers(ctx, ports.UserFilter{IncludePurged: true}, ""); err != nil || len(page.Users) != 2 {
+		t.Fatalf("asked for: %+v %v", page.Users, err)
+	}
+	if st, err := svc.UserStats(ctx, time.Time{}, 0); err != nil || st.Total != 1 || st.ByKind[domain.KindTest].Total != 1 {
+		t.Fatalf("counts %+v %v", st, err)
+	}
+	if ids, err := svc.IDsOfKinds(ctx, []string{"TEST"}); err != nil || len(ids) != 2 {
+		t.Fatalf("its kind's IDs: %v %v", ids, err)
 	}
 }
