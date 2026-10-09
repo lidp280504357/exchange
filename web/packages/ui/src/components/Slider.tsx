@@ -166,6 +166,8 @@ export function Slider({
             className={cn(
               "absolute top-0 left-0 block size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-bg-1 shadow-pop",
               "transition-transform duration-[var(--t-fast)] group-hover:scale-110 group-focus-visible:scale-110",
+              // The thumb that takes the focus has no size: the dot shows it (B175).
+              "group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-bg-1",
               peaking && "motion-safe:animate-slider-dot-pulse",
               c.thumb,
             )}

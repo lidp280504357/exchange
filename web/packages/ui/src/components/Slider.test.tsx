@@ -47,6 +47,8 @@ describe("Slider at its maximum (B173)", () => {
   it("puts the thumb's centre on the value: a zero-size thumb Radix cannot shift", () => {
     const { container } = render(<Slider value={0} onValueChange={() => {}} marks={[0, 100]} markLabels aria-label="p" />);
     expect(container.querySelector("[role=slider]")?.className).toContain("size-0");
+    // The keyboard's focus shows on the dot (B175).
+    expect(container.querySelector("[role=slider] > span:last-child")?.className).toContain("group-focus-visible:ring-2");
     const labels = [...container.querySelectorAll("button")].map((b) => (b as HTMLElement).style.left);
     expect(labels).toEqual(["calc(0% - 0.5rem)", "calc(100% + 0.5rem)"]);
   });
