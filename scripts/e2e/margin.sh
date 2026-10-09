@@ -142,6 +142,12 @@ check '.amount == "200" and .limited_by == "LEVERAGE"' "100 at 3x: 200 more"
 call POST /v1/margin/borrow '{"account":"MARGIN_CROSS","asset":"USDT","amount":"150"}' "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-b1"
 expect 200 - "borrow 150 USDT"
 check '.principal == "150" and .interest == "0.0015" and .interest_model == "FIXED"' "owing 150 and the first hour, 150 x 0.0010%"
+# The console's count of the spot line (product switches, K1a) counts
+# the margin accounts that owe: this one now (trading.sh only wants the
+# count there, as other runs and people may owe; B169). The count is at
+# most 15 seconds old.
+owing() { internal GET spot-trading-service 8088 /internal/products/spot && [[ $STATUS == 200 ]] && jq -e '.open_positions >= 1' <<<"$BODY" >/dev/null; }
+eventually 40 "the spot line's count sees a margin account that owes" owing
 call POST /v1/margin/borrow '{"account":"MARGIN_CROSS","asset":"USDT","amount":"60"}' "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-b2"
 expect 422 MARGIN_LIMIT "60 more is beyond 3x"
 check '.details.max_borrowable == "49.9955"' "what is left: (250 - 150.0015) x 2 - 150.0015"

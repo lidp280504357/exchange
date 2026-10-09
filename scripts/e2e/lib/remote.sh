@@ -155,12 +155,16 @@ server_now() {
 # price hangs on lifts what it caused (B165: spot trading closed stops the
 # platform coin's perpetuals, whose index is its spot market, and opening
 # it again does not lift them). It waits up to SECONDS (200) in all, then
-# fails naming the contracts still stale.
+# fails naming the contracts still stale; it fails at once when the
+# states cannot be read (B169).
 lift_reduce_only() {
-  local since=$1 actor=$2 deadline=$((SECONDS + ${3:-200})) left symbol mark lifted
+  local since=$1 actor=$2 deadline=$((SECONDS + ${3:-200})) states left symbol mark lifted
   while :; do
-    left=$(exchangectl derivatives states |
-      awk -v since="$since" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}')
+    if ! states=$(exchangectl derivatives states); then
+      echo "FAIL the contracts' states could not be read to lift what went reduce-only since $since; by hand: exchangectl derivatives states" >&2
+      return 1
+    fi
+    left=$(awk -v since="$since" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}' <<<"$states")
     [[ -z $left ]] && return 0
     if ((SECONDS >= deadline)); then
       echo "FAIL still reduce-only since $since, the mark price not fresh: $(tr '\n' ' ' <<<"$left")- by hand once it is: exchangectl derivatives resume <contract>" >&2
@@ -170,7 +174,10 @@ lift_reduce_only() {
     for symbol in $left; do
       mark=$(compose "exec -T market-data-service wget -qO- http://127.0.0.1:8090/v1/market/$symbol/mark-price" 2>/dev/null) || continue
       grep -q '"degraded":false' <<<"$mark" || continue
-      remote "sudo docker compose $COMPOSE_FILES exec -T -e EXCHANGECTL_ACTOR=$actor derivatives-service /app/exchangectl derivatives resume $symbol" >/dev/null
+      if ! remote "sudo docker compose $COMPOSE_FILES exec -T -e EXCHANGECTL_ACTOR=$actor derivatives-service /app/exchangectl derivatives resume $symbol" >/dev/null; then
+        echo "note: lifting $symbol's reduce-only failed; the next pass tries again" >&2
+        continue
+      fi
       echo "ok   $symbol went reduce-only since $since (its mark price stale); lifted now that it is fresh"
       lifted=1
     done
