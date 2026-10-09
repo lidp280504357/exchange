@@ -65,6 +65,8 @@ type UserRepo interface {
 	IDsOfKinds(ctx context.Context, kinds []string) ([]string, error)
 	// SetPurged notes when an account was purged (L4).
 	SetPurged(ctx context.Context, userID string, at time.Time) error
+	// SetPurgeExempt keeps an account out of the purge, or lets it in (L4).
+	SetPurgeExempt(ctx context.Context, userID string, exempt bool) error
 }
 
 // UserFilter selects accounts for the admin console.

@@ -90,10 +90,12 @@ func TestUsersSchema(t *testing.T) {
 	rejects(t, db, "an unknown kind", `INSERT INTO users (id, region, kind) VALUES ($1, 'CN', 'ROBOT')`, uuid.New())
 	accepts(t, db, `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason) VALUES ($1, 'HUMAN', 'TEST', 'e2e', 'x')`, id)
 	rejects(t, db, "kind changes need a user", `INSERT INTO user_kind_changes (user_id, from_kind, to_kind, actor, reason) VALUES ($1, 'HUMAN', 'TEST', 'e2e', 'x')`, uuid.New())
-	// Purged (L4): unset until a purge.
+	// Purged (L4): unset until a purge; not exempt from it unless said so.
 	var purged *time.Time
-	if err := db.QueryRow(context.Background(), `SELECT purged_at FROM users WHERE id = $1`, id).Scan(&purged); err != nil || purged != nil {
-		t.Fatalf("not purged: %v %v", purged, err)
+	var exempt bool
+	if err := db.QueryRow(context.Background(), `SELECT purged_at, purge_exempt FROM users WHERE id = $1`, id).Scan(&purged, &exempt); err != nil ||
+		purged != nil || exempt {
+		t.Fatalf("not purged, not exempt: %v %v %v", purged, exempt, err)
 	}
 }
 

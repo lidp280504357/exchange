@@ -45,29 +45,41 @@ func ledgerCmd(ctx context.Context, cfg settings, args []string, out io.Writer) 
 		fmt.Fprint(out, usage)
 		return errUsage
 	}
+	dbs, closeAll, err := openLedgerDBs(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer closeAll()
+	return ledgerWith(ctx, dbs, args, out)
+}
+
+// openLedgerDBs opens the schemas the ledger commands read; the function
+// returned closes them, and the ones open opened since.
+func openLedgerDBs(ctx context.Context, cfg settings) (ledgerDBs, func(), error) {
 	var dbs ledgerDBs
+	var all []*pg.DB
+	closeAll := func() {
+		for _, db := range all {
+			db.Close()
+		}
+	}
 	for schema, dst := range map[string]**pg.DB{"ledger": &dbs.ledger, "instrument": &dbs.instrument, "config": &dbs.config} {
 		db, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 2}, schema)
 		if err != nil {
-			return err
+			closeAll()
+			return dbs, nil, err
 		}
-		defer db.Close()
+		all = append(all, db)
 		*dst = db
 	}
-	var extra []*pg.DB
-	defer func() {
-		for _, db := range extra {
-			db.Close()
-		}
-	}()
 	dbs.open = func(schema string) (*pg.DB, error) {
 		db, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 1}, schema)
 		if err == nil {
-			extra = append(extra, db)
+			all = append(all, db)
 		}
 		return db, err
 	}
-	return ledgerWith(ctx, dbs, args, out)
+	return dbs, closeAll, nil
 }
 
 // instrumentAssets reads asset precision straight from the instrument
@@ -92,32 +104,41 @@ func (f staticFlags) Closed(key string) bool {
 	return ok && !fl.Enabled
 }
 
-func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer) error {
+// newLedgerService brings the schemas the ledger commands use up to date
+// and builds the ledger's use cases on them, with the flags as stored now.
+func newLedgerService(ctx context.Context, dbs ledgerDBs) (*application.Service, *postgres.Store, error) {
 	for _, db := range []*pg.DB{dbs.ledger, dbs.config, dbs.instrument} {
 		if err := migrate.UpPlatform(ctx, db, quiet); err != nil {
-			return err
+			return nil, nil, err
 		}
 	}
 	if err := migrate.Up(ctx, dbs.instrument, migrations.Instrument(), quiet); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := migrate.Up(ctx, dbs.ledger, migrations.Ledger(), quiet); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := migrate.Up(ctx, dbs.config, migrations.Config(), quiet); err != nil {
-		return err
+		return nil, nil, err
 	}
 	current, err := flags.Load(ctx, dbs.config)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	host, _ := os.Hostname()
 	store := postgres.NewStore(dbs.ledger, event.NewFactory("exchangectl", host))
-	svc := &application.Service{
+	return &application.Service{
 		Store:  store,
 		Assets: instrumentAssets{svc: &instrumentapp.Service{Store: instrumentpg.NewStore(dbs.instrument, nil)}},
 		Flags:  staticFlags(current),
 		Now:    time.Now,
+	}, store, nil
+}
+
+func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer) error {
+	svc, store, err := newLedgerService(ctx, dbs)
+	if err != nil {
+		return err
 	}
 	switch args[0] {
 	case "adjust":

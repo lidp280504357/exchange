@@ -63,6 +63,30 @@ position() { # position AUTH...: BODY holds the user's only position on the cont
   call GET "/v1/derivatives/positions?symbol=$SYMBOL" "" "$@" && jq -e '.positions | length == 1' <<<"$BODY"
 }
 
+# exempt [--off] EMAIL... keeps the hedge's accounts out of the test-account
+# purge (L4), or lets them in again once the hedge is gone: the exit hook
+# clears out the accounts a run registers, and the hedge stands from run
+# to run. Idempotent. Exempting that fails fails the run (the next purge
+# would take the hedge); lifting it only warns.
+exempt() {
+  local off="" e out
+  if [[ $1 == --off ]]; then
+    off=" --off"
+    shift
+  fi
+  for e in "$@"; do
+    if ! out=$(ssh -o ConnectTimeout=20 exchange "cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-funding user-service /app/exchangectl users exempt --email-like '$e'$off --reason 'funding.sh: the standing hedge'" 2>&1 </dev/null); then
+      if [[ -n $off ]]; then
+        echo "warn: $e is still exempt from the purge: $(tail -1 <<<"$out")" >&2
+        continue
+      fi
+      echo "FAIL the hedge's account $e is not exempt from the purge: $(tail -1 <<<"$out")" >&2
+      exit 1
+    fi
+  done
+  [[ -n $off ]] || echo "ok   the hedge's accounts are exempt from the purge"
+}
+
 # open_hedge KIND STATE registers two users and funds their FUTURES
 # accounts (usdt: 100 USDT each; coinm: COINM_IN BTC each, bought with the
 # welcome USDT), opens a long for one and a short for the other with
@@ -78,6 +102,7 @@ open_hedge() {
     register "$prefix-$who-$RUN@example.com" "$prefix-$who-$RUN" "$PASSWORD"
     eval "TOKEN_$who=$(jq -r .access_token <<<"$BODY")"
   done
+  exempt "$prefix-long-$RUN@example.com" "$prefix-short-$RUN@example.com"
   # shellcheck disable=SC2154 # set above
   LONG=(-H "Authorization: Bearer $TOKEN_long")
   # shellcheck disable=SC2154
@@ -136,12 +161,14 @@ hedge() {
   # shellcheck source=/dev/null
   source "$state"
   echo "== the standing $kind hedge on $SYMBOL (opened $(date -u -r "$OPENED_AT" +%FT%TZ 2>/dev/null || date -u -d "@$OPENED_AT" +%FT%TZ))"
+  exempt "$EMAIL_LONG" "$EMAIL_SHORT"
   login "$EMAIL_LONG" "$DEVICE_LONG"
   LONG=(-H "Authorization: Bearer $TOKEN")
   login "$EMAIL_SHORT" "$DEVICE_SHORT"
   SHORT=(-H "Authorization: Bearer $TOKEN")
   if ! position "${LONG[@]}" >/dev/null || ! position "${SHORT[@]}" >/dev/null; then
     echo "     the hedge is gone (closed or deleveraged); opening a new one"
+    exempt --off "$EMAIL_LONG" "$EMAIL_SHORT"
     rm -f "$state"
     open_hedge "$kind" "$state"
     return

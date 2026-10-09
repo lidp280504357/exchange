@@ -317,6 +317,18 @@ func TestAccountKindsStore(t *testing.T) {
 	if bots, _ := users.IDsOfKinds(ctx, []string{domain.KindBot}); len(bots) != 1 {
 		t.Fatalf("its kind's IDs %v", bots)
 	}
+	// Exempt from the purge (L4): kept, and lifted.
+	for _, exempt := range []bool{true, false} {
+		if err := users.SetPurgeExempt(ctx, ids[1], exempt); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := users.Get(ctx, ids[1]); got.PurgeExempt != exempt {
+			t.Fatalf("exempt %v: %+v", exempt, got)
+		}
+	}
+	if err := users.SetPurgeExempt(ctx, uuid.NewString(), true); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("an unknown account: %v", err)
+	}
 }
 
 // Usernames are unique whatever the case, a clash is ErrUsernameTaken on

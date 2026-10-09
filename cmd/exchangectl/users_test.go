@@ -105,3 +105,56 @@ func TestUsersKind(t *testing.T) {
 		t.Fatalf("audits: %d %v", audits, err)
 	}
 }
+
+// users exempt (L4): keeps the accounts named out of the purge, or lets
+// them in again (--off), audited; a run again changes nothing; one of
+// --user and --email-like, and a reason, are required.
+func TestUsersExempt(t *testing.T) {
+	db := testenv.Postgres(t)
+	ctx := context.Background()
+	if err := migrate.UpPlatform(ctx, db, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, db, migrations.Users(), quiet); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for range 2 {
+		u, _ := domain.NewUser(uuid.NewString(), "SG", "", "")
+		if _, err := postgres.NewStore(db, nil).Read().Users().Create(ctx, u, nil); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	run := func(args ...string) (string, error) {
+		var out bytes.Buffer
+		err := usersWith(ctx, db, args, &out)
+		return out.String(), err
+	}
+	both := ids[0] + "," + ids[1]
+	if out, err := run("exempt", "--user", both, "--reason", "funding.sh's hedge"); err != nil || !strings.Contains(out, "2 accounts, 2 changed to exempt=true") {
+		t.Fatalf("exempt: %v\n%s", err, out)
+	}
+	if out, err := run("exempt", "--user", both, "--reason", "again"); err != nil || !strings.Contains(out, "2 accounts, 0 changed") {
+		t.Fatalf("again: %v\n%s", err, out)
+	}
+	if out, err := run("exempt", "--user", ids[0], "--off", "--reason", "the hedge is gone"); err != nil || !strings.Contains(out, "1 accounts, 1 changed to exempt=false") {
+		t.Fatalf("off: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"exempt", "--user", both},
+		{"exempt", "--reason", "x"},
+		{"exempt", "--user", both, "--email-like", "e2e-%@example.com", "--reason", "x"},
+	} {
+		if out, err := run(args...); err == nil {
+			t.Fatalf("%v accepted:\n%s", args, out)
+		}
+	}
+	var exempt, audits int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM users WHERE purge_exempt`).Scan(&exempt); err != nil || exempt != 1 {
+		t.Fatalf("exempt: %d %v", exempt, err)
+	}
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE event_type = 'audit.AdminActionPerformed'`).Scan(&audits); err != nil || audits != 3 {
+		t.Fatalf("audits: %d %v", audits, err)
+	}
+}

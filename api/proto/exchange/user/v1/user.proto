@@ -121,6 +121,9 @@ message User {
   // When a closed test account was cleared out (L4: exchangectl users
   // purge); unset for the others.
   google.protobuf.Timestamp purged_at = 14;
+  // The purge leaves this test account alone (L4: exchangectl users
+  // exempt; the end-to-end scripts' standing accounts).
+  bool purge_exempt = 15;
 }
 
 

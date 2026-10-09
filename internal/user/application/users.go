@@ -344,8 +344,9 @@ func (s *Service) SetKind(ctx context.Context, userID, kind, actor, reason strin
 // MarkPurged notes that a closed test account was cleared out (L4: its
 // orders, positions and loans ended and its balances moved to the
 // ADJUSTMENT account, by exchangectl users purge), audited as user.purged;
-// the console's lists and counts leave it out from then on. Once: an
-// account purged already is left as it is (false).
+// the console's lists and counts leave it out from then on. Only a TEST
+// account that is not exempt (B180). Once: an account purged already is
+// left as it is (false).
 func (s *Service) MarkPurged(ctx context.Context, userID, actor, reason string) (bool, error) {
 	if strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
 		return false, apperr.Invalid("the actor and the reason are required")
@@ -360,6 +361,12 @@ func (s *Service) MarkPurged(ctx context.Context, userID, actor, reason string) 
 		if !u.PurgedAt.IsZero() {
 			return nil
 		}
+		switch {
+		case u.Kind != domain.KindTest:
+			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "only a test account is purged").WithDetail("kind", u.Kind)
+		case u.PurgeExempt:
+			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "the account is exempt from the purge")
+		}
 		if u.Status != domain.StatusClosed {
 			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "only a closed account is purged").WithDetail("status", u.Status)
 		}
@@ -372,6 +379,35 @@ func (s *Service) MarkPurged(ctx context.Context, userID, actor, reason string) 
 		}, "actor", actor)
 	})
 	return marked, err
+}
+
+// SetPurgeExempt keeps an account out of the test-account purge, or lets
+// it in again (L4: the end-to-end scripts' standing accounts, funding.sh's
+// hedges), audited as user.purge_exempt with the new value. An account
+// that is so already is left as it is (false).
+func (s *Service) SetPurgeExempt(ctx context.Context, userID string, exempt bool, actor, reason string) (bool, error) {
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return false, apperr.Invalid("the actor and the reason are required")
+	}
+	changed := false
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		changed = false
+		u, err := r.Users().GetForUpdate(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if u.PurgeExempt == exempt {
+			return nil
+		}
+		if err := r.Users().SetPurgeExempt(ctx, userID, exempt); err != nil {
+			return err
+		}
+		changed = true
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "user:" + userID, Action: "user.purge_exempt", Actor: actor, Reason: reason, Details: fmt.Sprintf(`{"exempt":%t}`, exempt),
+		}, "actor", actor)
+	})
+	return changed, err
 }
 
 // IDsOfKinds returns the accounts of the kinds (L0: the console leaves the

@@ -186,6 +186,16 @@ func (r memUsers) SetPurged(_ context.Context, userID string, at time.Time) erro
 	return nil
 }
 
+func (r memUsers) SetPurgeExempt(_ context.Context, userID string, exempt bool) error {
+	u, ok := r.s.users[userID]
+	if !ok {
+		return domain.ErrUserNotFound
+	}
+	u.PurgeExempt = exempt
+	r.s.users[userID] = u
+	return nil
+}
+
 func (r memUsers) IDsOfKinds(_ context.Context, kinds []string) ([]string, error) {
 	out := []string{}
 	for id, u := range r.s.users {
@@ -607,6 +617,17 @@ func TestMarkPurged(t *testing.T) {
 	if len(audits) != 1 || audits[0].GetAction() != "user.purged" || audits[0].GetTarget() != "user:"+closed {
 		t.Fatalf("audits %+v", audits)
 	}
+	// Only a test account that is not exempt (B180).
+	person, kept := uuid.NewString(), uuid.NewString()
+	store.users[person] = domain.User{ID: person, Status: domain.StatusClosed, Kind: domain.KindHuman, Region: "SG"}
+	store.users[kept] = domain.User{ID: kept, Status: domain.StatusClosed, Kind: domain.KindTest, PurgeExempt: true, Region: "SG"}
+	for _, id := range []string{person, kept} {
+		if _, err := svc.MarkPurged(ctx, id, "cli:ops", "test account"); !apperr.Is(err, apperr.CodeConflict) {
+			t.Fatalf("%s: %v", store.users[id].Kind, err)
+		}
+	}
+	delete(store.users, person)
+	delete(store.users, kept)
 	if page, err := svc.ListUsers(ctx, ports.UserFilter{}, ""); err != nil || len(page.Users) != 1 || page.Users[0].ID != open {
 		t.Fatalf("hidden: %+v %v", page.Users, err)
 	}
@@ -618,5 +639,36 @@ func TestMarkPurged(t *testing.T) {
 	}
 	if ids, err := svc.IDsOfKinds(ctx, []string{"TEST"}); err != nil || len(ids) != 2 {
 		t.Fatalf("its kind's IDs: %v %v", ids, err)
+	}
+}
+
+// The test-account purge leaves exempt accounts alone (L4): set and lifted
+// once each, audited with the new value; a change to what it is already
+// does nothing; the actor and reason are required; an unknown account is
+// not found.
+func TestSetPurgeExempt(t *testing.T) {
+	svc, store, _ := newService()
+	ctx := context.Background()
+	id := uuid.NewString()
+	store.users[id] = domain.User{ID: id, Status: domain.StatusActive, Kind: domain.KindTest, Region: "SG"}
+	if changed, err := svc.SetPurgeExempt(ctx, id, true, "cli:ops", "funding.sh's hedge"); err != nil || !changed || !store.users[id].PurgeExempt {
+		t.Fatalf("exempt: %v %v %+v", changed, err, store.users[id])
+	}
+	if changed, err := svc.SetPurgeExempt(ctx, id, true, "cli:ops", "again"); err != nil || changed {
+		t.Fatalf("again: %v %v", changed, err)
+	}
+	if changed, err := svc.SetPurgeExempt(ctx, id, false, "cli:ops", "the hedge is gone"); err != nil || !changed || store.users[id].PurgeExempt {
+		t.Fatalf("lifted: %v %v", changed, err)
+	}
+	if _, err := svc.SetPurgeExempt(ctx, id, true, " ", "x"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no actor: %v", err)
+	}
+	if _, err := svc.SetPurgeExempt(ctx, uuid.NewString(), true, "cli:ops", "x"); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	audits := eventsOf[*auditv1.AdminActionPerformed](store)
+	if len(audits) != 2 || audits[0].GetAction() != "user.purge_exempt" || audits[0].GetDetails() != `{"exempt":true}` ||
+		audits[1].GetDetails() != `{"exempt":false}` {
+		t.Fatalf("audits %+v", audits)
 	}
 }

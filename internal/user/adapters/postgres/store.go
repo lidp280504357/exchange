@@ -96,7 +96,7 @@ func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggreg
 type users repos
 
 const userColumns = `id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at, updated_at,
-	username, username_changed_at, avatar, kind, purged_at`
+	username, username_changed_at, avatar, kind, purged_at, purge_exempt`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
@@ -104,7 +104,7 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	var changed, purged *time.Time
 	var avatar []byte
 	err := row.Scan(&id, &u.Status, &u.Region, &u.Language, &u.Timezone, &u.AntiPhishingCode, &u.KYCLevel, &u.Version, &u.CreatedAt, &u.UpdatedAt,
-		&u.Username, &changed, &avatar, &u.Kind, &purged)
+		&u.Username, &changed, &avatar, &u.Kind, &purged, &u.PurgeExempt)
 	if err != nil {
 		return u, err
 	}
@@ -318,6 +318,17 @@ func (r users) SetPurged(ctx context.Context, userID string, at time.Time) error
 	tag, err := r.q.Exec(ctx, `UPDATE users SET purged_at = $2, version = version + 1, updated_at = now() WHERE id = $1`, userID, at)
 	if err != nil {
 		return fmt.Errorf("set purged: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
+func (r users) SetPurgeExempt(ctx context.Context, userID string, exempt bool) error {
+	tag, err := r.q.Exec(ctx, `UPDATE users SET purge_exempt = $2, version = version + 1, updated_at = now() WHERE id = $1`, userID, exempt)
+	if err != nil {
+		return fmt.Errorf("set purge exempt: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrUserNotFound

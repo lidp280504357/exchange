@@ -154,7 +154,7 @@ wait_resend() {
 
 # register EMAIL DEVICE PASSWORD signs a new APP user up and sets BODY to
 # the token response. The first one has this run's accounts marked TEST
-# when the script ends (mark_test_accounts).
+# and cleared out when the script ends (mark_test_accounts).
 register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
   local email=$1 device=$2 password=$3 country=${4:-SG} terms risk
   call GET /v1/auth/terms ""
@@ -174,14 +174,26 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
 # console leaves test accounts out of its lists by default), in one call
 # by their emails (e2e-...-$RUN@example.com, the fault drills'
 # fault-...-$RUN@example.com) through exchangectl in a container on the
-# test server. The kind changes nothing else; a failure only warns.
+# test server, then clears them out (L4: exchangectl users purge - the
+# accounts' balances go to ADJUSTMENT, the accounts are closed and hidden;
+# one still holding a contract position, a margin debt or a withdrawal in
+# flight is left, and so is one exempt from the purge, funding.sh's
+# standing hedges). It runs after the script's own clean-ups (registered
+# with the first account, it is the last at_exit to run). A failure only
+# warns.
 MARKS_TEST_ACCOUNTS=""
 mark_test_accounts() {
-  local out name
+  local out name ctl
   name=$(basename "$0" .sh)
-  if ! out=$(ssh -o ConnectTimeout=20 exchange "cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl users kind --email-like '%-$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
+  ctl="cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl"
+  if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users kind --email-like '%-$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not marked TEST: $(tail -1 <<<"$out")" >&2
+    return 0
   fi
+  if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users purge --email-like '%-$RUN@example.com' --pace 0s --reason 'e2e $name done'" 2>&1 </dev/null); then
+    echo "warn: this run's accounts were not all cleared out: $(grep -v '^skip' <<<"$out" | tail -1)" >&2
+  fi
+  grep '^skip\|^purged' <<<"$out" | sed 's/^/note: /' >&2 || true
 }
 
 # eventually TRIES WHAT CMD... reruns CMD every half second until it

@@ -34,18 +34,34 @@ func usersCmd(ctx context.Context, cfg settings, args []string, out io.Writer) e
 		return err
 	}
 	defer db.Close()
+	if args[0] == "purge" {
+		svc, err := usersService(ctx, db)
+		if err != nil {
+			return err
+		}
+		return usersPurge(ctx, cfg, db, svc, args[1:], out)
+	}
 	return usersWith(ctx, db, args, out)
 }
 
-func usersWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) error {
+// usersService brings the users schema up to date and builds
+// user-service's use cases on it.
+func usersService(ctx context.Context, db *pg.DB) (*application.Service, error) {
 	if err := migrate.UpPlatform(ctx, db, quiet); err != nil {
-		return err
+		return nil, err
 	}
 	if err := migrate.Up(ctx, db, migrations.Users(), quiet); err != nil {
-		return err
+		return nil, err
 	}
 	host, _ := os.Hostname()
-	svc := &application.Service{Store: postgres.NewStore(db, event.NewFactory("exchangectl", host)), Now: time.Now}
+	return &application.Service{Store: postgres.NewStore(db, event.NewFactory("exchangectl", host)), Now: time.Now}, nil
+}
+
+func usersWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) error {
+	svc, err := usersService(ctx, db)
+	if err != nil {
+		return err
+	}
 	switch args[0] {
 	case "show":
 		return usersShow(ctx, svc, args[1], out)
@@ -53,6 +69,8 @@ func usersWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) err
 		return usersStatus(ctx, svc, args[1:], out)
 	case "kind":
 		return usersKind(ctx, db, svc, args[1:], out)
+	case "exempt":
+		return usersExempt(ctx, db, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown users command %q", args[0])
 	}
@@ -104,31 +122,9 @@ func usersKind(ctx context.Context, db *pg.DB, svc *application.Service, args []
 	if err != nil {
 		return err
 	}
-	var users []string
-	for id := range strings.SplitSeq(*ids, ",") {
-		if id = strings.TrimSpace(id); id != "" {
-			users = append(users, id)
-		}
-	}
-	if *like != "" {
-		// Email addresses are auth-service's; it keeps them in lower case.
-		rows, err := db.Query(ctx, `SELECT user_id::text FROM auth.identities WHERE kind = 'EMAIL' AND value LIKE $1 ORDER BY user_id`,
-			strings.ToLower(*like))
-		if err != nil {
-			return fmt.Errorf("accounts by email: %w", err)
-		}
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			users = append(users, id)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
+	users, err := accountsNamed(ctx, db, *ids, *like)
+	if err != nil {
+		return err
 	}
 	who, changed := actor(), 0
 	for _, id := range users {
@@ -144,6 +140,71 @@ func usersKind(ctx context.Context, db *pg.DB, svc *application.Service, args []
 		}
 	}
 	fmt.Fprintf(out, "%d accounts, %d changed to %s (by %s)\n", len(users), changed, to, who)
+	return nil
+}
+
+// accountsNamed are the accounts --user (IDs, comma-separated) and
+// --email-like (a LIKE pattern over the email addresses) name.
+func accountsNamed(ctx context.Context, db *pg.DB, ids, like string) ([]string, error) {
+	var users []string
+	for id := range strings.SplitSeq(ids, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			users = append(users, id)
+		}
+	}
+	if like == "" {
+		return users, nil
+	}
+	// Email addresses are auth-service's; it keeps them in lower case.
+	rows, err := db.Query(ctx, `SELECT user_id::text FROM auth.identities WHERE kind = 'EMAIL' AND value LIKE $1 ORDER BY user_id`,
+		strings.ToLower(like))
+	if err != nil {
+		return nil, fmt.Errorf("accounts by email: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		users = append(users, id)
+	}
+	return users, rows.Err()
+}
+
+// usersExempt keeps test accounts out of the purge (L4: the end-to-end
+// scripts' standing accounts, funding.sh's hedges), or lets them in again
+// with --off; each change is audited, an account so already is left as it
+// is.
+func usersExempt(ctx context.Context, db *pg.DB, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("users exempt", flag.ContinueOnError)
+	fs.SetOutput(out)
+	ids := fs.String("user", "", "the accounts' IDs, comma-separated")
+	like := fs.String("email-like", "", "the accounts whose email address matches this LIKE pattern")
+	off := fs.Bool("off", false, "let them into the purge again")
+	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if (*ids == "") == (*like == "") || strings.TrimSpace(*reason) == "" {
+		fs.Usage()
+		return errors.New("one of --user and --email-like, and --reason, are required")
+	}
+	users, err := accountsNamed(ctx, db, *ids, *like)
+	if err != nil {
+		return err
+	}
+	who, changed := actor(), 0
+	for _, id := range users {
+		ok, err := svc.SetPurgeExempt(ctx, id, !*off, who, *reason)
+		if err != nil {
+			return fmt.Errorf("%s: %w (%d of %d changed before it)", id, err, changed, len(users))
+		}
+		if ok {
+			changed++
+		}
+	}
+	fmt.Fprintf(out, "%d accounts, %d changed to exempt=%t (by %s)\n", len(users), changed, !*off, who)
 	return nil
 }
 

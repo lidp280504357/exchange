@@ -515,7 +515,10 @@ type User struct {
 	Kind string `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
 	// When a closed test account was cleared out (L4: exchangectl users
 	// purge); unset for the others.
-	PurgedAt      *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=purged_at,json=purgedAt,proto3" json:"purged_at,omitempty"`
+	PurgedAt *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=purged_at,json=purgedAt,proto3" json:"purged_at,omitempty"`
+	// The purge leaves this test account alone (L4: exchangectl users
+	// exempt; the end-to-end scripts' standing accounts).
+	PurgeExempt   bool `protobuf:"varint,15,opt,name=purge_exempt,json=purgeExempt,proto3" json:"purge_exempt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -646,6 +649,13 @@ func (x *User) GetPurgedAt() *timestamppb.Timestamp {
 		return x.PurgedAt
 	}
 	return nil
+}
+
+func (x *User) GetPurgeExempt() bool {
+	if x != nil {
+		return x.PurgeExempt
+	}
+	return false
 }
 
 type CreateUserRequest struct {
@@ -1670,7 +1680,7 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"acceptedAt\"\x96\x01\n" +
 	"\x16GetUserHistoryResponse\x12E\n" +
 	"\x0estatus_changes\x18\x01 \x03(\v2\x1e.exchange.user.v1.StatusChangeR\rstatusChanges\x125\n" +
-	"\bconsents\x18\x02 \x03(\v2\x19.exchange.user.v1.ConsentR\bconsents\"\x82\x04\n" +
+	"\bconsents\x18\x02 \x03(\v2\x19.exchange.user.v1.ConsentR\bconsents\"\xa5\x04\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
@@ -1688,7 +1698,8 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"avatar_url\x18\v \x01(\tR\tavatarUrl\x12(\n" +
 	"\x10avatar_thumb_url\x18\f \x01(\tR\x0eavatarThumbUrl\x12\x12\n" +
 	"\x04kind\x18\r \x01(\tR\x04kind\x127\n" +
-	"\tpurged_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\bpurgedAt\"\xd9\x01\n" +
+	"\tpurged_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\bpurgedAt\x12!\n" +
+	"\fpurge_exempt\x18\x0f \x01(\bR\vpurgeExempt\"\xd9\x01\n" +
 	"\x11CreateUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12\x1a\n" +

@@ -11,6 +11,8 @@
 //	exchangectl users show <user_id>
 //	exchangectl users status <user_id> --to FROZEN --reason SUSPICIOUS_LOGIN [--note "..."]
 //	exchangectl users kind (--user ID[,ID...] | --email-like PATTERN) --kind BOT --reason "..."
+//	exchangectl users exempt (--user ID[,ID...] | --email-like PATTERN) [--off] --reason "..."
+//	exchangectl users purge [--older-than 24h] [--user ID,...] [--email-like PATTERN] [--limit N] [--dry-run] --reason "..."
 //	exchangectl instruments list
 //	exchangectl instruments apply --file deploy/instruments/test.json --reason "..."
 //	exchangectl instruments pair-status BTC-USDT --to TRADING --reason "..."
@@ -65,6 +67,11 @@ type settings struct {
 	// API, HOUSE's caps, and sign their changes (house only).
 	MarketMakerURL     string `koanf:"market_maker_url"`
 	HouseCapsAPISecret string `koanf:"house_caps_api_secret"`
+	// TradingURL and MarginURL reach spot-trading-service and
+	// margin-service as a user would through the gateway (users purge
+	// only: canceling a test account's orders, moving its margin balances).
+	TradingURL string `koanf:"trading_service_url"`
+	MarginURL  string `koanf:"margin_service_url"`
 }
 
 const usage = `usage: exchangectl <command> ...
@@ -80,6 +87,15 @@ commands:
   users kind (--user ID[,ID...] | --email-like PATTERN) --kind KIND --reason TEXT
                               set accounts' kind (HUMAN, BOT, TEST, SYSTEM: the console's only);
                               --email-like takes a LIKE pattern (e2e-%@example.com); idempotent
+  users exempt (--user ID[,ID...] | --email-like PATTERN) [--off] --reason TEXT
+                              keep test accounts out of the purge (the end-to-end scripts' standing ones), or
+                              let them in again (--off); idempotent, audited
+  users purge [--kind TEST] [--older-than D] [--user ID,...] [--email-like P] [--limit N] [--dry-run] --reason TEXT
+                              clear test accounts out: spot orders canceled, margin balances without a debt back
+                              to spot, spot and futures balances to ADJUSTMENT, the account closed and marked
+                              purged; contract positions or orders, a margin debt, a withdrawal in flight and
+                              exempt accounts are skipped and listed (needs ledger.manual_adjustment; run it
+                              under the ops lock: scripts/ops/purge.sh)
   instruments list            assets, networks and trading pairs
   instruments apply --file F --reason TEXT [--dry-run] [--force]
                               make the reference data match a JSON file ("-" for stdin); idempotent;
@@ -211,7 +227,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if args[0] == "udun" { // the gateway only: no database
 		return udunCmd(ctx, args[1:], out)
 	}
-	cfg := settings{Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098", MarketMakerURL: "http://127.0.0.1:8091"}
+	cfg := settings{
+		Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098", MarketMakerURL: "http://127.0.0.1:8091",
+		TradingURL: "http://spot-trading-service:8088", MarginURL: "http://margin-service:8099",
+	}
 	if err := config.Load(&cfg); err != nil {
 		return err
 	}

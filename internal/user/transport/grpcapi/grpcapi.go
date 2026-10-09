@@ -28,7 +28,7 @@ func toProto(u domain.User) *userv1.User {
 		Id: u.ID, Status: u.Status, Region: u.Region, Language: u.Language, Timezone: u.Timezone,
 		KycLevel:         int32(u.KYCLevel), //nolint:gosec // small level number
 		AntiPhishingCode: u.AntiPhishingCode, CreatedAt: timestamppb.New(u.CreatedAt),
-		Username: u.Username, AvatarUrl: u.Avatar.URL(), AvatarThumbUrl: u.Avatar.ThumbURL(), Kind: u.Kind,
+		Username: u.Username, AvatarUrl: u.Avatar.URL(), AvatarThumbUrl: u.Avatar.ThumbURL(), Kind: u.Kind, PurgeExempt: u.PurgeExempt,
 	}
 	if !u.UsernameChangedAt.IsZero() {
 		out.UsernameChangedAt = timestamppb.New(u.UsernameChangedAt)

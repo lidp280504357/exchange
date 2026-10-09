@@ -56,6 +56,9 @@ type User struct {
 	// PurgedAt is when a closed test account was cleared out (L4); zero
 	// for the others. The console's lists leave purged accounts out.
 	PurgedAt time.Time
+	// PurgeExempt keeps a test account out of the purge (L4): a standing
+	// account of the end-to-end scripts.
+	PurgeExempt bool
 }
 
 // Consent is an accepted document version.
