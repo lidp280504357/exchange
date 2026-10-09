@@ -286,6 +286,12 @@ func (r positions) Open(ctx context.Context, symbol string) ([]domain.Position, 
 		ORDER BY symbol, user_id, position_side`, symbol)
 }
 
+func (r positions) Listed(ctx context.Context, symbol string, users ports.UserFilter) ([]domain.Position, error) {
+	return r.query(ctx, `SELECT `+positionColumns+` FROM positions WHERE quantity <> 0 AND ($1 = '' OR symbol = $1)
+		AND ($2::uuid[] IS NULL OR user_id = ANY($2)) AND ($3::uuid[] IS NULL OR user_id <> ALL($3))
+		ORDER BY symbol, user_id, position_side`, symbol, users.Only, users.Except)
+}
+
 func (r positions) Totals(ctx context.Context) (map[string]ports.Totals, error) {
 	rows, err := r.q.Query(ctx, `SELECT symbol, sum(quantity), sum(CASE WHEN quantity > 0 THEN entry_cost ELSE -entry_cost END),
 		coalesce(sum(quantity) FILTER (WHERE quantity > 0), 0), count(*) FILTER (WHERE quantity <> 0)

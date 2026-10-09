@@ -34,7 +34,9 @@ import (
 // under the user's lock, and is refused once it has ended: canceled by
 // its user or with its position meanwhile (review C69).
 func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, error) {
-	if req.ClientOrderID != "" {
+	// A take-profit's or stop-loss's repeat is looked at under the lock,
+	// where its conditional is ended too.
+	if req.ClientOrderID != "" && req.Conditional == "" {
 		if prev, err := s.Store.Read().Orders().ByClientID(ctx, req.UserID, req.ClientOrderID); err == nil {
 			return repeat(prev, req)
 		} else if !errors.Is(err, domain.ErrOrderNotFound) {
@@ -61,7 +63,7 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		// Checked again under the lock: a concurrent retry may have won.
 		if p, err := r.Orders().ByClientID(ctx, req.UserID, req.ClientOrderID); err == nil {
 			prev = &p
-			return nil
+			return triggeredBy(ctx, r, req.Conditional, p.ID, s.Now())
 		} else if !errors.Is(err, domain.ErrOrderNotFound) {
 			return err
 		}
@@ -139,6 +141,22 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		return s.fund(ctx, o)
 	}
 	return o, nil
+}
+
+// triggeredBy ends a take-profit or stop-loss (id; none for other orders)
+// TRIGGERED with the order it placed before, unless it has ended: one the
+// two steps of before review C69 left ACTIVE after its order was placed
+// (review C75 ③) would otherwise come back every second.
+func triggeredBy(ctx context.Context, r ports.Repos, id, orderID string, now time.Time) error {
+	if id == "" {
+		return nil
+	}
+	cd, err := r.Conditionals().Get(ctx, id)
+	if err != nil || cd.Status != domain.ConditionalActive {
+		return err
+	}
+	cd.Status, cd.Reason, cd.OrderID, cd.UpdatedAt = domain.ConditionalTriggered, "", orderID, now
+	return r.Conditionals().Update(ctx, cd)
 }
 
 // conditionalOf returns the take-profit or stop-loss placing an order

@@ -148,6 +148,46 @@ func TestATakeOverKeepsItsEndAgainstAStaleTrigger(t *testing.T) {
 	}
 }
 
+// A take-profit whose order was placed while the conditional stayed ACTIVE
+// (the two steps of before review C69, a crash between them) ends
+// TRIGGERED with that order on its next trigger, and no second order is
+// placed (review C75 ③): before, the repeat answered the order and left
+// the conditional ACTIVE, to trigger again every second.
+func TestALeftoverTriggerOrderEndsItsConditional(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice, bob := uuid.NewString(), uuid.NewString()
+	r.fund(alice, "10000")
+	r.fund(bob, "10000")
+	r.trade(t, r.place(t, alice, domain.Buy, "60000", "0.2", false), r.place(t, bob, domain.Sell, "60000", "0.2", false), "60000")
+	tp, err := r.svc.CreateConditional(ctx, domain.ConditionalRequest{
+		UserID: alice, Symbol: perp.Symbol, Kind: domain.TakeProfit, TriggerPrice: d("61000"), Qty: d("0.1"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Its order as the trigger placed it before: the conditional untouched.
+	req := tp.OrderRequest(r.position(t, alice))
+	req.ClientOrderID, req.Kind = tp.ID, domain.KindTakeProfit
+	left, err := r.svc.Place(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.book.Set(perp.Symbol, d("61000"), time.Now())
+	if n, err := r.svc.Trigger(ctx); err != nil || n != 1 {
+		t.Fatalf("trigger: %d %v", n, err)
+	}
+	if c := r.conditional(t, alice, tp.ID); c.Status != domain.ConditionalTriggered || c.OrderID != left.ID {
+		t.Fatalf("the take-profit %+v", c)
+	}
+	if n := r.ordersOfKind(t, alice, domain.KindTakeProfit); n != 1 {
+		t.Fatalf("%d take-profit orders", n)
+	}
+	if n, err := r.svc.Trigger(ctx); err != nil || n != 0 {
+		t.Fatalf("triggered again: %d %v", n, err)
+	}
+}
+
 // An end never overwrites another (review C69 ①): the store ends only an
 // active conditional order.
 func TestAnEndedConditionalStaysEnded(t *testing.T) {

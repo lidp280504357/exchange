@@ -232,6 +232,17 @@ func (r memPositions) Open(_ context.Context, symbol string) ([]domain.Position,
 	return out, nil
 }
 
+func (r memPositions) Listed(ctx context.Context, symbol string, users ports.UserFilter) ([]domain.Position, error) {
+	open, err := r.Open(ctx, symbol)
+	out := open[:0]
+	for _, p := range open {
+		if users.Allows(p.UserID) {
+			out = append(out, p)
+		}
+	}
+	return out, err
+}
+
 func (r memPositions) Totals(context.Context) (map[string]ports.Totals, error) {
 	out := map[string]ports.Totals{}
 	for _, p := range r.st.positions {

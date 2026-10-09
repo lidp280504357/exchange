@@ -523,7 +523,10 @@ func TestInternalEndpoints(t *testing.T) {
 	st, body = a.do("POST", "/v1/margin/transfer", `{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"100"}`,
 		"X-User-Id", user, "Idempotency-Key", "in")
 	expect(t, "100 USDT in", st, body, 200, "")
-	for _, q := range []string{"status=BAD", "user_id=someone", "account=SPOT", "limit=0"} {
+	for _, q := range []string{
+		"status=BAD", "user_id=someone", "account=SPOT", "limit=0", "user_ids=someone",
+		"user_ids=" + user + "&exclude_user_ids=" + user,
+	} {
 		st, body = a.do("GET", "/internal/margin/accounts?"+q, "")
 		expect(t, "accounts with "+q, st, body, 400, apperr.CodeInvalidArgument)
 	}
@@ -532,6 +535,17 @@ func TestInternalEndpoints(t *testing.T) {
 	if acc := item(body, "user_id", user); acc == nil || acc["account"] != "MARGIN_CROSS" || acc["status"] != "NORMAL" ||
 		acc["leverage"] != float64(5) || acc["frozen_by"] != nil || body["truncated"] != false {
 		t.Fatalf("the user's accounts %v", body)
+	}
+	// Only some users' accounts, or all but some (review L3).
+	st, body = a.do("GET", "/internal/margin/accounts?user_ids="+user+","+uuid.Must(uuid.NewV7()).String(), "")
+	expect(t, "only the user's", st, body, 200, "")
+	if item(body, "user_id", user) == nil {
+		t.Fatalf("only the user's %v", body)
+	}
+	st, body = a.do("GET", "/internal/margin/accounts?exclude_user_ids="+user, "")
+	expect(t, "all but the user's", st, body, 200, "")
+	if item(body, "user_id", user) != nil {
+		t.Fatalf("all but the user's %v", body)
 	}
 	path := "/internal/margin/accounts/" + user + "/MARGIN_CROSS"
 	st, body = a.do("POST", path+"/freeze", `{"reason":" "}`, admin...)

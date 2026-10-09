@@ -376,11 +376,19 @@ func toConsoleAccount(c application.ConsoleAccount) consoleAccountJSON {
 	return out
 }
 
+// consoleAccounts lists the margin accounts riskiest first: user_id,
+// user_ids or exclude_user_ids (review L3: the console's real users),
+// account, symbol, status, limit.
 func (h *Handler) consoleAccounts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	only, except, err := httpx.UserIDsFrom(r.URL.Query())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	f := ports.AccountFilter{
-		UserID: q.Get("user_id"), Type: domain.AccountType(q.Get("account")), Symbol: strings.ToUpper(q.Get("symbol")),
-		Status: domain.Status(q.Get("status")),
+		UserID: q.Get("user_id"), UserIDs: only, ExcludeUserIDs: except, Type: domain.AccountType(q.Get("account")),
+		Symbol: strings.ToUpper(q.Get("symbol")), Status: domain.Status(q.Get("status")),
 	}
 	if f.UserID != "" {
 		if _, err := uuid.Parse(f.UserID); err != nil {

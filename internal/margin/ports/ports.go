@@ -136,11 +136,16 @@ type Account struct {
 }
 
 // AccountFilter narrows a list of accounts; empty fields match all.
+// UserIDs, when not nil, keeps only those users' accounts (an empty one,
+// nobody's) and ExcludeUserIDs leaves those out: the admin console's list
+// of the real users' accounts (review L3), at most httpx.MaxFilterUserIDs each.
 type AccountFilter struct {
-	UserID string
-	Type   domain.AccountType
-	Symbol string
-	Status domain.Status
+	UserID         string
+	UserIDs        []string
+	ExcludeUserIDs []string
+	Type           domain.AccountType
+	Symbol         string
+	Status         domain.Status
 }
 
 // AccountRepo stores users' margin accounts.

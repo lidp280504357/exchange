@@ -14,6 +14,7 @@ import (
 
 	"github.com/skill/exchange/internal/derivatives/application"
 	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/derivatives/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/httpx"
 )
@@ -798,8 +799,15 @@ func (h *Handler) liftReduceOnly(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": symbol(r), "lifted": lifted})
 }
 
+// risk lists the positions under watch, of only user_ids or of all but
+// exclude_user_ids (review L3).
 func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.RiskPositions(r.Context())
+	only, except, err := httpx.UserIDsFrom(r.URL.Query())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	list, err := h.Svc.RiskPositions(r.Context(), ports.UserFilter{Only: only, Except: except})
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -808,10 +816,16 @@ func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
 }
 
 // openPositions lists every user's open positions for the admin console,
-// riskiest first: symbol, user_id, watch=true (only those under watch),
-// limit (default 200, at most 1000).
+// riskiest first: symbol, user_id, user_ids or exclude_user_ids (review
+// L3), watch=true (only those under watch), limit (default 200, at most
+// 1000).
 func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	only, except, err := httpx.UserIDsFrom(r.URL.Query())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	switch {
 	case limit <= 0:
@@ -820,7 +834,8 @@ func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 		limit = 1000 // at most, not back to the default (C5.5 ⑨)
 	}
 	list, cut, err := h.Svc.OpenPositions(r.Context(), application.PositionFilter{
-		Symbol: strings.ToUpper(q.Get("symbol")), UserID: q.Get("user_id"), Watch: q.Get("watch") == "true", Limit: limit,
+		Symbol: strings.ToUpper(q.Get("symbol")), UserID: q.Get("user_id"), Users: ports.UserFilter{Only: only, Except: except},
+		Watch: q.Get("watch") == "true", Limit: limit,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

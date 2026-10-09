@@ -540,21 +540,22 @@ func (s *Service) Overview(ctx context.Context) ([]ContractOverview, error) {
 	return out, nil
 }
 
-// RiskPositions lists the open positions under watch: taken over by the
-// liquidation engine, warned, or with a margin ratio (maintenance margin
-// / margin balance) of at least half, riskiest first. Cross positions are
-// measured on their own here.
-func (s *Service) RiskPositions(ctx context.Context) ([]PositionView, error) {
-	out, _, err := s.OpenPositions(ctx, PositionFilter{Watch: true})
+// RiskPositions lists the open positions under watch of the users users
+// selects: taken over by the liquidation engine, warned, or with a margin
+// ratio (maintenance margin / margin balance) of at least half, riskiest
+// first. Cross positions are measured on their own here.
+func (s *Service) RiskPositions(ctx context.Context, users ports.UserFilter) ([]PositionView, error) {
+	out, _, err := s.OpenPositions(ctx, PositionFilter{Watch: true, Users: users})
 	return out, err
 }
 
 // PositionFilter selects open positions across users (the admin console):
-// of a contract, of a user, only those under watch; at most Limit of them
-// (0: all).
+// of a contract, of a user, of the users Users selects (review L3), only
+// those under watch; at most Limit of them (0: all).
 type PositionFilter struct {
 	Symbol string
 	UserID string
+	Users  ports.UserFilter
 	Watch  bool
 	Limit  int
 }
@@ -570,10 +571,12 @@ type PositionFilter struct {
 func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]PositionView, bool, error) {
 	var open []domain.Position
 	var err error
-	if f.UserID != "" {
+	switch {
+	case f.UserID != "" && !f.Users.Allows(f.UserID):
+	case f.UserID != "":
 		open, err = s.Store.Read().Positions().OfUser(ctx, f.UserID, f.Symbol)
-	} else {
-		open, err = s.Store.Read().Positions().Open(ctx, f.Symbol)
+	default:
+		open, err = s.Store.Read().Positions().Listed(ctx, f.Symbol, f.Users)
 	}
 	if err != nil {
 		return nil, false, err

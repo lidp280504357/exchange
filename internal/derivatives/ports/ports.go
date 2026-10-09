@@ -4,6 +4,7 @@ package ports
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -100,9 +101,28 @@ type PositionRepo interface {
 	Save(ctx context.Context, p domain.Position) (domain.Position, error)
 	// Open returns every open position of symbol ("" for all).
 	Open(ctx context.Context, symbol string) ([]domain.Position, error)
+	// Listed returns the open positions of symbol ("" for all) of the
+	// users users selects (the admin console's lists, review L3).
+	Listed(ctx context.Context, symbol string, users UserFilter) ([]domain.Position, error)
 	// Totals returns, per contract, the long quantity less the short
 	// quantity and the long entry cost less the short entry cost.
 	Totals(ctx context.Context) (map[string]Totals, error)
+}
+
+// UserFilter selects users for the admin console's lists (review L3: the
+// real users' rows, or all but the bots' and test accounts'): only those
+// of Only when it is not nil (an empty Only selects nobody), none of
+// Except. At most httpx.MaxFilterUserIDs each.
+type UserFilter struct {
+	Only, Except []string
+}
+
+// Allows reports whether the filter selects the user.
+func (f UserFilter) Allows(userID string) bool {
+	if f.Only != nil && !slices.Contains(f.Only, userID) {
+		return false
+	}
+	return !slices.Contains(f.Except, userID)
 }
 
 // Totals sum a contract's positions.

@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -102,6 +103,20 @@ func TestConsole(t *testing.T) {
 	if list, _, err = r.svc.ConsoleAccounts(ctx, ports.AccountFilter{UserID: safe}, 10); err != nil || len(list) != 1 ||
 		list[0].View.Valuation.HasDebt() {
 		t.Fatalf("one user's %+v %v", list, err)
+	}
+	// Only some users' accounts, or all but some (review L3: the console's
+	// real users); an empty list of users, nobody's.
+	if list, _, err = r.svc.ConsoleAccounts(ctx, ports.AccountFilter{UserIDs: []string{safe}}, 10); err != nil || len(list) != 1 ||
+		list[0].State.UserID != safe {
+		t.Fatalf("only the safe user's %+v %v", list, err)
+	}
+	if list, _, err = r.svc.ConsoleAccounts(ctx, ports.AccountFilter{ExcludeUserIDs: []string{risky}}, 10); err != nil ||
+		slices.ContainsFunc(list, func(c application.ConsoleAccount) bool { return c.State.UserID == risky }) ||
+		!slices.ContainsFunc(list, func(c application.ConsoleAccount) bool { return c.State.UserID == safe }) {
+		t.Fatalf("all but the risky user's %+v %v", list, err)
+	}
+	if list, _, err = r.svc.ConsoleAccounts(ctx, ports.AccountFilter{UserIDs: []string{}}, 10); err != nil || len(list) != 0 {
+		t.Fatalf("nobody's %+v %v", list, err)
 	}
 	detail, err := r.svc.ConsoleAccountDetail(ctx, risky, cross5)
 	if err != nil || len(detail.Loans) != 1 || detail.Loans[0].Loan.OpenedAt.IsZero() || len(detail.Balances) != 1 {

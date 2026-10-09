@@ -9,6 +9,7 @@ import (
 
 	"github.com/skill/exchange/internal/derivatives/application"
 	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/derivatives/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 )
 
@@ -40,7 +41,7 @@ func TestATierChangeShowsWhomItWouldLiquidate(t *testing.T) {
 	if err != nil || warned.Liquidated != 0 || warned.Warned != 1 || warned.OverLimit != 0 {
 		t.Fatalf("warned %+v %v", warned, err)
 	}
-	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 0 {
+	if list, err := r.svc.RiskPositions(ctx, ports.UserFilter{}); err != nil || len(list) != 0 {
 		t.Fatalf("nothing changed: %+v %v", list, err)
 	}
 	_ = alice
@@ -120,7 +121,7 @@ func TestATargetPriceShowsWhomItWouldLiquidate(t *testing.T) {
 	if imp, err := r.svc.PriceImpact(ctx, perp.Symbol, d("62000")); err != nil || imp.Liquidated != 0 {
 		t.Fatalf("up %+v %v", imp, err)
 	}
-	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 0 {
+	if list, err := r.svc.RiskPositions(ctx, ports.UserFilter{}); err != nil || len(list) != 0 {
 		t.Fatalf("nothing changed: %+v %v", list, err)
 	}
 	_ = alice

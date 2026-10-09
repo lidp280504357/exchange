@@ -1008,7 +1008,7 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	}
 	// At 60000 nobody is close: Bob's isolated 50x long needs 120 of
 	// maintenance on 600 of margin.
-	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 0 {
+	if list, err := r.svc.RiskPositions(ctx, ports.UserFilter{}); err != nil || len(list) != 0 {
 		t.Fatalf("risk list %+v %v", list, err)
 	}
 	// Every open position (the console's list), riskiest first.
@@ -1032,6 +1032,28 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if none, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{Symbol: "NOPE-USDT-PERP"}); err != nil || len(none) != 0 {
 		t.Fatalf("another contract %+v %v", none, err)
 	}
+	// Only some users' rows, or all but some (review L3: the console leaves
+	// out the bots' and the test accounts'); an empty Only, nobody's.
+	users := func(f ports.UserFilter, user string) []application.PositionView {
+		t.Helper()
+		list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{Users: f, UserID: user})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return list
+	}
+	if l := users(ports.UserFilter{Only: []string{alice}}, ""); len(l) != 1 || l[0].UserID != alice {
+		t.Fatalf("only Alice's %+v", l)
+	}
+	if l := users(ports.UserFilter{Except: []string{alice}}, ""); len(l) != 1 || l[0].UserID != bob {
+		t.Fatalf("all but Alice's %+v", l)
+	}
+	if l := users(ports.UserFilter{Only: []string{}}, ""); len(l) != 0 {
+		t.Fatalf("nobody's %+v", l)
+	}
+	if l := users(ports.UserFilter{Except: []string{alice}}, alice); len(l) != 0 {
+		t.Fatalf("Alice's, all but Alice's %+v", l)
+	}
 	if !all[0].MarkFresh || !all[1].MarkFresh {
 		t.Fatalf("fresh marks %+v", all)
 	}
@@ -1044,8 +1066,11 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, "USDT", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 1 || list[0].UserID != alice || list[0].WarnedAt.IsZero() {
+	if list, err := r.svc.RiskPositions(ctx, ports.UserFilter{}); err != nil || len(list) != 1 || list[0].UserID != alice || list[0].WarnedAt.IsZero() {
 		t.Fatalf("the warned cross account %+v %v", list, err)
+	}
+	if list, err := r.svc.RiskPositions(ctx, ports.UserFilter{Except: []string{alice}}); err != nil || len(list) != 0 {
+		t.Fatalf("under watch, all but Alice's %+v %v", list, err)
 	}
 	// ... in the view of every position too (⑱).
 	if list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{UserID: alice}); err != nil || len(list) != 1 || list[0].WarnedAt.IsZero() {
@@ -1060,13 +1085,13 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 		t.Fatalf("a stale mark %+v %v", list, err)
 	}
 	r.monitor(t, "59050") // warned
-	list, err := r.svc.RiskPositions(ctx)
+	list, err := r.svc.RiskPositions(ctx, ports.UserFilter{})
 	if err != nil || len(list) != 1 || list[0].UserID != bob || list[0].WarnedAt.IsZero() || list[0].Liquidating ||
 		!list[0].MaintenanceMargin.Equal(d("118.1")) {
 		t.Fatalf("risk list %+v %v", list, err)
 	}
 	r.monitor(t, "59000") // taken over
-	if list, err = r.svc.RiskPositions(ctx); err != nil || len(list) != 1 || !list[0].Liquidating {
+	if list, err = r.svc.RiskPositions(ctx, ports.UserFilter{}); err != nil || len(list) != 1 || !list[0].Liquidating {
 		t.Fatalf("risk list %+v %v", list, err)
 	}
 	_ = alice

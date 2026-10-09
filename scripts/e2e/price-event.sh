@@ -225,9 +225,15 @@ held_on() { # held_on SYMBOL N: N positions of the user on SYMBOL (BODY)
 }
 eventually 20 "the isolated long is open" held_on "$ETH" 1
 ETH_MARGIN=$(jq -r '.positions[0].margin' <<<"$BODY")
-call POST /v1/account/transfers '{"asset":"USDT","amount":"0.9","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+# The short's own margin and fee at 100x (a sell reserves at the mark or
+# its limit, the higher), 1% over for the mark moving meanwhile: not what
+# the long's reservation gives back, which may come later (review C75 ②).
+call GET "/v1/market/$PERP/mark-price" ""
+expect 200 - "$PERP's mark price"
+CROSS_IN=$(jq -rn --argjson m "$(jq -r .mark_price <<<"$BODY")" '0.001 * $m * (1 / 100 + 0.0005) * 1.01 * 1000000 | ceil / 1000000')
+call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$CROSS_IN\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" \
   "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-futures"
-expect 201 - "0.9 USDT to FUTURES for the cross short"
+expect 201 - "$CROSS_IN USDT to FUTURES for the cross short"
 call PUT "/v1/derivatives/settings/$PERP" '{"margin_mode":"CROSS","leverage":100}' "${AUTH[@]}"
 expect 200 - "cross, 100x"
 call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.001\"}" "${AUTH[@]}"

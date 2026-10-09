@@ -509,7 +509,9 @@ func (r accounts) List(ctx context.Context, f ports.AccountFilter, limit int) ([
 	}
 	return r.query(ctx, `SELECT `+accountColumns+` FROM accounts WHERE ($1::uuid IS NULL OR user_id = $1::uuid)
 		AND ($2 = '' OR account_type = $2) AND ($3 = '' OR symbol = $3) AND ($4 = '' OR status = $4)
-		ORDER BY created_at, user_id, account_type, symbol LIMIT $5`, user, string(f.Type), f.Symbol, string(f.Status), limit)
+		AND ($6::uuid[] IS NULL OR user_id = ANY($6)) AND ($7::uuid[] IS NULL OR user_id <> ALL($7))
+		ORDER BY created_at, user_id, account_type, symbol LIMIT $5`, user, string(f.Type), f.Symbol, string(f.Status), limit,
+		f.UserIDs, f.ExcludeUserIDs)
 }
 
 func (r accounts) IsolatedCounts(ctx context.Context) (map[string]int, error) {
