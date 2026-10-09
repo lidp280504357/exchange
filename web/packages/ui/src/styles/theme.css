@@ -104,33 +104,245 @@
   --animate-marquee: marquee 40s linear infinite;
   --animate-pop-in: pop-in var(--t-fast) var(--ease) backwards;
   --animate-pop-out: pop-out var(--t-fast) var(--ease) both;
-  /* A slider reaching its maximum (B173): the halo off the thumb and the
-     dot's pulse open the effect (components/Slider.tsx plays the rest with
-     the keyframes below). */
-  --animate-slider-peak: slider-peak 250ms var(--ease);
-  --animate-slider-dot-pulse: slider-dot-pulse 250ms var(--ease);
 }
 
-@keyframes slider-peak {
-  from {
-    opacity: 0.5;
-    scale: 1;
-  }
-  to {
+/*
+ * The slider (B176, the user 2026-10-10: an energy bar's glow, as in
+ * Blade & Soul). Its fill is lit from above: a vertical gradient of the
+ * tone (currentColor) with a highlight inside its top edge.
+ */
+.slider-fill {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, currentColor 60%, var(--white)) 0%,
+    currentColor 55%,
+    color-mix(in srgb, currentColor 80%, var(--black)) 100%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--white) 45%, transparent);
+}
+
+/*
+ * Reaching the maximum plays about 1.4 s of soft light over it
+ * (components/Slider.tsx mounts the layers and times the ones that depend
+ * on the marks): no outlines, only gradients that fade to nothing, moved
+ * by transform and faded by opacity alone; screen-blended on the dark
+ * theme, where light adds up.
+ *   0-200 ms      charge: two glow layers sweep along the fill to its end,
+ *                 which bursts (the end's flare, the thumb's halo, sparks)
+ *   200-1000 ms   two bands of light, a white core in the tone with a trail
+ *                 of afterglow, run back to the start rising and falling
+ *                 across each other; each mark glows as they pass
+ *   1000-1400 ms  the glow breathes once and settles
+ * Under prefers-reduced-motion one soft glow over the fill, fading in and
+ * out, is all.
+ */
+[data-theme="dark"] .slider-fx {
+  mix-blend-mode: screen;
+}
+
+.slider-glow-1,
+.slider-glow-2 {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform-origin: 0 50%;
+  -webkit-mask-image: linear-gradient(90deg, transparent, var(--black) 5%, var(--black) 95%, transparent);
+  mask-image: linear-gradient(90deg, transparent, var(--black) 5%, var(--black) 95%, transparent);
+}
+
+/* Both fall off from the middle as a glow does, quickly at first: the
+   inner one a hot line along the fill, the outer one a wide haze. */
+.slider-glow-1 {
+  height: 12px;
+  margin-top: -6px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, currentColor 25%, transparent) 25%,
+    color-mix(in srgb, currentColor 80%, var(--white)) 50%,
+    color-mix(in srgb, currentColor 25%, transparent) 75%,
+    transparent 100%
+  );
+  animation: slider-glow 1400ms linear both;
+}
+
+.slider-glow-2 {
+  height: 30px;
+  margin-top: -15px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, currentColor 6%, transparent) 20%,
+    color-mix(in srgb, currentColor 18%, transparent) 35%,
+    color-mix(in srgb, currentColor 45%, transparent) 50%,
+    color-mix(in srgb, currentColor 18%, transparent) 65%,
+    color-mix(in srgb, currentColor 6%, transparent) 80%,
+    transparent 100%
+  );
+  animation: slider-glow-outer 1400ms linear both;
+}
+
+/* Light adds up on the dark theme only: on the light one the inner glow is
+   the tone, not a white heat that would wash the fill out. */
+[data-theme="light"] .slider-glow-1 {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, currentColor 20%, transparent) 25%,
+    color-mix(in srgb, currentColor 50%, transparent) 50%,
+    color-mix(in srgb, currentColor 20%, transparent) 75%,
+    transparent 100%
+  );
+}
+
+@keyframes slider-glow {
+  0% {
     opacity: 0;
-    scale: 2.75;
+    transform: scaleX(0.02);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6);
+  }
+  14% {
+    opacity: 1;
+    transform: scaleX(1);
+    animation-timing-function: ease-out;
+  }
+  57% {
+    opacity: 0.6;
+    transform: scaleX(1);
+    animation-timing-function: ease-in-out;
+  }
+  71% {
+    opacity: 0.5;
+    animation-timing-function: ease-in-out;
+  }
+  82% {
+    opacity: 0.85;
+    animation-timing-function: ease-in;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
   }
 }
 
-@keyframes slider-dot-pulse {
-  40% {
-    scale: 1.3;
+@keyframes slider-glow-outer {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.02) scaleY(0.5);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6);
+  }
+  15% {
+    opacity: 0.9;
+    transform: scaleX(1) scaleY(1.15);
+    animation-timing-function: ease-out;
+  }
+  30% {
+    opacity: 0.6;
+    transform: scaleX(1) scaleY(1);
+    animation-timing-function: ease-in-out;
+  }
+  71% {
+    opacity: 0.35;
+    transform: scaleX(1) scaleY(0.95);
+    animation-timing-function: ease-in-out;
+  }
+  82% {
+    opacity: 0.7;
+    transform: scaleX(1) scaleY(1.1);
+    animation-timing-function: ease-in;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1) scaleY(0.9);
   }
 }
 
-/* The sparks run from the track's end to its start (a full-width carrier
-   moved by its own width) ... */
-@keyframes slider-spark-x {
+/* The flare where the charge reaches the end. */
+.slider-burst {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  background: radial-gradient(
+    closest-side,
+    var(--white) 0%,
+    color-mix(in srgb, currentColor 75%, var(--white)) 22%,
+    color-mix(in srgb, currentColor 45%, transparent) 55%,
+    transparent 100%
+  );
+  animation: slider-burst 560ms cubic-bezier(0.2, 0.8, 0.3, 1) 170ms both;
+}
+
+@keyframes slider-burst {
+  0% {
+    opacity: 0;
+    transform: scale(0.25);
+  }
+  16% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+/* The bands: a carrier as wide as the track, moved by its own width from
+   the end to the start, fades a band in and out; inside it the band rises
+   and falls (one wave, the other band its mirror image), a soft bead of
+   light with its afterglow trailing behind. A mask fades them at the
+   track's ends instead of cutting them. */
+.slider-bands {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -16px;
+  bottom: -16px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, var(--black) 4%, var(--black) 96%, transparent);
+  mask-image: linear-gradient(90deg, transparent, var(--black) 4%, var(--black) 96%, transparent);
+}
+
+.slider-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 0;
+}
+
+.slider-band-head {
+  position: absolute;
+  left: -18px;
+  top: -5px;
+  width: 36px;
+  height: 10px;
+  background: radial-gradient(
+    closest-side,
+    var(--white) 0%,
+    color-mix(in srgb, currentColor 65%, var(--white)) 35%,
+    color-mix(in srgb, currentColor 55%, transparent) 65%,
+    transparent 100%
+  );
+}
+
+.slider-band-trail {
+  position: absolute;
+  left: 0;
+  top: -4px;
+  width: 120px;
+  height: 8px;
+  background: radial-gradient(
+    farthest-side at 0% 50%,
+    color-mix(in srgb, currentColor 70%, var(--white)) 0%,
+    color-mix(in srgb, currentColor 40%, transparent) 45%,
+    transparent 100%
+  );
+}
+
+@keyframes slider-band-x {
   from {
     transform: translateX(100%);
   }
@@ -139,61 +351,12 @@
   }
 }
 
-/* ... on four half waves, crossing the track at every quarter: from a
-   crossing the sine eases out to its crest, from a crest it eases in. The
-   other spark is the mirror image, half a period apart. */
-@keyframes slider-spark-up {
-  0%,
-  25%,
-  50%,
-  75% {
-    transform: translateY(0);
-    animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
-  }
-  12.5%,
-  62.5% {
-    transform: translateY(-6px);
-    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
-  }
-  37.5%,
-  87.5% {
-    transform: translateY(6px);
-    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
-  }
-  100% {
-    transform: translateY(0);
-  }
-}
-
-@keyframes slider-spark-down {
-  0%,
-  25%,
-  50%,
-  75% {
-    transform: translateY(0);
-    animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
-  }
-  12.5%,
-  62.5% {
-    transform: translateY(6px);
-    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
-  }
-  37.5%,
-  87.5% {
-    transform: translateY(-6px);
-    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
-  }
-  100% {
-    transform: translateY(0);
-  }
-}
-
-@keyframes slider-spark-fade {
+@keyframes slider-band-fade {
   0% {
     opacity: 0;
   }
-  8%,
-  85% {
+  10%,
+  80% {
     opacity: 1;
   }
   100% {
@@ -201,39 +364,183 @@
   }
 }
 
-@keyframes slider-mark-flash {
+@keyframes slider-wave-a {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(-3px);
+  }
+  75% {
+    transform: translateY(3px);
+  }
+}
+
+@keyframes slider-wave-b {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(3px);
+  }
+  75% {
+    transform: translateY(-3px);
+  }
+}
+
+/* A mark lit by a passing band. */
+.slider-mark-glow {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  opacity: 0;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, currentColor 55%, var(--white)) 0%,
+    color-mix(in srgb, currentColor 40%, transparent) 45%,
+    transparent 100%
+  );
+}
+
+@keyframes slider-mark-glow {
   0% {
     opacity: 0;
-    scale: 1;
+    transform: scale(0.5);
   }
   35% {
-    opacity: 0.9;
-    scale: 1.9;
+    opacity: 1;
+    transform: scale(1);
   }
   100% {
     opacity: 0;
-    scale: 1;
+    transform: scale(1.25);
   }
 }
 
-/* The band over the fill: bright at its left edge (with the sparks), its
-   trail to the right; its colour is the tone's (currentColor) lightened. */
-.slider-sweep {
-  background: linear-gradient(90deg, color-mix(in srgb, currentColor 45%, var(--fg-1)) 0%, transparent 35%);
+/* A spark flung off by the flare or shed by a band, to (--dx, --dy). */
+.slider-spark {
+  position: absolute;
+  top: 50%;
+  opacity: 0;
+  background: radial-gradient(
+    closest-side,
+    var(--white) 0%,
+    color-mix(in srgb, currentColor 70%, var(--white)) 40%,
+    transparent 100%
+  );
 }
 
-@keyframes slider-sweep-x {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
-  }
-}
-
-@keyframes slider-fade-out {
-  to {
+@keyframes slider-spark-fly {
+  0% {
     opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(var(--dx) * 0.3), calc(var(--dy) * 0.3)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(0.3);
+  }
+}
+
+/* The thumb's halo: it charges, flares with the end and breathes with
+   the glow; the dot itself swells once at the flare. */
+.slider-thumb-halo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, currentColor 70%, var(--white)) 0%,
+    color-mix(in srgb, currentColor 40%, transparent) 50%,
+    transparent 100%
+  );
+  animation: slider-halo 1400ms linear both;
+}
+
+@keyframes slider-halo {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+    animation-timing-function: ease-in;
+  }
+  13% {
+    opacity: 0.7;
+    transform: scale(0.85);
+    animation-timing-function: ease-out;
+  }
+  17% {
+    opacity: 1;
+    transform: scale(1.3);
+    animation-timing-function: ease-in-out;
+  }
+  35% {
+    opacity: 0.55;
+    transform: scale(1);
+    animation-timing-function: ease-in-out;
+  }
+  71% {
+    opacity: 0.4;
+    transform: scale(0.95);
+    animation-timing-function: ease-in-out;
+  }
+  82% {
+    opacity: 0.75;
+    transform: scale(1.1);
+    animation-timing-function: ease-in;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+.slider-dot-burst {
+  animation: slider-dot-pulse 380ms var(--ease) 130ms;
+}
+
+@keyframes slider-dot-pulse {
+  35% {
+    scale: 1.3;
+  }
+}
+
+/* Reduced motion: no sweep, flare, bands or sparks; the outer glow and the
+   halo fade in and out once where they are. */
+@keyframes slider-soft-glow {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slider-fx-motion,
+  .slider-glow-1 {
+    display: none;
+  }
+  /* A fade, which reduced motion allows: its own timing again, past
+     index.css cutting every animation to 0.01 ms. */
+  .slider-glow-2,
+  .slider-thumb-halo {
+    animation: slider-soft-glow 1200ms ease-in-out both !important;
+  }
+  .slider-dot-burst {
+    animation: none;
   }
 }
 

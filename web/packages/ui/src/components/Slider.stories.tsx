@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Slider } from "./Slider";
 
 const meta = {
@@ -46,9 +46,10 @@ export const Tones: Story = {
  * The thumb's centre is the value (B173): at 0% and 100% the dot's centre
  * sits on the track's ends, as the fill's end and the marks do. The last
  * slider plays its arrival effect each time it reaches 100% (the buttons
- * replay it): the dot's pulse and halo, two sparks running back on sine
- * paths with trails, the marks flashing as they pass, a band over the fill;
- * a still halo under reduced motion.
+ * replay it; B176): the glow charges along the fill and flares at the end,
+ * two soft bands of light run back across each other with their
+ * afterglow, the marks glow as they pass, sparks fly, the glow breathes
+ * once and settles; one soft glow under reduced motion.
  */
 export const EndsAndPeak: Story = {
   render: () => {
@@ -66,6 +67,98 @@ export const EndsAndPeak: Story = {
       </div>
     );
   },
+};
+
+const marks = [0, 25, 50, 75, 100];
+
+/**
+ * The arrival in slow motion (B176): every animation under the story at
+ * the chosen rate, the brand, rise and fall tones at once.
+ */
+export const ArrivalSlowMotion: Story = {
+  render: () => {
+    const ref = useRef<HTMLDivElement>(null);
+    const [v, setV] = useState(75);
+    const [rate, setRate] = useState(0.2);
+    useEffect(() => {
+      let raf = 0;
+      const slow = () => {
+        for (const a of ref.current?.getAnimations({ subtree: true }) ?? []) if (a.playbackRate !== rate) a.playbackRate = rate;
+        raf = requestAnimationFrame(slow);
+      };
+      raf = requestAnimationFrame(slow);
+      return () => cancelAnimationFrame(raf);
+    }, [rate]);
+    const replay = () => {
+      setV(75);
+      requestAnimationFrame(() => setV(100));
+    };
+    return (
+      <div ref={ref} className="flex flex-col gap-6">
+        {(["brand", "up", "down"] as const).map((tone) => (
+          <Slider key={tone} value={v} onValueChange={setV} tone={tone} marks={marks} markLabels formatMark={(m) => `${m}%`} aria-label={tone} />
+        ))}
+        <div className="flex gap-2 text-xs">
+          <button type="button" className="rounded border border-line-2 px-2 py-1" onClick={replay}>
+            Replay
+          </button>
+          {[0.1, 0.2, 0.5, 1].map((r) => (
+            <button
+              key={r}
+              type="button"
+              className={`rounded border px-2 py-1 ${r === rate ? "border-brand text-brand" : "border-line-2"}`}
+              onClick={() => setRate(r)}
+            >
+              {r}x
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  },
+};
+
+/** One frame of the arrival: a slider that reached 100%, paused at `at` ms. */
+function ArrivalFrame({ at }: { at: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [v, setV] = useState(75);
+  useEffect(() => setV(100), []);
+  useEffect(() => {
+    if (v !== 100) return;
+    let raf = 0;
+    const seek = () => {
+      const all = ref.current?.getAnimations({ subtree: true }) ?? [];
+      if (all.length === 0) {
+        raf = requestAnimationFrame(seek);
+        return;
+      }
+      for (const a of all) {
+        a.pause();
+        a.currentTime = at;
+      }
+    };
+    raf = requestAnimationFrame(seek);
+    return () => cancelAnimationFrame(raf);
+  }, [v, at]);
+  return (
+    <div className="flex items-center gap-4">
+      <span className="w-16 shrink-0 text-right font-mono text-xs text-fg-3">{at} ms</span>
+      <div ref={ref} className="w-72">
+        <Slider value={v} onValueChange={() => {}} marks={marks} aria-label={`${at} ms`} />
+      </div>
+    </div>
+  );
+}
+
+/** The arrival frame by frame, every 50 ms from 0 to 1,400 (B176): the review's filmstrip. */
+export const ArrivalFrames: Story = {
+  render: () => (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 29 }, (_, i) => i * 50).map((at) => (
+        <ArrivalFrame key={at} at={at} />
+      ))}
+    </div>
+  ),
 };
 
 export const Leverage: Story = {

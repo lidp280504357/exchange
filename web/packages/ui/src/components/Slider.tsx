@@ -1,5 +1,5 @@
 import { Slider as RSlider } from "radix-ui";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 
 export type SliderTone = "brand" | "up" | "down";
@@ -22,7 +22,7 @@ export type SliderProps = {
   tone?: SliderTone;
   /**
    * Plays the arrival effect once as the value reaches max (dragged, clicked
-   * or typed there), not again until it has left max; a still halo instead
+   * or typed there), not again until it has left max; one soft glow instead
    * under prefers-reduced-motion. On by default (the order forms); the
    * leverage dialog turns it off.
    */
@@ -32,26 +32,40 @@ export type SliderProps = {
   "aria-label"?: string;
 };
 
-const tones: Record<SliderTone, { range: string; text: string; thumb: string; dot: string; glow: string }> = {
-  brand: { range: "bg-brand", text: "text-brand", thumb: "border-brand", dot: "border-brand bg-brand", glow: "bg-brand" },
-  up: { range: "bg-up", text: "text-up", thumb: "border-up", dot: "border-up bg-up", glow: "bg-up" },
-  down: { range: "bg-down", text: "text-down", thumb: "border-down", dot: "border-down bg-down", glow: "bg-down" },
+const tones: Record<SliderTone, { text: string; thumb: string; dot: string }> = {
+  brand: { text: "text-brand", thumb: "border-brand", dot: "border-brand bg-brand" },
+  up: { text: "text-up", thumb: "border-up", dot: "border-up bg-up" },
+  down: { text: "text-down", thumb: "border-down", dot: "border-down bg-down" },
 };
 
-// The arrival at max (B173; the user 2026-10-10): about 1.1 s of transform
-// and opacity only, never in the pointer's way. The dot pulses with a halo
-// (PULSE ms); two sparks then run back from the end to the start (RUN ms)
-// on sine paths half a period apart, one above the track and one below,
-// crossing it at every quarter (the marks), each with a fading trail of
-// ghosts GAP ms behind; each mark flashes as they cross it, and a bright
-// band sweeps the fill with them and is gone FADE ms after. Keyframes in
-// styles/theme.css.
-const PULSE = 250;
-const RUN = 700;
-const FADE = 300;
-const GAP = 26;
-const GHOSTS = [0, 1, 2, 3, 4];
-const FLASH = 260; // a mark's flash, brightest at 35%
+// The arrival at max (B176, the user 2026-10-10: an energy bar's glow, as
+// in Blade & Soul, in place of B173's sparks): about 1.4 s of soft light,
+// transform and opacity only, never in the pointer's way. The layers, their
+// keyframes and what plays when are in styles/theme.css; the timings that
+// depend on the marks are set here.
+const CHARGE = 200; // the glow reaches the end, which flares
+const RUN = 760; // the bands' run back to the start, done by about 1000 ms
+const MARK_GLOW = 480; // a mark's glow, brightest at 35% as the first band passes
+// The second band follows the first a little smaller and fainter, rising
+// where the first falls.
+const BANDS = [
+  { wave: "a", lag: 0, scale: "1", opacity: 1 },
+  { wave: "b", lag: 90, scale: "0.8", opacity: 0.75 },
+] as const;
+// Sparks: flung off the flare at the end (x 100%) or shed by the first band
+// halfway (x 50%), to (dx, dy) px; size px, duration and delay ms.
+const SPARKS = [
+  { x: 100, dx: -26, dy: -12, size: 10, dur: 520, delay: 185 },
+  { x: 100, dx: -14, dy: -18, size: 8, dur: 460, delay: 195 },
+  { x: 100, dx: 7, dy: -15, size: 8, dur: 420, delay: 190 },
+  { x: 100, dx: -36, dy: -3, size: 12, dur: 600, delay: 200 },
+  { x: 100, dx: -30, dy: 9, size: 10, dur: 560, delay: 192 },
+  { x: 100, dx: -12, dy: 17, size: 8, dur: 480, delay: 205 },
+  { x: 100, dx: 8, dy: 14, size: 8, dur: 430, delay: 198 },
+  { x: 100, dx: -22, dy: 2, size: 10, dur: 650, delay: 230 },
+  { x: 50, dx: -6, dy: -11, size: 8, dur: 520, delay: CHARGE + RUN / 2 },
+  { x: 50, dx: 5, dy: 10, size: 8, dur: 520, delay: CHARGE + RUN / 2 + 40 },
+];
 const ms = (n: number) => `${Math.round(n)}ms`;
 
 /**
@@ -96,8 +110,8 @@ export function Slider({
         onValueCommit={(v) => onValueCommit?.(v[0] ?? min)}
         className={cn("relative mx-2 flex h-5 touch-none items-center", disabled && "opacity-50")}
       >
-        <RSlider.Track className="relative h-1 grow rounded-full bg-bg-3">
-          <RSlider.Range className={cn("absolute h-full rounded-full", c.range)} />
+        <RSlider.Track className="relative h-1.5 grow rounded-full bg-bg-3">
+          <RSlider.Range className={cn("slider-fill absolute h-full rounded-full", c.text)} />
         </RSlider.Track>
         {marks.map((m) => (
           <span
@@ -111,39 +125,60 @@ export function Slider({
           />
         ))}
         {peaking && (
-          <span key={peaks} aria-hidden className={cn("pointer-events-none absolute inset-0 motion-reduce:hidden", c.text)}>
-            <span className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full">
-              <span
-                className="slider-sweep absolute inset-y-0 left-0 w-full"
-                style={{ animation: `slider-sweep-x ${ms(RUN)} linear ${ms(PULSE)} both, slider-fade-out ${ms(FADE)} ease-out ${ms(PULSE + RUN)} forwards` }}
-              />
-            </span>
-            {marks
-              .filter((m) => m < max)
-              .map((m) => (
-                <span
-                  key={m}
-                  className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] bg-current opacity-0"
-                  style={{ left: `${pct(m)}%`, animation: `slider-mark-flash ${ms(FLASH)} ease-out ${ms(PULSE + RUN * (1 - pct(m) / 100) - FLASH * 0.35)} both` }}
-                />
-              ))}
-            {(["up", "down"] as const).map((dir) =>
-              GHOSTS.map((k) => (
-                <span
-                  key={`${dir}${k}`}
-                  className="absolute inset-x-0 top-1/2 h-0"
-                  style={{ opacity: 1 - k * 0.19, animation: `slider-spark-x ${ms(RUN)} linear ${ms(PULSE + k * GAP)} both` }}
-                >
+          <span key={peaks} aria-hidden className={cn("slider-fx pointer-events-none absolute inset-0", c.text)}>
+            <span className="slider-glow-2" />
+            <span className="slider-glow-1" />
+            <span className="slider-fx-motion">
+              {marks
+                .filter((m) => m < max)
+                .map((m) => (
                   <span
-                    className="absolute top-0 left-0 block size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current shadow-pop"
+                    key={m}
+                    className="slider-mark-glow"
                     style={{
-                      scale: String(1 - k * 0.12),
-                      animation: `slider-spark-${dir} ${ms(RUN)} linear ${ms(PULSE + k * GAP)} both, slider-spark-fade ${ms(RUN)} linear ${ms(PULSE + k * GAP)} both`,
+                      left: `${pct(m)}%`,
+                      animation: `slider-mark-glow ${ms(MARK_GLOW)} ease-out ${ms(CHARGE + RUN * (1 - pct(m) / 100) - MARK_GLOW * 0.35)} both`,
                     }}
                   />
-                </span>
-              )),
-            )}
+                ))}
+              <span className="slider-bands">
+                {BANDS.map((b) => (
+                  <span
+                    key={b.wave}
+                    className="slider-band"
+                    style={{
+                      animation: `slider-band-x ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both, slider-band-fade ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both`,
+                    }}
+                  >
+                    <span
+                      className="absolute top-0 left-0"
+                      style={{ scale: b.scale, opacity: b.opacity, animation: `slider-wave-${b.wave} ${ms(RUN)} ease-in-out ${ms(CHARGE + b.lag)} both` }}
+                    >
+                      <span className="slider-band-trail" />
+                      <span className="slider-band-head" />
+                    </span>
+                  </span>
+                ))}
+              </span>
+              <span className="slider-burst" />
+              {SPARKS.map((p, i) => (
+                <span
+                  key={i}
+                  className="slider-spark"
+                  style={
+                    {
+                      left: `${p.x}%`,
+                      width: p.size,
+                      height: p.size,
+                      margin: `${-p.size / 2}px 0 0 ${-p.size / 2}px`,
+                      "--dx": `${p.dx}px`,
+                      "--dy": `${p.dy}px`,
+                      animation: `slider-spark-fly ${ms(p.dur)} cubic-bezier(0.15, 0.75, 0.35, 1) ${ms(p.delay)} both`,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </span>
           </span>
         )}
         <RSlider.Thumb
@@ -151,16 +186,7 @@ export function Slider({
           aria-valuetext={formatValue?.(value)}
           className="group relative block size-0 outline-none"
         >
-          {peaking && (
-            <span
-              key={peaks}
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute top-0 left-0 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-0 motion-safe:animate-slider-peak motion-reduce:opacity-30",
-                c.glow,
-              )}
-            />
-          )}
+          {peaking && <span key={peaks} aria-hidden className={cn("slider-fx slider-thumb-halo pointer-events-none", c.text)} />}
           <span
             aria-hidden
             className={cn(
@@ -168,7 +194,7 @@ export function Slider({
               "transition-transform duration-[var(--t-fast)] group-hover:scale-110 group-focus-visible:scale-110",
               // The thumb that takes the focus has no size: the dot shows it (B175).
               "group-focus-visible:ring-2 group-focus-visible:ring-brand group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-bg-1",
-              peaking && "motion-safe:animate-slider-dot-pulse",
+              peaking && "slider-dot-burst",
               c.thumb,
             )}
           />
