@@ -31,7 +31,7 @@ export default function Users() {
   // A keyword from the address or a saved view is checked as the search box checks it (A104): one the services would
   // refuse filters nothing, and the box says so.
   const keyword = f.q?.trim() ?? "";
-  const keywordOk = keyword === "" || (keywordFits(keyword) && !invalid(keyword));
+  const keywordOk = keyword === "" || usableKeyword(keyword);
   const q = { status: f.status, region: f.region?.toUpperCase(), q: keywordOk ? keyword : "", from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
   const list = useCursorList<UserSummary>(["admin", "users", q], async (cursor) =>
     adminData(await adminApi.GET("/admin/v1/users", { params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: pageSize() } } })),
@@ -71,8 +71,11 @@ export default function Users() {
 /** invalid is an input no account could match (A93): over 254 characters, or with invisible ones. */
 const invalid = (s: string) => [...s].length > 254 || /\p{Cc}/u.test(s);
 
-/** keywordFits is a list's keyword as auth-service and user-service take it (B170): 2 to 64 characters. */
-const keywordFits = (s: string) => [...s].length >= 2 && [...s].length <= 64;
+/**
+ * usableKeyword is a list's keyword as auth-service and user-service take it (B170): 2 to 64 characters, none invisible -
+ * the search box's and the address's alike (A104, A106).
+ */
+const usableKeyword = (s: string) => [...s].length >= 2 && [...s].length <= 64 && !invalid(s);
 
 /**
  * UserSearch (A93): on Enter, an exact ID, email, phone or username opens the user (B167); anything else filters the
@@ -95,7 +98,7 @@ function UserSearch({
     } catch (err) {
       // No such account: the input as the list's keyword, of 2 to 64 characters (B170).
       if (err instanceof ApiError && err.status === 404) {
-        if (keywordFits(query)) onKeyword(query);
+        if (usableKeyword(query)) onKeyword(query);
         else toast.info(t("admin.users.keywordLength"));
       } else if (err instanceof ApiError && err.status === 400) toast.error(t("admin.users.searchInvalid"));
       else errorToast(err);
