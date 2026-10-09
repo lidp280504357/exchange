@@ -1054,6 +1054,10 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if l := users(ports.UserFilter{Except: []string{alice}}, alice); len(l) != 0 {
 		t.Fatalf("Alice's, all but Alice's %+v", l)
 	}
+	// Spelled in capitals the ID is the same user (review C76).
+	if l := users(ports.UserFilter{Except: []string{alice}}, strings.ToUpper(alice)); len(l) != 0 {
+		t.Fatalf("ALICE's, all but Alice's %+v", l)
+	}
 	if !all[0].MarkFresh || !all[1].MarkFresh {
 		t.Fatalf("fresh marks %+v", all)
 	}

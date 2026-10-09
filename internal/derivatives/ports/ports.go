@@ -5,6 +5,7 @@ package ports
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -117,12 +118,16 @@ type UserFilter struct {
 	Only, Except []string
 }
 
-// Allows reports whether the filter selects the user.
+// Allows reports whether the filter selects the user (an ID's spellings
+// differ only in case once parsed: compared regardless of it).
 func (f UserFilter) Allows(userID string) bool {
-	if f.Only != nil && !slices.Contains(f.Only, userID) {
+	in := func(ids []string) bool {
+		return slices.ContainsFunc(ids, func(id string) bool { return strings.EqualFold(id, userID) })
+	}
+	if f.Only != nil && !in(f.Only) {
 		return false
 	}
-	return !slices.Contains(f.Except, userID)
+	return !in(f.Except)
 }
 
 // Totals sum a contract's positions.

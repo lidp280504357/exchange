@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/derivatives/application"
@@ -821,10 +822,21 @@ func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
 // 1000).
 func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	only, except, err := httpx.UserIDsFrom(r.URL.Query())
+	only, except, err := httpx.UserIDsFrom(q)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	// In its canonical form, as the lists' IDs are: another spelling of an
+	// ID left out would get past exclude_user_ids (review C76).
+	user := q.Get("user_id")
+	if user != "" {
+		id, err := uuid.Parse(user)
+		if err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("user_id must be a UUID"))
+			return
+		}
+		user = id.String()
 	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	switch {
@@ -834,7 +846,7 @@ func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 		limit = 1000 // at most, not back to the default (C5.5 ⑨)
 	}
 	list, cut, err := h.Svc.OpenPositions(r.Context(), application.PositionFilter{
-		Symbol: strings.ToUpper(q.Get("symbol")), UserID: q.Get("user_id"), Users: ports.UserFilter{Only: only, Except: except},
+		Symbol: strings.ToUpper(q.Get("symbol")), UserID: user, Users: ports.UserFilter{Only: only, Except: except},
 		Watch: q.Get("watch") == "true", Limit: limit,
 	})
 	if err != nil {

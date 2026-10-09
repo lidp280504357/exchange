@@ -46,6 +46,7 @@ func TestTheListsTakeUsersToShowOrLeaveOut(t *testing.T) {
 		"/internal/derivatives/positions?exclude_user_ids=bob",
 		"/internal/derivatives/risk?user_ids=" + a + "," + "nope",
 		"/internal/derivatives/risk?user_ids=" + a + "&exclude_user_ids=",
+		"/internal/derivatives/positions?user_id=bob&exclude_user_ids=" + a,
 	} {
 		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, http.NoBody)
 		w := httptest.NewRecorder()
