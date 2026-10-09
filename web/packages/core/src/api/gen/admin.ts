@@ -1631,6 +1631,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/products/spot/reduce-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The contracts spot's last closure left reduce-only
+         * @description A92. Closing spot halts the platform coin's spot pair; its
+         *     perpetuals, whose index comes from it, go reduce-only as their
+         *     mark price goes stale, and opening spot again lifts nothing (a
+         *     person decides the market is sound, requirements §11.7). Spot's
+         *     last closure is read from its flag's history (product.spot): the
+         *     latest openings and the closing before them; the contracts listed
+         *     are those under reduce-only now that went so between the closing
+         *     and a minute after the (earliest of the latest) opening, from
+         *     derivatives-service. While spot is closed, or was never closed,
+         *     closed_at and opened_at are null and nothing is listed. Needs
+         *     instruments.read.
+         */
+        get: operations["getSpotReduceOnly"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/products/spot/reduce-only/lift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift the reduce-only of the contracts spot's last closure left so
+         * @description A92. Lifts, one by one, the contracts GET
+         *     /admin/v1/products/spot/reduce-only lists now (through
+         *     derivatives-service's lift, as POST
+         *     /admin/v1/derivatives/contracts/{symbol}/lift-reduce-only does), in
+         *     the administrator's name; each is audited as
+         *     admin.contracts.resumed (target contract:SYMBOL; details: product,
+         *     closed_at, opened_at, reduce_only_reason, reduce_only_since, lifted
+         *     and an error). One failing does not stop the others; a contract
+         *     whose mark price is still stale goes reduce-only again within
+         *     seconds. Needs derivatives.write.
+         */
+        post: operations["liftSpotReduceOnly"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/instruments": {
         parameters: {
             query?: never;
@@ -5138,6 +5197,35 @@ export interface components {
             products: components["schemas"]["ProductState"][];
             /** @description The lines whose counts could not be read. */
             partial: components["schemas"]["ProductName"][];
+        };
+        /** @description Spot's last closure and the contracts it left reduce-only (A92). */
+        SpotReduceOnly: {
+            /**
+             * Format: date-time
+             * @description When spot was last closed; null while it is closed or never was.
+             */
+            closed_at: string | null;
+            /**
+             * Format: date-time
+             * @description When it opened again after that; null as closed_at.
+             */
+            opened_at: string | null;
+            contracts: {
+                /** @example ASTRA-USDT-PERP */
+                symbol: string;
+                /** @description Why it went reduce-only, e.g. MARK_PRICE_STALE. */
+                reason: string;
+                /** Format: date-time */
+                since: string;
+            }[];
+        };
+        /** @description How lifting one contract's reduce-only went. */
+        ContractLift: {
+            symbol: string;
+            /** @description False when it was not reduce-only any more, or the lift failed. */
+            lifted: boolean;
+            /** @description The service's code and message when the lift failed. */
+            error: string | null;
         };
         /**
          * @description How canceling a closed line's open orders through its service went
@@ -9259,6 +9347,54 @@ export interface operations {
                         canceled_orders: number;
                         /** @description How canceling the closed line's orders went; null when the change asked no cancel (it opened a line or changed nothing). */
                         cancel: components["schemas"]["ProductCancel"] | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSpotReduceOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The closure and its contracts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpotReduceOnly"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    liftSpotReduceOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description How each lift went (none when nothing was listed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        contracts: components["schemas"]["ContractLift"][];
                     };
                 };
             };

@@ -1,10 +1,10 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, ErrorState, Skeleton } from "@exchange/ui";
+import { Badge, Button, ErrorState, KeyTag, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { DangerAction, type Notice } from "../../kit/actions";
-import { TimeText } from "../../kit/format";
+import { TimeText, useTimeText } from "../../kit/format";
 import { Card } from "../../kit/Page";
 
 // The product lines (design 2026-10-07, product switches §1 #5, K3): spot
@@ -43,7 +43,73 @@ export function ProductsCard({ admin }: { admin: Admin }) {
         </div>
       )}
       {q.data && q.data.partial.length > 0 && <p className="mt-2 text-xs text-warn-strong">{t("admin.products.partial")}</p>}
+      {q.data?.products.find((p) => p.product === "spot")?.enabled && <SpotReduceOnly lift={can(admin, "derivatives.write")} />}
     </Card>
+  );
+}
+
+export const spotReduceOnlyKey = ["admin", "products", "spot", "reduce-only"];
+
+/**
+ * SpotReduceOnly lists the contracts spot's last closure left reduce-only
+ * - opening spot lifts nothing (A92) - and lifts them together; nothing
+ * shows when there are none.
+ */
+function SpotReduceOnly({ lift }: { lift: boolean }) {
+  const { t } = useTranslation();
+  const time = useTimeText();
+  const q = useQuery({
+    queryKey: spotReduceOnlyKey,
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/products/spot/reduce-only")),
+    refetchInterval: 30_000,
+  });
+  const c = q.data;
+  if (!c || c.contracts.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-col gap-2 rounded-2 border border-warn bg-warn/5 px-3 py-2.5 text-sm" data-testid="spot-reduce-only">
+      <span className="font-medium text-fg-1">{t("admin.products.reduced.title")}</span>
+      <span className="text-xs text-fg-3">{t("admin.products.reduced.window", { closed: time(c.closed_at), opened: time(c.opened_at) })}</span>
+      <ul className="flex flex-col gap-1">
+        {c.contracts.map((rc) => (
+          <li key={rc.symbol} className="flex flex-wrap items-center gap-2">
+            <KeyTag>{rc.symbol}</KeyTag>
+            <span className="text-xs text-fg-3">{t("admin.products.reduced.since", { reason: rc.reason || "—", time: time(rc.since) })}</span>
+          </li>
+        ))}
+      </ul>
+      {lift && (
+        <span>
+          <DangerAction
+            trigger={(open) => (
+              <Button size="sm" variant="secondary" onClick={open} data-testid="spot-reduce-only-lift">
+                {t("admin.products.reduced.lift")}
+              </Button>
+            )}
+            danger={false}
+            title={t("admin.products.reduced.liftTitle")}
+            description={t("admin.products.reduced.liftHint")}
+            target={
+              <span className="flex flex-wrap gap-1.5">
+                {c.contracts.map((rc) => (
+                  <KeyTag key={rc.symbol}>{rc.symbol}</KeyTag>
+                ))}
+              </span>
+            }
+            confirmWord="lift"
+            run={async (reason) => adminData(await adminApi.POST("/admin/v1/products/spot/reduce-only/lift", { body: { reason } }))}
+            success={(res) => {
+              const lifts = (res as { contracts: { symbol: string; lifted: boolean; error: string | null }[] }).contracts;
+              const failed = lifts.filter((l) => l.error);
+              const n = lifts.filter((l) => l.lifted).length;
+              return failed.length
+                ? { info: t("admin.products.reduced.liftedSome", { n, failed: failed.length, errors: failed.map((l) => `${l.symbol} ${l.error}`).join(t("admin.summary.sep")) }) }
+                : t("admin.products.reduced.lifted", { n });
+            }}
+            invalidate={[spotReduceOnlyKey, ["admin", "derivatives", "contracts"]]}
+          />
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -124,14 +190,18 @@ function ProductSwitch({ p, name }: { p: ProductState; name: string }) {
               {p.product === "spot" && <span className="text-warn-strong">{t("admin.products.closeSpotAstra")}</span>}
             </span>
           ) : (
-            t("admin.products.openHint")
+            <span className="flex flex-col gap-1">
+              <span>{t("admin.products.openHint")}</span>
+              {/* Opening spot lifts no contract's reduce-only (A92). */}
+              {p.product === "spot" && <span className="text-warn-strong">{t("admin.products.openSpotHint")}</span>}
+            </span>
           )
         }
         target={<span className="font-medium">{name}</span>}
         confirmWord={p.product}
         run={(reason) => put(!p.enabled, reason)}
         success={(res) => (closing ? said(res, "admin.products.closedDone") : t("admin.products.openedDone"))}
-        invalidate={[productsKey]}
+        invalidate={[productsKey, spotReduceOnlyKey]}
       />
       {left && (
         <DangerAction

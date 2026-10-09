@@ -21,6 +21,10 @@ func (f *launchFlags) Switch(context.Context, string, bool, string, string) (por
 	return ports.Flag{}, errors.New("read-only")
 }
 
+func (f *launchFlags) History(context.Context, string, int) ([]ports.FlagChange, error) {
+	return nil, nil
+}
+
 // launchWallet answers the custodian's state.
 type launchWallet struct {
 	fakeWallet

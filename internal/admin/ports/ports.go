@@ -803,11 +803,21 @@ type Flag struct {
 	UpdatedAt *time.Time `json:"updated_at"`
 }
 
+// FlagChange is one change of a flag: on or off after it, when and by whom.
+type FlagChange struct {
+	Enabled bool
+	At      time.Time
+	By      string
+}
+
 // Flags reads and switches feature flags (the shared config schema); a
 // change is recorded with its audit event.
 type Flags interface {
 	List(ctx context.Context) ([]Flag, error)
 	Switch(ctx context.Context, key string, enabled bool, actor, reason string) (Flag, error)
+	// History returns a flag's latest changes, newest first (the config
+	// schema's flag_changes).
+	History(ctx context.Context, key string, limit int) ([]FlagChange, error)
 }
 
 // Features evaluates the feature flags that change the console's own

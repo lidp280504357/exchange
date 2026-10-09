@@ -670,6 +670,26 @@ func (f Flags) Switch(ctx context.Context, key string, enabled bool, actor, reas
 	return toPort(stored), nil
 }
 
+// History returns a flag's latest changes, newest first: whether it was on
+// after each, when and by whom.
+func (f Flags) History(ctx context.Context, key string, limit int) ([]ports.FlagChange, error) {
+	changes, err := flags.History(ctx, f.DB, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.FlagChange, 0, len(changes))
+	for _, c := range changes {
+		var after struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.Unmarshal(c.New, &after); err != nil {
+			return nil, fmt.Errorf("flags: a change of %s: %w", key, err)
+		}
+		out = append(out, ports.FlagChange{Enabled: after.Enabled, At: c.ChangedAt, By: c.ChangedBy})
+	}
+	return out, nil
+}
+
 // Audit implements ports.AuditLog on ClickHouse audit_logs.
 type Audit struct{ Conn driver.Conn }
 

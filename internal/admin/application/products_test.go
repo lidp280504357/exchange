@@ -22,6 +22,12 @@ type productFlags struct {
 	now         func() time.Time
 	down        bool
 	afterSwitch func()
+	// changes are each flag's switches, newest first (flag_changes).
+	changes map[string][]ports.FlagChange
+}
+
+func (f *productFlags) History(_ context.Context, key string, limit int) ([]ports.FlagChange, error) {
+	return f.changes[key][:min(limit, len(f.changes[key]))], nil
 }
 
 func (f *productFlags) List(context.Context) ([]ports.Flag, error) {
@@ -41,6 +47,10 @@ func (f *productFlags) Switch(_ context.Context, key string, enabled bool, actor
 	v.Key, v.Enabled, v.UpdatedBy, v.UpdatedAt = key, enabled, actor, &at
 	v.Version++
 	f.flags[key] = v
+	if f.changes == nil {
+		f.changes = map[string][]ports.FlagChange{}
+	}
+	f.changes[key] = append([]ports.FlagChange{{Enabled: enabled, At: at, By: actor}}, f.changes[key]...)
 	if f.afterSwitch != nil {
 		f.afterSwitch()
 	}

@@ -1121,6 +1121,74 @@ else
   fi
 fi
 
+echo "== spot's closure and the contracts it left reduce-only (A92)"
+# Closing spot halts the platform coin's spot pair; its perpetuals, whose
+# index comes from it, go reduce-only once their mark is stale, and opening
+# spot again lifts nothing: the card lists them, and an OPERATOR lifts them
+# together once their marks are back (each audited admin.contracts.resumed).
+as AUDITOR GET /admin/v1/products/spot/reduce-only ""
+if [[ $STATUS == 404 ]]; then
+  echo "skip spot's closure: this admin-service is from before A92"
+else
+  expect 200 - "every administrator reads spot's last closure"
+  as AUDITOR GET /admin/v1/products ""
+  if [[ $(jq -r '.products[] | select(.product == "spot") | .enabled' <<<"$BODY") != true ]]; then
+    echo "skip spot's closure: spot is closed already"
+  else
+    reopen_spot() { as ADMIN PUT /admin/v1/products '{"product":"spot","enabled":true,"reason":"e2e cleanup"}' >/dev/null; }
+    at_exit reopen_spot
+    astra_reduced() { # astra_reduced: an ASTRA perpetual is reduce-only
+      as AUDITOR GET /admin/v1/derivatives/contracts ""
+      [[ $STATUS == 200 ]] && jq -e '[.contracts[] | select((.symbol | startswith("ASTRA-")) and .reduce_only)] | length > 0' <<<"$BODY" >/dev/null
+    }
+    if astra_reduced; then
+      echo "skip spot's closure: an ASTRA perpetual is reduce-only already"
+    else
+      as ADMIN PUT /admin/v1/products '{"product":"spot","enabled":false,"reason":"e2e: spot closed for a moment (A92)"}'
+      expect 200 - "ADMIN closes spot"
+      deadline=$((SECONDS + 150))
+      until astra_reduced || ((SECONDS > deadline)); do sleep 2; done
+      if ! astra_reduced; then
+        reopen_spot
+        echo "skip the rest of spot's closure: no ASTRA perpetual went reduce-only within 150 s of closing spot"
+      else
+        echo "ok   an ASTRA perpetual goes reduce-only while spot is closed"
+        as ADMIN PUT /admin/v1/products '{"product":"spot","enabled":true,"reason":"e2e: spot open again (A92)"}'
+        expect 200 - "ADMIN opens spot again"
+        as AUDITOR GET /admin/v1/products/spot/reduce-only ""
+        expect 200 - "the closure"
+        check '(.closed_at | type) == "string" and (.opened_at | type) == "string" and .closed_at < .opened_at
+          and any(.contracts[]; (.symbol | startswith("ASTRA-")) and (.since | type) == "string")' \
+          "lists the ASTRA perpetuals it left reduce-only, opening spot lifted nothing"
+        REDUCED=$(jq -c '[.contracts[].symbol]' <<<"$BODY")
+        marks_back() { # marks_back: every contract listed has a fresh mark price again
+          as AUDITOR GET /admin/v1/derivatives/contracts ""
+          [[ $STATUS == 200 ]] && jq -e --argjson s "$REDUCED" '[.contracts[] | select(.symbol as $x | $s | index($x))] | length > 0 and all(.mark_fresh)' <<<"$BODY" >/dev/null
+        }
+        eventually 240 "their mark prices are back" marks_back
+        as AUDITOR POST /admin/v1/products/spot/reduce-only/lift '{"reason":"e2e: by an auditor"}'
+        expect 403 ADMIN_FORBIDDEN "an AUDITOR lifts nothing"
+        as OPERATOR POST /admin/v1/products/spot/reduce-only/lift '{"reason":"e2e: the index is back (A92)"}'
+        expect 200 - "an OPERATOR lifts them together"
+        check "[.contracts[].symbol] == $REDUCED and all(.contracts[]; .lifted and .error == null)" "each of them, lifted"
+        lifted_all() { # lifted_all: none of them reduce-only, nothing left to lift
+          as AUDITOR GET /admin/v1/derivatives/contracts ""
+          [[ $STATUS == 200 ]] && jq -e --argjson s "$REDUCED" '[.contracts[] | select((.symbol as $x | $s | index($x)) and .reduce_only)] | length == 0' <<<"$BODY" >/dev/null
+        }
+        eventually 20 "they trade again" lifted_all
+        as AUDITOR GET /admin/v1/products/spot/reduce-only ""
+        check '.contracts == []' "the card has nothing left to lift"
+        FIRST_REDUCED=$(jq -r '.[0]' <<<"$REDUCED")
+        resumed() {
+          as AUDITOR GET "/admin/v1/audit-logs?target=contract:$FIRST_REDUCED&limit=10" ""
+          [[ $STATUS == 200 ]] && jq -e --arg who "$EMAIL_OPERATOR" '[.items[] | select(.payload.action == "admin.contracts.resumed" and .actor == $who)] | length >= 1' <<<"$BODY" >/dev/null
+        }
+        eventually 40 "the lift in the audit trail in the OPERATOR's name" resumed
+      fi
+    fi
+  fi
+fi
+
 echo "== paged lists and the overview"
 as AUDITOR GET "/admin/v1/users?limit=2" ""
 expect 200 - "accounts, newest first"

@@ -331,6 +331,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - 打开：只改开关，不撤单；关闭期间撤掉的挂单不恢复。切换到它现在的状态不改不撤。审计 `admin.products.toggled`（对象 `product:<线>`，详情：线、开关、从/到、撤单数、撤单失败的原因；开关改了就一定有审计——请求在切换后断开时，审计在不随请求取消的上下文里写完，限 5 秒，A91）。
 - 两站读公开的 `GET /v1/platform/products`（instrument-service，缓存 30 秒），一分钟内生效；新单的拒绝（`PRODUCT_CLOSED`）、划入合约账户的拒绝与模拟市场机器人的暂停由各服务按开关执行（K1a、K1b）。
 
+- 关闭现货留下的只减仓（A92）：关闭币币交易会让平台币 ASTRA 现货停牌，以它为指数的 ASTRA 永续在标记价停更后进入只减仓（`MARK_PRICE_STALE`），重新打开现货不会自动解除（要人判断行情已正常，需求 §11.7）。现货开着时卡片下方列出「关闭现货期间进入只减仓的合约」：`GET /admin/v1/products/spot/reduce-only`（`instruments.read`）从 `product.spot` 的变更历史（config `flag_changes`）找出最近一次关闭与之后的打开，返回 `{closed_at, opened_at, contracts:[{symbol, reason, since}]}`——仍在只减仓、且在关闭到打开后一分钟之间进入的合约（读 derivatives-service 的合约状态）；现货关着或从没关过时为空。「一并解除」：`POST /admin/v1/products/spot/reduce-only/lift`（`{reason}`，`derivatives.write`，一人即可，确认词 `lift`）按当时的列表逐个调 derivatives-service 的解除（与合约页的「解除只减仓」相同），各记一条审计 `admin.contracts.resumed`（对象 `contract:<合约>`，详情：线、关闭与打开时间、原因与开始时间、`lifted`、失败时的 `error`），一个失败不影响其它；标记价还没恢复的合约几秒内会再进只减仓，先在「合约与保险基金」页看标记价。打开现货的确认框与关闭现货的提示都写明这一点。admin.sh 会把现货关一两分钟来走一遍（等某个 ASTRA 永续进只减仓，150 秒内没有就跳过），结束时总会重开。
+
 ### 交易参数的护栏
 
 （设计 §2 第 6 条，C3c）一次调用就能把费率改到 10%、让高杠杆仓位在几秒内被强平、或掐断 HOUSE 的流动性，所以这些"交易参数"的修改另有一套规则：

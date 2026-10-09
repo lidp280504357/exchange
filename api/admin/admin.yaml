@@ -2629,6 +2629,72 @@ paths:
                           - type: 'null'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/products/spot/reduce-only:
+    get:
+      operationId: getSpotReduceOnly
+      summary: The contracts spot's last closure left reduce-only
+      description: |
+        A92. Closing spot halts the platform coin's spot pair; its
+        perpetuals, whose index comes from it, go reduce-only as their
+        mark price goes stale, and opening spot again lifts nothing (a
+        person decides the market is sound, requirements §11.7). Spot's
+        last closure is read from its flag's history (product.spot): the
+        latest openings and the closing before them; the contracts listed
+        are those under reduce-only now that went so between the closing
+        and a minute after the (earliest of the latest) opening, from
+        derivatives-service. While spot is closed, or was never closed,
+        closed_at and opened_at are null and nothing is listed. Needs
+        instruments.read.
+      tags: [instruments]
+      responses:
+        '200':
+          description: The closure and its contracts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpotReduceOnly'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/products/spot/reduce-only/lift:
+    post:
+      operationId: liftSpotReduceOnly
+      summary: Lift the reduce-only of the contracts spot's last closure left so
+      description: |
+        A92. Lifts, one by one, the contracts GET
+        /admin/v1/products/spot/reduce-only lists now (through
+        derivatives-service's lift, as POST
+        /admin/v1/derivatives/contracts/{symbol}/lift-reduce-only does), in
+        the administrator's name; each is audited as
+        admin.contracts.resumed (target contract:SYMBOL; details: product,
+        closed_at, opened_at, reduce_only_reason, reduce_only_since, lifted
+        and an error). One failing does not stop the others; a contract
+        whose mark price is still stale goes reduce-only again within
+        seconds. Needs derivatives.write.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: How each lift went (none when nothing was listed).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contracts]
+                properties:
+                  contracts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContractLift'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/instruments:
     get:
       operationId: listInstruments
@@ -8217,6 +8283,47 @@ components:
           description: The lines whose counts could not be read.
           items:
             $ref: '#/components/schemas/ProductName'
+    SpotReduceOnly:
+      type: object
+      description: Spot's last closure and the contracts it left reduce-only (A92).
+      required: [closed_at, opened_at, contracts]
+      properties:
+        closed_at:
+          type: [string, 'null']
+          format: date-time
+          description: When spot was last closed; null while it is closed or never was.
+        opened_at:
+          type: [string, 'null']
+          format: date-time
+          description: When it opened again after that; null as closed_at.
+        contracts:
+          type: array
+          items:
+            type: object
+            required: [symbol, reason, since]
+            properties:
+              symbol:
+                type: string
+                examples: [ASTRA-USDT-PERP]
+              reason:
+                type: string
+                description: Why it went reduce-only, e.g. MARK_PRICE_STALE.
+              since:
+                type: string
+                format: date-time
+    ContractLift:
+      type: object
+      description: How lifting one contract's reduce-only went.
+      required: [symbol, lifted, error]
+      properties:
+        symbol:
+          type: string
+        lifted:
+          type: boolean
+          description: False when it was not reduce-only any more, or the lift failed.
+        error:
+          type: [string, 'null']
+          description: The service's code and message when the lift failed.
     ProductCancel:
       type: object
       description: |

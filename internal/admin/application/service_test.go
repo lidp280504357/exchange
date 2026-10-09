@@ -727,6 +727,10 @@ func (f *fakeFlags) Switch(_ context.Context, key string, enabled bool, actor, _
 	return ports.Flag{Key: key, Enabled: enabled, UpdatedBy: actor}, nil
 }
 
+func (f *fakeFlags) History(context.Context, string, int) ([]ports.FlagChange, error) {
+	return nil, nil
+}
+
 type fakeOrders struct{ canceled []string }
 
 func (o *fakeOrders) CancelAll(_ context.Context, userID string) error {
