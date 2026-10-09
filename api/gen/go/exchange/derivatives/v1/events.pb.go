@@ -1176,6 +1176,97 @@ func (x *AdlExecuted) GetDirection() string {
 	return ""
 }
 
+// CrossLiquidationCompleted: a cross account's liquidation is over, its
+// cross positions closed and settled, and what it left went to the
+// insurance fund as the liquidation clearance fee, as Binance does
+// (coin-margined design 2026-10-06 §0, C68): the account is at zero. One
+// per liquidation; a loss beyond the account fell on the fund.
+type CrossLiquidationCompleted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LiquidationId string                 `protobuf:"bytes,1,opt,name=liquidation_id,json=liquidationId,proto3" json:"liquidation_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// The cross account's settlement asset, the fee's.
+	SettleAsset string `protobuf:"bytes,3,opt,name=settle_asset,json=settleAsset,proto3" json:"settle_asset,omitempty"`
+	// What went to the insurance fund, "0" when the liquidation left nothing.
+	ClearanceFee  string                 `protobuf:"bytes,4,opt,name=clearance_fee,json=clearanceFee,proto3" json:"clearance_fee,omitempty"`
+	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	CompletedAt   *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CrossLiquidationCompleted) Reset() {
+	*x = CrossLiquidationCompleted{}
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CrossLiquidationCompleted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CrossLiquidationCompleted) ProtoMessage() {}
+
+func (x *CrossLiquidationCompleted) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CrossLiquidationCompleted.ProtoReflect.Descriptor instead.
+func (*CrossLiquidationCompleted) Descriptor() ([]byte, []int) {
+	return file_exchange_derivatives_v1_events_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CrossLiquidationCompleted) GetLiquidationId() string {
+	if x != nil {
+		return x.LiquidationId
+	}
+	return ""
+}
+
+func (x *CrossLiquidationCompleted) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CrossLiquidationCompleted) GetSettleAsset() string {
+	if x != nil {
+		return x.SettleAsset
+	}
+	return ""
+}
+
+func (x *CrossLiquidationCompleted) GetClearanceFee() string {
+	if x != nil {
+		return x.ClearanceFee
+	}
+	return ""
+}
+
+func (x *CrossLiquidationCompleted) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *CrossLiquidationCompleted) GetCompletedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return nil
+}
+
 var File_exchange_derivatives_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
@@ -1287,7 +1378,15 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\fsettle_asset\x18\b \x01(\tR\vsettleAsset\x12#\n" +
 	"\rcontract_size\x18\t \x01(\tR\fcontractSize\x12\x1c\n" +
 	"\tdirection\x18\n" +
-	" \x01(\tR\tdirectionB\xf4\x01\n" +
+	" \x01(\tR\tdirection\"\x9d\x02\n" +
+	"\x19CrossLiquidationCompleted\x12%\n" +
+	"\x0eliquidation_id\x18\x01 \x01(\tR\rliquidationId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\fsettle_asset\x18\x03 \x01(\tR\vsettleAsset\x12#\n" +
+	"\rclearance_fee\x18\x04 \x01(\tR\fclearanceFee\x129\n" +
+	"\n" +
+	"started_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12=\n" +
+	"\fcompleted_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAtB\xf4\x01\n" +
 	"\x1bcom.exchange.derivatives.v1B\vEventsProtoP\x01ZJgithub.com/skill/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
 
 var (
@@ -1302,21 +1401,22 @@ func file_exchange_derivatives_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_derivatives_v1_events_proto_rawDescData
 }
 
-var file_exchange_derivatives_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_exchange_derivatives_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_exchange_derivatives_v1_events_proto_goTypes = []any{
-	(*Position)(nil),              // 0: exchange.derivatives.v1.Position
-	(*PositionOpened)(nil),        // 1: exchange.derivatives.v1.PositionOpened
-	(*PositionChanged)(nil),       // 2: exchange.derivatives.v1.PositionChanged
-	(*PositionClosed)(nil),        // 3: exchange.derivatives.v1.PositionClosed
-	(*MarginAdjusted)(nil),        // 4: exchange.derivatives.v1.MarginAdjusted
-	(*LeverageChanged)(nil),       // 5: exchange.derivatives.v1.LeverageChanged
-	(*FundingPaid)(nil),           // 6: exchange.derivatives.v1.FundingPaid
-	(*FillSettled)(nil),           // 7: exchange.derivatives.v1.FillSettled
-	(*LiquidationWarning)(nil),    // 8: exchange.derivatives.v1.LiquidationWarning
-	(*LiquidationStarted)(nil),    // 9: exchange.derivatives.v1.LiquidationStarted
-	(*LiquidationFilled)(nil),     // 10: exchange.derivatives.v1.LiquidationFilled
-	(*AdlExecuted)(nil),           // 11: exchange.derivatives.v1.AdlExecuted
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(*Position)(nil),                  // 0: exchange.derivatives.v1.Position
+	(*PositionOpened)(nil),            // 1: exchange.derivatives.v1.PositionOpened
+	(*PositionChanged)(nil),           // 2: exchange.derivatives.v1.PositionChanged
+	(*PositionClosed)(nil),            // 3: exchange.derivatives.v1.PositionClosed
+	(*MarginAdjusted)(nil),            // 4: exchange.derivatives.v1.MarginAdjusted
+	(*LeverageChanged)(nil),           // 5: exchange.derivatives.v1.LeverageChanged
+	(*FundingPaid)(nil),               // 6: exchange.derivatives.v1.FundingPaid
+	(*FillSettled)(nil),               // 7: exchange.derivatives.v1.FillSettled
+	(*LiquidationWarning)(nil),        // 8: exchange.derivatives.v1.LiquidationWarning
+	(*LiquidationStarted)(nil),        // 9: exchange.derivatives.v1.LiquidationStarted
+	(*LiquidationFilled)(nil),         // 10: exchange.derivatives.v1.LiquidationFilled
+	(*AdlExecuted)(nil),               // 11: exchange.derivatives.v1.AdlExecuted
+	(*CrossLiquidationCompleted)(nil), // 12: exchange.derivatives.v1.CrossLiquidationCompleted
+	(*timestamppb.Timestamp)(nil),     // 13: google.protobuf.Timestamp
 }
 var file_exchange_derivatives_v1_events_proto_depIdxs = []int32{
 	0,  // 0: exchange.derivatives.v1.PositionOpened.position:type_name -> exchange.derivatives.v1.Position
@@ -1324,15 +1424,17 @@ var file_exchange_derivatives_v1_events_proto_depIdxs = []int32{
 	0,  // 2: exchange.derivatives.v1.PositionClosed.position:type_name -> exchange.derivatives.v1.Position
 	0,  // 3: exchange.derivatives.v1.MarginAdjusted.position:type_name -> exchange.derivatives.v1.Position
 	0,  // 4: exchange.derivatives.v1.FundingPaid.position:type_name -> exchange.derivatives.v1.Position
-	12, // 5: exchange.derivatives.v1.FundingPaid.funding_time:type_name -> google.protobuf.Timestamp
-	12, // 6: exchange.derivatives.v1.FillSettled.executed_at:type_name -> google.protobuf.Timestamp
-	12, // 7: exchange.derivatives.v1.LiquidationWarning.at:type_name -> google.protobuf.Timestamp
+	13, // 5: exchange.derivatives.v1.FundingPaid.funding_time:type_name -> google.protobuf.Timestamp
+	13, // 6: exchange.derivatives.v1.FillSettled.executed_at:type_name -> google.protobuf.Timestamp
+	13, // 7: exchange.derivatives.v1.LiquidationWarning.at:type_name -> google.protobuf.Timestamp
 	0,  // 8: exchange.derivatives.v1.LiquidationStarted.position:type_name -> exchange.derivatives.v1.Position
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	13, // 9: exchange.derivatives.v1.CrossLiquidationCompleted.started_at:type_name -> google.protobuf.Timestamp
+	13, // 10: exchange.derivatives.v1.CrossLiquidationCompleted.completed_at:type_name -> google.protobuf.Timestamp
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_exchange_derivatives_v1_events_proto_init() }
@@ -1346,7 +1448,7 @@ func file_exchange_derivatives_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_derivatives_v1_events_proto_rawDesc), len(file_exchange_derivatives_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -54,6 +54,7 @@ func TestToEvent(t *testing.T) {
 		{&derivv1.LiquidationWarning{UserId: "u", Cross: true, SettleAsset: "BTC"}, domain.NoticeContractWarned, true},
 		{&derivv1.LiquidationStarted{Position: &derivv1.Position{UserId: "u", Symbol: "BTC-USD-PERP"}}, domain.NoticeContractLiquidating, true},
 		{&derivv1.AdlExecuted{UserId: "u", Symbol: "BTC-USDT-PERP"}, domain.NoticeContractDeleveraged, true},
+		{&derivv1.CrossLiquidationCompleted{UserId: "u", SettleAsset: "USDT", ClearanceFee: "897.98"}, domain.NoticeContractLiquidated, true},
 		{&derivv1.LiquidationFilled{UserId: "u"}, "", false},
 	} {
 		e, ok := toEvent(tc.msg)

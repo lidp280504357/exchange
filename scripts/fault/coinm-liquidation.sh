@@ -2,20 +2,27 @@
 # Fault injection: coin-margined positions liquidated by the market
 # (coin-margined design 2026-10-06 §2.2, §2.3; review EX: a condition
 # before launch). On ASTRA-USD-PERP, settled in ASTRA and made by the
-# simulated market's bots (HOUSE does not quote it), three new users buy
-# ASTRA and open isolated positions: A long at 25x, C long at 15x, B short
-# at 20x.
+# simulated market's bots (HOUSE does not quote it), four new users buy
+# ASTRA and open positions: isolated, A long at 25x, C long at 15x, B short
+# at 20x; cross, D long at 25x on an account that holds only what puts its
+# liquidation about 3.85% under the mark (review C68).
 # 1. The fund's path: an operator's price event drops ASTRA 4%. As the
 #    mark follows, the monitor takes A's position over and its IOC
 #    liquidation orders sell into the bots' bids: A is flat, its closing
 #    fills are liquidation fills, and ASTRA's insurance fund moved by
 #    exactly what those fills say it paid (nothing when they filled above
 #    the bankruptcy price).
+#    D's cross account goes the same way, late in the drop (or in the
+#    second one, deleveraged at the mark): checked after step 2.
 # 2. ADL: the bots stop making the perpetual (sim.perp without it) and a
 #    second 4% drop reaches C's liquidation price: three IOC orders find
 #    no bid and C's position is closed against the best-ranked short (B,
 #    unless a bot ranks higher) at C's bankruptcy price on the tick grid,
 #    without fees.
+# 3. The clearance fee (review C68): D is flat, its cross liquidation DONE
+#    with the fee min(what it left, its equity at the take-over), that fee
+#    in D's ledger as INSURANCE_CONTRIBUTION (none when nothing was left),
+#    D's ASTRA FUTURES account at zero and D told (CONTRACT_LIQUIDATED).
 # The price goes back up by the exact inverse of both drops, the bots make
 # the perpetual again and B's position is closed; the reconciliation
 # (invariant 6 per settlement asset, ASTRA's included) passes.
@@ -65,6 +72,7 @@ if [[ $STATUS != 200 || $(jq -r .status <<<"$BODY") != TRADING || $(jq -r .runni
   exit 0
 fi
 SIZE=$(jq -r .contract_size <<<"$BODY")
+MMR=$(jq -r '.risk_tiers[0].mmr' <<<"$BODY")
 RECENT=$(pg "SELECT (SELECT count(*) FROM marketsim.events WHERE status <> 'CANCELED' AND type IN ('JUMP', 'TARGET', 'SPIKE', 'TREND', 'VOLATILITY') AND starts_at BETWEEN now() - interval '1 hour' AND now() + interval '1 hour') + (SELECT count(*) FROM marketsim.param_changes WHERE at > now() - interval '1 hour' AND (move <> 0 OR volume <> 0))")
 if ((RECENT > 0)); then
   echo "skip: $RECENT price events or settings changes within the hour take one operator's room; run it an hour after them"
@@ -115,10 +123,10 @@ drop() {
 }
 
 # A trader: registered, ASTRA bought with the welcome USDT and IN of it
-# moved to FUTURES, isolated at LEVERAGE on the perpetual; sets USER_<who>
-# and AUTH_<who>.
+# moved to FUTURES, isolated (or MODE) at LEVERAGE on the perpetual; sets
+# USER_<who> and AUTH_<who>.
 trader() {
-  local who=$1 leverage=$2 in=$3 token
+  local who=$1 leverage=$2 in=$3 mode=${4:-ISOLATED} token
   register "fault-coinm-$who-$RUN@example.com" "fault-coinm-$who-$RUN" "fault coinm $who $RUN"
   token=$(jq -r .access_token <<<"$BODY")
   eval "USER_$who=$(jq -r .user_id <<<"$BODY")"
@@ -137,8 +145,8 @@ trader() {
   call POST /v1/account/transfers "{\"asset\":\"ASTRA\",\"amount\":\"$in\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" \
     "${auth[@]}" -H "Idempotency-Key: fault-coinm-in-$RUN-$who"
   expect 201 - "$in ASTRA to FUTURES ($who)"
-  call PUT "/v1/derivatives/settings/$SYMBOL" "{\"margin_mode\":\"ISOLATED\",\"leverage\":$leverage}" "${auth[@]}"
-  expect 200 - "isolated, ${leverage}x ($who)"
+  call PUT "/v1/derivatives/settings/$SYMBOL" "{\"margin_mode\":\"$mode\",\"leverage\":$leverage}" "${auth[@]}"
+  expect 200 - "$mode, ${leverage}x ($who)"
 }
 # open WHO SIDE CONTRACTS: a market order of the user's.
 open() {
@@ -160,11 +168,19 @@ notice() {
     jq -e --arg t "$2" '[.items[] | select(.type == $t)] | length >= 1' <<<"$BODY" >/dev/null
 }
 
-echo "== three traders on $SYMBOL"
+echo "== four traders on $SYMBOL"
 trader A 25 50
 trader C 15 50
 trader B 20 60
-MINE="'$USER_A', '$USER_B', '$USER_C'"
+# D's account: what puts the take-over of a long of 30 contracts (V, their
+# value in ASTRA at the mark) 3.85% under it, V x (mmr + 0.0385) / 0.9615,
+# and the taker fee, V x 0.0005.
+call GET "/v1/market/$SYMBOL/mark-price" ""
+expect 200 - "$SYMBOL's mark price"
+D_IN=$(jq -rn --argjson m "$(jq -r .mark_price <<<"$BODY")" --argjson size "$SIZE" --argjson mmr "$MMR" \
+  '(30 * $size / $m) as $v | ($v * ($mmr + 0.0385) / 0.9615 + $v * 0.0005) * 10000 | ceil / 10000')
+trader D 25 "$D_IN" CROSS
+MINE="'$USER_A', '$USER_B', '$USER_C', '$USER_D'"
 # shellcheck disable=SC2016 # expanded when the drill ends
 at_exit 'unwind'
 # unwind: the users' orders off the book and what is left of their
@@ -172,7 +188,7 @@ at_exit 'unwind'
 # drills would skip for it).
 unwind() {
   local who qty side auth_var
-  for who in A B C; do
+  for who in A B C D; do
     auth_var="AUTH_$who[@]"
     call DELETE "/v1/derivatives/orders?symbol=$SYMBOL" "" "${!auth_var}" || true
     for _ in $(seq 12); do
@@ -191,9 +207,12 @@ unwind() {
 }
 open A BUY 30
 open C BUY 30
+open D BUY 30
 open B SELL 60
 eventually 60 "A holds 30" held A
 eventually 60 "C holds 30" held C
+eventually 60 "D holds 30" held D
+echo "     D's cross long: $D_IN ASTRA in FUTURES, estimated liquidation price $(jq -r '.positions[0].liquidation_price' <<<"$BODY") (entry $(jq -r '.positions[0].entry_price' <<<"$BODY"))"
 eventually 60 "B holds -60" held B
 if (($(others_on_perps) > 0)); then
   echo "skip: a position on the platform coin's perpetuals of a user other than the bots opened meanwhile; the drops could liquidate it"
@@ -307,12 +326,31 @@ jq -en --argjson p "$ADL_PRICE" --argjson b "$C_BANKRUPT" --argjson f "$ADL_FEE"
   fail "C's ADL fill at $ADL_PRICE (its bankruptcy price is about $C_BANKRUPT), fee $ADL_FEE"
 ATTEMPTS=$(pg "SELECT count(*) FROM derivatives.orders WHERE user_id = '$USER_C' AND symbol = '$SYMBOL' AND kind = 'LIQUIDATION'")
 echo "ok   C deleveraged at $ADL_PRICE (bankruptcy about $C_BANKRUPT), no fee, PnL $ADL_PNL ASTRA, after $ATTEMPTS liquidation orders"
-WHO=$(pg "SELECT string_agg(DISTINCT CASE WHEN o.user_id = '$USER_B' THEN 'B' WHEN o.user_id IN (SELECT user_id FROM marketsim.bots) THEN 'a bot' ELSE o.user_id::text END, ', ') FROM derivatives.orders o WHERE o.symbol = '$SYMBOL' AND o.kind = 'ADL' AND o.user_id <> '$USER_C' AND o.created_at > now() - interval '15 minutes'")
+WHO=$(pg "SELECT string_agg(DISTINCT CASE WHEN o.user_id = '$USER_B' THEN 'B' WHEN o.user_id IN (SELECT user_id FROM marketsim.bots) THEN 'a bot' ELSE o.user_id::text END, ', ') FROM derivatives.orders o WHERE o.symbol = '$SYMBOL' AND o.kind = 'ADL' AND o.user_id NOT IN ('$USER_C', '$USER_D') AND o.created_at > now() - interval '15 minutes'")
 echo "ok   against: $WHO"
 eventually 60 "C was told: CONTRACT_LIQUIDATING" notice C CONTRACT_LIQUIDATING
 if [[ $WHO == *B* ]]; then
   eventually 60 "B was told of its deleveraging: CONTRACT_ADL" notice B CONTRACT_ADL
 fi
+
+echo "== 3. D's cross account: what its liquidation left to ASTRA's insurance fund (review C68)"
+eventually 600 "D's cross long liquidated (flat)" flat D
+cleared() { [[ $(pg "SELECT status FROM derivatives.cross_liquidations WHERE user_id = '$USER_D'") == DONE ]]; }
+eventually 60 "D's cross liquidation over (DONE)" cleared
+read -r D_FEE D_LEFT D_EQUITY <<<"$(pg "SELECT concat_ws(' ', trim_scale(fee), trim_scale(balance + flows), trim_scale(equity)) FROM derivatives.cross_liquidations WHERE user_id = '$USER_D'")"
+# The fee is what the liquidation left, at most the equity at the take-over,
+# none when nothing was left (down to ASTRA's decimals).
+jq -en --argjson fee "$D_FEE" --argjson left "$D_LEFT" --argjson eq "$D_EQUITY" '([$left, $eq, 0] | sort | .[1]) as $want | $fee <= $want and $want - $fee < 0.0001' >/dev/null ||
+  fail "D's clearance fee $D_FEE, while the liquidation left $D_LEFT (equity at the take-over $D_EQUITY)"
+D_AUTH="AUTH_D[@]"
+call GET "/v1/account/ledger?asset=ASTRA&type=INSURANCE_CONTRIBUTION" "" "${!D_AUTH}"
+expect 200 - "D's insurance fund entries"
+check "[.items[] | select(.account_type == \"FUTURES\") | .amount | tonumber | fabs] | (add // 0) - $D_FEE | fabs < 0.000001" \
+  "the fee $D_FEE in D's ledger as INSURANCE_CONTRIBUTION (the liquidation left $D_LEFT, its equity at the take-over $D_EQUITY)"
+call GET "/v1/derivatives/account?asset=ASTRA" "" "${!D_AUTH}"
+expect 200 - "D's ASTRA FUTURES account"
+check '(.wallet_balance | tonumber) == 0 and (.frozen | tonumber) == 0' "D's account at zero"
+eventually 60 "D was told: CONTRACT_LIQUIDATED" notice D CONTRACT_LIQUIDATED
 
 echo "== the price, the bots and B's position back"
 back_up

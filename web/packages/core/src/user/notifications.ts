@@ -168,7 +168,7 @@ export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, str
  */
 export function noticeRisk(type: string): "warn" | "danger" | null {
   if (type === "MARGIN_WARNED" || type === "CONTRACT_LIQUIDATION_WARNED") return "warn";
-  if (["MARGIN_LIQUIDATING", "MARGIN_LIQUIDATED", "CONTRACT_LIQUIDATING", "CONTRACT_ADL"].includes(type)) return "danger";
+  if (["MARGIN_LIQUIDATING", "MARGIN_LIQUIDATED", "CONTRACT_LIQUIDATING", "CONTRACT_LIQUIDATED", "CONTRACT_ADL"].includes(type)) return "danger";
   return null;
 }
 

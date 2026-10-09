@@ -50,8 +50,17 @@ var coinPerp = domain.Contract{
 	MakerFeeRate: d("0.0002"), TakerFeeRate: d("0.0005"), Status: domain.StatusTrading, QuoteDecimals: 8, BaseDecimals: 8,
 }
 
-// instruments lists perp, and coinPerp too when coin is set.
-type instruments struct{ coin bool }
+// ethPerp is a second contract settled in USDT.
+var ethPerp = domain.Contract{
+	Symbol: "ETH-USDT-PERP", Base: "ETH", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.01"), MinQuantity: d("0.01"),
+	MaxQuantity: d("1000"), MinNotional: d("5"), PriceBand: d("0.05"), FundingIntervalHours: 8,
+	Tiers:        []domain.RiskTier{{MaxNotional: d("50000"), MaxLeverage: 50, MMR: d("0.005")}},
+	MakerFeeRate: d("0.0002"), TakerFeeRate: d("0.0005"), Status: domain.StatusTrading, QuoteDecimals: 6, BaseDecimals: 8,
+}
+
+// instruments lists perp, coinPerp too when coin is set, ethPerp when eth
+// is.
+type instruments struct{ coin, eth bool }
 
 func (i instruments) Contract(_ context.Context, symbol string) (domain.Contract, error) {
 	switch {
@@ -59,15 +68,21 @@ func (i instruments) Contract(_ context.Context, symbol string) (domain.Contract
 		return perp, nil
 	case symbol == coinPerp.Symbol && i.coin:
 		return coinPerp, nil
+	case symbol == ethPerp.Symbol && i.eth:
+		return ethPerp, nil
 	}
 	return domain.Contract{}, apperr.NotFound("no such contract")
 }
 
 func (i instruments) Contracts(context.Context) ([]domain.Contract, error) {
+	list := []domain.Contract{perp}
 	if i.coin {
-		return []domain.Contract{perp, coinPerp}, nil
+		list = append(list, coinPerp)
 	}
-	return []domain.Contract{perp}, nil
+	if i.eth {
+		list = append(list, ethPerp)
+	}
+	return list, nil
 }
 
 // rates is market-data-service's settled funding rates.

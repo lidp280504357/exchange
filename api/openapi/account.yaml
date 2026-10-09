@@ -55,7 +55,11 @@ paths:
         account is the USDT-margined contracts', product.usdt_m; BTC's,
         ETH's and ASTRA's the coin-margined ones', product.coin_m) a
         transfer into it fails with PRODUCT_CLOSED (403, details product)
-        and nothing is stored; transfers out stay open.
+        and nothing is stored; transfers out stay open. A transfer out of
+        FUTURES while the cross account of that asset is being liquidated
+        (review C68: until what the liquidation left has gone to the
+        insurance fund) fails with DERIV_POSITION_LIQUIDATING (409, details
+        settle_asset) and nothing is stored.
       tags: [account]
       parameters:
         - name: Idempotency-Key

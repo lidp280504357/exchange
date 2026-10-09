@@ -37,6 +37,7 @@ type memState struct {
 	payments  map[string]domain.FundingPayment
 	warned    map[ports.CrossAccount]time.Time
 	conds     map[string]domain.Conditional
+	crossLiq  map[string]domain.CrossLiquidation
 	events    []proto.Message
 	runs      int
 }
@@ -46,7 +47,7 @@ func newMemStore() *memStore {
 		settings: map[string]domain.Settings{}, orders: map[string]domain.Order{}, positions: map[string]domain.Position{},
 		fills: map[string]domain.Fill{}, pending: map[string]ports.PendingSettlement{}, contracts: map[string]ports.ContractState{},
 		rounds: map[string]domain.FundingRound{}, payments: map[string]domain.FundingPayment{}, warned: map[ports.CrossAccount]time.Time{},
-		conds: map[string]domain.Conditional{},
+		conds: map[string]domain.Conditional{}, crossLiq: map[string]domain.CrossLiquidation{},
 	}}
 }
 
@@ -57,7 +58,7 @@ func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
 		settings: maps.Clone(s.st.settings), orders: maps.Clone(s.st.orders), positions: maps.Clone(s.st.positions),
 		fills: maps.Clone(s.st.fills), pending: maps.Clone(s.st.pending), contracts: maps.Clone(s.st.contracts),
 		rounds: maps.Clone(s.st.rounds), payments: maps.Clone(s.st.payments), warned: maps.Clone(s.st.warned), conds: maps.Clone(s.st.conds),
-		events: slices.Clone(s.st.events), runs: s.st.runs,
+		crossLiq: maps.Clone(s.st.crossLiq), events: slices.Clone(s.st.events), runs: s.st.runs,
 	}
 	if err := fn(memRepos{st: &tx}); err != nil {
 		return err
@@ -81,6 +82,8 @@ func (r memRepos) Runs() ports.RunRepo                    { return memRuns(r) }
 func (r memRepos) Funding() ports.FundingRepo             { return memFunding(r) }
 func (r memRepos) Cross() ports.CrossRepo                 { return memCross(r) }
 func (r memRepos) Conditionals() ports.ConditionalRepo    { return memConds(r) }
+
+func (r memRepos) CrossLiquidations() ports.CrossLiquidationRepo { return memCrossLiq(r) }
 
 func (r memRepos) Emit(_ context.Context, _ string, msg proto.Message, _, _ string) error {
 	r.st.events = append(r.st.events, msg)
@@ -344,6 +347,58 @@ func (r memPending) Delete(_ context.Context, key string) error {
 }
 
 func (r memPending) Count(context.Context) (int, error) { return len(r.st.pending), nil }
+
+func (r memPending) CountOf(_ context.Context, userID string) (int, error) {
+	n := 0
+	for _, p := range r.st.pending {
+		if p.UserID == userID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+type memCrossLiq memRepos
+
+func (r memCrossLiq) Open(_ context.Context, userID, asset string) (*domain.CrossLiquidation, error) {
+	for _, l := range r.st.crossLiq {
+		if l.UserID == userID && l.Asset == asset && l.Status == domain.CrossLiquidationOpen {
+			return &l, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r memCrossLiq) Insert(_ context.Context, l domain.CrossLiquidation) error {
+	r.st.crossLiq[l.ID] = l
+	return nil
+}
+
+func (r memCrossLiq) AddFlow(_ context.Context, id string, flow decimal.Decimal) error {
+	if l, ok := r.st.crossLiq[id]; ok && l.Status == domain.CrossLiquidationOpen {
+		l.Flows = l.Flows.Add(flow)
+		r.st.crossLiq[id] = l
+	}
+	return nil
+}
+
+func (r memCrossLiq) Update(_ context.Context, l domain.CrossLiquidation) error {
+	cur := r.st.crossLiq[l.ID]
+	cur.Status, cur.Fee, cur.DoneAt = l.Status, l.Fee, l.DoneAt
+	r.st.crossLiq[l.ID] = cur
+	return nil
+}
+
+func (r memCrossLiq) AllOpen(context.Context) ([]domain.CrossLiquidation, error) {
+	var out []domain.CrossLiquidation
+	for _, l := range r.st.crossLiq {
+		if l.Status == domain.CrossLiquidationOpen {
+			out = append(out, l)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.CrossLiquidation) int { return a.StartedAt.Compare(b.StartedAt) })
+	return out, nil
+}
 
 func (r memContracts) Get(_ context.Context, symbol string) (*ports.ContractState, error) {
 	s, ok := r.st.contracts[symbol]

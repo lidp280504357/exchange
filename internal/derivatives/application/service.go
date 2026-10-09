@@ -67,7 +67,8 @@ type Metrics struct {
 	Parked        prometheus.Counter
 	Reconciled    *prometheus.GaugeVec
 	LastReconcile prometheus.Gauge
-	// Liquidations counts the steps: warning, takeover, order, adl.
+	// Liquidations counts the steps: warning, takeover, order, adl,
+	// cleared.
 	Liquidations *prometheus.CounterVec
 }
 
@@ -87,10 +88,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "derivatives_reconcile_last_success_timestamp_seconds", Help: "When the last reconciliation completed.",
 		}),
 		Liquidations: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "derivatives_liquidation_steps_total", Help: "Liquidation steps: warning, takeover, order, adl.",
+			Name: "derivatives_liquidation_steps_total",
+			Help: "Liquidation steps: warning, takeover, order, adl, cleared (a cross account's clearance fee booked).",
 		}, []string{"step"}),
 	}
-	for _, step := range []string{"warning", "takeover", "order", "adl"} {
+	for _, step := range []string{"warning", "takeover", "order", "adl", "cleared"} {
 		m.Liquidations.WithLabelValues(step)
 	}
 	reg.MustRegister(m.Fills, m.Parked, m.Reconciled, m.LastReconcile, m.Liquidations)

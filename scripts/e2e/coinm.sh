@@ -20,8 +20,9 @@
 # nothing frozen and is what went in plus the PnL less the fees. Then HOUSE
 # has no room for the contract (market.house_liquidity off for it, put back
 # when the script ends): a market buy fills nothing, ends canceled and
-# leaves nothing frozen. The BTC moves back to SPOT and the derivatives
-# reconciliation (invariant 6 per settlement asset) passes. Prices come
+# leaves nothing frozen. The BTC moves back to SPOT, no clearance fee went
+# to the insurance fund (a liquidation's alone, review C68) and the
+# derivatives reconciliation (invariant 6 per settlement asset) passes. Prices come
 # from the mark price and HOUSE's book (Binance COIN-M's). Liquidation and
 # ADL are covered by the application tests (internal/derivatives/
 # application/coinm_test.go): no price here can be moved on purpose.
@@ -220,6 +221,12 @@ AVAILABLE=$(jq -r .available <<<"$BODY")
 call POST /v1/account/transfers "{\"asset\":\"BTC\",\"amount\":\"$AVAILABLE\",\"from_account_type\":\"FUTURES\",\"to_account_type\":\"SPOT\"}" \
   "${AUTH[@]}" -H "Idempotency-Key: coinm-out-$RUN"
 expect 201 - "move $AVAILABLE BTC back"
+
+# The liquidation clearance fee (review C68) is a liquidation's alone:
+# ordinary closes give the BTC insurance fund nothing.
+call GET "/v1/account/ledger?asset=BTC&type=INSURANCE_CONTRIBUTION" "" "${AUTH[@]}"
+expect 200 - "the insurance fund entries in BTC"
+check '.items | length == 0' "no clearance fee without a liquidation"
 
 echo "== the derivatives reconciliation, every settlement asset"
 remote "sudo docker compose $COMPOSE_FILES exec -T derivatives-service /app/exchangectl derivatives reconcile" | sed 's/^/     /'

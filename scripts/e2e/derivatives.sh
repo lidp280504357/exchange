@@ -15,7 +15,9 @@
 # reduce-only market orders. The PnL of each is what its
 # fills say ((sold - bought) x quantity), the positions are flat, FUTURES
 # holds nothing frozen and its balance is 500 plus the PnL less the fees;
-# the rest moves back to SPOT; the derivatives reconciliation (invariant 6)
+# the rest moves back to SPOT; neither gave the insurance fund anything (the
+# liquidation clearance fee is a liquidation's, review C68; liquidations
+# run in price-event.sh); the derivatives reconciliation (invariant 6)
 # passes. Prices come from the mark price and HOUSE's book (Binance's).
 # Needs derivatives.trading on, the contract TRADING with HOUSE liquidity
 # and a mark price (docs/runbook/derivatives.md), and ssh to the server.
@@ -201,6 +203,20 @@ AVAILABLE=$(jq -r .available <<<"$BODY")
 call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$AVAILABLE\",\"from_account_type\":\"FUTURES\",\"to_account_type\":\"SPOT\"}" \
   "${SELLER[@]}" -H "Idempotency-Key: perp-out-$RUN"
 expect 201 - "the seller moves $AVAILABLE back"
+
+# The liquidation clearance fee (review C68) is a liquidation's alone:
+# ordinary closes give the insurance fund nothing. Liquidations themselves
+# run in price-event.sh, which can move the mark.
+echo "== no clearance fee without a liquidation"
+no_fee() { # no_fee WHO AUTH...
+  local who=$1
+  shift
+  call GET "/v1/account/ledger?asset=USDT&type=INSURANCE_CONTRIBUTION" "" "$@"
+  expect 200 - "the $who's insurance fund entries"
+  check '.items | length == 0' "none for the $who"
+}
+no_fee buyer "${BUYER[@]}"
+no_fee seller "${SELLER[@]}"
 
 echo "== the derivatives reconciliation"
 remote "sudo docker compose $COMPOSE_FILES exec -T derivatives-service /app/exchangectl derivatives reconcile" | sed 's/^/     /'

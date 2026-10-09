@@ -36,6 +36,7 @@ type Repos interface {
 	Funding() FundingRepo
 	Cross() CrossRepo
 	Conditionals() ConditionalRepo
+	CrossLiquidations() CrossLiquidationRepo
 	// Emit queues an event (or an engine command) on topic, keyed by
 	// aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
@@ -219,6 +220,22 @@ type PendingRepo interface {
 	Failed(ctx context.Context, key, reason string) error
 	Delete(ctx context.Context, key string) error
 	Count(ctx context.Context) (int, error)
+	// CountOf counts the user's.
+	CountOf(ctx context.Context, userID string) (int, error)
+}
+
+// CrossLiquidationRepo stores the cross accounts' liquidations (C68).
+type CrossLiquidationRepo interface {
+	// Open returns the user's open liquidation of the cross account in
+	// asset, or nil.
+	Open(ctx context.Context, userID, asset string) (*domain.CrossLiquidation, error)
+	Insert(ctx context.Context, l domain.CrossLiquidation) error
+	// AddFlow adds a fill's flow to an open one.
+	AddFlow(ctx context.Context, id string, flow decimal.Decimal) error
+	// Update stores its fee, status and end.
+	Update(ctx context.Context, l domain.CrossLiquidation) error
+	// AllOpen returns the open ones, oldest first.
+	AllOpen(ctx context.Context) ([]domain.CrossLiquidation, error)
 }
 
 // ContractState is a contract under reduce-only.

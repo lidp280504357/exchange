@@ -35,10 +35,13 @@ const (
 	// Perpetual contracts (requirements §11.7, coin-margined design
 	// 2026-10-06 §2.6): a margin balance near its maintenance margin, a
 	// position taken over by the liquidation engine, a position
-	// auto-deleveraged. Amounts are in the contract's settlement asset.
+	// auto-deleveraged, a cross account's liquidation over with what it
+	// left gone to the insurance fund (C68). Amounts are in the contract's
+	// settlement asset.
 	NoticeContractWarned      = "CONTRACT_LIQUIDATION_WARNED"
 	NoticeContractLiquidating = "CONTRACT_LIQUIDATING"
 	NoticeContractDeleveraged = "CONTRACT_ADL"
+	NoticeContractLiquidated  = "CONTRACT_LIQUIDATED"
 	// Profile resets (avatars and usernames design 2026-10-07 §1.6): an
 	// operator reset the username to a random one, or the avatar to the
 	// default. In the app only.
@@ -350,20 +353,42 @@ func RenderNotice(in NoticeInput) (title, body string) {
 			asset := settleOr(d["settle_asset"])
 			if en {
 				return "Futures account liquidated", fmt.Sprintf("Your %s cross futures account reached its maintenance margin at %s: "+
-					"its cross orders are canceled and the liquidation engine closes its cross positions. Their results are settled in %s.",
+					"its cross orders are canceled and the liquidation engine closes its cross positions. Their results are settled in %s; "+
+					"the margin left when the liquidation completes goes to the insurance fund as the liquidation clearance fee.",
 					asset, when, asset)
 			}
-			return zh(lang, "合约全仓账户强平"), fmt.Sprintf(zh(lang, "您的 %s 合约全仓账户已于 %s 触发强平：系统已撤销全仓挂单并接管全部全仓仓位，盈亏以 %s 结算。"),
+			return zh(lang, "合约全仓账户强平"), fmt.Sprintf(zh(lang, "您的 %s 合约全仓账户已于 %s 触发强平：系统已撤销全仓挂单并接管全部全仓仓位，盈亏以 %s 结算；强平完成后，剩余保证金将作为强平清算费划入保险基金。"),
 				asset, when, asset)
 		}
 		name, unit, side := contractName(d["symbol"], lang), contractUnit(d["symbol"], d["contract_size"], lang), pick(positionSides, d["side"], lang)
 		if en {
 			return "Futures position liquidated", fmt.Sprintf("Your %s %s position (%s %s) reached its maintenance margin at %s (mark price %s): "+
-				"its open orders are canceled and the liquidation engine closes it. Its result is settled in %s.",
+				"its open orders are canceled and the liquidation engine closes it. Its result is settled in %s; "+
+				"the margin it leaves goes to the insurance fund as the liquidation clearance fee.",
 				name, side, d["quantity"], unit, when, d["mark_price"], settleOr(d["settle_asset"]))
 		}
-		return zh(lang, "合约仓位强平"), fmt.Sprintf(zh(lang, "您的 %s%s（%s %s）已于 %s 触发强平（标记价格 %s）：系统已撤销该仓位的挂单并接管平仓，盈亏以 %s 结算。"),
+		return zh(lang, "合约仓位强平"), fmt.Sprintf(zh(lang, "您的 %s%s（%s %s）已于 %s 触发强平（标记价格 %s）：系统已撤销该仓位的挂单并接管平仓，盈亏以 %s 结算；该仓位剩余的保证金将作为强平清算费划入保险基金。"),
 			name, side, d["quantity"], unit, when, d["mark_price"], settleOr(d["settle_asset"]))
+	case NoticeContractLiquidated:
+		// A cross account's liquidation over (C68): what it left went to the
+		// insurance fund, as Binance does.
+		asset, fee := settleOr(d["settle_asset"]), d["clearance_fee"]
+		if left, err := decimal.NewFromString(fee); err != nil || !left.IsPositive() {
+			if en {
+				return "Futures liquidation completed", fmt.Sprintf("The liquidation of your %s cross futures account completed at %s: "+
+					"its cross positions are closed and no margin was left (the insurance fund covered the loss beyond the account).",
+					asset, when)
+			}
+			return zh(lang, "合约全仓账户强平完成"), fmt.Sprintf(zh(lang, "您的 %s 合约全仓账户强平已于 %s 完成：全仓仓位已全部平仓，账户没有剩余保证金（超出账户的亏损由保险基金承担）。"),
+				asset, when)
+		}
+		if en {
+			return "Futures liquidation completed", fmt.Sprintf("The liquidation of your %s cross futures account completed at %s: "+
+				"its cross positions are closed and the margin left, %s %s, went to the insurance fund as the liquidation clearance fee.",
+				asset, when, fee, asset)
+		}
+		return zh(lang, "合约全仓账户强平完成"), fmt.Sprintf(zh(lang, "您的 %s 合约全仓账户强平已于 %s 完成：全仓仓位已全部平仓，剩余保证金 %s %s 已作为强平清算费划入保险基金。"),
+			asset, when, fee, asset)
 	case NoticeContractDeleveraged:
 		name, unit, asset := contractName(d["symbol"], lang), contractUnit(d["symbol"], d["contract_size"], lang), settleOr(d["settle_asset"])
 		position := positionOf(d["side"], lang)

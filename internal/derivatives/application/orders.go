@@ -27,7 +27,9 @@ import (
 // the cross positions' unrealized loss); orders that only close need
 // neither, but must fit in what their position has left to close. A
 // contract under reduce-only takes only those, and so does a closed product
-// line (PRODUCT_CLOSED, products.go).
+// line (PRODUCT_CLOSED, products.go). A cross account being liquidated
+// takes no cross order and no opening order on the contracts settled in
+// its asset (crossliquidation.go).
 func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, error) {
 	if req.ClientOrderID != "" {
 		if prev, err := s.Store.Read().Orders().ByClientID(ctx, req.UserID, req.ClientOrderID); err == nil {
@@ -70,6 +72,11 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		}
 		if !o.Closing() && s.closedTo(c, o.UserID) {
 			return flags.ErrProductClosed(ProductOf(c))
+		}
+		if o.MarginMode == domain.Cross || !o.Closing() {
+			if err := crossLiquidating(ctx, r, o.UserID, c.Settle()); err != nil {
+				return err
+			}
 		}
 		if state, err := r.Contracts().Get(ctx, c.Symbol); err != nil {
 			return err

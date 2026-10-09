@@ -79,6 +79,7 @@ describe("noticeRisk", () => {
     expect(noticeRisk("CONTRACT_LIQUIDATION_WARNED")).toBe("warn");
     expect(noticeRisk("CONTRACT_LIQUIDATING")).toBe("danger");
     expect(noticeRisk("CONTRACT_ADL")).toBe("danger");
+    expect(noticeRisk("CONTRACT_LIQUIDATED")).toBe("danger");
     expect(noticeRisk("DEPOSIT_CREDITED")).toBeNull();
   });
 });

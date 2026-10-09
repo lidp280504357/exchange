@@ -13,7 +13,7 @@ func TestRenderNotice(t *testing.T) {
 		NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed,
 		NoticeWithdrawalRequested, NoticeWithdrawalCompleted, NoticeWithdrawalRejected, NoticeWithdrawalCanceled, NoticeWithdrawalFailed,
 		NoticeMarginWarned, NoticeMarginLiquidating, NoticeMarginLiquidated, NoticeContractWarned, NoticeContractLiquidating, NoticeContractDeleveraged,
-		NoticeUsernameReset, NoticeAvatarReset,
+		NoticeContractLiquidated, NoticeUsernameReset, NoticeAvatarReset,
 	} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
@@ -117,8 +117,28 @@ func TestContractNotices(t *testing.T) {
 	// Review FG, B133: a cross takeover is one notice for the account; the
 	// side shows where the event has one; the unit follows the face value.
 	title, body = render(NoticeContractLiquidating, "zh-CN", map[string]string{"cross": "true", "symbol": "BTC-USD-PERP", "settle_asset": "BTC"})
-	if title != "合约全仓账户强平" || !strings.Contains(body, "BTC 合约全仓账户已于") || !strings.Contains(body, "接管全部全仓仓位") {
+	if title != "合约全仓账户强平" || !strings.Contains(body, "BTC 合约全仓账户已于") || !strings.Contains(body, "接管全部全仓仓位") ||
+		!strings.Contains(body, "剩余保证金将作为强平清算费划入保险基金") {
 		t.Fatalf("cross liquidating: %q %s", title, body)
+	}
+	// C68: a cross account's liquidation over, what it left gone to the
+	// insurance fund, the amount named; or nothing left.
+	title, body = render(NoticeContractLiquidated, "zh-CN", map[string]string{"settle_asset": "USDT", "clearance_fee": "897.98"})
+	if title != "合约全仓账户强平完成" || !strings.Contains(body, "USDT 合约全仓账户强平已于") ||
+		!strings.Contains(body, "剩余保证金 897.98 USDT 已作为强平清算费划入保险基金") {
+		t.Fatalf("liquidated: %q %s", title, body)
+	}
+	_, body = render(NoticeContractLiquidated, "en", map[string]string{"settle_asset": "BTC", "clearance_fee": "0.0012"})
+	if !strings.Contains(body, "the margin left, 0.0012 BTC, went to the insurance fund as the liquidation clearance fee") {
+		t.Fatalf("liquidated en: %s", body)
+	}
+	_, body = render(NoticeContractLiquidated, "zh-CN", map[string]string{"settle_asset": "USDT", "clearance_fee": "0"})
+	if !strings.Contains(body, "账户没有剩余保证金") || strings.Contains(body, "清算费") {
+		t.Fatalf("liquidated, nothing left: %s", body)
+	}
+	title, body = render(NoticeContractLiquidated, "zh-TW", map[string]string{"settle_asset": "USDT", "clearance_fee": "1"})
+	if title != "合約全倉帳戶強平完成" || !strings.Contains(body, "保險基金") {
+		t.Fatalf("liquidated zh-TW: %q %s", title, body)
 	}
 	_, body = render(NoticeContractWarned, "zh-CN", map[string]string{"cross": "false", "symbol": "BTC-USDT-PERP", "side": "SHORT", "margin_balance": "9", "maintenance_margin": "8"})
 	if !strings.Contains(body, "BTCUSDT 永续 逐仓空仓保证金余额") {

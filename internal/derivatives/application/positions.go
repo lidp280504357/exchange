@@ -285,7 +285,8 @@ func (s *Service) moveMargin(ctx context.Context, userID, asset, key string, del
 }
 
 // AdjustMargin adds margin to one of the user's isolated positions
-// (amount positive) or takes some away (domain.AdjustMargin).
+// (amount positive) or takes some away (domain.AdjustMargin). Nothing is
+// added while the cross account of its asset is being liquidated (C68).
 func (s *Service) AdjustMargin(ctx context.Context, userID, symbol string, side domain.PositionSide, amount decimal.Decimal) (domain.Position, error) {
 	c, err := s.Instruments.Contract(ctx, symbol)
 	if err != nil {
@@ -313,6 +314,11 @@ func (s *Service) AdjustMargin(ctx context.Context, userID, symbol string, side 
 		}
 		if pos.Liquidating {
 			return domain.ErrLiquidating
+		}
+		if amount.IsPositive() {
+			if err := crossLiquidating(ctx, r, userID, c.Settle()); err != nil {
+				return err
+			}
 		}
 		next, err := domain.AdjustMargin(c, pos, amount, mark)
 		if err != nil {
@@ -412,8 +418,13 @@ func (s *Service) checkSettleAsset(ctx context.Context, asset string) error {
 
 // CrossUnrealizedPnL is the unrealized result of the user's cross
 // positions at fresh mark prices, for the ledger's transfers out of
-// FUTURES; unavailable while a cross position has no fresh mark.
+// FUTURES; unavailable while a cross position has no fresh mark, refused
+// while the cross account is being liquidated (nothing leaves it until its
+// clearance fee is booked, C68).
 func (s *Service) CrossUnrealizedPnL(ctx context.Context, userID, asset string) (decimal.Decimal, error) {
+	if err := crossLiquidating(ctx, s.Store.Read(), userID, asset); err != nil {
+		return decimal.Zero, err
+	}
 	return s.crossUnrealized(ctx, s.Store.Read(), userID, asset)
 }
 

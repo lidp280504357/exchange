@@ -87,7 +87,9 @@ export interface paths {
          *     position; a negative one frees margin as long as what stays covers
          *     the initial margin at the entry price, and with the unrealized
          *     result the initial margin at the mark price
-         *     (DERIV_MARGIN_REDUCE_TOO_LARGE).
+         *     (DERIV_MARGIN_REDUCE_TOO_LARGE). Nothing is added while the cross
+         *     account of the position's settlement asset is being liquidated
+         *     (DERIV_POSITION_LIQUIDATING, 409, review C68).
          */
         post: operations["adjustMargin"];
         delete?: never;
@@ -137,6 +139,14 @@ export interface paths {
          *     and conditional orders were canceled when it closed (and any that
          *     slipped in, within 5 seconds); positions, funding and liquidations
          *     go on, closing against HOUSE, which keeps quoting.
+         *
+         *     While the caller's cross account in the contract's settlement asset
+         *     is being liquidated (review C68: from the take-over until what the
+         *     liquidation left has gone to the insurance fund as the clearance
+         *     fee, seconds as a rule) no cross order and no opening order of
+         *     either margin mode is taken on the contracts settled in that asset:
+         *     DERIV_POSITION_LIQUIDATING (409, details settle_asset and
+         *     liquidation_id). Closing orders of isolated positions are taken.
          */
         post: operations["createDerivativesOrder"];
         /** Cancel the caller's active contract orders */

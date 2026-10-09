@@ -161,6 +161,14 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		}
 		positions := byside(held)
 		liquidated := positions[o.PositionSide].Liquidating
+		// A cross account being liquidated: what its fills add or take
+		// counts towards what the liquidation leaves (C68).
+		var liq *domain.CrossLiquidation
+		if !house && o.MarginMode == domain.Cross {
+			if liq, err = r.CrossLiquidations().Open(ctx, userID, c.Settle()); err != nil {
+				return err
+			}
+		}
 		plan, err := domain.PlanFill(c, o, positions, domain.FillInput{
 			TradeID: t.ID, Price: t.Price, Qty: t.Qty, Maker: maker, Seq: t.Seq, ExecutedAt: t.At,
 			Liquidation: o.Kind == domain.KindLiquidation, ADL: o.Kind == domain.KindADL,
@@ -183,6 +191,7 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		if err := plan.Apply(outcomes); err != nil {
 			return err
 		}
+		s.takeOverOpened(ctx, liq, plan.Positions)
 		for i, ch := range plan.Positions {
 			saved, err := r.Positions().Save(ctx, ch.Position)
 			if err != nil {
@@ -203,6 +212,11 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		}
 		if err := r.Fills().Insert(ctx, plan.Fill); err != nil {
 			return err
+		}
+		if liq != nil {
+			if err := r.CrossLiquidations().AddFlow(ctx, liq.ID, plan.Fill.Flow()); err != nil {
+				return err
+			}
 		}
 		if err := r.Emit(ctx, event.TopicDerivPosition, fillProto(c, plan.Fill), "user", userID); err != nil {
 			return err

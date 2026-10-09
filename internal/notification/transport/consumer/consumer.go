@@ -146,6 +146,10 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 			"symbol": p.GetSymbol(), "side": positionSide(p), "quantity": strings.TrimPrefix(p.GetQuantity(), "-"), "mark_price": m.GetMarkPrice(),
 			"cross": "false", "settle_asset": p.GetSettleAsset(), "contract_size": p.GetContractSize(),
 		}}, true
+	case *derivv1.CrossLiquidationCompleted:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeContractLiquidated, Mail: true, Data: map[string]string{
+			"settle_asset": m.GetSettleAsset(), "clearance_fee": m.GetClearanceFee(), "liquidation_id": m.GetLiquidationId(),
+		}}, true
 	case *derivv1.AdlExecuted:
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeContractDeleveraged, Mail: true, Data: map[string]string{
 			"symbol": m.GetSymbol(), "side": sideOf(m.GetDirection(), m.GetPositionSide()), "quantity": strings.TrimPrefix(m.GetQuantity(), "-"), "price": m.GetPrice(),

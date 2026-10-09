@@ -154,6 +154,9 @@ func setup(ctx context.Context, a *app.App) error {
 			if _, err := svc.Trigger(ctx); err != nil && ctx.Err() == nil {
 				a.Logger().WarnContext(ctx, "conditional orders check failed", "error", err)
 			}
+			if _, err := svc.SettleCrossLiquidations(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "cross liquidation fees not booked", "error", err)
+			}
 		}
 	}))
 	rc := &application.Reconciler{Svc: svc, Asset: cfg.SettlementAsset}

@@ -192,3 +192,19 @@ message AdlExecuted {
   // position_side (BOTH in one-way mode) does not tell (review FS, C49).
   string direction = 10;
 }
+
+// CrossLiquidationCompleted: a cross account's liquidation is over, its
+// cross positions closed and settled, and what it left went to the
+// insurance fund as the liquidation clearance fee, as Binance does
+// (coin-margined design 2026-10-06 §0, C68): the account is at zero. One
+// per liquidation; a loss beyond the account fell on the fund.
+message CrossLiquidationCompleted {
+  string liquidation_id = 1;
+  string user_id = 2;
+  // The cross account's settlement asset, the fee's.
+  string settle_asset = 3;
+  // What went to the insurance fund, "0" when the liquidation left nothing.
+  string clearance_fee = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp completed_at = 6;
+}

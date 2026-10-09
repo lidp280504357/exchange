@@ -230,6 +230,9 @@ func reload(ctx context.Context, r ports.Repos, p domain.Position) (domain.Posit
 // isolated one; a take-profit's or stop-loss's order too, review C65 ②),
 // so are the take-profits and stop-losses waiting on them (review C67 ④),
 // and each is marked liquidating, which refuses the user's orders on it.
+// A cross account's liquidation is recorded with what the account held
+// (openCrossLiquidation): what it leaves goes to the insurance fund once
+// it is over (C68).
 func (s *Service) takeOver(ctx context.Context, positions []domain.Position, contracts map[string]domain.Contract,
 	marks map[string]decimal.Decimal, balance, maintenance decimal.Decimal,
 ) error {
@@ -242,6 +245,7 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 		if err != nil {
 			return err
 		}
+		var taken []domain.Position // the cross positions taken over now
 		for _, p := range positions {
 			cur, ok, err := reload(ctx, r, p)
 			if err != nil {
@@ -293,8 +297,14 @@ func (s *Service) takeOver(ctx context.Context, positions []domain.Position, con
 			s.step("takeover")
 			s.Log.WarnContext(ctx, "position taken over for liquidation", "user_id", userID, "symbol", cur.Symbol,
 				"position_side", cur.Side, "margin_balance", balance.String(), "maintenance_margin", maintenance.String())
+			if cur.MarginMode == domain.Cross {
+				taken = append(taken, saved)
+			}
 		}
-		return nil
+		if len(taken) == 0 {
+			return nil
+		}
+		return s.openCrossLiquidation(ctx, r, userID, contracts[taken[0].Symbol].Settle(), taken, balance)
 	})
 }
 

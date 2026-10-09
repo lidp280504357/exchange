@@ -170,6 +170,11 @@ func (s *Service) pay(ctx context.Context, c domain.Contract, p domain.FundingPa
 				return err
 			}
 			p.Insurance = outcomes[0].Insurance
+			if pos.ID != "" && pos.MarginMode == domain.Cross {
+				if err := crossFlow(ctx, r, p.UserID, c.Settle(), outcomes[0].User); err != nil {
+					return err
+				}
+			}
 			if pos.ID != "" {
 				pos = domain.ApplyFunding(pos, move, outcomes[0].User)
 				pos.UpdatedAt = s.Now()

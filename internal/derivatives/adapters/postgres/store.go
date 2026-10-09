@@ -462,6 +462,80 @@ func (r pending) Count(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+func (r pending) CountOf(ctx context.Context, userID string) (int, error) {
+	var n int
+	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM pending_settlements WHERE user_id = $1`, userID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count the user's pending settlements: %w", err)
+	}
+	return n, nil
+}
+
+func (r repos) CrossLiquidations() ports.CrossLiquidationRepo { return crossLiquidations(r) }
+
+type crossLiquidations repos
+
+const crossLiquidationColumns = `liquidation_id, user_id, asset, started_at, equity, balance, flows, status, fee, done_at`
+
+func (r crossLiquidations) query(ctx context.Context, sql string, args ...any) ([]domain.CrossLiquidation, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load cross liquidations: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.CrossLiquidation
+	for rows.Next() {
+		var l domain.CrossLiquidation
+		var done *time.Time
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Asset, &l.StartedAt, &l.Equity, &l.Balance, &l.Flows, &l.Status, &l.Fee,
+			&done); err != nil {
+			return nil, fmt.Errorf("scan cross liquidation: %w", err)
+		}
+		if done != nil {
+			l.DoneAt = *done
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (r crossLiquidations) Open(ctx context.Context, userID, asset string) (*domain.CrossLiquidation, error) {
+	list, err := r.query(ctx, `SELECT `+crossLiquidationColumns+` FROM cross_liquidations
+		WHERE user_id = $1 AND asset = $2 AND status = 'OPEN'`, userID, asset)
+	if err != nil || len(list) == 0 {
+		return nil, err
+	}
+	return &list[0], nil
+}
+
+func (r crossLiquidations) Insert(ctx context.Context, l domain.CrossLiquidation) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO cross_liquidations (liquidation_id, user_id, asset, started_at, equity, balance, flows,
+		status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, l.ID, l.UserID, l.Asset, l.StartedAt, l.Equity, l.Balance, l.Flows,
+		l.Status); err != nil {
+		return fmt.Errorf("insert cross liquidation: %w", err)
+	}
+	return nil
+}
+
+func (r crossLiquidations) AddFlow(ctx context.Context, id string, flow decimal.Decimal) error {
+	if _, err := r.q.Exec(ctx, `UPDATE cross_liquidations SET flows = flows + $2 WHERE liquidation_id = $1 AND status = 'OPEN'`,
+		id, flow); err != nil {
+		return fmt.Errorf("add to cross liquidation: %w", err)
+	}
+	return nil
+}
+
+func (r crossLiquidations) Update(ctx context.Context, l domain.CrossLiquidation) error {
+	if _, err := r.q.Exec(ctx, `UPDATE cross_liquidations SET status = $2, fee = $3, done_at = $4 WHERE liquidation_id = $1`,
+		l.ID, l.Status, l.Fee, nullTime(l.DoneAt)); err != nil {
+		return fmt.Errorf("update cross liquidation: %w", err)
+	}
+	return nil
+}
+
+func (r crossLiquidations) AllOpen(ctx context.Context) ([]domain.CrossLiquidation, error) {
+	return r.query(ctx, `SELECT `+crossLiquidationColumns+` FROM cross_liquidations WHERE status = 'OPEN' ORDER BY started_at`)
+}
+
 type contracts repos
 
 func (r contracts) Get(ctx context.Context, symbol string) (*ports.ContractState, error) {

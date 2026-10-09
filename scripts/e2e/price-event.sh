@@ -7,7 +7,10 @@
 # event's factor, HOUSE quotes a quarter of each level
 # (market_house_quoted_share against the reference market's book, before
 # and during), BTC-USDT-PERP's index and mark follow (the mark computed,
-# PLATFORM) and so does a margin account holding BTC; afterwards the event
+# PLATFORM) and so does a margin account holding BTC, and a cross short of
+# the perpetual at 100x on 1 USDT is liquidated: what the liquidation left
+# goes to the insurance fund as the clearance fee and the account ends at
+# zero (review C68); afterwards the event
 # is DONE, the ticker within 0.05% of the reference market, the spike in
 # the 1m candles, the perpetual's mark back on its own source once the
 # reference market's mark has streamed 5 seconds (the C40 rule). The
@@ -189,6 +192,26 @@ done_event() { # done_event: the event DONE, its record as JSON in EVENT_JSON
   [[ $(jq -r .status <<<"$EVENT_JSON") == DONE ]]
 }
 
+# A cross short of the perpetual at 100x on 1 USDT (review C68): the event
+# with risk takes it over (about +0.75%), the liquidation closes it against
+# HOUSE and what the liquidation left - the clearance fee, often 0 while
+# the mark runs up a percent a second - goes to the insurance fund; the
+# account ends at zero and the user is told.
+echo "== a cross short of $PERP at 100x for the event to liquidate"
+call POST /v1/account/transfers '{"asset":"USDT","amount":"1","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+  "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-futures"
+expect 201 - "1 USDT to FUTURES"
+call PUT "/v1/derivatives/settings/$PERP" '{"margin_mode":"CROSS","leverage":100}' "${AUTH[@]}"
+expect 200 - "cross, 100x"
+call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.001\"}" "${AUTH[@]}"
+expect 202 - "a market short of 0.001"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.001\",\"reduce_only\":true}" "${AUTH[@]}" || true'
+positions() { call GET "/v1/derivatives/positions?symbol=$PERP" "" "${AUTH[@]}" && [[ $STATUS == 200 ]] && jq -e ".positions | length == $1" <<<"$BODY" >/dev/null; }
+eventually 20 "the short is open" positions 1
+LIQ_PRICE=$(jq -r '.positions[0].liquidation_price' <<<"$BODY")
+echo "     its estimated liquidation price $LIQ_PRICE"
+
 echo "== an event with risk (the default)"
 start true
 sample "$WORK/risk"
@@ -224,6 +247,36 @@ check "[.candles[].high | tonumber] | max >= $BASE * (1 + 0.7 * ($F - 1))" "the 
 mark_back() { [[ $(md "/v1/market/$PERP/mark-price" | jq -r .source) == "$MARK_BEFORE" ]]; }
 eventually 120 "$PERP's mark back on $MARK_BEFORE" mark_back
 EVENT=""
+
+echo "== the cross short after the event"
+completed() {
+  call GET "/v1/notifications?limit=20" "" "${AUTH[@]}" && [[ $STATUS == 200 ]] &&
+    jq -e '[.items[] | select(.type == "CONTRACT_LIQUIDATED")] | length == 1' <<<"$BODY" >/dev/null
+}
+if positions 0; then
+  echo "ok   liquidated"
+  eventually 30 "the user is told the liquidation completed (CONTRACT_LIQUIDATED)" completed
+  FEE=$(jq -r '[.items[] | select(.type == "CONTRACT_LIQUIDATED")][0].data.clearance_fee' <<<"$BODY")
+  [[ $FEE =~ ^[0-9.]+$ ]] || { echo "FAIL the notice names no clearance fee: $BODY" >&2; exit 1; }
+  call GET "/v1/account/ledger?asset=USDT&type=INSURANCE_CONTRIBUTION" "" "${AUTH[@]}"
+  expect 200 - "the user's insurance fund entries"
+  if [[ $(jq -n "$FEE > 0") == true ]]; then
+    check "[.items[] | select(.account_type == \"FUTURES\")] | length == 1 and ((.[0].amount | tonumber | fabs) == $FEE)" \
+      "what the liquidation left, $FEE USDT, went to the insurance fund as the clearance fee"
+  else
+    check '[.items[] | select(.account_type == "FUTURES")] | length == 0' "nothing was left: no clearance fee (the fund paid the loss beyond the account)"
+  fi
+  call GET /v1/derivatives/account "" "${AUTH[@]}"
+  expect 200 - "the FUTURES account"
+  check '(.wallet_balance | tonumber) == 0 and (.frozen | tonumber) == 0' "the account at zero"
+elif [[ $LIQ_PRICE =~ ^[0-9.]+$ && $(jq -n "$BASE * (1 + 0.6 * ($F - 1)) > $LIQ_PRICE * 1.001") == true ]]; then
+  echo "FAIL the mark passed the short's liquidation price $LIQ_PRICE but the short is open: $BODY" >&2
+  exit 1
+else
+  echo "note: the event (factor $F from $BASE) stayed below the short's liquidation price $LIQ_PRICE; closing it"
+  call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.001\",\"reduce_only\":true}" "${AUTH[@]}"
+  expect 202 - "the short closed"
+fi
 
 echo "== an event without risk"
 start false
