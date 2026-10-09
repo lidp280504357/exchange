@@ -71,6 +71,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -78,15 +79,13 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/skill/exchange/internal/instrument/domain"
 )
 
 // quoteDecimals are USDT's: a contract's prices are in USDT (a COIN-M
 // contract's in USD, priced as USDT).
 const quoteDecimals = 6
-
-// leverageCap is the instruments' guard on a tier's leverage (B171): a
-// contract's top leverage is its first bracket's, Binance's.
-const leverageCap = 150
 
 type filter struct {
 	FilterType     string `json:"filterType"`
@@ -580,36 +579,23 @@ func contract(r remote, base string, size decimal.Decimal, baseDecimals int, tie
 
 // riskTiers are the instruments' tiers of a contract's Binance brackets:
 // the notional cap, the top leverage and the maintenance rate. A ladder
-// the instruments would refuse (internal/instrument/domain validateTiers)
-// stops the run (B172).
-func riskTiers(symbol string, tiers []bracket) []map[string]any {
-	if len(tiers) == 0 || len(tiers) > 20 {
-		log.Fatalf("%s: %d brackets at Binance, the instruments take 1 to 20", symbol, len(tiers))
+// the instruments would refuse (internal/instrument/domain.ValidateTiers,
+// the check apply makes) stops the run (B172, B174 ④).
+func riskTiers(symbol string, brackets []bracket) []map[string]any {
+	tiers := make([]domain.RiskTier, len(brackets))
+	for i, b := range brackets {
+		leverage := int32(-1) // refused below, as any leverage out of range
+		if b.MaxLeverage >= 0 && b.MaxLeverage <= math.MaxInt32 {
+			leverage = int32(b.MaxLeverage)
+		}
+		tiers[i] = domain.RiskTier{MaxNotional: decimal.NewFromFloat(b.NotionalCap), MaxLeverage: leverage, MMR: decimal.NewFromFloat(b.MMR)}
 	}
-	one := decimal.NewFromInt(1)
+	if err := domain.ValidateTiers(symbol, tiers); err != nil {
+		log.Fatalf("Binance's brackets: %v", err)
+	}
 	out := make([]map[string]any, 0, len(tiers))
-	for i, b := range tiers {
-		notional, mmr := decimal.NewFromFloat(b.NotionalCap), decimal.NewFromFloat(b.MMR)
-		switch {
-		case !notional.IsPositive():
-			log.Fatalf("%s: bracket %d: notional cap %v is not positive", symbol, i+1, b.NotionalCap)
-		case b.MaxLeverage < 1 || b.MaxLeverage > leverageCap:
-			log.Fatalf("%s: bracket %d: leverage %d is not 1 to %d", symbol, i+1, b.MaxLeverage, leverageCap)
-		case !mmr.IsPositive() || !mmr.LessThan(one.Div(decimal.NewFromInt(int64(b.MaxLeverage)))):
-			log.Fatalf("%s: bracket %d: maintenance rate %v is not above 0 and below 1/%d", symbol, i+1, b.MMR, b.MaxLeverage)
-		}
-		if i > 0 {
-			prev := tiers[i-1]
-			switch {
-			case b.NotionalCap <= prev.NotionalCap:
-				log.Fatalf("%s: bracket %d: notional cap %v does not rise", symbol, i+1, b.NotionalCap)
-			case b.MaxLeverage > prev.MaxLeverage:
-				log.Fatalf("%s: bracket %d: leverage %d rises", symbol, i+1, b.MaxLeverage)
-			case b.MMR < prev.MMR:
-				log.Fatalf("%s: bracket %d: maintenance rate %v falls", symbol, i+1, b.MMR)
-			}
-		}
-		out = append(out, map[string]any{"max_notional": notional.String(), "max_leverage": b.MaxLeverage, "mmr": mmr.String()})
+	for _, t := range tiers {
+		out = append(out, map[string]any{"max_notional": t.MaxNotional.String(), "max_leverage": int(t.MaxLeverage), "mmr": t.MMR.String()})
 	}
 	return out
 }

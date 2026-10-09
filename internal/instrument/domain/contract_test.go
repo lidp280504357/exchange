@@ -3,6 +3,8 @@ package domain
 import (
 	"strings"
 	"testing"
+
+	"github.com/shopspring/decimal"
 )
 
 func perp() Contract {
@@ -60,6 +62,54 @@ func TestContractValidate(t *testing.T) {
 	disabled.TradingEnabled = false
 	if err := perp().Validate(disabled, usdt); err == nil || !strings.Contains(err.Error(), "enabled") {
 		t.Fatalf("disabled asset: %v", err)
+	}
+}
+
+// ValidateTiers is the check gen-contracts.go makes on Binance's brackets
+// before it writes them (B174 ④): Binance's 12 brackets of BTCUSDT pass;
+// a ladder apply would refuse is refused with its contract and tier.
+func TestValidateTiers(t *testing.T) {
+	type row struct {
+		notional string
+		lev      int32
+		mmr      string
+	}
+	ladder := func(rows ...row) []RiskTier {
+		out := make([]RiskTier, len(rows))
+		for i, r := range rows {
+			out[i] = RiskTier{MaxNotional: d(r.notional), MaxLeverage: r.lev, MMR: d(r.mmr)}
+		}
+		return out
+	}
+	btc := ladder(row{"300000", 150, "0.004"}, row{"800000", 100, "0.005"}, row{"3000000", 75, "0.0065"}, row{"12000000", 50, "0.01"},
+		row{"70000000", 25, "0.02"}, row{"100000000", 20, "0.025"}, row{"230000000", 10, "0.05"}, row{"480000000", 5, "0.1"},
+		row{"600000000", 4, "0.125"}, row{"800000000", 3, "0.15"}, row{"1200000000", 2, "0.25"}, row{"1800000000", 1, "0.5"})
+	if err := ValidateTiers("BTC-USDT-PERP", btc); err != nil {
+		t.Fatalf("Binance's BTCUSDT: %v", err)
+	}
+	many := make([]RiskTier, 21)
+	for i := range many {
+		many[i] = RiskTier{MaxNotional: decimal.NewFromInt(int64(i+1) * 1000), MaxLeverage: 1, MMR: d("0.5")}
+	}
+	for _, c := range []struct {
+		name  string
+		tiers []RiskTier
+		want  string
+	}{
+		{"none", nil, "1 to 20"},
+		{"21", many, "1 to 20"},
+		{"a cap of 0", ladder(row{"0", 20, "0.01"}), "tier 1: max_notional must be positive"},
+		{"151x", ladder(row{"300000", 151, "0.004"}), "tier 1: max_leverage must be 1 to 150"},
+		{"0x", ladder(row{"300000", 0, "0.004"}), "tier 1: max_leverage must be 1 to 150"},
+		{"liquidated on opening", ladder(row{"300000", 150, "0.007"}), "tier 1: mmr must be above 0 and below"},
+		{"a cap that does not rise", ladder(row{"300000", 150, "0.004"}, row{"300000", 100, "0.005"}), "tier 2: max_notional must rise"},
+		{"leverage that rises", ladder(row{"300000", 100, "0.004"}, row{"800000", 125, "0.005"}), "tier 2: max_leverage must not rise"},
+		{"a rate that falls", ladder(row{"300000", 100, "0.005"}, row{"800000", 75, "0.004"}), "tier 2: mmr must not fall"},
+	} {
+		err := ValidateTiers("XYZ-USDT-PERP", c.tiers)
+		if err == nil || !strings.Contains(err.Error(), "contract XYZ-USDT-PERP: ") || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
+		}
 	}
 }
 

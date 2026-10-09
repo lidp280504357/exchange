@@ -421,6 +421,18 @@ func TestWalletSchema(t *testing.T) {
 	rejects(t, db, "at most 16 KiB of a callback is kept", callback, uuid.New(), "trade-2", 3, strings.Repeat("x", 16385), true, "RECEIVED")
 }
 
+// TestDerivativesSchema: a user's leverage on a contract goes from 1x to
+// 150x, the contracts' cap (B174, derivatives 00008).
+func TestDerivativesSchema(t *testing.T) {
+	db := apply(t, migrations.Derivatives())
+	user := uuid.New()
+	ins := `INSERT INTO settings (user_id, symbol, position_mode, margin_mode, leverage) VALUES ($1, $2, 'ONE_WAY', 'CROSS', $3)`
+	accepts(t, db, ins, user, "BTC-USDT-PERP", 150)
+	accepts(t, db, ins, user, "ETH-USDT-PERP", 1)
+	rejects(t, db, "at most 150x", ins, user, "SOL-USDT-PERP", 151)
+	rejects(t, db, "at least 1x", ins, user, "XRP-USDT-PERP", 0)
+}
+
 func TestSignerSchema(t *testing.T) {
 	db := apply(t, migrations.Signer())
 	ins := `INSERT INTO signatures (request_id, request_hash, purpose, reference, chain_id, from_address, to_address, value, nonce,

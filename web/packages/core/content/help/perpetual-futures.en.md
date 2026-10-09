@@ -34,17 +34,22 @@ Cross is the default. To switch the margin mode or the position mode, first clos
 
 ## Leverage and risk limits
 
-Leverage goes from 1x to the contract's maximum, 20x by default (a contract's maximum when it is lower). The BTCUSDT and ETHUSDT perpetuals go to 125x; the other contracts have Binance's tiers (75x or less for most), and the leverage setting on the trading page shows the position limit at the leverage chosen. Larger positions allow less leverage and need a higher maintenance margin rate. For the BTCUSDT and ETHUSDT perpetuals:
+Leverage goes from 1x to the contract's maximum, 20x by default (a contract's maximum when it is lower). The BTCUSDT and ETHUSDT perpetuals go to 150x; the other contracts have Binance's tiers (75x or less for most), and the leverage setting on the trading page shows the position limit at the leverage chosen. Larger positions allow less leverage and need a higher maintenance margin rate. For the BTCUSDT and ETHUSDT perpetuals:
 
-| Max leverage | Position up to | Maintenance margin rate |
-|--:|--:|--:|
-| 125x | 50,000 USDT | 0.4% |
-| 100x | 250,000 USDT | 0.5% |
-| 50x | 1,000,000 USDT | 1% |
-| 20x | 5,000,000 USDT | 2.5% |
-| 10x | 20,000,000 USDT | 5% |
-| 5x | 50,000,000 USDT | 10% |
-| 2x | 100,000,000 USDT | 12.5% |
+| Max leverage | BTCUSDT position up to (USDT) | ETHUSDT position up to (USDT) | Maintenance margin rate |
+|--:|--:|--:|--:|
+| 150x | 300,000 | 300,000 | 0.4% |
+| 100x | 800,000 | 800,000 | 0.5% |
+| 75x | 3,000,000 | 3,000,000 | 0.65% |
+| 50x | 12,000,000 | 12,000,000 | 1% |
+| 25x | 70,000,000 | 50,000,000 | 2% |
+| 20x | 100,000,000 | 65,000,000 | 2.5% |
+| 10x | 230,000,000 | 150,000,000 | 5% |
+| 5x | 480,000,000 | 320,000,000 | 10% |
+| 4x | 600,000,000 | 400,000,000 | 12.5% |
+| 3x | 800,000,000 | 530,000,000 | 15% |
+| 2x | 1,200,000,000 | 800,000,000 | 25% |
+| 1x | 1,800,000,000 | 1,200,000,000 | 50% |
 
 Position sizes are notional values at the mark price, open orders on the same side included; a coin-margined contract's limits are in its coin (see below).
 

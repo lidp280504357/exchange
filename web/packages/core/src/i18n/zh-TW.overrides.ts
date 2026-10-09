@@ -22,6 +22,8 @@ export const zhTWOverrides = {
     ["用户", "用戶"],
     ["账本", "帳本"],
     ["杠杆", "槓桿"],
+    // OpenCC reads 高杠 first (最高杠杆 came out 最高槓杆).
+    ["高杠杆", "高槓桿"],
     // An order's 只 is "only" (订单只用来…, 市价单只能…), not the measure word 隻.
     ["单只", "單只"],
     ["退出登录", "登出"],

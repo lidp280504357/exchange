@@ -26,7 +26,7 @@ export default {
       stats: {
         turnover: "24h 成交額（USDT 交易對）",
         markets: "現貨與合約市場",
-        leverage: "合約最高槓杆",
+        leverage: "合約最高槓桿",
         fee: "現貨手續費",
       },
       overviewHint: "24 小時漲跌與成交額，即時更新",
@@ -133,7 +133,7 @@ export default {
       noMarket: "暫無交易市場",
       noMarketHint: "{{symbol}} 是本站的計價資產，可以在各個交易對中使用。",
       contract: "永續合約",
-      maxLeverage: "最高槓杆",
+      maxLeverage: "最高槓桿",
       funding: "資金費結算",
       fundingEvery: "每 {{hours}} 小時",
       fees: "手續費（掛單 / 吃單）",

@@ -232,33 +232,39 @@ func (c Contract) validateMargin(quote Asset) error {
 // all as Binance; BTCUSDT's and ETHUSDT's first brackets are 150x).
 const LeverageCap = 150
 
-// validateTiers checks the ladder: notional caps rise, leverage does not,
-// maintenance margin rises and stays below the initial margin of its
-// leverage (1 / leverage), or a position would be liquidated on opening.
-func (c Contract) validateTiers() error {
-	if len(c.RiskTiers) == 0 || len(c.RiskTiers) > 20 {
-		return apperr.Invalid(fmt.Sprintf("contract %s: 1 to 20 risk tiers are required", c.Symbol))
+// validateTiers checks c's ladder (ValidateTiers).
+func (c Contract) validateTiers() error { return ValidateTiers(c.Symbol, c.RiskTiers) }
+
+// ValidateTiers checks a contract's ladder: 1 to 20 tiers, notional caps
+// positive and rising, leverage 1 to LeverageCap and not rising,
+// maintenance margin rising and below the initial margin of its leverage
+// (1 / leverage), or a position would be liquidated on opening.
+// deploy/instruments/gen-contracts.go checks Binance's brackets with it
+// before writing them (B174 ④).
+func ValidateTiers(symbol string, tiers []RiskTier) error {
+	if len(tiers) == 0 || len(tiers) > 20 {
+		return apperr.Invalid(fmt.Sprintf("contract %s: 1 to 20 risk tiers are required", symbol))
 	}
-	for i, t := range c.RiskTiers {
+	for i, t := range tiers {
 		switch {
 		case !t.MaxNotional.IsPositive():
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_notional must be positive", c.Symbol, i+1))
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_notional must be positive", symbol, i+1))
 		case t.MaxLeverage < 1 || t.MaxLeverage > LeverageCap:
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_leverage must be 1 to %d", c.Symbol, i+1, LeverageCap))
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_leverage must be 1 to %d", symbol, i+1, LeverageCap))
 		case !t.MMR.IsPositive() || !t.MMR.LessThan(one.Div(decimal.NewFromInt32(t.MaxLeverage))):
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: mmr must be above 0 and below 1/max_leverage", c.Symbol, i+1))
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: mmr must be above 0 and below 1/max_leverage", symbol, i+1))
 		}
 		if i == 0 {
 			continue
 		}
-		prev := c.RiskTiers[i-1]
+		prev := tiers[i-1]
 		switch {
 		case !t.MaxNotional.GreaterThan(prev.MaxNotional):
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_notional must rise", c.Symbol, i+1))
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_notional must rise", symbol, i+1))
 		case t.MaxLeverage > prev.MaxLeverage:
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_leverage must not rise", c.Symbol, i+1))
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: max_leverage must not rise", symbol, i+1))
 		case t.MMR.LessThan(prev.MMR):
-			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: mmr must not fall", c.Symbol, i+1))
+			return apperr.Invalid(fmt.Sprintf("contract %s: tier %d: mmr must not fall", symbol, i+1))
 		}
 	}
 	return nil

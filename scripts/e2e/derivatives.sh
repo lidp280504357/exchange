@@ -75,6 +75,13 @@ TOP=$(jq -r .max_leverage <<<"$BODY")
 call PUT /v1/derivatives/settings/$SYMBOL "{\"leverage\":$((TOP + 1))}" "${SELLER[@]}"
 expect 400 DERIV_LEVERAGE_EXCEEDED "above the contract's ${TOP}x (its first tier's)"
 check ".details.max_leverage == $TOP" "the details name the contract's top leverage"
+# The top itself is stored (B174: BTC's and ETH's 150x hit the settings' CHECK of
+# 1-125 until derivatives 00008 and answered 500), then back to 20x.
+call PUT /v1/derivatives/settings/$SYMBOL "{\"leverage\":$TOP}" "${SELLER[@]}"
+expect 200 - "seller: the contract's top, ${TOP}x"
+check ".leverage == $TOP" "${TOP}x kept"
+call PUT /v1/derivatives/settings/$SYMBOL '{"leverage":20}' "${SELLER[@]}"
+expect 200 - "seller: back to 20x"
 call GET /v1/market/$SYMBOL/mark-price ""
 expect 200 - "mark price"
 MARK=$(jq -r .mark_price <<<"$BODY")
