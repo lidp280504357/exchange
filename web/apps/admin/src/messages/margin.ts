@@ -30,7 +30,6 @@ export const marginZh = {
           required: "不开放；或已开启强平，且杠杆与自动借款都按用户/地区规则开放（不对所有人全局打开）",
         },
       },
-      marginGlobal: "对所有人",
     },
     marginApproval: {
       asset: "资产 {{code}}",
@@ -73,7 +72,6 @@ export const marginEn = {
           required: "Off; or on with liquidations on, margin and auto-borrowing open by user or region rules (not for everyone)",
         },
       },
-      marginGlobal: "for everyone",
     },
     marginApproval: {
       asset: "Asset {{code}}",

@@ -1,5 +1,5 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, ErrorState, FormField, IconButton, Input, Segmented, Select, Skeleton, Switch } from "@exchange/ui";
+import { Badge, Button, ErrorState, FormField, IconButton, Input, KeyTag, Segmented, Select, ShortList, Skeleton, SummaryRow, SummaryTable, Switch } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ImageUp, Plus, Trash2, X } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
@@ -11,6 +11,7 @@ import { Card, Page } from "../../kit/Page";
 import { platformKey, usePlatformProfile } from "../../kit/profile";
 import { launchKey } from "./Launch";
 import { ReadOnly } from "../../kit/ReadOnly";
+import { Amount, AmountGrid, FlagState, positive } from "../../kit/summary";
 import { TextsField } from "../../kit/texts";
 
 // The platform's settings (design 2026-10-04 §4.1, §4.2, §5; D2): the
@@ -385,12 +386,27 @@ function WelcomeBody({ setting: s, rows, setRows, edit }: { setting: Setting; ro
   const now = new Map(s.credits.map((c) => [c.asset, c.amount]));
   const asked = (rows ?? []).filter((r) => r.asset.trim() !== "");
   const raising = asked.some((r) => Number(r.amount) > Number(now.get(r.asset.trim().toUpperCase()) ?? 0));
+  const given = s.credits.filter((c) => positive(c.amount));
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-fg-2">
-        {s.credits.length ? s.credits.map((c) => `${c.amount} ${c.asset}`).join(" · ") : t("admin.launch.nothing")}
-        <span className="text-fg-3"> · {t("admin.launch.master", { on: t(s.flag_enabled ? "admin.launch.on" : "admin.launch.off") })} · v{s.version}</span>
-      </p>
+      <SummaryTable label={t("admin.platform.welcome")} noStatus>
+        <SummaryRow
+          data-testid="welcome-now"
+          title={t("admin.summary.welcome.now")}
+          source={t("admin.summary.welcome.version", { v: s.version })}
+          summary={
+            given.length ? (
+              <span>
+                {t("admin.summary.welcome.given")} <ShortList items={given.map((c) => <Amount key={c.asset} value={c.amount} asset={c.asset} />)} />
+              </span>
+            ) : (
+              t("admin.summary.welcome.none")
+            )
+          }
+          details={given.length > 3 ? <AmountGrid rows={given.map((c) => [c.asset, c.amount])} /> : undefined}
+        />
+        <SummaryRow title={t("admin.summary.welcome.master")} source={<KeyTag>ledger.welcome_credit</KeyTag>} summary={<FlagState on={s.flag_enabled} scope={false} />} />
+      </SummaryTable>
       <p className="text-xs text-fg-3">{t("admin.platform.welcomeHint")}</p>
       {edit && rows === null && (
         <Button size="sm" variant="secondary" className="self-start" onClick={() => setRows(s.credits.map((c) => ({ asset: c.asset, amount: c.amount })))} data-testid="welcome-edit">

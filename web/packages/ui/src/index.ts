@@ -47,6 +47,7 @@ export * from "./components/CoinIcon";
 export * from "./data/DataTable";
 export * from "./data/CopyButton";
 export * from "./data/KeyValue";
+export * from "./data/SummaryTable";
 export * from "./data/Stat";
 export * from "./data/Sparkline";
 export * from "./data/AmountText";

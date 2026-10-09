@@ -478,11 +478,13 @@ try {
   await waitText("各合约净头寸");
   await waitText("ETH-USDT-PERP");
   // HOUSE's caps (A69): the six of them, each with its purpose and what
-  // lowering or raising it does (user 06:0x); the request dialog lists a
-  // change from and to with what it does, then is closed, nothing asked (a
-  // request may wait already: then no button).
+  // lowering or raising it does (user 06:0x; a row each since A94, what
+  // moving it does once opened); the request dialog lists a change from
+  // and to with what it does, then is closed, nothing asked (a request may
+  // wait already: then no button).
   await page.waitForSelector("[data-testid=house-caps] [data-testid=house-cap-contract_leverage]", { timeout: 20000 });
   await waitText("每个盘口每一档最多报出的数量");
+  await page.click("[data-testid=house-cap-contract_leverage] button[aria-expanded]");
   await waitText("极端行情下合约权益可能被打穿");
   // Beside the per-asset and total caps, what HOUSE holds now (review R18).
   await page.waitForSelector("[data-testid=house-cap-symbol-held]", { timeout: 20000 });

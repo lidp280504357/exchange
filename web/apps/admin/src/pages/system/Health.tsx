@@ -1,15 +1,16 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, DataTable, ErrorState, KeyValue, Skeleton, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { Badge, DataTable, ErrorState, ShortList, Skeleton, SummaryRow, SummaryTable, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { EnumBadge, useEnum } from "../../kit/enums";
+import { EnumBadge } from "../../kit/enums";
 import { Num, TimeText } from "../../kit/format";
 import { Pulse, stagger } from "../../kit/motion";
 import { Card, Page } from "../../kit/Page";
-import { CustodySummary } from "./status";
+import { Lines } from "../../kit/summary";
+import { CustodySummary, ReconciliationTable } from "./status";
 
 type Service = AdminSchemas["ServiceHealth"];
 
@@ -108,7 +109,6 @@ export default function Health() {
 
 function Reconciliation() {
   const { t } = useTranslation();
-  const label = useEnum();
   const q = useQuery({
     queryKey: ["admin", "reconciliation"],
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/ledger/reconciliation")),
@@ -135,25 +135,13 @@ function Reconciliation() {
       ) : q.isPending ? (
         <Skeleton className="h-32 w-full" />
       ) : (
-        <ul className="flex flex-col gap-1.5 text-sm">
-          {latest.map((r) => (
-            <li key={r.check} className="flex items-center gap-2">
-              <Pulse ok={r.mismatches === 0} />
-              <span className="truncate" title={r.check}>
-                {label("check", r.check)}
-              </span>
-              <span className="ml-auto text-xs text-fg-3">
-                <TimeText value={r.started_at} />
-              </span>
-              <Badge tone={r.mismatches ? "danger" : "neutral"}>{r.mismatches}</Badge>
-            </li>
-          ))}
-        </ul>
+        <ReconciliationTable runs={latest} label={t("admin.health.reconciliation")} compact />
       )}
     </Card>
   );
 }
 
+/** Feed is the reference feed: when it last sent, the pairs it follows (all of them once opened), those halted for its loss. */
 function Feed({ feed, loading }: { feed?: AdminSchemas["FeedStatus"]; loading: boolean }) {
   const { t } = useTranslation();
   return (
@@ -163,24 +151,42 @@ function Feed({ feed, loading }: { feed?: AdminSchemas["FeedStatus"]; loading: b
       ) : !feed ? (
         <p className="text-sm text-danger-strong">{t("admin.health.feedUnknown")}</p>
       ) : (
-        <KeyValue
-          density="compact"
-          items={[
-            { key: "received", label: t("admin.health.received"), value: feed.received_at ? <TimeText value={feed.received_at} /> : "—" },
-            {
-              key: "followed", label: t("admin.health.followed"),
-              value: <span title={feed.followed.join(", ")}>{feed.followed.length}</span>,
-            },
-            {
-              key: "halted", label: t("admin.health.halted"),
-              value: feed.halted.length ? (
-                <span className="text-danger-strong">{feed.halted.map((h) => h.symbol).join(", ")}</span>
+        <SummaryTable label={t("admin.health.feed")} compact noStatus>
+          <SummaryRow title={t("admin.health.received")} summary={feed.received_at ? <TimeText value={feed.received_at} /> : "—"} />
+          <SummaryRow
+            title={t("admin.health.followed")}
+            summary={
+              <span>
+                {t("admin.summary.health.pairs", { n: feed.followed.length })} <ShortList items={feed.followed} />
+              </span>
+            }
+            details={feed.followed.length > 3 ? <span className="leading-6">{feed.followed.join(t("admin.summary.sep"))}</span> : undefined}
+          />
+          <SummaryRow
+            title={t("admin.health.halted")}
+            summary={
+              feed.halted.length ? (
+                <span className="text-danger-strong">
+                  {t("admin.summary.health.pairs", { n: feed.halted.length })} <ShortList items={feed.halted.map((h) => h.symbol)} />
+                </span>
               ) : (
                 t("admin.health.noHalted")
-              ),
-            },
-          ]}
-        />
+              )
+            }
+            details={
+              feed.halted.length ? (
+                <Lines
+                  items={feed.halted.map((h): [ReactNode, ReactNode] => [
+                    h.symbol,
+                    <span key={h.symbol}>
+                      {t("admin.summary.health.haltedAt")} <TimeText value={h.halted_at} />
+                    </span>,
+                  ])}
+                />
+              ) : undefined
+            }
+          />
+        </SummaryTable>
       )}
     </Card>
   );

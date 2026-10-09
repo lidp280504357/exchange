@@ -31,14 +31,14 @@ export type NumProps = {
   className?: string;
 };
 
-/** Num shows a decimal string exactly, grouped, right-aligned digits. */
+/** Num shows a decimal string exactly, grouped, in tabular digits (the text face: monospace is for IDs and keys, A94). */
 export function Num({ value, decimals, unit, signed, className }: NumProps) {
   const text = formatDecimal(value, { decimals, sign: signed });
   const sign = signed && value && dec.isDecimal(value) ? dec.sign(value) : 0;
   return (
-    <span className={cn("whitespace-nowrap font-mono tabular-nums", sign > 0 && "text-up-strong", sign < 0 && "text-down-strong", className)}>
+    <span className={cn("whitespace-nowrap tabular-nums", sign > 0 && "text-up-strong", sign < 0 && "text-down-strong", className)}>
       {text}
-      {unit && text !== "—" && <span className="ml-1 font-sans text-fg-3">{unit}</span>}
+      {unit && text !== "—" && <span className="ml-1 text-fg-3">{unit}</span>}
     </span>
   );
 }

@@ -46,10 +46,7 @@ export const coinmZh = {
           required: "不开放；或按用户/地区规则开放（不对所有人全局打开）",
         },
       },
-      insuranceShort: "缺：{{assets}}",
-      contractsOpen: "开放中 U 本位 {{usdt}} 个、币本位 {{coin}} 个",
       noOpenContracts: "没有开放中的合约",
-      coinMGlobal: "对所有人",
     },
   },
 };
@@ -96,10 +93,7 @@ export const coinmEn = {
           required: "Off; or open by user or region rules (not for everyone)",
         },
       },
-      insuranceShort: "missing: {{assets}}",
-      contractsOpen: "open: {{usdt}} USDⓈ-M, {{coin}} COIN-M",
       noOpenContracts: "no contract open",
-      coinMGlobal: "for everyone",
     },
   },
 };

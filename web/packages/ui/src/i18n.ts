@@ -31,6 +31,7 @@ export const uiMessages = {
       stepCurrent: "进行中",
       stepUpcoming: "未开始",
       stepError: "失败",
+      summary: { expand: "展开", collapse: "收起", more: "+{{n}}" },
       confirm: {
         target: "操作对象",
         reason: "操作理由",
@@ -161,6 +162,7 @@ export const uiMessages = {
       stepCurrent: "In progress",
       stepUpcoming: "Upcoming",
       stepError: "Failed",
+      summary: { expand: "Show details", collapse: "Hide details", more: "+{{n}}" },
       confirm: {
         target: "Target",
         reason: "Reason",

@@ -11,7 +11,6 @@ export const productsZh = {
           required: "仅供参考：列出开着的产品线，关着的也不算未就绪",
         },
       },
-      productOpen: "开放", productClosed: "已关闭",
     },
     products: {
       title: "产品线",
@@ -59,7 +58,6 @@ export const productsEn = {
           required: "For information: lists the lines open; one closed does not make the platform unready",
         },
       },
-      productOpen: "open", productClosed: "closed",
     },
     products: {
       title: "Product lines",

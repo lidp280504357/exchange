@@ -1,6 +1,6 @@
 import { ApiError, dec, errorText, formatDecimal } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, ErrorState, Input, Skeleton } from "@exchange/ui";
+import { Badge, Button, ErrorState, Input, KeyTag, Skeleton, SummaryRow, SummaryTable } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,12 +8,14 @@ import { Link } from "react-router";
 import { Num, TimeText } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
+import { Lines } from "../../kit/summary";
 import { direction, holdings, HOUSE_CAPS, inRange, over, stepOK, stepRange, totalOver, type CapName, type Holding } from "./capsRules";
 
 // HOUSE's caps at run time (user 2026-10-07, A69; market-maker review C45):
 // what HOUSE quotes within - each cap with its unit, current and first
 // value, allowed range, purpose and what lowering or raising it does (user
-// 06:0x), the per-asset and total caps beside what HOUSE holds now (review
+// 06:0x; a row each since A94, its purpose and value shown, the rest once
+// opened), the per-asset and total caps beside what HOUSE holds now (review
 // R18) - with the request that waits and the latest changes; a change is
 // a HOUSE_CAPS request a second administrator approves, its dialog listing
 // each cap from and to with what that does, in red where HOUSE would stop
@@ -109,10 +111,12 @@ export function HouseCapsCard({ admin, assets }: { admin: Admin; assets?: readon
         <Skeleton className="h-48 w-full" />
       ) : (
         <div className="flex flex-col gap-3">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="house-caps">
-            {HOUSE_CAPS.map((f) => (
-              <CapCell key={f} name={f} value={v.caps[f]} initial={v.initial?.[f]} held={held} />
-            ))}
+          <div data-testid="house-caps">
+            <SummaryTable label={t("admin.house.caps.title")} noStatus headings={{ item: t("admin.summary.caps.cap"), summary: t("admin.house.caps.current") }}>
+              {HOUSE_CAPS.map((f) => (
+                <CapRow key={f} name={f} value={v.caps[f]} initial={v.initial?.[f]} held={held} />
+              ))}
+            </SummaryTable>
           </div>
           <p className="text-xs text-fg-3">
             {t("admin.house.caps.version", {
@@ -142,61 +146,62 @@ function HeldText({ asset, value, cap }: { asset?: string; value: string; cap: s
   );
 }
 
-/** CapCell is one cap: its name, unit, value now and first, range, purpose and what moving it does. */
-function CapCell({ name, value, initial, held }: { name: CapName; value: string; initial: string | undefined; held: Held | undefined }) {
+/**
+ * CapRow is one cap (A94): its name over its purpose, its value now with
+ * what HOUSE holds against it (the per-asset and total caps); opened, its
+ * key and unit, range, first value and what lowering or raising it does.
+ */
+function CapRow({ name, value, initial, held }: { name: CapName; value: string; initial: string | undefined; held: Held | undefined }) {
   const { t } = useTranslation();
   const item = (k: string) => t(`admin.house.caps.items.${name}.${k}`);
+  const moved = initial !== undefined && dec.isDecimal(initial) && dec.isDecimal(value) && !dec.eq(initial, value);
   return (
-    <div className="flex flex-col gap-1.5 rounded-2 border border-line-1 px-3 py-2.5" data-testid={`house-cap-${name}`}>
-      <div className="flex items-baseline gap-2">
-        <span className="text-sm font-medium text-fg-1">{item("name")}</span>
-        <span className="font-mono text-xs text-fg-3">{name}</span>
-        <span className="ml-auto text-xs text-fg-3">{name === "contract_leverage" ? t("admin.house.caps.times") : "USDT"}</span>
-      </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-        <dt className="text-fg-3">{t("admin.house.caps.current")}</dt>
-        <dd className="text-sm font-medium" data-testid={`house-cap-${name}-value`}>
-          <CapValue name={name} value={value} />
-        </dd>
-        <dt className="text-fg-3" title={t("admin.house.caps.initialHint")}>
-          {t("admin.house.caps.initial")}
-        </dt>
-        <dd>{initial === undefined ? <span className="text-fg-3">{t("admin.house.caps.initialUnknown")}</span> : <CapValue name={name} value={initial} />}</dd>
-        <dt className="text-fg-3">{t("admin.house.caps.range")}</dt>
-        <dd>{item("range")}</dd>
-        {held && name === "symbol" && (
-          <>
-            <dt className="text-fg-3" title={t("admin.house.caps.heldHint")}>
-              {t("admin.house.caps.largest")}
-            </dt>
-            <dd data-testid="house-cap-symbol-held">
+    <SummaryRow
+      data-testid={`house-cap-${name}`}
+      title={item("name")}
+      source={<span data-testid={`house-cap-${name}-purpose`}>{item("purpose")}</span>}
+      summary={
+        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="font-semibold" data-testid={`house-cap-${name}-value`}>
+            <CapValue name={name} value={value} />
+          </span>
+          {moved && (
+            <span className="text-xs text-fg-3" title={t("admin.house.caps.initialHint")}>
+              {t("admin.house.caps.initial")} <CapValue name={name} value={initial} />
+            </span>
+          )}
+          {held && name === "symbol" && (
+            <span className="text-xs" data-testid="house-cap-symbol-held" title={t("admin.house.caps.heldHint")}>
+              <span className="text-fg-3">{t("admin.house.caps.largest")} </span>
               {held.list[0] ? <HeldText asset={held.list[0].asset} value={held.list[0].value} cap={value} /> : <span className="text-fg-3">{t("admin.house.caps.noHolding")}</span>}
-            </dd>
-          </>
-        )}
-        {held && name === "total" && (
-          <>
-            <dt className="text-fg-3" title={t("admin.house.caps.heldHint")}>
-              {t("admin.house.caps.together")}
-            </dt>
-            <dd data-testid="house-cap-total-held">
+            </span>
+          )}
+          {held && name === "total" && (
+            <span className="text-xs" data-testid="house-cap-total-held" title={t("admin.house.caps.heldHint")}>
+              <span className="text-fg-3">{t("admin.house.caps.together")} </span>
               <HeldText value={held.total} cap={value} />
-            </dd>
-          </>
-        )}
-      </dl>
-      <p className="text-xs text-fg-2" data-testid={`house-cap-${name}-purpose`}>
-        {item("purpose")}
-      </p>
-      <p className="text-xs text-fg-3">
-        <span className="text-fg-2">{t("admin.house.caps.lower")}</span>
-        {item("lower")}
-      </p>
-      <p className="text-xs text-fg-3">
-        <span className="text-fg-2">{t("admin.house.caps.raise")}</span>
-        {item("raise")}
-      </p>
-    </div>
+            </span>
+          )}
+        </span>
+      }
+      details={
+        <Lines
+          items={[
+            [t("admin.summary.caps.key"), <KeyTag key="k">{name}</KeyTag>],
+            [t("admin.summary.caps.unit"), name === "contract_leverage" ? t("admin.house.caps.times") : "USDT"],
+            [t("admin.house.caps.range"), item("range")],
+            [
+              <span key="i" title={t("admin.house.caps.initialHint")}>
+                {t("admin.house.caps.initial")}
+              </span>,
+              initial === undefined ? <span className="text-fg-3">{t("admin.house.caps.initialUnknown")}</span> : <CapValue name={name} value={initial} />,
+            ],
+            [t("admin.summary.caps.lower"), item("lower")],
+            [t("admin.summary.caps.raise"), item("raise")],
+          ]}
+        />
+      }
+    />
   );
 }
 
