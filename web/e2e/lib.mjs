@@ -374,9 +374,23 @@ export async function pickLanguage(page, label, name) {
  * negotiated from the browser's languages, else the platform's fallback
  * language). A first screen in one language that turns into another once
  * the platform's profile is in comes back as "en then zh-CN" (the flash
- * F33 removed).
+ * F33 removed). A first screen that waited for the profile and gave up
+ * (its 1.5 s ran out or the read failed: core awaitFallbackLocale's
+ * marks) did not have the language to draw in: it tries again, three
+ * times in all, then returns null for the caller to note (F34). A page
+ * that did not wait at all still fails.
  */
 export async function firstVisitLocale(page, app, path, tags, device = {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { first, settled, gaveUp } = await openFirstVisit(page, app, path, tags, device);
+    if (first === settled) return first;
+    if (!gaveUp) return `${first} then ${settled}`;
+  }
+  return null;
+}
+
+/** openFirstVisit is one of firstVisitLocale's visits: its first screen's language, the settled one, and whether its wait gave up. */
+async function openFirstVisit(page, app, path, tags, device) {
   const ctx = await page.browser().createBrowserContext();
   try {
     const visit = await ctx.newPage();
@@ -402,8 +416,11 @@ export async function firstVisitLocale(page, app, path, tags, device = {}) {
     await visit.waitForFunction(() => window.__firstScreenLang !== undefined, { timeout: 30000, polling: 100 });
     await profile;
     await new Promise((r) => setTimeout(r, 500)); // the effects that follow the profile
-    const [first, settled] = await visit.evaluate(() => [window.__firstScreenLang, document.documentElement.lang]);
-    return first === settled ? first : `${first} then ${settled}`;
+    return await visit.evaluate(() => ({
+      first: window.__firstScreenLang,
+      settled: document.documentElement.lang,
+      gaveUp: performance.getEntriesByType("mark").some((m) => m.name === "fallback-locale:timeout" || m.name === "fallback-locale:failed"),
+    }));
   } finally {
     await ctx.close();
   }

@@ -14,21 +14,36 @@ export function usePlatformProfile() {
   return useQuery({ queryKey: qk.platform, queryFn: fetchProfile, staleTime: 60_000, refetchInterval: 60_000 });
 }
 
+/** How a first screen's wait for the fallback language ended: read in time, failed, or out of time. */
+type FallbackWait = "read" | "failed" | "timeout";
+
 /**
  * awaitFallbackLocale reads the profile before the first screen when its
  * fallback language decides the visitor's (needsFallbackLocale: a first
  * visit in a language the site lacks), at most `limit` ms, and applies it,
  * so the page does not start in English and turn into another language a
  * moment later (F33). Everyone else it lets through at once; the profile
- * it read serves usePlatformProfile.
+ * it read serves usePlatformProfile. The wait leaves performance marks
+ * ("fallback-locale:wait", then ":read", ":failed" or ":timeout"): the
+ * smoke tells a slow profile from a page that did not wait by them (F34).
  */
 export async function awaitFallbackLocale(queryClient: QueryClient, limit = 1500): Promise<void> {
   if (!needsFallbackLocale()) return;
+  globalThis.performance?.mark?.("fallback-locale:wait");
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const read = queryClient
     .fetchQuery({ queryKey: qk.platform, queryFn: fetchProfile, staleTime: 60_000 })
-    .then((p) => followFallbackLocale(p.default_locale))
-    .catch(() => undefined);
-  await Promise.race([read, new Promise((resolve) => setTimeout(resolve, limit))]);
+    .then((p): FallbackWait => {
+      followFallbackLocale(p.default_locale);
+      return "read";
+    })
+    .catch((): FallbackWait => "failed");
+  const out = new Promise<FallbackWait>((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), limit);
+  });
+  const ended = await Promise.race([read, out]);
+  clearTimeout(timer);
+  globalThis.performance?.mark?.(`fallback-locale:${ended}`);
 }
 
 /** useBranding returns the profile, the built-in one until (and while not) read. */
