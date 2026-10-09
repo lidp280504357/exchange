@@ -165,14 +165,14 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
 
 # mark_test_accounts marks the accounts this run registered TEST (L0: the
 # console leaves test accounts out of its lists by default), in one call
-# by their emails (e2e-...-$RUN@example.com) through exchangectl in a
-# container on the test server. The kind changes nothing else; a failure
-# only warns.
+# by their emails (e2e-...-$RUN@example.com, the fault drills'
+# fault-...-$RUN@example.com) through exchangectl in a container on the
+# test server. The kind changes nothing else; a failure only warns.
 MARKS_TEST_ACCOUNTS=""
 mark_test_accounts() {
   local out name
   name=$(basename "$0" .sh)
-  if ! out=$(ssh -o ConnectTimeout=20 exchange "cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl users kind --email-like 'e2e-%$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
+  if ! out=$(ssh -o ConnectTimeout=20 exchange "cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl users kind --email-like '%-$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not marked TEST: $(tail -1 <<<"$out")" >&2
   fi
 }
