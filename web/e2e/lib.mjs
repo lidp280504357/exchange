@@ -400,10 +400,21 @@ export async function firstVisitLocale(page, app, path, tags, device = {}) {
   return { locale: null, gaveUp };
 }
 
+/** within is what promise gives within ms, else null (its timer cleared either way). */
+async function within(promise, ms) {
+  let timer;
+  try {
+    return await Promise.race([promise.catch(() => null), new Promise((r) => (timer = setTimeout(() => r(null), ms)))]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * openFirstVisit is one of firstVisitLocale's visits: its first screen's
  * language, the settled one, and how its wait ended (null: no wait;
- * "unanswered": it timed out and no profile answer came within 10 s).
+ * "unanswered": it timed out and no profile answer came within 10 s;
+ * "failed" too when the late answer was an error).
  */
 async function openFirstVisit(page, app, path, tags, device) {
   const ctx = await page.browser().createBrowserContext();
@@ -425,7 +436,8 @@ async function openFirstVisit(page, app, path, tags, device) {
         }).observe(document.getElementById("root"), { childList: true });
       });
     }, tags);
-    const profile = visit.waitForResponse((r) => new URL(r.url()).pathname === "/v1/platform/profile", { timeout: 30000 });
+    // The profile's answer, however long the page takes to load: each wait below has its own window (F37).
+    const profile = visit.waitForResponse((r) => new URL(r.url()).pathname === "/v1/platform/profile", { timeout: 0 });
     profile.catch(() => {}); // awaited below; a failure before that is the one to report
     await visit.goto(app + path, { waitUntil: "domcontentloaded", timeout: 60000 });
     await visit.waitForFunction(() => window.__firstScreenLang !== undefined, { timeout: 30000, polling: 100 });
@@ -440,11 +452,11 @@ async function openFirstVisit(page, app, path, tags, device) {
     const first = await visit.evaluate(() => window.__firstScreenLang);
     if (ended === "failed") return { first, settled: null, ended }; // nothing to settle
     if (ended === "timeout") {
-      // Late (a slow server) or never (the page did not ask, or no answer).
-      const late = await Promise.race([profile.then(() => true), new Promise((r) => setTimeout(() => r(false), 10000))]).catch(() => false);
-      return { first, settled: null, ended: late ? "timeout" : "unanswered" };
+      // Late (a slow server), late with an error (a failed read), or never (the page did not ask, or no answer).
+      const answer = await within(profile, 10000);
+      return { first, settled: null, ended: !answer ? "unanswered" : answer.ok() ? "timeout" : "failed" };
     }
-    await profile;
+    if (!(await within(profile, 30000))) throw new Error("no answer for the platform's profile within 30 s");
     await new Promise((r) => setTimeout(r, 500)); // the effects that follow the profile
     return { first, settled: await visit.evaluate(() => document.documentElement.lang), ended };
   } finally {
