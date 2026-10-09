@@ -24,6 +24,7 @@ func TestInternalRoutesRefuseACallersIdentity(t *testing.T) {
 		{http.MethodPost, "/internal/products/coin_m/cancel-open"},
 		{http.MethodGet, "/internal/derivatives/contracts"},
 		{http.MethodPost, "/internal/derivatives/positions/close"},
+		{http.MethodPost, "/internal/derivatives/users/01a0ee73-9d3a-79c1-a9b8-8cc210950404/flatten"},
 	} {
 		req := httptest.NewRequestWithContext(context.Background(), c.method, c.path, strings.NewReader("{}"))
 		req.Header.Set(httpx.HeaderUserID, "01a0ee73-9d3a-79c1-a9b8-8cc210950404")

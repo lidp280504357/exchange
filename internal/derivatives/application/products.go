@@ -240,7 +240,7 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 				mine = append(mine, ProductOrder{ID: cur.ID, UserID: user, Symbol: cur.Symbol, Conditional: true})
 			}
 			for _, p := range mine {
-				if err := auditCancel(ctx, r, p, key, actor, reason); err != nil {
+				if err := auditCancel(ctx, r, p, flags.ProductNames[key], actor, reason); err != nil {
 					return err
 				}
 			}
@@ -266,14 +266,19 @@ func (s *Service) cancelOn(ctx context.Context, key, actor, reason string, since
 	return out, nil
 }
 
-// auditCancel records a cancel of a product line's closing as the console
-// records the cancels it asks for (admin.orders.canceled).
-func auditCancel(ctx context.Context, r ports.Repos, p ProductOrder, key, actor, reason string) error {
+// auditCancel records a cancel of a product line's closing (product its
+// name) or of a purge's (Flatten, no product) as the console records the
+// cancels it asks for (admin.orders.canceled).
+func auditCancel(ctx context.Context, r ports.Repos, p ProductOrder, product, actor, reason string) error {
 	kind := "ORDER"
 	if p.Conditional {
 		kind = "CONDITIONAL"
 	}
-	details, err := json.Marshal(map[string]string{"order_id": p.ID, "symbol": p.Symbol, "product": flags.ProductNames[key], "type": kind})
+	d := map[string]string{"order_id": p.ID, "symbol": p.Symbol, "type": kind}
+	if product != "" {
+		d["product"] = product
+	}
+	details, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}

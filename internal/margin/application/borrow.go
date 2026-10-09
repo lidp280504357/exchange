@@ -38,8 +38,9 @@ func (in BorrowInput) hash() []byte {
 }
 
 // internalKeys start the keys margin-service gives its own writes: an
-// order's borrow, an automatic repayment, a liquidation's writes.
-var internalKeys = []string{"order:", AutoRepayPrefix, "liquidation:"}
+// order's borrow, an automatic repayment, a liquidation's writes, a
+// purge's repayments (Settle).
+var internalKeys = []string{"order:", AutoRepayPrefix, "liquidation:", SettlePrefix}
 
 // checkKey validates a client's Idempotency-Key, which may not take an
 // internal key's form (review CR: a client's "trade-repay:..." would hide

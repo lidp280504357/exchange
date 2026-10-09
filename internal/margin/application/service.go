@@ -48,6 +48,12 @@ type Service struct {
 	// at a mismatch (0: 5 seconds for the loans, 2 for the pools; tests
 	// shorten it).
 	Recheck time.Duration
+	// SettleWait bounds how long Settle waits for the orders it canceled
+	// to let go of what they held, SettlePoll is how often it looks (0: 8
+	// seconds and 200 ms). Sleep waits between the looks, nil for real
+	// (the tests run the engine there).
+	SettleWait, SettlePoll time.Duration
+	Sleep                  func(ctx context.Context, d time.Duration) error
 }
 
 // touch tells Touched that a user's margin accounts changed.

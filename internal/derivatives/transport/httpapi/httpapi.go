@@ -598,9 +598,10 @@ func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
 // open interest; lifting reduce-only; the positions close to or in
 // liquidation; every user's open positions; closing a user's position at
 // the market; a contract product line's counts and, as the console closes
-// it, its open orders canceled (design 2026-10-07, product switches). A
-// request carrying a caller's X-User-Id came through the gateway and is
-// not served (404, as spot-trading-service's; api/internal/products.yaml).
+// it, its open orders canceled (design 2026-10-07, product switches); a
+// test account's purge flattening its contract accounts (L4b). A request
+// carrying a caller's X-User-Id came through the gateway and is not
+// served (404, as spot-trading-service's; api/internal/products.yaml).
 func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(internalOnly)
@@ -614,6 +615,7 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 		r.Post("/internal/derivatives/positions/list", h.openPositions)
 		r.Post("/internal/derivatives/positions/close", h.adminClose)
 		r.Get("/internal/derivatives/users/{id}/cross-margin", h.crossMargin)
+		r.Post("/internal/derivatives/users/{id}/flatten", h.flatten)
 		r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
 		r.Post("/internal/derivatives/contracts/{symbol}/price-impact", h.priceImpact)
 	})
@@ -710,6 +712,54 @@ func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o, h.settles(r.Context()).of(o.Symbol)))
+}
+
+// flattenDeadline is how long a flatten may take to answer, past the
+// server's write timeout: it waits for the engine (application.Flatten).
+const flattenDeadline = 2 * time.Minute
+
+// flatten ends what a user holds on their contract accounts for a test
+// account's purge (design 2026-10-09 user kinds §1 #9, L4b;
+// api/internal/derivatives.yaml).
+func (h *Handler) flatten(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	// A recorder in the tests cannot take a deadline: nothing to extend.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(flattenDeadline))
+	res, err := h.Svc.Flatten(r.Context(), chi.URLParam(r, "id"), body.Actor, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type closedJSON struct {
+		Symbol   string `json:"symbol"`
+		Side     string `json:"side"`
+		Quantity string `json:"quantity"`
+		Price    string `json:"price"`
+	}
+	type leftJSON struct {
+		Symbol   string `json:"symbol"`
+		Side     string `json:"side"`
+		Quantity string `json:"quantity"`
+		Reason   string `json:"reason"`
+	}
+	closed, left := make([]closedJSON, 0, len(res.Closed)), make([]leftJSON, 0, len(res.Remaining))
+	for _, c := range res.Closed {
+		closed = append(closed, closedJSON{Symbol: c.Symbol, Side: c.Side, Quantity: c.Quantity.String(), Price: c.Price.String()})
+	}
+	for _, l := range res.Remaining {
+		left = append(left, leftJSON{Symbol: l.Symbol, Side: l.Side, Quantity: l.Quantity.String(), Reason: l.Reason})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"canceled_orders": res.CanceledOrders, "canceled_conditionals": res.CanceledConditionals, "closed": closed, "remaining": left,
+		"complete": res.Complete(),
+	})
 }
 
 // marginStates names the margin states for the console.

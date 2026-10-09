@@ -585,8 +585,9 @@ type LiquidationRepo interface {
 // Trading is spot-trading-service's internal API a liquidation uses.
 type Trading interface {
 	// CancelAccount asks for every open order on a margin account to be
-	// canceled (the engine's order events tell when).
-	CancelAccount(ctx context.Context, userID string, a domain.Account) error
+	// canceled (the engine's order events tell when) and returns how many
+	// it asked for (those asked for before not counted).
+	CancelAccount(ctx context.Context, userID string, a domain.Account) (int, error)
 	// PlaceLiquidation places a liquidation's market order against HOUSE
 	// (its attempt) and returns where it stands; the same order again
 	// reads it again. A refusal, as it came or later (the pair halted, a

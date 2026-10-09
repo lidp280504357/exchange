@@ -22,10 +22,10 @@ import (
 const HeaderAdminID = "X-Admin-Id"
 
 // InternalRoutes serves the admin console through admin-service
-// (coordination decision of 2026-10-06 03:24 ⑥): only on the compose
-// network — the gateway does not route /internal, and a request that came
-// through it (it carries the caller's X-User-Id) is not served. Field
-// names are margin-service's columns.
+// (coordination decision of 2026-10-06 03:24 ⑥) and a test account's
+// purge (L4b): only on the compose network — the gateway does not route
+// /internal, and a request that came through it (it carries the caller's
+// X-User-Id) is not served. Field names are margin-service's columns.
 func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Route("/internal/margin", func(r chi.Router) {
 		r.Use(func(next http.Handler) http.Handler {
@@ -49,6 +49,57 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 		r.Post("/accounts/{user_id}/{account}/freeze", h.freeze)
 		r.Post("/accounts/{user_id}/{account}/unfreeze", h.unfreeze)
 		r.Post("/accounts/{user_id}/{account}/liquidate", h.liquidate)
+		r.Post("/users/{id}/settle", h.settle)
+	})
+}
+
+// settleDeadline is how long a settle may take to answer, past the
+// server's write timeout: it waits for the orders it canceled.
+const settleDeadline = time.Minute
+
+// settle ends a user's margin trading for a test account's purge (design
+// 2026-10-09 user kinds §1 #9, L4b; api/internal/margin.yaml).
+func (h *Handler) settle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	// A recorder in the tests cannot take a deadline: nothing to extend.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(settleDeadline))
+	res, err := h.Svc.Settle(r.Context(), chi.URLParam(r, "id"), body.Actor, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type repaidJSON struct {
+		Account   string  `json:"account"`
+		Symbol    *string `json:"symbol"`
+		Asset     string  `json:"asset"`
+		Principal string  `json:"principal"`
+		Interest  string  `json:"interest"`
+	}
+	type owedJSON struct {
+		Account string  `json:"account"`
+		Symbol  *string `json:"symbol"`
+		Asset   string  `json:"asset"`
+		Amount  string  `json:"amount"`
+	}
+	repaid, owed := make([]repaidJSON, 0, len(res.Repaid)), make([]owedJSON, 0, len(res.Remaining))
+	for _, p := range res.Repaid {
+		repaid = append(repaid, repaidJSON{
+			Account: string(p.Account.Type), Symbol: nullable(p.Account.Symbol), Asset: p.Asset, Principal: p.Principal.String(),
+			Interest: p.Interest.String(),
+		})
+	}
+	for _, o := range res.Remaining {
+		owed = append(owed, owedJSON{Account: string(o.Account.Type), Symbol: nullable(o.Account.Symbol), Asset: o.Asset, Amount: o.Amount.String()})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"canceled_orders": res.CanceledOrders, "repaid": repaid, "remaining_debt": owed, "complete": res.Complete(),
 	})
 }
 

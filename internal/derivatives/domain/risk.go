@@ -72,11 +72,10 @@ func LiquidationAnchor(c Contract, p Position, mark decimal.Decimal) decimal.Dec
 	return mark
 }
 
-// LiquidationOrder is the liquidation engine's order for what is left of
-// a position: IOC, closing it at the anchor (the bankruptcy price of an
-// isolated position, the mark price for cross) moved by Slippage against
-// the position, on the tick grid.
-func LiquidationOrder(id string, c Contract, p Position, anchor decimal.Decimal, now time.Time) Order {
+// CloseAt is the side and the price of an IOC order closing p around
+// anchor: the anchor moved by Slippage against the position, on the tick
+// grid (the liquidation engine's, and a purge's at the mark price).
+func CloseAt(c Contract, p Position, anchor decimal.Decimal) (Side, decimal.Decimal) {
 	one := decimal.NewFromInt(1)
 	side, price := Sell, floorTo(anchor.Mul(one.Sub(Slippage)), c.TickSize)
 	if p.Qty.IsNegative() {
@@ -85,6 +84,15 @@ func LiquidationOrder(id string, c Contract, p Position, anchor decimal.Decimal,
 	if !price.IsPositive() {
 		price = c.TickSize
 	}
+	return side, price
+}
+
+// LiquidationOrder is the liquidation engine's order for what is left of
+// a position: IOC, closing it at the anchor (the bankruptcy price of an
+// isolated position, the mark price for cross) moved by Slippage against
+// the position, on the tick grid.
+func LiquidationOrder(id string, c Contract, p Position, anchor decimal.Decimal, now time.Time) Order {
+	side, price := CloseAt(c, p, anchor)
 	return Order{
 		ID: id, ClientOrderID: id, UserID: p.UserID, Symbol: p.Symbol, Side: side, PositionSide: p.Side, Type: Limit,
 		TimeInForce: IOC, Price: price, Qty: p.Qty.Abs(), ReduceOnly: p.Side == SideBoth, Kind: KindLiquidation,

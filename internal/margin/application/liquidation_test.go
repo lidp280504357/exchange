@@ -31,12 +31,14 @@ type trading struct {
 	ledger   *ledger
 	prices   *prices
 	canceled int
-	fill     func(o ports.LiquidationOrder) decimal.Decimal
-	pending  int
-	fail     error
-	reject   func(o ports.LiquidationOrder) *apperr.Error
-	orders   map[string]*placed
-	sent     []ports.LiquidationOrder
+	// cancel, when set, answers how many orders a cancel asked for.
+	cancel  func(user string, a domain.Account) int
+	fill    func(o ports.LiquidationOrder) decimal.Decimal
+	pending int
+	fail    error
+	reject  func(o ports.LiquidationOrder) *apperr.Error
+	orders  map[string]*placed
+	sent    []ports.LiquidationOrder
 }
 
 type placed struct {
@@ -47,11 +49,14 @@ type placed struct {
 
 var lot = d("0.0001")
 
-func (t *trading) CancelAccount(context.Context, string, domain.Account) error {
+func (t *trading) CancelAccount(_ context.Context, user string, a domain.Account) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.canceled++
-	return nil
+	if t.cancel != nil {
+		return t.cancel(user, a), nil
+	}
+	return 0, nil
 }
 
 func (t *trading) PlaceLiquidation(_ context.Context, user string, a domain.Account, o ports.LiquidationOrder) (ports.OrderState, error) {

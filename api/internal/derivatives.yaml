@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Exchange contract position lists for the admin console, internal API
-  version: 0.1.0
+  title: Exchange contract position lists for the admin console and a test account's purge, internal API
+  version: 0.2.0
   description: |
     derivatives-service's two lists of every user's open positions that the
     console narrows by account (L3 of the user-kind design 2026-10-09, §1
@@ -22,6 +22,10 @@ info:
     accounts are narrowed in the database (= ANY / <> ALL), before the
     order and the limit.
 
+    A test account's purge (§1 #9, L4b; exchangectl users purge) first
+    flattens the account's contract accounts here: POST
+    /internal/derivatives/users/{id}/flatten.
+
     The service's other internal endpoints are in docs/runbook/derivatives.md.
     They are on the compose network only: the gateway does not route
     /internal, and a request carrying the caller's X-User-Id (one that came
@@ -30,6 +34,7 @@ servers:
   - url: http://derivatives-service:8095
 tags:
   - name: lists
+  - name: purge
 paths:
   /internal/derivatives/positions:
     get:
@@ -98,6 +103,85 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Risk'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/derivatives/users/{id}/flatten:
+    post:
+      operationId: flattenUser
+      summary: End what a user holds on their contract accounts (a test account's purge)
+      description: |
+        Under the user's lock their orders are canceled (their own and those
+        of their take-profits and stop-losses; the liquidation engine's and
+        the console's run their course) and their active take-profits and
+        stop-losses end CANCELED with reason ADMIN, each audited as
+        admin.orders.canceled (details order_id, symbol, type ORDER or
+        CONDITIONAL) by actor with reason. Once the engine confirmed the
+        cancels, every open position - both sides in hedge mode, every
+        settlement asset (USDT and the coin-margined ones) - is closed with
+        IOC limit orders of kind ADMIN, reduce-only in one-way mode, at the
+        mark price moved by 0.5% against the position on the tick grid (the
+        liquidation engine's price for a cross position), at most the
+        contract's largest order each: only HOUSE takes them. Up to 3
+        rounds, a second apart; what is still open comes back in remaining
+        with the reason. Each wait for the engine lasts at most 8 seconds,
+        so the answer may take about 40 seconds when the engine does not
+        answer: give the call a minute or more.
+
+        Calling it again cancels and closes what is open by then: once all
+        is done, 0, 0, [], [] and complete. complete false means not done:
+        call again later. A user who never traded contracts gets the same
+        answer: user-service is not asked whether it knows the user (a
+        purge calls this for every test account; a 404 would read like a
+        wrong path), so there is no 404 for an unknown user. Each call is
+        audited as derivatives.user_flattened (target user:<id>; details the
+        counts, closed, remaining and complete).
+      tags: [purge]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user; another spelling of a UUID is the same user.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        $ref: '#/components/requestBodies/Purge'
+      responses:
+        '200':
+          description: What it did and what it left.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flattened'
+        '400':
+          description: The user is no UUID, or the actor or a reason of at least 3 characters is missing (COMMON_INVALID_ARGUMENT).
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '404':
+          description: The call came through the gateway (it carries a caller's X-User-Id).
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '409':
+          description: |
+            DERIV_POSITION_LIQUIDATING: a position of the user's is under
+            liquidation (details symbol, position_side) or their cross
+            account in an asset is being liquidated (details settle_asset,
+            liquidation_id); nothing was canceled. A liquidation takes
+            seconds as a rule: call again.
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '422':
+          description: DERIV_HOUSE_NOT_CLOSED - HOUSE is not flattened.
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
         default:
           $ref: '../openapi/common.yaml#/components/responses/Error'
 components:
@@ -169,6 +253,21 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Accounts'
+    Purge:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [actor, reason]
+            properties:
+              actor:
+                type: string
+                description: Who purges (an operator's email, or the e2e scripts' name); the audit's actor.
+              reason:
+                type: string
+                minLength: 3
   responses:
     Positions:
       description: The positions; truncated when limit cut the list.
@@ -197,6 +296,68 @@ components:
                 items:
                   $ref: '#/components/schemas/WatchedPosition'
   schemas:
+    Flattened:
+      type: object
+      required: [canceled_orders, canceled_conditionals, closed, remaining, complete]
+      properties:
+        complete:
+          type: boolean
+          description: Nothing left (remaining is empty); the purge goes on with the account.
+        canceled_orders:
+          type: integer
+          description: Orders whose cancel this call asked for (not those on their way out before).
+        canceled_conditionals:
+          type: integer
+          description: Take-profits and stop-losses it ended.
+        closed:
+          type: array
+          description: What it closed, by contract and side.
+          items:
+            type: object
+            required: [symbol, side, quantity, price]
+            properties:
+              symbol:
+                type: string
+                examples: [BTC-USDT-PERP]
+              side:
+                type: string
+                enum: [LONG, SHORT]
+                description: The position's direction (its side in hedge mode).
+              quantity:
+                type: string
+                description: In the base asset; whole contracts on a coin-margined contract.
+              price:
+                type: string
+                description: The average price of the closes, 8 decimals at most.
+        remaining:
+          type: array
+          description: What it left open, by contract and side.
+          items:
+            type: object
+            required: [symbol, side, quantity, reason]
+            properties:
+              symbol:
+                type: string
+              side:
+                type: string
+                enum: [LONG, SHORT]
+              quantity:
+                type: string
+                description: |
+                  What is open; "0" when the position is flat but an order on
+                  it is still working (it may open it again).
+              reason:
+                type: string
+                description: |
+                  NOT_FILLED (HOUSE took nothing at the price, three rounds),
+                  DERIV_POSITION_LIQUIDATING (a liquidation began during the
+                  call: the liquidation engine has it),
+                  DERIV_CLOSE_PENDING (an order still working when it gave
+                  up - the engine slow, or a cancel it has not confirmed - or
+                  the position changed meanwhile), or the code a close was
+                  refused with (DERIV_MARK_PRICE_UNAVAILABLE,
+                  INSTRUMENT_NOT_TRADING, ORDER_QUANTITY_OUT_OF_RANGE, ...).
+                examples: [NOT_FILLED]
     Accounts:
       type: object
       additionalProperties: false

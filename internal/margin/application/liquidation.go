@@ -271,7 +271,7 @@ func (s *Service) stepCancel(ctx context.Context, l ports.Liquidation) (ports.Li
 		return l, false, err
 	}
 	if locked(holdings) {
-		if err := s.Trading.CancelAccount(ctx, l.UserID, l.Account); err != nil && !refused(err) {
+		if _, err := s.Trading.CancelAccount(ctx, l.UserID, l.Account); err != nil && !refused(err) {
 			return l, false, err
 		}
 		return s.wait(ctx, l, "waiting for the account's orders to be canceled")

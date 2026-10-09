@@ -484,7 +484,7 @@ func (s *Service) Freeze(ctx context.Context, userID string, a domain.Account, b
 	// Its open orders go (review CY C17 ⑥); a cancel that fails is logged,
 	// the freeze stands and the orders can be canceled again.
 	if s.Trading != nil {
-		if err := s.Trading.CancelAccount(ctx, userID, a); err != nil {
+		if _, err := s.Trading.CancelAccount(ctx, userID, a); err != nil {
 			s.Log.WarnContext(ctx, "the frozen account's orders were not canceled", "user_id", userID, "account", a.Key(), "error", err)
 		}
 	}

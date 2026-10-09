@@ -89,11 +89,15 @@ func symbolOf(a domain.Account) string {
 }
 
 // CancelAccount asks for every open order on the margin account to be
-// canceled.
-func (c *Client) CancelAccount(ctx context.Context, userID string, a domain.Account) error {
-	return c.post(ctx, "/internal/orders/cancel", map[string]string{
+// canceled and returns how many it asked for (202 {"requested": n}).
+func (c *Client) CancelAccount(ctx context.Context, userID string, a domain.Account) (int, error) {
+	var out struct {
+		Requested int `json:"requested"`
+	}
+	err := c.post(ctx, "/internal/orders/cancel", map[string]string{
 		"user_id": userID, "account": string(a.Type), "symbol": symbolOf(a),
-	}, nil)
+	}, &out)
+	return out.Requested, err
 }
 
 // PlaceLiquidation places a liquidation's market order (a sell by

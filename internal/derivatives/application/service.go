@@ -54,6 +54,13 @@ type Service struct {
 	// Started is when the service started: missing mark prices count as
 	// stale only some time after it.
 	Started time.Time
+	// FlattenWait bounds each of Flatten's waits for the engine (its
+	// cancels, a round's closing orders), FlattenPoll is how often it
+	// looks, FlattenPause how long it lets the marks and HOUSE's quotes
+	// move between rounds; zero means 8 s, 200 ms and 1 s. Sleep waits
+	// between the looks, nil for real (the tests run the engine there).
+	FlattenWait, FlattenPoll, FlattenPause time.Duration
+	Sleep                                  func(ctx context.Context, d time.Duration) error
 
 	// fills serializes the engine's fills with the reconciliation, which
 	// must not see a fill half booked.

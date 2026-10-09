@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Exchange margin account list for the admin console, internal API
-  version: 0.1.0
+  title: Exchange margin account list for the admin console and a test account's purge, internal API
+  version: 0.2.0
   description: |
     margin-service's list of every user's margin accounts that the console
     narrows by account (L3 of the user-kind design 2026-10-09, §1 #8): the
@@ -21,6 +21,10 @@ info:
     accounts are narrowed in the database (= ANY / <> ALL) before they are
     valued and ordered.
 
+    A test account's purge (§1 #9, L4b; exchangectl users purge) settles
+    the account's margin accounts here: POST
+    /internal/margin/users/{id}/settle.
+
     The service's other internal endpoints are in docs/runbook/margin.md.
     They are on the compose network only: the gateway does not route
     /internal, and a request carrying the caller's X-User-Id is not served.
@@ -28,6 +32,7 @@ servers:
   - url: http://margin-service:8099
 tags:
   - name: lists
+  - name: purge
 paths:
   /internal/margin/accounts:
     get:
@@ -67,6 +72,89 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Accounts'
+        default:
+          $ref: '../openapi/common.yaml#/components/responses/Error'
+  /internal/margin/users/{id}/settle:
+    post:
+      operationId: settleUser
+      summary: End a user's margin trading (a test account's purge)
+      description: |
+        The open orders of each of the user's margin accounts are canceled
+        (spot-trading-service's POST /internal/orders/cancel); it waits up
+        to 8 seconds for them to let go of what they held. Then each debt is
+        repaid from what its account holds free of the asset, interest
+        first, as an AUTO_REPAY repayment (key settle:<uuid>; a client's
+        Idempotency-Key may not take that form); what is still owed comes
+        back in remaining_debt: the purge moves the asset in from spot (or
+        credits it) and calls again. Other assets the account holds are not
+        sold.
+
+        Calling it again cancels and repays what is open by then: once all
+        is done, 0, [], [] and complete. A user without margin accounts gets
+        the same answer: user-service is not asked whether it knows the
+        user (a purge calls this for every test account; a 404 would read
+        like a wrong path), so there is no 404 for an unknown user. Each
+        call is audited as margin.user_settled (target user:<id>; details
+        the count, repaid, remaining_debt and complete).
+      tags: [purge]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user; another spelling of a UUID is the same user.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [actor, reason]
+              properties:
+                actor:
+                  type: string
+                  description: Who purges (an operator's email, or the e2e scripts' name); the audit's actor.
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: What it did and what is still owed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settled'
+        '400':
+          description: The user is no UUID, or the actor or a reason of at least 3 characters is missing (COMMON_INVALID_ARGUMENT).
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '404':
+          description: The call came through the gateway (it carries a caller's X-User-Id).
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '409':
+          description: |
+            MARGIN_FROZEN: one of the user's margin accounts is being
+            liquidated (details status LIQUIDATING, account MARGIN_CROSS or
+            MARGIN_ISOLATED:<pair>); the liquidation repays its debts. Call
+            again once it is over.
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
+        '503':
+          description: spot-trading-service or the ledger unreachable; nothing is lost, call again.
+          content:
+            application/json:
+              schema:
+                $ref: '../openapi/common.yaml#/components/schemas/Error'
         default:
           $ref: '../openapi/common.yaml#/components/responses/Error'
 components:
@@ -153,6 +241,51 @@ components:
               truncated:
                 type: boolean
   schemas:
+    Settled:
+      type: object
+      required: [canceled_orders, repaid, remaining_debt, complete]
+      properties:
+        complete:
+          type: boolean
+          description: Nothing owed any more (remaining_debt is empty).
+        canceled_orders:
+          type: integer
+          description: Orders whose cancel this call asked for (not those on their way out before).
+        repaid:
+          type: array
+          description: The repayments it made, by account and asset.
+          items:
+            type: object
+            required: [account, symbol, asset, principal, interest]
+            properties:
+              account:
+                type: string
+                enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+              symbol:
+                type: [string, 'null']
+                description: An isolated account's pair.
+              asset:
+                type: string
+              principal:
+                type: string
+              interest:
+                type: string
+        remaining_debt:
+          type: array
+          description: What is still owed (principal and interest), by account and asset.
+          items:
+            type: object
+            required: [account, symbol, asset, amount]
+            properties:
+              account:
+                type: string
+                enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+              symbol:
+                type: [string, 'null']
+              asset:
+                type: string
+              amount:
+                type: string
     Accounts:
       type: object
       additionalProperties: false

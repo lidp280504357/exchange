@@ -409,7 +409,7 @@ export interface components {
             quantity: components["schemas"]["NullableDecimal"];
             /** @enum {string} */
             status: "ACTIVE" | "TRIGGERED" | "CANCELED" | "FAILED";
-            /** @description When CANCELED: USER (by its owner), NO_POSITION (the position was gone when it triggered), PRODUCT_CLOSED (its product line closed) or LIQUIDATION (its position was taken over for liquidation); when FAILED, the refusal's code. */
+            /** @description When CANCELED: USER (by its owner), NO_POSITION (the position was gone when it triggered), PRODUCT_CLOSED (its product line closed), LIQUIDATION (its position was taken over for liquidation) or ADMIN (a test account's purge); when FAILED, the refusal's code. */
             reason: string | null;
             /** @description The order it placed when TRIGGERED. */
             order_id: string | null;

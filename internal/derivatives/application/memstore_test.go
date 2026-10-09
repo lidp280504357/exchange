@@ -597,10 +597,10 @@ func (r memConds) Active(_ context.Context, symbol string) ([]domain.Conditional
 	return out, nil
 }
 
-func (r memConds) OfUser(_ context.Context, userID, symbol, status, _ string, limit int) ([]domain.Conditional, error) {
+func (r memConds) OfUser(_ context.Context, userID, symbol, status, before string, limit int) ([]domain.Conditional, error) {
 	var out []domain.Conditional
 	for _, c := range r.st.conds {
-		if c.UserID == userID && (symbol == "" || c.Symbol == symbol) && (status == "" || c.Status == status) {
+		if c.UserID == userID && (symbol == "" || c.Symbol == symbol) && (status == "" || c.Status == status) && (before == "" || c.ID < before) {
 			out = append(out, c)
 		}
 	}

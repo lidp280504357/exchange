@@ -70,6 +70,12 @@ func (s *Service) Repay(ctx context.Context, in RepayInput) (RepayResult, error)
 	if err := checkKey(in.IdemKey); err != nil {
 		return RepayResult{}, err
 	}
+	return s.repay(ctx, in)
+}
+
+// repay is Repay under a key of any form: a client's, checked, or one of
+// margin-service's own (Settle's).
+func (s *Service) repay(ctx context.Context, in RepayInput) (RepayResult, error) {
 	if prior, ok, err := s.Store.Read().Repays().ByKey(ctx, in.UserID, in.IdemKey); err != nil {
 		return RepayResult{}, err
 	} else if ok {

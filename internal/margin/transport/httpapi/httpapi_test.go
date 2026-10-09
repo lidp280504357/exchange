@@ -170,7 +170,7 @@ func (f *switches) set(key string, on bool) {
 
 type trading struct{}
 
-func (trading) CancelAccount(context.Context, string, domain.Account) error { return nil }
+func (trading) CancelAccount(context.Context, string, domain.Account) (int, error) { return 0, nil }
 
 func (trading) PlaceLiquidation(context.Context, string, domain.Account, ports.LiquidationOrder) (ports.OrderState, error) {
 	return ports.OrderState{}, apperr.Unavailable(fmt.Errorf("no trading service here"))
@@ -582,4 +582,22 @@ func TestInternalEndpoints(t *testing.T) {
 	expect(t, "a liquidation without an approval's ID", st, body, 400, apperr.CodeInvalidArgument)
 	st, body = a.do("POST", path+"/liquidate", fmt.Sprintf(`{"approval_id":%q}`, uuid.Must(uuid.NewV7()).String()), admin...)
 	expect(t, "a liquidation of an account owing nothing", st, body, 409, "MARGIN_NOTHING_OWED")
+
+	// A test account's purge settles its margin accounts (L4b).
+	settle := "/internal/margin/users/" + user + "/settle"
+	purge := `{"actor":"ops@example.com","reason":"purging a test account"}`
+	st, body = a.do("POST", settle, purge, "X-User-Id", user)
+	expect(t, "a settle through the gateway", st, body, 404, apperr.CodeNotFound)
+	st, body = a.do("POST", settle, `{"actor":"ops@example.com"}`)
+	expect(t, "a settle without a reason", st, body, 400, apperr.CodeInvalidArgument)
+	st, body = a.do("POST", settle, purge)
+	expect(t, "a settle", st, body, 200, "")
+	if repaid, _ := body["repaid"].([]any); body["canceled_orders"] != float64(0) || repaid == nil || len(repaid) != 0 {
+		t.Fatalf("settled %v", body)
+	}
+	if owed, _ := body["remaining_debt"].([]any); owed == nil || len(owed) != 0 || body["complete"] != true {
+		t.Fatalf("settled %v", body)
+	}
+	st, body = a.do("POST", "/internal/margin/users/not-a-user/settle", purge)
+	expect(t, "a settle of no user", st, body, 400, apperr.CodeInvalidArgument)
 }
