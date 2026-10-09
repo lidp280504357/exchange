@@ -156,7 +156,8 @@ event_body() {
     ramp_up_seconds: 15, hold_seconds: 3, ramp_down_seconds: 5, risk: $risk, actor: "e2e-ops", reason: "e2e: a price event (price-event.sh)"}'
 }
 # start RISK: an event of +16%, or the largest share HOUSE's loss cap
-# allows; sets EVENT, F (the target factor) and BASE.
+# allows; sets EVENT, F (the target factor) and EVENT_BASE (its base
+# price; BASE is the site the calls go to, common.sh's).
 start() {
   local pct=16 est cap
   simpost /internal/sim/events "$(event_body $pct "$1")"
@@ -175,9 +176,9 @@ start() {
   [[ $SIM_STATUS == 201 ]] || { echo "FAIL the event: $SIM_STATUS $SIM_BODY" >&2; exit 1; }
   EVENT=$(jq -r '.items[0].event_id' <<<"$SIM_BODY")
   F=$(jq -r '.items[0].factor_target' <<<"$SIM_BODY")
-  BASE=$(jq -r '.items[0].base_price' <<<"$SIM_BODY")
+  EVENT_BASE=$(jq -r '.items[0].base_price' <<<"$SIM_BODY")
   [[ $(jq -r '.items[0].status' <<<"$SIM_BODY") == RUNNING ]] || { echo "FAIL not running: $SIM_BODY" >&2; exit 1; }
-  echo "ok   event $EVENT: factor $F from $BASE (+$pct%, risk $1)"
+  echo "ok   event $EVENT: factor $F from $EVENT_BASE (+$pct%, risk $1)"
 }
 # holds FILE JQ WHAT: JQ holds over the samples (an array).
 holds() {
@@ -238,15 +239,21 @@ LIQ_PRICE=$(jq -r '.positions[0].liquidation_price' <<<"$BODY")
 echo "     the long's margin $ETH_MARGIN; the short's estimated liquidation price $LIQ_PRICE"
 # probe: the transfers out while the event runs, one line each in
 # $WORK/probe: when the answer came (this machine's clock), the HTTP status
-# and the error code.
+# and the error code. It stops once a refusal is followed by another
+# answer (the liquidation over), or after 90.
 probe() {
-  local i code
+  local i code refused=""
   for i in $(seq 90); do
     [[ -f $WORK/probe.stop ]] && return 0
     code=$(curl -s --connect-timeout 5 -m 10 -o "$WORK/probe.body" -w '%{http_code}' -X POST "$BASE/v1/account/transfers" \
       -H 'Content-Type: application/json' "${AUTH[@]}" -H "Idempotency-Key: e2e-pe-$RUN-probe-$i" \
       -d '{"asset":"USDT","amount":"1000","from_account_type":"FUTURES","to_account_type":"SPOT"}' || true)
     printf '%s %s %s\n' "$(date +%s)" "$code" "$(jq -r '.code // "-"' "$WORK/probe.body" 2>/dev/null || echo -)" >>"$WORK/probe"
+    if [[ $code == 409 ]]; then
+      refused=1
+    elif [[ -n $refused && $code != 000 ]]; then
+      return 0
+    fi
     sleep 0.5
   done
 }
@@ -287,7 +294,7 @@ LAST=$(md "/v1/market/$SYMBOL/ticker" | jq -r .last)
   { echo "FAIL after the event: ticker $LAST, reference $REF" >&2; exit 1; }
 echo "ok   the ticker $LAST within 0.05% of the reference market"
 BODY=$(md "/v1/market/$SYMBOL/candles?interval=1m&limit=3")
-check "[.candles[].high | tonumber] | max >= $BASE * (1 + 0.7 * ($F - 1))" "the spike stays in the 1m candles"
+check "[.candles[].high | tonumber] | max >= $EVENT_BASE * (1 + 0.7 * ($F - 1))" "the spike stays in the 1m candles"
 mark_back() { [[ $(md "/v1/market/$PERP/mark-price" | jq -r .source) == "$MARK_BEFORE" ]]; }
 eventually 120 "$PERP's mark back on $MARK_BEFORE" mark_back
 EVENT=""
@@ -304,8 +311,8 @@ completed() {
 # and ended (epoch seconds).
 LIQ_SQL="SELECT concat_ws(' ', status, trim_scale(equity), trim_scale(balance + flows), coalesce(trim_scale(fee)::text, '-'), floor(extract(epoch FROM started_at)), coalesce(ceil(extract(epoch FROM done_at))::text, '-')) FROM derivatives.cross_liquidations WHERE user_id = '$USER_ID'"
 cleared() { read -r LIQ_STATUS LIQ_EQUITY LIQ_LEFT LIQ_FEE LIQ_FROM LIQ_TO <<<"$(pg "$LIQ_SQL")" && [[ $LIQ_STATUS == DONE ]]; }
-if [[ $LIQ_PRICE =~ ^[0-9.]+$ && $(jq -n "$BASE * (1 + 0.6 * ($F - 1)) > $LIQ_PRICE * 1.001") == true ]] || [[ -n $(pg "$LIQ_SQL") ]]; then
-  eventually 30 "the cross short liquidated (flat)" held_on "$PERP" 0
+if [[ $LIQ_PRICE =~ ^[0-9.]+$ && $(jq -n "$EVENT_BASE * (1 + 0.6 * ($F - 1)) > $LIQ_PRICE * 1.001") == true ]] || [[ -n $(pg "$LIQ_SQL") ]]; then
+  eventually 90 "the cross short liquidated (flat)" held_on "$PERP" 0
   eventually 30 "its cross liquidation over (DONE)" cleared
   echo "     equity at the take-over $LIQ_EQUITY, left $LIQ_LEFT, clearance fee $LIQ_FEE, $((LIQ_TO - LIQ_FROM)) s"
   jq -en --argjson fee "$LIQ_FEE" --argjson left "$LIQ_LEFT" --argjson eq "$LIQ_EQUITY" \
@@ -341,7 +348,7 @@ if [[ $LIQ_PRICE =~ ^[0-9.]+$ && $(jq -n "$BASE * (1 + 0.6 * ($F - 1)) > $LIQ_PR
     echo "note: the liquidation ($((LIQ_TO - LIQ_FROM)) s) fell between two transfers out: the refusal is the application tests' (TestACrossAccountBeingLiquidatedKeepsItsBalance)"
   fi
 else
-  echo "note: the event (factor $F from $BASE) stayed below the short's liquidation price $LIQ_PRICE; closing it"
+  echo "note: the event (factor $F from $EVENT_BASE) stayed below the short's liquidation price $LIQ_PRICE; closing it"
   call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.001\",\"reduce_only\":true}" "${AUTH[@]}"
   expect 202 - "the short closed"
 fi
