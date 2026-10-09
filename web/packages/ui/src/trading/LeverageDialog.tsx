@@ -96,6 +96,7 @@ export function LeverageDialog({
           formatMark={(m) => `${m}x`}
           formatValue={(v) => `${v}x`}
           tone={risky ? "down" : "brand"}
+          pulseAtMax={false}
           aria-label={t("ui.leverage.label")}
         />
         {info && <div className="text-xs text-fg-3">{info(lev)}</div>}

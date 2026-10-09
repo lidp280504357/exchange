@@ -104,6 +104,137 @@
   --animate-marquee: marquee 40s linear infinite;
   --animate-pop-in: pop-in var(--t-fast) var(--ease) backwards;
   --animate-pop-out: pop-out var(--t-fast) var(--ease) both;
+  /* A slider reaching its maximum (B173): the halo off the thumb and the
+     dot's pulse open the effect (components/Slider.tsx plays the rest with
+     the keyframes below). */
+  --animate-slider-peak: slider-peak 250ms var(--ease);
+  --animate-slider-dot-pulse: slider-dot-pulse 250ms var(--ease);
+}
+
+@keyframes slider-peak {
+  from {
+    opacity: 0.5;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 2.75;
+  }
+}
+
+@keyframes slider-dot-pulse {
+  40% {
+    scale: 1.3;
+  }
+}
+
+/* The sparks run from the track's end to its start (a full-width carrier
+   moved by its own width) ... */
+@keyframes slider-spark-x {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* ... on four half waves, crossing the track at every quarter: from a
+   crossing the sine eases out to its crest, from a crest it eases in. The
+   other spark is the mirror image, half a period apart. */
+@keyframes slider-spark-up {
+  0%,
+  25%,
+  50%,
+  75% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
+  }
+  12.5%,
+  62.5% {
+    transform: translateY(-6px);
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
+  }
+  37.5%,
+  87.5% {
+    transform: translateY(6px);
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes slider-spark-down {
+  0%,
+  25%,
+  50%,
+  75% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
+  }
+  12.5%,
+  62.5% {
+    transform: translateY(6px);
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
+  }
+  37.5%,
+  87.5% {
+    transform: translateY(-6px);
+    animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes slider-spark-fade {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes slider-mark-flash {
+  0% {
+    opacity: 0;
+    scale: 1;
+  }
+  35% {
+    opacity: 0.9;
+    scale: 1.9;
+  }
+  100% {
+    opacity: 0;
+    scale: 1;
+  }
+}
+
+/* The band over the fill: bright at its left edge (with the sparks), its
+   trail to the right; its colour is the tone's (currentColor) lightened. */
+.slider-sweep {
+  background: linear-gradient(90deg, color-mix(in srgb, currentColor 45%, var(--fg-1)) 0%, transparent 35%);
+}
+
+@keyframes slider-sweep-x {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slider-fade-out {
+  to {
+    opacity: 0;
+  }
 }
 
 /* Popovers, menus, tooltips and select lists (the CSS twin of the motion
