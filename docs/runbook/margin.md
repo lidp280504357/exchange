@@ -135,7 +135,7 @@ margin-service 的结果记在 `margin.reconciliation_runs`，指标 `margin_rec
 | `borrows`、`repays`、`transfers` | 键记录：非 `PENDING`、`created_at` 早于 90 天 |
 | `order_reservations` | 键记录：`created_at` 早于 90 天 |
 
-不删（当前状态）：`accounts`、`loans`、`pools`、三张条款表，进行中（`STARTED`/`SHORTFALL`）的强平与其订单，`PENDING` 的借、还、划转与计息，`RUNNING` 的整点。
+不删（当前状态）：`accounts`、`loans`、`pools`、三张条款表，进行中（`STARTED`/`SHORTFALL`）的强平与其订单，`PENDING` 的借、还、划转与计息，`RUNNING` 的整点。计息与小时利率的批删走迁移 margin 00008 的 `interest_charges_done`、`hourly_rates_hour`（审查 LI ②）。
 
 - 借、还、划转与订单预留就是各自幂等键（客户端的 Idempotency-Key、订单的 `order:<id>`、自动还款的 `trade-repay:…`、清理的 `settle:<uuid>`）的记录，行很小，整行留 90 天；自动还款按 `repays` 的键去重，`ledger.events` 只留 7 天，够用。
 - 对账不受影响：不变量 7 与池子检查只读 `loans`、账本负债、`pools` 与 `PENDING` 借币，不读流水；真删之后跑一次 `exchangectl margin reconcile` 核对（不变量 8、9 在账本，编码会话做检查点）。

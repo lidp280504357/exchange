@@ -40,7 +40,9 @@ const settledFill = `settled AND executed_at < $1
 	AND NOT EXISTS (SELECT 1 FROM pending_settlements p WHERE p.trade_id = fills.trade_id AND p.side = fills.side)`
 
 // moveFillKeys deletes a batch of settled fills and keeps their keys; its
-// command tag (the INSERT's) counts them.
+// command tag (the INSERT's) counts them. A key already kept would make
+// the batch look short and the run stop early, to go on the next run (it
+// cannot be: a fill is deleted once and its key is unique; review LI ①).
 const moveFillKeys = `WITH gone AS (
 		DELETE FROM fills WHERE ctid IN (SELECT ctid FROM fills WHERE ` + settledFill + ` LIMIT $2)
 		RETURNING trade_id, side, executed_at)

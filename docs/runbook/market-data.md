@@ -36,7 +36,7 @@ derivatives-engine ──derivatives.market.depth.internal / derivatives.trade.e
 
 | 表 | 删除条件（cutoff = 现在 − 15 天） |
 |---|---|
-| `candles` | 平台 K 线 1m–12h，**收盘**（开盘时间 + 周期长度）不晚于 cutoff——按收盘算，长周期的当期 K 线开盘可能早已超过 15 天 |
+| `candles` | 平台 K 线 1m–12h，**收盘**（开盘时间 + 周期长度）不晚于 cutoff——按收盘算，长周期的当期 K 线开盘可能早已超过 15 天；条件先限开盘时间不晚于 cutoff，批删走迁移 market 00011 的 `candles_intraday_open`（审查 LI ②） |
 | `funding_periods` | 已结算、资金费时刻早于 cutoff（未结算的当期累计留着） |
 | `reference_candles` | 开盘早于 cutoff，价格事件叠加的也删（服务自己只删不叠加的） |
 | `trades`、`futures_stats`、`futures_liquidations` | 早于 cutoff（兜底：服务自己的清理停了也不超过 15 天） |

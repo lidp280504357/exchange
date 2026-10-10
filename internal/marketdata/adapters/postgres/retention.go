@@ -37,7 +37,9 @@ var intraday = []domain.Interval{
 }
 
 // closedCandles selects the intraday candles whose close (open time and
-// length, fixed for each) is at or before $1.
+// length, fixed for each) is at or before $1. The open time bounded by $1
+// first lets a batch use candles_intraday_open (market 00011), whose
+// condition is the same list of intervals.
 var closedCandles = func() string {
 	ref := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	names, lengths := make([]string, 0, len(intraday)), ""
@@ -45,7 +47,7 @@ var closedCandles = func() string {
 		names = append(names, "'"+string(i)+"'")
 		lengths += fmt.Sprintf(" WHEN '%s' THEN interval '%d seconds'", i, int64(i.Next(ref).Sub(ref)/time.Second))
 	}
-	return "interval IN (" + strings.Join(names, ", ") + ") AND open_time + CASE interval" + lengths + " END <= $1"
+	return "interval IN (" + strings.Join(names, ", ") + ") AND open_time <= $1 AND open_time + CASE interval" + lengths + " END <= $1"
 }()
 
 // kept are the tables of current state, reported with their size.

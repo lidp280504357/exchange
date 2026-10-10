@@ -183,6 +183,9 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 
 不删（当前状态）：`positions`（含平仓的行）、`settings`、`contract_states`、`cross_accounts`、`pending_settlements`，以及上面条件之外的行（生效中的止盈止损、未结束的订单、未结算的资金费轮次、进行中的全仓清算）。
 
+- 已终态而冻结仍是 `PENDING` 的订单，只会是账本拒绝冻结后被拒（`REJECTED`）——没冻结过，所以按"没冻结"删；冻结还在途（账本没应答、恢复循环重试中）的订单状态仍是 `NEW`，不会被删（审查 LI ④）。
+- 每批走索引：订单按 `orders_finished`（迁移 00009，终态订单的 `updated_at`），成交按 `fills_settled`（00010，已记账成交的 `executed_at`），不会每批从表头扫描（审查 LI ②）。
+
 - 重投去重：引擎的成交在 topic 上留 30 天，删掉成交后靠 `fill_keys` 识别重投——`Fills().Has` 两张表都查，HOUSE 那一侧没有订单可查，不留键会重复记仓位。已删订单的订单事件只记一条日志后忽略（`engine update for an unknown contract order`）。
 - `client_order_id` 只在订单保留期内唯一（15 天，远超平台幂等键的 24 小时；协调会话 2026-10-10 19:0x 决定不另设键表），之后可以再用（同币安"未结订单内唯一"）。
 - 对账不受影响：不变量 6 只读当前仓位合计、账本 `PNL_CLEARING` 余额与等账本的结算，不读流水；真删之后跑一次 `exchangectl derivatives reconcile` 核对。
