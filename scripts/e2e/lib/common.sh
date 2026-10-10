@@ -182,10 +182,11 @@ export E2E_REGISTERED="$WORK/registered"
 # test server, then clears out the ones in $E2E_REGISTERED (L4:
 # exchangectl users purge by their IDs, not by the emails' second-long
 # RUN, which a script of another session may share - B184 ④; the
-# accounts' balances go to ADJUSTMENT, the accounts are closed and hidden;
-# one still holding a contract position, a margin debt or a withdrawal in
-# flight is left, and so is one exempt from the purge, funding.sh's
-# standing hedges). Registered when this file is sourced, it is the last
+# accounts' balances go to ADJUSTMENT, the accounts are closed and hidden,
+# contract positions flattened and margin debts settled first; one they
+# leave, one with a withdrawal in flight and one exempt from the purge,
+# funding.sh's standing hedges, are left). Registered when this file is
+# sourced, it is the last
 # at_exit to run, after the script's own clean-ups. It marks when an
 # account was signed up here or the script names its accounts for the run
 # some other way (E2E_MARK_RUN=1: web.sh's and webflows.sh's browser

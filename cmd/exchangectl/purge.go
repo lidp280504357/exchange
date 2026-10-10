@@ -146,7 +146,7 @@ func (d purgeDebt) String() string {
 }
 
 // errLiquidating is a 409 of flatten or settle: a liquidation is under
-// way on the account.
+// way on the account (DERIV_POSITION_LIQUIDATING, MARGIN_FROZEN).
 var errLiquidating = errors.New("a liquidation is under way")
 
 // purgeData reads the test accounts and what they hold.
@@ -517,7 +517,7 @@ func (p *purger) clear(ctx context.Context, c purgeCandidate, o *purgeOutcome, s
 func (p *purger) ended(o *purgeOutcome, end purgeEnd, err error, left string) (bool, error) {
 	switch {
 	case errors.Is(err, errLiquidating):
-		o.skip = skipLiquidating
+		o.skip, o.detail = skipLiquidating, strings.TrimPrefix(err.Error(), errLiquidating.Error()+": ")
 		return false, nil
 	case err != nil:
 		return false, err
@@ -534,18 +534,19 @@ func (p *purger) ended(o *purgeOutcome, end purgeEnd, err error, left string) (b
 func (p *purger) settleDebts(ctx context.Context, user string, o *purgeOutcome) (bool, error) {
 	end, err := p.act.settleMargin(ctx, user, p.actor, p.opts.reason)
 	if err == nil && !end.complete && len(end.debts) > 0 {
-		s, readErr := p.data.state(ctx, user)
-		if readErr != nil {
-			return false, readErr
-		}
 		for _, d := range end.debts {
+			// Spot as it is now: an earlier debt's move took from it
+			// (B188 ①).
+			s, readErr := p.data.state(ctx, user)
+			if readErr != nil {
+				return false, readErr
+			}
 			i := slices.IndexFunc(s.rows, func(r purgeRow) bool { return r.account == ledgerdomain.AccountSpot && r.asset == d.asset })
 			if i < 0 || s.rows[i].available.LessThan(d.amount) {
 				o.skip, o.detail = skipDebt, d.String()+", not in spot"
 				return false, nil
 			}
-			key := fmt.Sprintf("purge:%s:%s:in:v%d", user, d.asset, s.rows[i].version)
-			if err := p.act.marginIn(ctx, user, d, key); err != nil {
+			if err := p.act.marginIn(ctx, user, d, marginInKey(user, d, s.rows[i].version)); err != nil {
 				o.skip, o.detail = skipDebt, fmt.Sprintf("%s: %v", d, err)
 				return false, nil
 			}
@@ -553,6 +554,15 @@ func (p *purger) settleDebts(ctx context.Context, user string, o *purgeOutcome) 
 		end, err = p.act.settleMargin(ctx, user, p.actor, p.opts.reason)
 	}
 	return p.ended(o, end, err, skipDebt)
+}
+
+// marginInKey is a move into a margin account for one of its debts: the
+// account and pair as a short hash, as marginKey, and the version of the
+// spot row it comes from, so two debts in one asset get keys of their own
+// (B188 ①).
+func marginInKey(user string, d purgeDebt, spotVersion int64) string {
+	h := sha256.Sum256([]byte(d.account + "/" + d.symbol))
+	return fmt.Sprintf("purge:%s:%s:in:%x:v%d", user, d.asset, h[:4], spotVersion)
 }
 
 // ordersEnded waits up to the options' wait for a user's canceled orders
@@ -726,18 +736,15 @@ func (a livePurgeActions) marginIn(ctx context.Context, user string, d purgeDebt
 }
 
 // internal posts {actor, reason} to a service's internal purge endpoint
-// and decodes the answer; a 409 is errLiquidating. A 500 after the
-// server's 30 seconds is tried once more (review JV: until C79, a slow
-// engine's answer may come back so).
+// and decodes the answer; a 409 is errLiquidating with the service's own
+// words. Not tried again: since C79 a slow engine's answer is
+// complete:false, and a second call would run beside the first (B188 ②).
 func (a livePurgeActions) internal(ctx context.Context, url, actor, reason string, answer any) error {
 	body := map[string]string{"actor": actor, "reason": reason}
 	err := a.call(ctx, http.MethodPost, url, "", "", body, answer)
 	var status *httpStatusError
-	if errors.As(err, &status) && status.code >= 500 {
-		err = a.call(ctx, http.MethodPost, url, "", "", body, answer)
-	}
 	if errors.As(err, &status) && status.code == http.StatusConflict {
-		return errLiquidating
+		return fmt.Errorf("%w: %s", errLiquidating, status.body)
 	}
 	return err
 }
