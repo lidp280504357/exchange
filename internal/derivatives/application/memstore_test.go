@@ -101,7 +101,7 @@ type (
 )
 
 func (r memSettings) Get(_ context.Context, userID, symbol string) (*domain.Settings, error) {
-	s, ok := r.st.settings[userID+"|"+symbol]
+	s, ok := r.st.settings[userKey(userID)+"|"+symbol]
 	if !ok {
 		return nil, nil
 	}
@@ -109,13 +109,13 @@ func (r memSettings) Get(_ context.Context, userID, symbol string) (*domain.Sett
 }
 
 func (r memSettings) Save(_ context.Context, s domain.Settings) error {
-	r.st.settings[s.UserID+"|"+s.Symbol] = s
+	r.st.settings[userKey(s.UserID)+"|"+s.Symbol] = s
 	return nil
 }
 
 func (r memOrders) Insert(_ context.Context, o domain.Order) error {
 	for _, x := range r.st.orders {
-		if x.UserID == o.UserID && x.ClientOrderID == o.ClientOrderID {
+		if sameUser(x.UserID, o.UserID) && x.ClientOrderID == o.ClientOrderID {
 			return domain.ErrClientIDReused
 		}
 	}
@@ -137,7 +137,7 @@ func (r memOrders) GetForUpdate(ctx context.Context, id string) (domain.Order, e
 
 func (r memOrders) ByClientID(_ context.Context, userID, clientOrderID string) (domain.Order, error) {
 	for _, o := range r.st.orders {
-		if o.UserID == userID && o.ClientOrderID == clientOrderID {
+		if sameUser(o.UserID, userID) && o.ClientOrderID == clientOrderID {
 			return o, nil
 		}
 	}
@@ -162,7 +162,7 @@ func (r memOrders) sorted(keep func(domain.Order) bool) []domain.Order {
 
 func (r memOrders) Active(_ context.Context, userID, symbol string) ([]domain.Order, error) {
 	return r.sorted(func(o domain.Order) bool {
-		return o.UserID == userID && (symbol == "" || o.Symbol == symbol) && o.Status.Active()
+		return sameUser(o.UserID, userID) && (symbol == "" || o.Symbol == symbol) && o.Status.Active()
 	}), nil
 }
 
@@ -183,13 +183,13 @@ func (r memOrders) CountActive(ctx context.Context, userID, symbol string) (int,
 
 func (r memOrders) Unreleased(_ context.Context, userID string) ([]domain.Order, error) {
 	return r.sorted(func(o domain.Order) bool {
-		return o.UserID == userID && o.FreezeState == domain.FreezeDone && o.Reserving() && o.Unreleased().IsPositive()
+		return sameUser(o.UserID, userID) && o.FreezeState == domain.FreezeDone && o.Reserving() && o.Unreleased().IsPositive()
 	}), nil
 }
 
 func (r memOrders) List(_ context.Context, userID string, f ports.ListFilter) ([]domain.Order, error) {
 	list := r.sorted(func(o domain.Order) bool {
-		return o.UserID == userID && (f.Symbol == "" || o.Symbol == f.Symbol) &&
+		return sameUser(o.UserID, userID) && (f.Symbol == "" || o.Symbol == f.Symbol) &&
 			(len(f.Statuses) == 0 || slices.Contains(f.Statuses, o.Status)) && (f.Before == "" || o.ID < f.Before)
 	})
 	slices.Reverse(list)
@@ -208,13 +208,20 @@ func (r memOrders) ToRelease(_ context.Context, cutoff time.Time, limit int) ([]
 	return list[:min(limit, len(list))], nil
 }
 
-func positionKey(p domain.Position) string { return p.UserID + "|" + p.Symbol + "|" + string(p.Side) }
+// sameUser compares user IDs as PostgreSQL compares a uuid column: in any
+// case (review C77 ①, C78); userKey is an ID as the maps keep it.
+func sameUser(a, b string) bool { return strings.EqualFold(a, b) }
+
+func userKey(id string) string { return strings.ToLower(id) }
+
+func positionKey(p domain.Position) string {
+	return userKey(p.UserID) + "|" + p.Symbol + "|" + string(p.Side)
+}
 
 func (r memPositions) OfUser(_ context.Context, userID, symbol string) ([]domain.Position, error) {
 	var out []domain.Position
 	for _, p := range r.st.positions {
-		// As PostgreSQL compares a uuid column: in any case (review C77 ①).
-		if strings.EqualFold(p.UserID, userID) && (symbol == "" || p.Symbol == symbol) {
+		if sameUser(p.UserID, userID) && (symbol == "" || p.Symbol == symbol) {
 			out = append(out, p)
 		}
 	}
@@ -306,7 +313,7 @@ func (r memFills) SetSettled(_ context.Context, tradeID string, side domain.Side
 func (r memFills) OfUser(_ context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error) {
 	var out []domain.Fill
 	for _, f := range r.st.fills {
-		if f.UserID == userID && (symbol == "" || f.Symbol == symbol) {
+		if sameUser(f.UserID, userID) && (symbol == "" || f.Symbol == symbol) {
 			out = append(out, f)
 		}
 	}
@@ -371,7 +378,7 @@ func (r memPending) Count(context.Context) (int, error) { return len(r.st.pendin
 func (r memPending) CountOf(_ context.Context, userID string) (int, error) {
 	n := 0
 	for _, p := range r.st.pending {
-		if p.UserID == userID {
+		if sameUser(p.UserID, userID) {
 			n++
 		}
 	}
@@ -382,7 +389,7 @@ type memCrossLiq memRepos
 
 func (r memCrossLiq) Open(_ context.Context, userID, asset string) (*domain.CrossLiquidation, error) {
 	for _, l := range r.st.crossLiq {
-		if l.UserID == userID && l.Asset == asset && l.Status == domain.CrossLiquidationOpen {
+		if sameUser(l.UserID, userID) && l.Asset == asset && l.Status == domain.CrossLiquidationOpen {
 			return &l, nil
 		}
 	}
@@ -521,7 +528,7 @@ func (r memFunding) Finish(_ context.Context, symbol string, at time.Time, statu
 func (r memFunding) OfUser(_ context.Context, userID, symbol, _ string, limit int) ([]domain.FundingPayment, error) {
 	var out []domain.FundingPayment
 	for _, p := range r.st.payments {
-		if p.UserID == userID && (symbol == "" || p.Symbol == symbol) && p.Settled {
+		if sameUser(p.UserID, userID) && (symbol == "" || p.Symbol == symbol) && p.Settled {
 			fr := r.st.rounds[roundKey(p.Symbol, p.FundingTime)]
 			p.Rate, p.Mark = fr.Rate, fr.Mark
 			out = append(out, p)
@@ -534,11 +541,11 @@ func (r memFunding) OfUser(_ context.Context, userID, symbol, _ string, limit in
 type memCross memRepos
 
 func (r memCross) WarnedAt(_ context.Context, userID, asset string) (time.Time, error) {
-	return r.st.warned[ports.CrossAccount{UserID: userID, Asset: asset}], nil
+	return r.st.warned[ports.CrossAccount{UserID: userKey(userID), Asset: asset}], nil
 }
 
 func (r memCross) SetWarnedAt(_ context.Context, userID, asset string, at time.Time) error {
-	r.st.warned[ports.CrossAccount{UserID: userID, Asset: asset}] = at
+	r.st.warned[ports.CrossAccount{UserID: userKey(userID), Asset: asset}] = at
 	return nil
 }
 
@@ -600,7 +607,7 @@ func (r memConds) Active(_ context.Context, symbol string) ([]domain.Conditional
 func (r memConds) OfUser(_ context.Context, userID, symbol, status, before string, limit int) ([]domain.Conditional, error) {
 	var out []domain.Conditional
 	for _, c := range r.st.conds {
-		if c.UserID == userID && (symbol == "" || c.Symbol == symbol) && (status == "" || c.Status == status) && (before == "" || c.ID < before) {
+		if sameUser(c.UserID, userID) && (symbol == "" || c.Symbol == symbol) && (status == "" || c.Status == status) && (before == "" || c.ID < before) {
 			out = append(out, c)
 		}
 	}

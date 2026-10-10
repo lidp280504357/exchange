@@ -715,8 +715,18 @@ func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
 }
 
 // flattenDeadline is how long a flatten may take to answer, past the
-// server's write timeout: it waits for the engine (application.Flatten).
+// server's read and write timeouts (30 s): it waits for the engine
+// (application.Flatten).
 const flattenDeadline = 2 * time.Minute
+
+// outlast moves the connection's write deadline d ahead, for the answer.
+// The read timeout cancels nothing once the body is read: the server
+// clears the read deadline as it starts its background read
+// (net/http's startBackgroundRead, Go 1.27; review C79 ①, which
+// TestTheFlattenEndpoint holds to). A test's recorder takes no deadline.
+func outlast(w http.ResponseWriter, d time.Duration) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(d))
+}
 
 // flatten ends what a user holds on their contract accounts for a test
 // account's purge (design 2026-10-09 user kinds §1 #9, L4b;
@@ -730,8 +740,7 @@ func (h *Handler) flatten(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	// A recorder in the tests cannot take a deadline: nothing to extend.
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(flattenDeadline))
+	outlast(w, flattenDeadline)
 	res, err := h.Svc.Flatten(r.Context(), chi.URLParam(r, "id"), body.Actor, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)

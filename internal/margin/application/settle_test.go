@@ -60,13 +60,13 @@ func TestSettleRepaysFromWhatTheAccountsHold(t *testing.T) {
 	b.free, b.locked = d("0.004"), d("0.002")
 	r.ledger.mu.Unlock()
 	open := 1 // the isolated account's sell
-	tr := &trading{ledger: r.ledger, prices: r.prices, cancel: func(_ string, a domain.Account) int {
+	tr := &trading{ledger: r.ledger, prices: r.prices, cancel: func(_ string, a domain.Account) (int, error) {
 		if a != iso {
-			return 0
+			return 0, nil
 		}
 		n := open
 		open = 0
-		return n
+		return n, nil
 	}}
 	r.svc.Trading = tr
 	r.svc.Sleep = func(context.Context, time.Duration) error { // the engine confirms the cancel
@@ -143,6 +143,59 @@ func TestSettleRepaysFromWhatTheAccountsHold(t *testing.T) {
 	// Its keys are margin-service's own.
 	if _, err := r.svc.Repay(ctx, application.RepayInput{UserID: user, IdemKey: application.SettlePrefix + "x", Account: iso, Asset: "BTC", All: true}); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("a client's settle: key %v", err)
+	}
+}
+
+// A cancel the trading service refuses does not stop a settle: the other
+// accounts go on and what can be repaid is (review C79 ③). The trading
+// service unreachable stops it; what it did is audited all the same,
+// with the error (C79 ④).
+func TestSettleGoesOnPastARefusedCancel(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	user := uuid.Must(uuid.NewV7()).String()
+	cross := domain.Cross()
+	r.ledger.fund(user, "USDT", d("1000"))
+	if _, err := r.svc.Transfer(ctx, application.TransferInput{
+		UserID: user, IdemKey: "in", Direction: domain.DirectionIn, Account: cross, Asset: "USDT", Amount: d("1000"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: user, IdemKey: "b", Account: cross, Asset: "USDT", Amount: d("100")}); err != nil {
+		t.Fatal(err)
+	}
+	refusal := apperr.Invalid("not a margin account")
+	r.svc.Trading = &trading{ledger: r.ledger, prices: r.prices, cancel: func(string, domain.Account) (int, error) { return 0, refusal }}
+	res, err := r.svc.Settle(ctx, user, "ops@example.com", "purging a test account")
+	if err != nil || len(res.Repaid) != 1 || !res.Repaid[0].Principal.Equal(d("100")) || !res.Complete() {
+		t.Fatalf("settle past a refused cancel %+v %v", res, err)
+	}
+	audits := func() (n int) {
+		t.Helper()
+		rows, err := r.db.Query(ctx, `SELECT envelope FROM outbox WHERE event_type = 'audit.AdminActionPerformed'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var envelope []byte
+			if err := rows.Scan(&envelope); err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(envelope, []byte("margin.user_settled")) && bytes.Contains(envelope, []byte("COMMON_UNAVAILABLE")) {
+				n++
+			}
+		}
+		return n
+	}
+	r.svc.Trading = &trading{ledger: r.ledger, prices: r.prices, cancel: func(string, domain.Account) (int, error) {
+		return 0, apperr.Unavailable(context.DeadlineExceeded)
+	}}
+	if _, err := r.svc.Settle(ctx, user, "ops@example.com", "purging a test account"); code(err) != apperr.CodeUnavailable {
+		t.Fatalf("settle with the trading service unreachable: %v", err)
+	}
+	if n := audits(); n != 1 {
+		t.Fatalf("%d failed settles audited", n)
 	}
 }
 

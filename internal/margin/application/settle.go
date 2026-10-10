@@ -95,15 +95,44 @@ func (s *Service) Settle(ctx context.Context, userID, actor, reason string) (Set
 	}
 	order := slices.SortedFunc(maps.Keys(accounts), func(a, b domain.Account) int { return strings.Compare(a.Key(), b.Key()) })
 	var out SettleResult
+	err = s.settle(ctx, userID, order, &out)
+	// What it did is audited even when it failed midway (review C79 ④):
+	// cancels may have gone out, some debts been repaid.
+	if aerr := s.auditSettle(ctx, userID, actor, reason, out, err); aerr != nil {
+		if err != nil {
+			s.Log.ErrorContext(ctx, "a failed settle not audited", "user_id", userID, "error", aerr)
+		}
+		err = cmp.Or(err, aerr)
+	}
+	s.touch(userID)
+	if err != nil {
+		s.Log.WarnContext(ctx, "margin accounts not settled", "user_id", userID, "actor", actor, "error", err)
+		return SettleResult{}, err
+	}
+	s.Log.InfoContext(ctx, "margin accounts settled", "user_id", userID, "actor", actor, "canceled_orders", out.CanceledOrders,
+		"repaid", len(out.Repaid), "remaining", len(out.Remaining))
+	return out, nil
+}
+
+// settle cancels the accounts' orders, repays what they can and lists what
+// is still owed, in out.
+func (s *Service) settle(ctx context.Context, userID string, order []domain.Account, out *SettleResult) error {
 	for _, a := range order {
 		n, err := s.Trading.CancelAccount(ctx, userID, a)
-		if err != nil {
-			return SettleResult{}, err
+		switch {
+		case err == nil:
+			out.CanceledOrders += n
+		case refused(err):
+			// The trading service refused (review C79 ③): what the orders
+			// hold stays locked and its debt owed below; the rest goes on.
+			s.Log.WarnContext(ctx, "a purge's cancel refused", "user_id", userID, "account", a.Key(), "error", err)
+		default:
+			return err
 		}
-		out.CanceledOrders += n
 	}
-	if held, err = s.unlocked(ctx, userID); err != nil {
-		return SettleResult{}, err
+	held, err := s.unlocked(ctx, userID)
+	if err != nil {
+		return err
 	}
 	for _, a := range order {
 		for _, h := range sortedHoldings(held[a]) {
@@ -122,12 +151,12 @@ func (s *Service) Settle(ctx context.Context, userID, actor, reason string) (Set
 				// liquidation began meanwhile): still owed below.
 				s.Log.WarnContext(ctx, "a purge's repayment not made", "user_id", userID, "account", a.Key(), "asset", h.Asset, "error", err)
 			default:
-				return SettleResult{}, err
+				return err
 			}
 		}
 	}
 	if held, err = s.Ledger.Holdings(ctx, userID); err != nil {
-		return SettleResult{}, err
+		return err
 	}
 	for _, a := range slices.SortedFunc(maps.Keys(held), func(a, b domain.Account) int { return strings.Compare(a.Key(), b.Key()) }) {
 		for _, h := range sortedHoldings(held[a]) {
@@ -136,13 +165,7 @@ func (s *Service) Settle(ctx context.Context, userID, actor, reason string) (Set
 			}
 		}
 	}
-	if err := s.auditSettle(ctx, userID, actor, reason, out); err != nil {
-		return SettleResult{}, err
-	}
-	s.Log.InfoContext(ctx, "margin accounts settled", "user_id", userID, "actor", actor, "canceled_orders", out.CanceledOrders,
-		"repaid", len(out.Repaid), "remaining", len(out.Remaining))
-	s.touch(userID)
-	return out, nil
+	return nil
 }
 
 // unlocked waits until nothing is locked in the user's margin accounts
@@ -167,7 +190,7 @@ func sortedHoldings(list []domain.Holding) []domain.Holding {
 }
 
 // auditSettle records the call and what it did.
-func (s *Service) auditSettle(ctx context.Context, userID, actor, reason string, out SettleResult) error {
+func (s *Service) auditSettle(ctx context.Context, userID, actor, reason string, out SettleResult, failed error) error {
 	type entry struct {
 		Account   string `json:"account"`
 		Symbol    string `json:"symbol,omitempty"`
@@ -185,12 +208,19 @@ func (s *Service) auditSettle(ctx context.Context, userID, actor, reason string,
 	for _, o := range out.Remaining {
 		owed = append(owed, entry{Account: string(o.Account.Type), Symbol: o.Account.Symbol, Asset: o.Asset, Amount: o.Amount.String()})
 	}
-	details, err := json.Marshal(map[string]any{
-		"canceled_orders": out.CanceledOrders, "repaid": repaid, "remaining_debt": owed, "complete": out.Complete(),
-	})
+	d := map[string]any{
+		"canceled_orders": out.CanceledOrders, "repaid": repaid, "remaining_debt": owed, "complete": failed == nil && out.Complete(),
+	}
+	if failed != nil { // what is owed unknown: it stopped midway
+		d["error"] = apperr.From(failed).Code
+	}
+	details, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
+	// Recorded even when the caller has gone: the cancels went out.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
 		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
 			Target: "user:" + userID, Action: "margin.user_settled", Actor: actor, Reason: reason, Details: string(details),

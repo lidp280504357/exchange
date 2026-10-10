@@ -1,8 +1,10 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -102,12 +104,37 @@ func (s *Service) Flatten(ctx context.Context, userID, actor, reason string) (Fl
 	var out FlattenResult
 	working, err := s.cancelAll(ctx, userID, actor, reason, &out)
 	if err != nil {
-		return FlattenResult{}, err
+		return FlattenResult{}, err // refused, or failed in its transaction: nothing changed
 	}
 	f := &flattening{why: map[string]string{}, ours: map[string]bool{}, closed: map[string]*Closed{}}
+	err = s.closeAll(ctx, userID, working, f)
+	out.Closed = f.result()
+	if err == nil {
+		out.Remaining, err = s.left(ctx, userID, f)
+	}
+	// What it did is audited even when it failed midway (review C79 ④):
+	// the cancels went out, some closes may have filled.
+	if aerr := s.auditFlatten(ctx, userID, actor, reason, out, err); aerr != nil {
+		if err != nil {
+			s.Log.ErrorContext(ctx, "a failed flatten not audited", "user_id", userID, "error", aerr)
+		}
+		err = cmp.Or(err, aerr)
+	}
+	if err != nil {
+		s.Log.WarnContext(ctx, "contract accounts not flattened", "user_id", userID, "actor", actor, "error", err)
+		return FlattenResult{}, err
+	}
+	s.Log.InfoContext(ctx, "contract accounts flattened", "user_id", userID, "actor", actor, "canceled_orders", out.CanceledOrders,
+		"canceled_conditionals", out.CanceledConditionals, "closed", len(out.Closed), "remaining", len(out.Remaining))
+	return out, nil
+}
+
+// closeAll waits for the orders working (the cancels), then closes the
+// user's positions in up to FlattenRounds rounds; f keeps what it did.
+func (s *Service) closeAll(ctx context.Context, userID string, working []string, f *flattening) error {
 	orders, err := s.await(ctx, working)
 	if err != nil {
-		return FlattenResult{}, err
+		return err
 	}
 	f.look(orders)
 	for round := range FlattenRounds {
@@ -118,10 +145,10 @@ func (s *Service) Flatten(ctx context.Context, userID, actor, reason string) (Fl
 			}
 		}
 		if err != nil {
-			return FlattenResult{}, err
+			return err
 		}
 		if len(held) == 0 && len(f.carry) == 0 {
-			break
+			return nil
 		}
 		// A position with an order still working (a cancel the engine has
 		// not confirmed, a close of an earlier round) waits for it.
@@ -137,65 +164,55 @@ func (s *Service) Flatten(ctx context.Context, userID, actor, reason string) (Fl
 				continue
 			}
 			placed, code, err := s.closeOut(ctx, userID, p)
-			if err != nil {
-				return FlattenResult{}, err
-			}
-			f.why[k] = code
 			for _, id := range placed {
 				f.ours[id] = true
 			}
+			if err != nil {
+				return err
+			}
+			f.why[k] = code
 			ids = append(ids, placed...)
 		}
 		orders, err := s.await(ctx, ids)
 		if err != nil {
-			return FlattenResult{}, err
+			return err
 		}
 		f.look(orders)
 	}
-	for _, o := range f.carry { // what they filled so far counts
-		if f.ours[o.ID] {
-			f.add(o)
-		}
-	}
-	for _, k := range f.order {
-		c := f.closed[k]
-		c.Price = c.quote.DivRound(c.Quantity, 8)
-		out.Closed = append(out.Closed, *c)
-	}
+	return nil
+}
+
+// left lists what is still open: the positions, with why, and the flat
+// positions an order is still working on (it may open them again).
+func (s *Service) left(ctx context.Context, userID string, f *flattening) ([]Left, error) {
 	held, err := s.openOf(ctx, userID)
 	if err != nil {
-		return FlattenResult{}, err
+		return nil, err
 	}
-	left := map[string]bool{}
+	var out []Left
+	seen := map[string]bool{}
 	for _, p := range held {
 		k := positionKey(p.Symbol, p.Side)
 		l := Left{Symbol: p.Symbol, Side: direction(p), Quantity: p.Qty.Abs(), Reason: f.why[k]}
 		if l.Reason == "" { // it changed after its last look
 			l.Reason = domain.ErrClosePending.Code
 		}
-		left[k] = true
-		out.Remaining = append(out.Remaining, l)
+		seen[k] = true
+		out = append(out, l)
 	}
-	// An order still working on a flat position may open it again: not
-	// done either.
 	for _, o := range f.carry {
-		if k := positionKey(o.Symbol, o.PositionSide); !left[k] {
-			left[k] = true
+		if k := positionKey(o.Symbol, o.PositionSide); !seen[k] {
+			seen[k] = true
 			way := decimal.NewFromInt(1) // in one-way mode, the way it fills
 			if o.Side == domain.Sell {
 				way = way.Neg()
 			}
-			out.Remaining = append(out.Remaining, Left{
+			out = append(out, Left{
 				Symbol: o.Symbol, Side: direction(domain.Position{Side: o.PositionSide, Qty: way}), Quantity: decimal.Zero,
 				Reason: domain.ErrClosePending.Code,
 			})
 		}
 	}
-	if err := s.auditFlatten(ctx, userID, actor, reason, out); err != nil {
-		return FlattenResult{}, err
-	}
-	s.Log.InfoContext(ctx, "contract accounts flattened", "user_id", userID, "actor", actor, "canceled_orders", out.CanceledOrders,
-		"canceled_conditionals", out.CanceledConditionals, "closed", len(out.Closed), "remaining", len(out.Remaining))
 	return out, nil
 }
 
@@ -247,6 +264,29 @@ func (f *flattening) add(o domain.Order) {
 		f.order = append(f.order, k)
 	}
 	c.Quantity, c.quote = c.Quantity.Add(o.Filled), c.quote.Add(o.FilledQuote)
+}
+
+// result is what the closes filled, with their average prices: the
+// finished ones and, as far as they went, those still working. f is left
+// as it was.
+func (f *flattening) result() []Closed {
+	sums := &flattening{closed: map[string]*Closed{}, order: slices.Clone(f.order)}
+	for k, c := range f.closed {
+		copied := *c
+		sums.closed[k] = &copied
+	}
+	for _, o := range f.carry {
+		if f.ours[o.ID] {
+			sums.add(o)
+		}
+	}
+	out := make([]Closed, 0, len(sums.order))
+	for _, k := range sums.order {
+		c := *sums.closed[k]
+		c.Price = c.quote.DivRound(c.Quantity, 8)
+		out = append(out, c)
+	}
+	return out
 }
 
 // cancelAll requests the cancel of the user's orders and ends their
@@ -415,7 +455,7 @@ func (s *Service) openOf(ctx context.Context, userID string) ([]domain.Position,
 func positionKey(symbol string, side domain.PositionSide) string { return symbol + "|" + string(side) }
 
 // auditFlatten records the call and what it did.
-func (s *Service) auditFlatten(ctx context.Context, userID, actor, reason string, out FlattenResult) error {
+func (s *Service) auditFlatten(ctx context.Context, userID, actor, reason string, out FlattenResult, failed error) error {
 	type entry struct {
 		Symbol   string `json:"symbol"`
 		Side     string `json:"side"`
@@ -430,13 +470,20 @@ func (s *Service) auditFlatten(ctx context.Context, userID, actor, reason string
 	for _, l := range out.Remaining {
 		left = append(left, entry{Symbol: l.Symbol, Side: l.Side, Quantity: l.Quantity.String(), Reason: l.Reason})
 	}
-	details, err := json.Marshal(map[string]any{
+	d := map[string]any{
 		"canceled_orders": out.CanceledOrders, "canceled_conditionals": out.CanceledConditionals, "closed": closed, "remaining": left,
-		"complete": out.Complete(),
-	})
+		"complete": failed == nil && out.Complete(),
+	}
+	if failed != nil { // remaining unknown: it stopped midway
+		d["error"] = apperr.From(failed).Code
+	}
+	details, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
+	// Recorded even when the caller has gone: the cancels went out.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
 		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
 			Target: "user:" + userID, Action: "derivatives.user_flattened", Actor: actor, Reason: reason, Details: string(details),

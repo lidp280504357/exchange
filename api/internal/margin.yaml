@@ -93,9 +93,14 @@ paths:
         is done, 0, [], [] and complete. A user without margin accounts gets
         the same answer: user-service is not asked whether it knows the
         user (a purge calls this for every test account; a 404 would read
-        like a wrong path), so there is no 404 for an unknown user. Each
-        call is audited as margin.user_settled (target user:<id>; details
-        the count, repaid, remaining_debt and complete).
+        like a wrong path), so there is no 404 for an unknown user. A cancel
+        the trading service refuses (4xx) is logged and the rest goes on:
+        what those orders hold stays locked and its debt in remaining_debt.
+        It takes a few seconds as a rule (8 at most waiting for the
+        cancels): give the call 30 seconds or more. Each call is audited as
+        margin.user_settled (target user:<id>; details the count, repaid,
+        remaining_debt and complete), also one that failed midway (details
+        error, the failure's code, and complete false).
       tags: [purge]
       parameters:
         - name: id

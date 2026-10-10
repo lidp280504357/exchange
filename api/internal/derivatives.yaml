@@ -134,7 +134,9 @@ paths:
         purge calls this for every test account; a 404 would read like a
         wrong path), so there is no 404 for an unknown user. Each call is
         audited as derivatives.user_flattened (target user:<id>; details the
-        counts, closed, remaining and complete).
+        counts, closed, remaining and complete), also one that failed midway
+        (details error, the failure's code, and complete false: the cancels
+        went out, some closes may have filled).
       tags: [purge]
       parameters:
         - name: id

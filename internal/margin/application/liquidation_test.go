@@ -31,8 +31,9 @@ type trading struct {
 	ledger   *ledger
 	prices   *prices
 	canceled int
-	// cancel, when set, answers how many orders a cancel asked for.
-	cancel  func(user string, a domain.Account) int
+	// cancel, when set, answers a cancel: how many orders it asked for, or
+	// why it did not.
+	cancel  func(user string, a domain.Account) (int, error)
 	fill    func(o ports.LiquidationOrder) decimal.Decimal
 	pending int
 	fail    error
@@ -54,7 +55,7 @@ func (t *trading) CancelAccount(_ context.Context, user string, a domain.Account
 	defer t.mu.Unlock()
 	t.canceled++
 	if t.cancel != nil {
-		return t.cancel(user, a), nil
+		return t.cancel(user, a)
 	}
 	return 0, nil
 }

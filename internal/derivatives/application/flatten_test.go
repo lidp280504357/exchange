@@ -3,6 +3,8 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -344,6 +346,36 @@ func TestFlattenWaitsForTheFillsToBeApplied(t *testing.T) {
 		t.Fatalf("alice %+v", p)
 	}
 	r.reconcile(t)
+}
+
+// A flatten that fails midway - here the caller gone while it waits for
+// the engine - still audits what it did: the cancels went out (review C79
+// ④).
+func TestFlattenAuditsWhatItDidWhenItFails(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice := uuid.NewString()
+	r.fund(alice, "10000")
+	bid := r.place(t, alice, domain.Buy, "59000", "0.1", false)
+	r.svc.Sleep = func(context.Context, time.Duration) error { return context.Canceled }
+	if _, err := r.svc.Flatten(ctx, alice, "ops@example.com", "purging a test account"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a flatten whose caller went: %v", err)
+	}
+	if o, err := r.svc.Get(ctx, alice, bid.ID); err != nil || !o.CancelRequested {
+		t.Fatalf("the bid %+v %v", o, err)
+	}
+	if events := r.events(); events != nil {
+		var flattened []string
+		for _, e := range events {
+			if a, ok := e.(*auditv1.AdminActionPerformed); ok && a.GetAction() == "derivatives.user_flattened" {
+				flattened = append(flattened, a.GetDetails())
+			}
+		}
+		if len(flattened) != 1 || !strings.Contains(flattened[0], `"canceled_orders":1`) || !strings.Contains(flattened[0], `"complete":false`) ||
+			!strings.Contains(flattened[0], `"error":"COMMON_INTERNAL"`) {
+			t.Fatalf("the audits of the failed flatten %v", flattened)
+		}
+	}
 }
 
 // Flatten refuses a cross account being liquidated (the liquidation
