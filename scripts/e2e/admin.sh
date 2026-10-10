@@ -2565,16 +2565,18 @@ check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without 
 echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
 as AUDITOR GET /admin/v1/launch-checklist ""
 expect 200 - "every administrator reads the launch checklist"
-# Twenty with the product lines (K3), nineteen with the apps to download
-# (H4), eighteen with the contracts' (G5), sixteen with margin trading's
-# (E5); fewer from an admin-service before them.
-check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 20
+# Twenty-one with the console's access restriction (N1), twenty with the
+# product lines (K3), nineteen with the apps to download (H4), eighteen
+# with the contracts' (G5), sixteen with margin trading's (E5); fewer from
+# an admin-service before them.
+check '(.items | length) == ([.items[].key] | unique | length) and ((.items | length) == 21
+    or ((.items | length) == 20 and all(.items[]; .key != "admin_access"))
     or ((.items | length) == 19 and all(.items[]; .key != "products"))
     or ((.items | length) == 18 and all(.items[]; .key != "app_downloads"))
     or ((.items | length) == 16 and all(.items[]; .key != "insurance" and .key != "coin_m"))
     or ((.items | length) == 15 and all(.items[]; .key != "margin")))
   and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
-  "twenty items, each with its state"
+  "twenty-one items, each with its state"
 check '[.items[] | select(.key == "products")] | all(.status == "UNKNOWN" or (.status == "OK"
   and all(.value.spot, .value.usdt_m, .value.coin_m; (.enabled | type) == "boolean")))' \
   "the product lines' item says which are open, OK whatever is"
