@@ -390,12 +390,22 @@ func SwitchOffRequireTOTP(ctx context.Context, store ports.Store, actor, reason 
 // current password and, when it is bound, its code prove it is them. A
 // new secret nobody holds takes its place, so the account signs in with
 // the code again only after an authenticator is bound anew. Audited as
-// admin.totp_removed.
+// admin.totp_removed. The switch is read under its lock, as
+// SetRequireTOTP takes it (A121): an instance's cached copy may be 5
+// seconds old, and a removal racing the switch-on would leave the code
+// asked with nobody bound.
 func (s *Service) RemoveOwnTOTP(ctx context.Context, p Principal, current, code string) error {
 	if s.TOTPRequired() {
 		return domain.ErrTOTPRequired
 	}
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
+		sw, err := r.Access().GetForUpdate(ctx)
+		if err != nil {
+			return err
+		}
+		if sw == nil || sw.RequireTOTP {
+			return domain.ErrTOTPRequired
+		}
 		a, err := r.Admins().GetForUpdate(ctx, p.Admin.ID)
 		if err != nil {
 			return err

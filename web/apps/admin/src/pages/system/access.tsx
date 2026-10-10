@@ -146,9 +146,10 @@ export function AccessRestriction({ admin }: { admin: Admin }) {
   const list = entries(draft);
   const changed = list.join("\n") !== v.access_allowlist.join("\n");
   const yours = holds(list, v.your_ip);
-  const put = async (on: boolean, reason: string) => {
+  // Switching it off sends no list: the stored one stays, whatever the box holds (A122).
+  const put = async (on: boolean, reason: string, allowlist?: string[]) => {
     const res: ConsoleAccess = adminData(
-      await adminApi.PUT("/admin/v1/settings/access/restriction", { body: { enabled: on, allowlist: list, reason } }),
+      await adminApi.PUT("/admin/v1/settings/access/restriction", { body: { enabled: on, ...(allowlist ? { allowlist } : {}), reason } }),
     );
     qc.setQueryData(accessKey, res);
     return res;
@@ -179,9 +180,9 @@ export function AccessRestriction({ admin }: { admin: Admin }) {
               {!v.access_restriction && !yours && <span className="text-danger-strong">{t("admin.access.notYours", { ip: v.your_ip })}</span>}
             </span>
           }
-          target={listTarget}
+          target={v.access_restriction ? <span className="font-mono">admin.access_restriction</span> : listTarget}
           confirmWord={v.access_restriction ? "off" : "on"}
-          run={(reason) => put(!v.access_restriction, reason)}
+          run={(reason) => (v.access_restriction ? put(false, reason) : put(true, reason, list))}
           success={t("admin.access.saved")}
         />
       </div>
@@ -252,7 +253,7 @@ export function AccessRestriction({ admin }: { admin: Admin }) {
             description={t("admin.access.saveListDesc")}
             target={listTarget}
             confirmWord="save"
-            run={(reason) => put(v.access_restriction, reason)}
+            run={(reason) => put(v.access_restriction, reason, list)}
             success={t("admin.access.saved")}
           />
         </div>

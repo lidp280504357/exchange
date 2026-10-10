@@ -140,7 +140,7 @@ ok "a cross margin account with 10 USDT for the console ($MARGIN_USER_ID)"
 echo "== admin console in the browser"
 # A throwaway administrator (random password and authenticator secret on
 # stdin, never printed), disabled when the script ends; the browser signs
-# in with the password alone (admin.login_without_totp on the test server).
+# in with the password alone (admin.require_totp off on the test server).
 ADMIN_EMAIL="e2e-console-$RUN@example.com"
 ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
 secret=$(LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32 || true)

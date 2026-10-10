@@ -136,6 +136,14 @@ func TestRequireTOTPSwitch(t *testing.T) {
 		t.Fatalf("exchangectl's audit %v", last)
 	}
 
+	// A copy 5 seconds old here does not let a removal through while the
+	// stored switch is on (another instance switched it on, A121).
+	h.store.access.RequireTOTP = true
+	if err := h.svc.RemoveOwnTOTP(ctx, boss, testPassword, h.code("boss@example.com")); code(err) != "ADMIN_TOTP_REQUIRED" {
+		t.Fatalf("removed while the stored switch is on: %v", err)
+	}
+	h.store.access.RequireTOTP = false
+
 	// Off, an authenticator is removed with the password and its code; not bound any more.
 	h.now = h.now.Add(totp.Period)
 	if err := h.svc.RemoveOwnTOTP(ctx, boss, "a wrong password", h.code("boss@example.com")); code(err) != "ADMIN_PASSWORD_WRONG" {

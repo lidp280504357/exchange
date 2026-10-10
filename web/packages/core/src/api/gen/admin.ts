@@ -38,8 +38,8 @@ export interface paths {
          *     email, password or code (or a code used before), ADMIN_LOCKED
          *     after five failures in a row (15 minutes), and COMMON_RATE_LIMITED
          *     beyond 10 attempts a minute from one IP. The code may be left out
-         *     while the flag admin.login_without_totp is on; it is then not
-         *     checked.
+         *     while the console's setting admin.require_totp is off (N1); it is
+         *     then not checked.
          */
         post: operations["login"];
         delete?: never;

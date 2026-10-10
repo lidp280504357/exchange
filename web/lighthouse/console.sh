@@ -3,7 +3,7 @@
 # 2026-10-02 §6: a console page scores at least 85 for performance; the
 # sign-in page, at least 90, is in admin.json). A throwaway ADMIN (random
 # password and authenticator secret on stdin, never printed) signs in with
-# the password alone (admin.login_without_totp on the test server); its
+# the password alone (admin.require_totp off on the test server); its
 # session goes to Lighthouse in a header file in the run's private work
 # directory, and the administrator is signed out and disabled when the
 # script ends. Reports (JSON and HTML) in .lighthouseci/console/.

@@ -79,7 +79,7 @@ for site in "${sites[@]}"; do
       ;;
     admin)
       echo "== admin console's checklist ($ADMIN_BASE)"
-      # The browser signs in with the password alone (admin.login_without_totp
+      # The browser signs in with the password alone (admin.require_totp off
       # on the test server).
       # shellcheck source=lib/remote.sh
       source "$(dirname "$0")/lib/remote.sh"

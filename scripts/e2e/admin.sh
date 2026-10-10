@@ -261,7 +261,9 @@ fi
 # be made up, so the other addresses' requests go straight to
 # admin-service on the compose network with the X-Real-IP nginx would set.
 # Switched on with this machine's address and a test network, then off
-# (exchangectl in the container switches it off when the run ends).
+# with the list it had put back (A122; when the run ends the list is put
+# back and exchangectl in the container switches it off, whatever
+# happened).
 echo "== the access restriction (N1)"
 as AUDITOR GET /admin/v1/settings/access ""
 if [[ $STATUS != 200 || $(jq -r 'has("access_restriction")' <<<"$BODY") != true ]]; then
@@ -270,6 +272,7 @@ elif [[ $(jq -r .access_restriction <<<"$BODY") == true ]]; then
   echo "skip switching the access restriction: it is on here"
 else
   MY_IP=$(jq -r .your_ip <<<"$BODY")
+  LIST_BEFORE=$(jq -c .access_allowlist <<<"$BODY")
   [[ -n $MY_IP && $MY_IP != null ]] || fail "the caller's address is not told: $BODY"
   echo "ok   off here; this machine's address as the console sees it: $MY_IP"
   inside() { # inside IP PORT PATH: the status of GET PATH from IP, straight to admin-service on the compose network
@@ -284,6 +287,10 @@ else
   expect 400 COMMON_INVALID_ARGUMENT "a list that lets every address in is refused"
   # shellcheck disable=SC2016 # expanded when the script ends
   at_exit 'remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin settings access-restriction off --reason \"e2e run over\"" >/dev/null'
+  restore_list() { # restore_list: off, with the list as it was before the run
+    as ADMIN PUT /admin/v1/settings/access/restriction "$(jq -nc --argjson l "$LIST_BEFORE" '{enabled: false, allowlist: $l, reason: "e2e: the list as it was"}')"
+  }
+  at_exit 'restore_list >/dev/null'
   as ADMIN PUT /admin/v1/settings/access/restriction \
     "$(jq -nc --arg ip "$MY_IP" '{enabled: true, allowlist: [$ip, "192.0.2.0/24"], reason: "e2e: this machine and a test network"}')"
   expect 200 - "ADMIN restricts the console to this machine and a test network"
@@ -301,6 +308,9 @@ else
   check '.access_restriction == false and (.access_allowlist | length) == 2' "off, the list kept"
   open_again() { [[ $(inside 198.51.100.7 8093 /admin/v1/login-options) == 200 ]]; }
   eventually 20 "every address reaches the console again" open_again
+  restore_list
+  expect 200 - "the list as it was before the run"
+  check ".access_restriction == false and .access_allowlist == $LIST_BEFORE" "this machine's address left out again"
 fi
 
 echo "== roles"

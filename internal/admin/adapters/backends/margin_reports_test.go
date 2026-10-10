@@ -53,6 +53,8 @@ func TestMarginReports(t *testing.T) {
 			balance_kind, available_after, frozen_after, posted_at) VALUES
 			(generateUUIDv4(), 1, 0, 'MARGIN_INTEREST', generateUUIDv4(), 'USER', 'u', 'MARGIN_CROSS_INTEREST', 'ZETA', -0.5, 'AVAILABLE', 0, 0,
 				toDateTime64(today() - 3, 3, 'UTC')),
+			(generateUUIDv4(), 5, 0, 'MARGIN_INTEREST', generateUUIDv4(), 'USER', 'u', 'MARGIN_CROSS_INTEREST', 'ZETA', -0.05, 'AVAILABLE', 0, 0,
+				toDateTime64(today() - 30, 3, 'UTC')),
 			(generateUUIDv4(), 2, 0, 'MARGIN_INTEREST', generateUUIDv4(), 'USER', 'u', 'MARGIN_CROSS_INTEREST', 'ZETA', -0.1, 'AVAILABLE', 0, 0,
 				toDateTime64(today(), 3, 'UTC') + INTERVAL 1 HOUR),
 			(generateUUIDv4(), 3, 0, 'MARGIN_INTEREST', generateUUIDv4(), 'USER', 'u', 'MARGIN_ISOLATED_INTEREST', 'ZETA', -0.2, 'AVAILABLE', 0, 0,
@@ -134,8 +136,10 @@ func TestMarginReports(t *testing.T) {
 		t.Fatalf("the interest %+v", buckets)
 	}
 	b := buckets[0]
+	// Owed carries 0.5 from three days before and 0.05 from thirty: the
+	// interest rows are kept past the read models' 15 days (clickhouse 00013).
 	if b.Day != midnight.Format(time.DateOnly) || b.Asset != "ZETA" || b.Charged.String() != "0.3" || b.Repaid.String() != "0.15" ||
-		b.Owed.String() != "0.65" || b.PrincipalAvg.String() != "100" || b.HourlyRateAvg.String() != "0.0015" || b.Accounts != 2 ||
+		b.Owed.String() != "0.7" || b.PrincipalAvg.String() != "100" || b.HourlyRateAvg.String() != "0.0015" || b.Accounts != 2 ||
 		b.ChargedUSDT == nil || *b.ChargedUSDT != "0.6" || *b.RepaidUSDT != "0.3" {
 		t.Fatalf("the day's interest %+v", b)
 	}
