@@ -510,6 +510,25 @@ export function withProducts(page, products, fn) {
   return withAnswer(page, "/v1/platform/products", products, fn);
 }
 
+/**
+ * ACCOUNT_LIQUIDATING is an answer of GET /v1/derivatives/account: a USDT
+ * futures account whose cross positions are being liquidated (C68, F24),
+ * nothing transferable meanwhile.
+ */
+export const ACCOUNT_LIQUIDATING = {
+  asset: "USDT", wallet_balance: "100", available: "100", frozen: "0", order_margin: "0", position_margin: "0", unrealized_pnl: "0",
+  cross_unrealized_pnl: "0", margin_balance: "100", transferable: "0", liquidating: true,
+};
+
+/**
+ * withFuturesAccount runs fn while the page's GET /v1/derivatives/account
+ * answers account (whatever the asset asked for): a state of the futures
+ * account the smokes cannot bring about, such as a liquidation.
+ */
+export function withFuturesAccount(page, account, fn) {
+  return withAnswer(page, "/v1/derivatives/account", account, fn);
+}
+
 // withAnswer runs fn while the page's requests of path answer body, then
 // lets the network be again.
 async function withAnswer(page, path, body, fn) {

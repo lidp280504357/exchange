@@ -51,7 +51,7 @@ export const zhTW = {
     SUBMITTED: "託管方處理中", CUSTODY_REJECTED: "託管方拒絕", CUSTODY_FAILED: "鏈上轉帳失敗",
     CONFIRMED: "已完成", FAILED: "失敗", LEDGER_INSUFFICIENT_BALANCE: "可用餘額不足",
     REALIZED_PNL: "已實現盈虧", FUNDING_PAYMENT: "資金費", LIQUIDATION_SETTLE: "強平結算", ADL_SETTLE: "自動減倉",
-    INSURANCE_CONTRIBUTION: "保險基金", ONE_WAY: "單向持倉", HEDGE: "雙向持倉", CROSS: "全倉", ISOLATED: "逐倉",
+    INSURANCE_CONTRIBUTION: "保險基金", LIQUIDATION_CLEARANCE_FEE: "強平清算費", ONE_WAY: "單向持倉", HEDGE: "雙向持倉", CROSS: "全倉", ISOLATED: "逐倉",
     LONG: "多", SHORT: "空", BOTH: "單向", TAKE_PROFIT: "止盈", STOP_LOSS: "止損", TRIGGERED: "已觸發",
     DETECTED: "已檢測", CREDITED: "已到帳", ORPHANED: "已回滾", COMPLETED: "成功", CHAIN: "鏈上", INTERNAL: "站內",
     MARGIN_CROSS: "全倉槓桿", MARGIN_ISOLATED: "逐倉槓桿", NORMAL: "正常", WARNED: "已預警", LIQUIDATING: "強平中",
@@ -109,5 +109,6 @@ export const zhTW = {
     MARGIN_LEVEL_TOO_LOW_OUT: "劃出後風險率會低於預警線：現在最多可劃出 {{max_transferable}}",
     LEDGER_INSUFFICIENT_BALANCE_OUT: "可用餘額不足：現在最多可劃出 {{max_transferable}}",
     MARGIN_DISABLED_AUTO_BORROW: "自動借款暫未開放，借還方式已改為普通",
+    DERIV_CROSS_LIQUIDATING: "{{settle_asset}} 全倉強平進行中，請稍候",
   },
 };

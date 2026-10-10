@@ -64,6 +64,7 @@ export * from "./trading/OrderBook";
 export * from "./trading/TradeTape";
 export * from "./trading/PositionCard";
 export * from "./trading/FundingCountdown";
+export * from "./trading/CrossLiquidatingNotice";
 export * from "./trading/LeverageDialog";
 export * from "./trading/tpsl";
 export * from "./trading/TpSlDialog";

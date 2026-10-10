@@ -121,6 +121,9 @@ function showLocale(locale: Locale): void {
 // FROZEN is not a frozen balance.
 const kindOverrides: Record<string, Record<string, string>> = {
   accountStatus: { FROZEN: "FROZEN_ACCOUNT" },
+  // A user's insurance entry is what a liquidation leaves, the clearance
+  // fee (C68, F24); the console's insurance fund keeps 保险基金.
+  entry: { INSURANCE_CONTRIBUTION: "LIQUIDATION_CLEARANCE_FEE" },
 };
 
 /**
@@ -174,6 +177,9 @@ const detailMessages: Record<string, { key: string; fields: Record<string, numbe
   // AUTO_BORROW while margin.auto_borrow is off: the terminals set the side
   // effect back to NONE (margin/trade.ts afterMarginOrder).
   MARGIN_DISABLED: [{ key: "MARGIN_DISABLED_AUTO_BORROW", fields: {}, when: (d) => d.flag === "margin.auto_borrow" }],
+  // A cross account's liquidation (C68, F24: details settle_asset and
+  // liquidation_id), not one position's.
+  DERIV_POSITION_LIQUIDATING: [{ key: "DERIV_CROSS_LIQUIDATING", fields: { settle_asset: null }, when: (d) => d.liquidation_id != null }],
 };
 
 /** withDetails is the error's message with its details, when it has one and they all came. */

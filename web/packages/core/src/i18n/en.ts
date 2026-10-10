@@ -51,7 +51,7 @@ export const en = {
     SUBMITTED: "With the custodian", CUSTODY_REJECTED: "Refused by the custodian", CUSTODY_FAILED: "The transfer failed",
     CONFIRMED: "Completed", FAILED: "Failed", LEDGER_INSUFFICIENT_BALANCE: "Insufficient balance",
     REALIZED_PNL: "Realized PnL", FUNDING_PAYMENT: "Funding", LIQUIDATION_SETTLE: "Liquidation", ADL_SETTLE: "Auto-deleveraging",
-    INSURANCE_CONTRIBUTION: "Insurance fund", ONE_WAY: "One-way", HEDGE: "Hedge", CROSS: "Cross", ISOLATED: "Isolated",
+    INSURANCE_CONTRIBUTION: "Insurance fund", LIQUIDATION_CLEARANCE_FEE: "Liquidation clearance fee", ONE_WAY: "One-way", HEDGE: "Hedge", CROSS: "Cross", ISOLATED: "Isolated",
     LONG: "Long", SHORT: "Short", BOTH: "One-way", TAKE_PROFIT: "Take profit", STOP_LOSS: "Stop loss", TRIGGERED: "Triggered",
     DETECTED: "Detected", CREDITED: "Credited", ORPHANED: "Reorganized", COMPLETED: "Completed", CHAIN: "On chain", INTERNAL: "Internal",
     MARGIN_CROSS: "Cross margin", MARGIN_ISOLATED: "Isolated margin", NORMAL: "Normal", WARNED: "Warned", LIQUIDATING: "Liquidating",
@@ -111,5 +111,6 @@ export const en = {
     MARGIN_LEVEL_TOO_LOW_OUT: "The margin level would fall under the warning level: at most {{max_transferable}} may leave now",
     LEDGER_INSUFFICIENT_BALANCE_OUT: "Insufficient available balance: at most {{max_transferable}} may leave now",
     MARGIN_DISABLED_AUTO_BORROW: "Auto-borrow is not open yet: borrowing is back to normal",
+    DERIV_CROSS_LIQUIDATING: "Your {{settle_asset}} cross positions are being liquidated: please wait a moment",
   },
 };

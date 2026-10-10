@@ -13,6 +13,12 @@ export default {
       unbound: "未綁定",
       only: "驗證碼將傳送到 {{target}}",
     },
+    crossLiquidating: {
+      title: "全倉強平中",
+      orders: "{{asset}} 全倉倉位正在強平，通常幾秒內結束；期間不能下全倉單與開倉單，逐倉倉位仍可平倉。",
+      margin: "{{asset}} 全倉倉位正在強平，通常幾秒內結束；期間不能追加逐倉保證金。",
+      transfer: "{{asset}} 全倉倉位正在強平，通常幾秒內結束；期間合約帳戶的 {{asset}} 不能轉出。",
+    },
     clear: "清除",
     max: "最大",
     searchCoin: "搜尋幣種",

@@ -44,6 +44,12 @@ describe("notifications", () => {
     expect(noticeLink({ type: "MARGIN_WARNED" })).toBe(routes.margin);
     expect(noticeLink({ type: "CONTRACT_LIQUIDATING", data: { symbol: "BTC-USD-PERP" } })).toBe(routes.futures("BTC-USD-PERP"));
     expect(noticeLink({ type: "CONTRACT_LIQUIDATION_WARNED", data: { cross: "true", symbol: "" } })).toBe(routes.assets);
+    // A cross liquidation done (C68, F24): its clearance fee in the ledger; with a contract, its terminal.
+    expect(noticeLink({ type: "CONTRACT_LIQUIDATED", data: { settle_asset: "BTC", clearance_fee: "0.0012" } })).toBe(
+      `${routes.history}?type=INSURANCE_CONTRIBUTION&asset=BTC`,
+    );
+    expect(noticeLink({ type: "CONTRACT_LIQUIDATED", data: { symbol: "ETH-USDT-PERP", settle_asset: "USDT" } })).toBe(routes.futures("ETH-USDT-PERP"));
+    expect(noticeRisk("CONTRACT_LIQUIDATED")).toBe("danger");
     expect(noticeLink({ type: "STATUS_CHANGED" })).toBeNull();
     expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "/announcements/maintenance" } })).toBe("/announcements/maintenance");
     expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "https://evil.example.com" } })).toBeNull();

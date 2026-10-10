@@ -2,11 +2,13 @@ import {
   adjustPositionMargin, assetDecimals, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, closeAtMarket, dec, enumLabel,
   errorText, formatAmount, formatPercent, formatPrice, isActive, isInverse, placeConditionalOrder, routes,
   selectSignedIn, useAssets, useConditionalOrders, useContractFills, useContractMath, useContractOpenOrders, useContractOrderHistory,
-  useContracts, useFundingPayments, useMarkPrice, usePositions, useSession, useTicker, type ConditionalOrder, type Contract, type ContractFill,
+  useContracts, useFundingPayments, useFuturesAccount, useMarkPrice, usePositions, useSession, useTicker, type ConditionalOrder, type Contract,
+  type ContractFill,
   type ContractOrder, type ContractPosition, type ContractTerms, type FundingPayment,
 } from "@exchange/core";
 import {
-  Button, Checkbox, DataTable, Dialog, EmptyState, NumberInput, PositionCard, Segmented, Tabs, TabsPanel, TimeText, TpSlDialog, toast, cn,
+  Button, Checkbox, CrossLiquidatingNotice, DataTable, Dialog, EmptyState, NumberInput, PositionCard, Segmented, Tabs, TabsPanel, TimeText,
+  TpSlDialog, toast, cn,
   type ColumnDef, type TpSlValues,
 } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -320,6 +322,9 @@ function MarginDialog({ p, decimals, onDone }: { p: ContractPosition; decimals: 
   const [mode, setMode] = useState<"add" | "remove">("add");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+  // Nothing is added while the settlement asset's cross positions are being liquidated (C68, F24).
+  const liquidating = useFuturesAccount(p.settle_asset).data?.liquidating === true;
+  const blocked = liquidating && mode === "add";
   const submit = async () => {
     if (!dec.isDecimal(amount || "x") || dec.sign(amount) <= 0) return;
     setBusy(true);
@@ -335,8 +340,17 @@ function MarginDialog({ p, decimals, onDone }: { p: ContractPosition; decimals: 
     }
   };
   return (
-    <Dialog open onOpenChange={(o) => !o && onDone()} title={t("pcTrade.adjustMargin")} size="sm" onConfirm={() => void submit()} confirmLoading={busy}>
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onDone()}
+      title={t("pcTrade.adjustMargin")}
+      size="sm"
+      onConfirm={() => void submit()}
+      confirmLoading={busy}
+      confirmDisabled={blocked}
+    >
       <div className="flex flex-col gap-3">
+        {blocked && <CrossLiquidatingNotice asset={p.settle_asset} stops="margin" />}
         <Segmented
           block
           value={mode}

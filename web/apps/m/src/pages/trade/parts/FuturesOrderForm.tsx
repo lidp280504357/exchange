@@ -3,7 +3,7 @@ import {
   selectSignedIn, sideExposure, updateContractSettings, usdValue, useContractMath, useContractOpenOrders, useContractSettings, useFuturesAccount,
   useMarkPrice, useOrderAmount, usePositions, useSession, useSettings, useTicker, waitForOrder, type Contract, type ContractUnit, type NewContractOrder,
 } from "@exchange/core";
-import { Button, Checkbox, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Select, Slider, Tabs, toast, cn } from "@exchange/ui";
+import { Button, Checkbox, CrossLiquidatingNotice, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Select, Slider, Tabs, toast, cn } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -65,6 +65,11 @@ export function FuturesOrderForm({
   const marginMode = settings.data?.margin_mode ?? "CROSS";
   const hedge = settings.data?.position_mode === "HEDGE";
   const available = account.data?.available ?? "0";
+  // The settlement asset's cross positions are being liquidated (C68, F24):
+  // meanwhile no cross order and no opening order; an isolated position
+  // still closes.
+  const liquidating = account.data?.liquidating === true;
+  const blocked = liquidating && (marginMode === "CROSS" || tab === "open");
   const refPrice = type === "limit" ? price : (mark?.mark_price ?? tk?.last ?? "");
   // The amount as typed, and the quantity it orders (a coin-margined contract's in whole contracts).
   const amount = useOrderAmount(contract, math, refPrice);
@@ -395,6 +400,8 @@ export function FuturesOrderForm({
           </>
         )}
       </div>
+      {/* Beside the buttons it disables (above, a notice would shift the margin mode's sliding thumb). */}
+      {liquidating && <CrossLiquidatingNotice asset={math.settle} stops="orders" />}
       <div className="grid grid-cols-2 gap-2">
         {actions.map((a) => (
           <Button
@@ -402,7 +409,7 @@ export function FuturesOrderForm({
             size="lg"
             variant={a.side === "BUY" ? "buy" : "sell"}
             loading={submitting}
-            disabled={contract.status !== "TRADING" && contract.status !== "CANCEL_ONLY"}
+            disabled={blocked || (contract.status !== "TRADING" && contract.status !== "CANCEL_ONLY")}
             onClick={() => submit(a)}
           >
             {a.label}

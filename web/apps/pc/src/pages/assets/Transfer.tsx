@@ -9,6 +9,7 @@ import {
   CoinIcon,
   Combobox,
   CountUp,
+  CrossLiquidatingNotice,
   DataTable,
   EmptyState,
   FormField,
@@ -254,6 +255,8 @@ export default function Transfer() {
               </Notice>
             )}
             {to === "FUTURES" && asset !== "USDT" && <Notice tone="info">{t("pcAssets.transfer.futuresNote")}</Notice>}
+            {/* Nothing leaves while the asset's cross positions are being liquidated (C68, F24): transferable is 0. */}
+            {from === "FUTURES" && futures.data?.asset === asset && futures.data.liquidating && <CrossLiquidatingNotice asset={asset} stops="transfer" />}
             {error && !error.field && (
               <Notice tone="danger" role="alert">
                 {error.message}

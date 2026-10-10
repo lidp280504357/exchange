@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/errors";
-import { errorText, i18n, initI18n } from "./index";
+import { enumLabel, errorText, i18n, initI18n } from "./index";
 
 describe("error messages", () => {
   initI18n();
@@ -34,5 +34,14 @@ describe("error messages", () => {
     expect(errorText(new ApiError(403, "MARGIN_DISABLED", "", { flag: "margin.enabled" }))).toBe("杠杆交易暂未开放");
     // A paused product line (design 2026-10-07, product line switches §1 #3).
     expect(errorText(new ApiError(403, "PRODUCT_CLOSED", "", { product: "usdt_m" }))).toBe("该产品已暂停交易：只能平仓、撤单与把资金划出");
+    // A cross account's liquidation (C68, F24) names its asset; one position's keeps the plain message.
+    const cross = new ApiError(409, "DERIV_POSITION_LIQUIDATING", "", { settle_asset: "USDT", liquidation_id: "0192a000-0000-7000-8000-00000000c068" });
+    expect(errorText(cross)).toBe("USDT 全仓强平进行中，请稍候");
+    expect(errorText(new ApiError(409, "DERIV_POSITION_LIQUIDATING", ""))).toBe("仓位正在强平");
+  });
+
+  it("names a user's insurance entry the clearance fee, by kind (F24)", () => {
+    expect(enumLabel("INSURANCE_CONTRIBUTION", "entry")).toBe("强平清算费");
+    expect(enumLabel("INSURANCE_CONTRIBUTION")).toBe("保险基金");
   });
 });

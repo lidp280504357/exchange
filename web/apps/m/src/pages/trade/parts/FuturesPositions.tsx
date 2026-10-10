@@ -1,9 +1,11 @@
 import {
   adjustPositionMargin, closeableQuantity, closeAtMarket, dec, enumLabel, errorText, formatAmount, formatPrice, placeConditionalOrder,
-  routes, useConditionalOrders, useContractMath, useContracts, useMarkPrice, usePositions, useTicker,
+  routes, useConditionalOrders, useContractMath, useContracts, useFuturesAccount, useMarkPrice, usePositions, useTicker,
   type ConditionalOrder, type Contract, type ContractPosition, type ContractTerms,
 } from "@exchange/core";
-import { Button, Dialog, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues } from "@exchange/ui";
+import {
+  Button, CrossLiquidatingNotice, Dialog, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues,
+} from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -187,6 +189,9 @@ function MarginSheet({ p, decimals, onDone }: { p: ContractPosition; decimals: n
   const [mode, setMode] = useState<"add" | "remove">("add");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+  // Nothing is added while the settlement asset's cross positions are being liquidated (C68, F24).
+  const liquidating = useFuturesAccount(p.settle_asset).data?.liquidating === true;
+  const blocked = liquidating && mode === "add";
   const submit = async () => {
     if (!dec.isDecimal(amount || "x") || dec.sign(amount) <= 0) return;
     setBusy(true);
@@ -207,12 +212,13 @@ function MarginSheet({ p, decimals, onDone }: { p: ContractPosition; decimals: n
       onOpenChange={(o) => !o && onDone()}
       title={t("mTrade.adjustMargin")}
       footer={
-        <Button size="lg" block loading={busy} onClick={() => void submit()}>
+        <Button size="lg" block loading={busy} disabled={blocked} onClick={() => void submit()}>
           {t("common.confirm")}
         </Button>
       }
     >
       <div className="flex flex-col gap-3 pb-2">
+        {blocked && <CrossLiquidatingNotice asset={p.settle_asset} stops="margin" />}
         <Segmented
           block
           value={mode}

@@ -154,7 +154,12 @@ export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, str
       // Margin warnings and liquidations (margin design 2026-10-06 §4.5).
       if (n.type.startsWith("MARGIN_")) return routes.margin;
       // A contract position's warning, liquidation or auto-deleveraging:
-      // its contract's terminal; a cross account's warning names none.
+      // its contract's terminal; a cross account's warning names none. A
+      // cross liquidation done (CONTRACT_LIQUIDATED, C68: settle_asset,
+      // clearance_fee): its clearance fee in the ledger (F24).
+      if (n.type === "CONTRACT_LIQUIDATED" && !n.data?.symbol && n.data?.settle_asset) {
+        return `${routes.history}?type=INSURANCE_CONTRIBUTION&asset=${encodeURIComponent(n.data.settle_asset)}`;
+      }
       if (n.type.startsWith("CONTRACT_")) return n.data?.symbol ? routes.futures(n.data.symbol) : routes.assets;
       return null;
   }

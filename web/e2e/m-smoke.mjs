@@ -14,12 +14,16 @@
 // orders, a transfer to futures and its ledger entry, a deposit address,
 // the futures terminal, the candle charts' legends clear of the highest
 // candle (there and on the coin page), the futures data (the terminal's
-// 数据 tab, the futures category, /futures/data), notifications, devices, help, the profile
+// 数据 tab, the futures category, /futures/data), a cross liquidation in progress (the account's
+// answer stubbed), notifications, devices, help, the profile
 // (the drawn username, a rename, an avatar uploaded and removed), the App download page,
 // closed product lines (hidden, their terminals not open, the wind-down page),
 // the step-up's channel cards, the language switch, a first visit's language and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
-import { APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, firstVisitLocale, legendClear, note, ok, pickLanguage, sleep, start, withApps, withProducts } from "./lib.mjs";
+import {
+  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, firstVisitLocale, legendClear, note, ok, pickLanguage, sleep, start, withApps,
+  withFuturesAccount, withProducts,
+} from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.astras.vip" : APP);
@@ -348,6 +352,27 @@ try {
   } finally {
     page.off("response", onFuturesRead);
   }
+
+  // 7c. A cross liquidation in progress (C68, F24): with the answer of
+  // GET /v1/derivatives/account replaced by a USDT account being
+  // liquidated, the order sheet says so above its buttons, which are off
+  // (no opening order); the transfer page says no USDT leaves the futures
+  // account. The ledger calls a user's insurance entry 强平清算费.
+  await withFuturesAccount(page, ACCOUNT_LIQUIDATING, async () => {
+    await go("/futures/BTC-USDT-PERP");
+    await clickButton("开多");
+    await page.waitForSelector('[role="dialog"] [data-testid="cross-liquidating"]', { visible: true, timeout: 20000 });
+    const off = await page.$$eval('[role="dialog"] button', (bs) => bs.filter((b) => /^(开多|开空)$/.test(b.innerText.trim())).map((b) => b.disabled));
+    if (off.length !== 2 || off.some((d) => !d)) throw new Error(`the order buttons while the account is liquidating: ${JSON.stringify(off)}`);
+    await shot("7c-liquidating");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("[role=dialog]", { hidden: true, timeout: 5000 });
+    await go("/assets/transfer?from=FUTURES&asset=USDT");
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="cross-liquidating"]')].some((n) => n.innerText.includes("不能转出")), { timeout: 20000 });
+  });
+  await go("/assets/history?type=INSURANCE_CONTRIBUTION");
+  await waitText("强平清算费");
+  ok("a cross liquidation in progress: the order sheet says so above its buttons, which are off; the transfer page says nothing leaves; the ledger names the clearance fee");
 
   // 8. Notifications, devices, the help centre.
   await go("/notifications");

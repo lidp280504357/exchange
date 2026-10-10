@@ -11,7 +11,10 @@ import {
 import { checkTransfer, otherAccount, transferCoins, transferMax, type AccountType } from "@exchange/core/assets/transfer";
 import { futuresLineOf, useOpenProducts } from "@exchange/core/platform/products";
 import { sortAssets } from "@exchange/core/wallet/networks";
-import { Badge, Button, CoinIcon, CountUp, EmptyState, ErrorState, FormField, HIDDEN_AMOUNT, NumberInput, Skeleton, TimeText, cn, mapServerError, toast } from "@exchange/ui";
+import {
+  Badge, Button, CoinIcon, CountUp, CrossLiquidatingNotice, EmptyState, ErrorState, FormField, HIDDEN_AMOUNT, NumberInput, Skeleton, TimeText, cn,
+  mapServerError, toast,
+} from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, ArrowUpDown, ChevronDown, CircleCheck } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -212,6 +215,8 @@ export default function Transfer() {
             </Notice>
           )}
           {to === "FUTURES" && asset !== "USDT" && <Notice tone="info">{t("mAssets.transfer.futuresNote")}</Notice>}
+          {/* Nothing leaves while the asset's cross positions are being liquidated (C68, F24): transferable is 0. */}
+          {from === "FUTURES" && futures.data?.asset === asset && futures.data.liquidating && <CrossLiquidatingNotice asset={asset} stops="transfer" />}
           {error && !error.field && (
             <Notice tone="danger" role="alert">
               {error.message}
