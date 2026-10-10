@@ -328,8 +328,10 @@ refresh_user() { # refresh_user SCOPE
 refresh_user read
 call GET /v1/user/profile "" "${UAUTH[@]}"
 check '.status == "FROZEN"' "the user sees FROZEN"
-as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"CLOSED","reason":"USER_REQUEST"}'
-expect 409 USER_STATUS_TRANSITION_INVALID "FROZEN cannot close directly"
+# Appendix B (as of db2698c7: any status may close, CLOSED final): a frozen
+# account goes back to ACTIVE, not under review.
+as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"RISK_REVIEW","reason":"SUSPICIOUS_LOGIN"}'
+expect 409 USER_STATUS_TRANSITION_INVALID "FROZEN cannot go under review"
 as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"ACTIVE","reason":"REVIEW_CLEARED"}'
 expect 200 - "and unfreezes it"
 refresh_user full
