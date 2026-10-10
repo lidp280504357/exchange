@@ -75,6 +75,24 @@ func (s *Service) kindFilter(ctx context.Context, raw []string, userID string, c
 	return ports.KindFilter{Only: nonNil(only)}, nil
 }
 
+// activityKinds are the overview's accounts (L1): the humans' kept, each
+// other kind's apart; none (every account's figures) without the kinds.
+func (s *Service) activityKinds(ctx context.Context) (ports.ActivityKinds, error) {
+	keep, err := s.kindFilter(ctx, nil, "", false)
+	if err != nil || !keep.On() {
+		return ports.ActivityKinds{}, err
+	}
+	others := map[string][]string{}
+	for _, k := range nonHuman {
+		ids, err := s.KindIDs.IDs(ctx, []string{k})
+		if err != nil {
+			return ports.ActivityKinds{}, err
+		}
+		others[k] = ids
+	}
+	return ports.ActivityKinds{Keep: keep, Others: others}, nil
+}
+
 // withNarrowed marks a service's list (a JSON object) whose kind filter
 // was cut to MaxKindIDs (kinds_narrowed: the console says so).
 func withNarrowed(raw json.RawMessage, f ports.KindFilter) (json.RawMessage, error) {

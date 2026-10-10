@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"slices"
 	"testing"
@@ -18,7 +17,6 @@ import (
 type fakeReports struct {
 	ports.Reports
 	rng       ports.ReportRange
-	exclude   []string
 	users     []ports.UsersBucket
 	before    uint64
 	spot      []ports.HouseSpotDay
@@ -31,8 +29,8 @@ func (f *fakeReports) Trading(_ context.Context, r ports.ReportRange) ([]ports.T
 	return []ports.TradingDay{}, nil
 }
 
-func (f *fakeReports) Users(_ context.Context, r ports.ReportRange, exclude []string) ([]ports.UsersBucket, uint64, error) {
-	f.rng, f.exclude = r, exclude
+func (f *fakeReports) Users(_ context.Context, r ports.ReportRange) ([]ports.UsersBucket, uint64, error) {
+	f.rng = r
 	return f.users, f.before, nil
 }
 
@@ -107,15 +105,16 @@ func TestTheUsersReportCountsEveryBucket(t *testing.T) {
 		},
 	}
 	svc := &Service{
-		Reports: reports, SimBots: fakeBots{ids: []string{"bot-1", "bot-2"}}, HouseBook: HouseDeps{User: "house"},
+		Reports: reports, KindIDs: &fakeKindIDs{of: map[string][]string{"BOT": {"bot-1", "bot-2"}, "SYSTEM": {"house"}}},
 		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return time.Date(2026, 10, 6, 1, 0, 0, 0, time.UTC) },
 	}
 	out, err := svc.UsersReport(context.Background(), reader, ReportQuery{From: "2026-09-25", To: "2026-10-06", Bucket: "week"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(reports.exclude, []string{"house", "bot-1", "bot-2"}) || len(out.Partial) != 0 {
-		t.Fatalf("HOUSE and the bots left out: %v %v", reports.exclude, out.Partial)
+	// The humans' (L1): HOUSE and the bots left out by kind.
+	if !slices.Equal(reports.rng.ByKind.Except, []string{"bot-1", "bot-2", "house"}) || len(out.Partial) != 0 {
+		t.Fatalf("HOUSE and the bots left out: %+v %v", reports.rng.ByKind, out.Partial)
 	}
 	want := []ports.UsersBucket{
 		{Day: "2026-09-21", Registered: 3, SignedIn: 10, Traders: 4, Depositors: 1, Total: 103},
@@ -125,10 +124,10 @@ func TestTheUsersReportCountsEveryBucket(t *testing.T) {
 	if !slices.Equal(out.Items, want) {
 		t.Fatalf("every week, the running total: %+v", out.Items)
 	}
-	svc.SimBots = fakeBots{err: errors.New("market-sim down")}
-	if out, err := svc.UsersReport(context.Background(), reader, ReportQuery{}); err != nil || !slices.Equal(out.Partial, []string{"bots"}) ||
-		!slices.Equal(reports.exclude, []string{"house"}) {
-		t.Fatalf("without the bots' list: %+v %v %v", out.Partial, reports.exclude, err)
+	// Without the kinds the report is unavailable, not everyone's.
+	svc.KindIDs = failingKindIDs{}
+	if _, err := svc.UsersReport(context.Background(), reader, ReportQuery{}); code(err) != apperr.CodeUnavailable {
+		t.Fatalf("without the kinds: %v", err)
 	}
 }
 

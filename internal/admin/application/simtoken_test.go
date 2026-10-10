@@ -241,6 +241,13 @@ type pageRecords struct {
 	ports.Records
 	orders ports.OrderQuery
 	trades ports.TradeQuery
+	// activity is the accounts the overview's figures were asked of.
+	activity []ports.ActivityKinds
+}
+
+func (f *pageRecords) Activity(_ context.Context, _ int, k ports.ActivityKinds) (ports.Activity, error) {
+	f.activity = append(f.activity, k)
+	return ports.Activity{}, nil
 }
 
 func (f *pageRecords) Orders(_ context.Context, q ports.OrderQuery) ([]ports.Order, string, error) {

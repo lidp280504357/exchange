@@ -148,6 +148,18 @@ func TestHoldingsAndTheBotsInLists(t *testing.T) {
 	if err != nil || len(trades) != 1 || trades[0].BuyerUserID != u1 {
 		t.Fatalf("a long filter: %+v %v", trades, err)
 	}
+
+	// The overview's figures (L1): the humans' (u1's trade with a bot),
+	// the bots' trade between them and the bots apart.
+	a, err := records.Activity(ctx, 2, ports.ActivityKinds{Keep: ports.KindFilter{Except: []string{b1, b2}}, Others: map[string][]string{"BOT": {b1, b2}}})
+	today := time.Now().UTC().Format(time.DateOnly)
+	if err != nil || a.Trades24h != 1 || a.ActiveTraders24h != 1 || a.OtherTrades24h["BOT"] != 1 || a.OtherTrades24h["TEST"] != 0 ||
+		a.OtherTraders24h["BOT"] != 2 || a.TradesByDay[today] != 1 {
+		t.Fatalf("activity %+v %v", a, err)
+	}
+	if a, err = records.Activity(ctx, 2, ports.ActivityKinds{}); err != nil || a.Trades24h != 2 || a.ActiveTraders24h != 3 || len(a.OtherTrades24h) != 0 {
+		t.Fatalf("everyone's activity %+v %v", a, err)
+	}
 }
 
 // usersOf is the accounts of a list's rows, sorted.

@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
+import { useKindFilter } from "../../kit/kinds";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
 import { ListTable, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
@@ -39,11 +40,13 @@ function Amounts({ items }: { items: MarginLiquidation["repaid"] }) {
 export default function MarginLiquidations(_: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
-  const filters = useFilters(["account", "symbol", "trigger", "user_id", "days"]);
+  const filters = useFilters(["account", "symbol", "trigger", "user_id", "kind", "days"]);
+  const kind = useKindFilter();
   const f = filters.values;
   const q: LiquidationQuery = {
     days: DAYS.includes(f.days ?? "") ? Number(f.days) : 30, account: (f.account || undefined) as LiquidationQuery["account"],
     symbol: f.symbol?.toUpperCase() || undefined, trigger: (f.trigger || undefined) as LiquidationQuery["trigger"], user_id: f.user_id || undefined,
+    kind: f.kind || undefined,
   };
   const list = useCursorList<MarginLiquidation>([...marginKey, "liquidations", q], (cursor) => liquidationsPage(q, cursor));
   const columns = useMemo<ColumnDef<MarginLiquidation, unknown>[]>(
@@ -115,6 +118,7 @@ export default function MarginLiquidations(_: { admin: Admin }) {
             options: options(t("admin.common.all"), ["AUTO", "MANUAL"], (c) => label("marginTrigger", c)),
           },
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
+          kind,
           {
             key: "days", label: t("admin.liquidations.period"), kind: "select", width: 120,
             options: DAYS.map((d) => ({ value: d === "30" ? ALL : d, label: t("admin.reports.lastDays", { n: Number(d) }) })),

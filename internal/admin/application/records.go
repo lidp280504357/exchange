@@ -248,13 +248,15 @@ type Dashboard struct {
 	Feed *ports.FeedStatus
 	Days []string
 	// Partial lists the parts that could not be read (users, activity,
-	// feed); the rest is still shown.
+	// feed, and kinds: the figures are every account's); the rest is
+	// still shown.
 	Partial []string
 }
 
 // Dashboard gathers the overview for the last days (default 7, at most
 // 90): accounts, the read models' trading and wallet figures, and the
-// reference feed. A part that fails is left out and named in Partial.
+// reference feed. A part that fails is left out and named in Partial. The
+// figures are the humans' (L1), the other kinds counted apart.
 func (s *Service) Dashboard(ctx context.Context, p Principal, days int) (Dashboard, error) {
 	if err := p.require(domain.PermReportsRead); err != nil {
 		return Dashboard{}, err
@@ -266,11 +268,23 @@ func (s *Service) Dashboard(ctx context.Context, p Principal, days int) (Dashboa
 		out.Days = append(out.Days, now.AddDate(0, 0, -i).Format(time.DateOnly))
 	}
 	var err error
-	if out.Users, err = s.Users.Stats(ctx, now.Add(-24*time.Hour), days); err != nil {
+	// Every kind's counts (by_kind) and the humans' accounts per day (the
+	// trend, A108): user-service counts only the kinds asked for (B185).
+	if out.Users, err = s.Users.Stats(ctx, now.Add(-24*time.Hour), days, nil); err != nil {
 		s.Log.WarnContext(ctx, "dashboard: user stats unavailable", "error", err)
 		out.Partial = append(out.Partial, "users")
+	} else if humans, err := s.Users.Stats(ctx, now.Add(-24*time.Hour), days, []string{KindHuman}); err != nil {
+		s.Log.WarnContext(ctx, "dashboard: the humans' stats unavailable", "error", err)
+		out.Partial = append(out.Partial, "users")
+	} else {
+		out.Users.Days = humans.Days
 	}
-	if out.Activity, err = s.Records.Activity(ctx, days); err != nil {
+	kinds, err := s.activityKinds(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "dashboard: the accounts' kinds unavailable", "error", err)
+		out.Partial = append(out.Partial, "kinds")
+	}
+	if out.Activity, err = s.Records.Activity(ctx, days, kinds); err != nil {
 		s.Log.WarnContext(ctx, "dashboard: activity unavailable", "error", err)
 		out.Partial = append(out.Partial, "activity")
 	}

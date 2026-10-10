@@ -3033,7 +3033,10 @@ export interface paths {
         /**
          * Trades and orders per symbol and day, week or month (UTC), newest first
          * @description From the ClickHouse read models (trades, order_updates), which lag
-         *     the services by a few seconds. Needs reports.read.
+         *     the services by a few seconds. Of the accounts' kinds (kind, L1):
+         *     the trades with a side of theirs (by default a human on a side;
+         *     HOUSE is the other side of nearly every one) and their orders.
+         *     Needs reports.read.
          */
         get: operations["tradingReport"];
         put?: never;
@@ -3054,7 +3057,8 @@ export interface paths {
         /**
          * Credited deposits and confirmed withdrawals per asset and day, week or month (UTC)
          * @description Deposits booked to users (not the unclaimed ones) by the day they
-         *     were credited; withdrawals by the day they were confirmed. Needs
+         *     were credited; withdrawals by the day they were confirmed; of the
+         *     accounts' kinds (kind, L1: the humans' by default). Needs
          *     reports.read.
          */
         get: operations["walletReport"];
@@ -3100,6 +3104,9 @@ export interface paths {
          *     their fees and results, the funding the positions paid and
          *     received at the day's settlements, the positions taken over, the
          *     auto-deleveraged counterparties and what the insurance fund paid.
+         *     Of the accounts' kinds (kind, L1: the humans' by default): their
+         *     fills, fees, results, funding and liquidations; the volume and
+         *     notional of the trades with a side of theirs, once per trade.
          *     Needs reports.read.
          */
         get: operations["derivativesReport"];
@@ -3121,7 +3128,9 @@ export interface paths {
         /**
          * Each contract's open positions from the positions read model
          * @description The latest position snapshots (derivatives_positions); a few
-         *     seconds behind derivatives-service. Needs reports.read.
+         *     seconds behind derivatives-service. Of the accounts' kinds (kind,
+         *     L1): the humans' by default, HOUSE's with SYSTEM. Needs
+         *     reports.read.
          */
         get: operations["openInterestReport"];
         put?: never;
@@ -3144,10 +3153,10 @@ export interface paths {
          * @description Per bucket: the accounts registered and signed in (the auth
          *     events), those trading (either side of a spot trade, or a
          *     contract fill) and those with a deposit credited, each counted
-         *     once; total is every account registered by the bucket's end.
-         *     HOUSE and the simulated market's bots are left out (partial names
-         *     "bots" when market-sim could not say which they are). Every bucket
-         *     of the period comes, empty ones too. Needs reports.read.
+         *     once; total is every account registered by the bucket's end. Of
+         *     the accounts' kinds (kind, L1): the humans' by default, so without
+         *     HOUSE, the simulated market's bots and the test accounts. Every
+         *     bucket of the period comes, empty ones too. Needs reports.read.
          */
         get: operations["usersReport"];
         put?: never;
@@ -3372,7 +3381,7 @@ export interface paths {
         };
         /**
          * Liquidation steps, newest first
-         * @description From the ClickHouse read model derivatives_liquidations. Needs derivatives.read.
+         * @description From the ClickHouse read model derivatives_liquidations; the steps of the accounts' kinds (user_kind, L1: the humans' by default) unless user_id is given. Needs derivatives.read.
          */
         get: operations["listLiquidations"];
         put?: never;
@@ -4146,7 +4155,8 @@ export interface paths {
          *     fund and any shortfall the fund covered; started in the last
          *     `days` (seen completed only: completed). A row seen completed only
          *     has no start fields, and one from before ClickHouse 00010 no
-         *     trigger or approval. Needs reports.read.
+         *     trigger or approval. Of the accounts' kinds (kind, L1: the humans'
+         *     by default) unless user_id is given. Needs reports.read.
          */
         get: operations["listMarginLiquidations"];
         put?: never;
@@ -4171,7 +4181,8 @@ export interface paths {
          *     ledger_entries), what users owe at the bucket's end, the average
          *     principal and hourly rate and the accounts charged
          *     (margin_interest's hourly charges), in the asset and in USDT at the
-         *     bucket's last trade of its USDT pair (null without one). Needs
+         *     bucket's last trade of its USDT pair (null without one); of the
+         *     accounts' kinds (kind, L1: the humans' by default). Needs
          *     reports.read.
          */
         get: operations["marginInterestReport"];
@@ -4422,6 +4433,7 @@ export interface components {
                     new_24h: number;
                 }[];
             };
+            /** @description The humans' (L1): the trades with a human on a side and their turnover, the humans trading; the other kinds' beside them. Every account's, and nothing beside, when the kinds cannot be read (partial names kinds). */
             trading: {
                 /** Format: int64 */
                 trades_24h: number;
@@ -4431,7 +4443,12 @@ export interface components {
                     quote_asset: string;
                     amount: components["schemas"]["Decimal"];
                 }[];
+                /** @description The trades without a human side, by the other kind on a side (TEST before BOT). */
+                other_trades_24h: components["schemas"]["KindCount"][];
+                /** @description The traders of each other kind (BOT, TEST, SYSTEM). */
+                other_traders_24h: components["schemas"]["KindCount"][];
             };
+            /** @description The humans' (L1), as the queues list by default. */
             wallet: {
                 /**
                  * Format: int64
@@ -4445,12 +4462,15 @@ export interface components {
                 pending_withdrawals: number;
             };
             risk: {
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description The risk events of the last 24 hours, a symbol's and the humans' (L1).
+                 */
                 events_24h: number;
             };
             /** @description The reference feed; null when market-data-service could not be asked. */
             feed: null | components["schemas"]["FeedStatus"];
-            /** @description One per UTC day, oldest first. */
+            /** @description One per UTC day, oldest first; the humans' (L1, A108): their new accounts, the trades with a human on a side and their USDT turnover. */
             series: {
                 /** Format: date */
                 day: string;
@@ -4460,8 +4480,13 @@ export interface components {
                 trades: number;
                 turnover_usdt: components["schemas"]["Decimal"];
             }[];
-            /** @description The parts that could not be read (users, activity, feed). */
+            /** @description The parts that could not be read (users, activity, feed; kinds - the figures are every account's). */
             partial: string[];
+        };
+        KindCount: {
+            kind: components["schemas"]["UserKind"];
+            /** Format: int64 */
+            count: number;
         };
         /** @example 12.5 */
         Decimal: string;
@@ -7195,6 +7220,8 @@ export interface components {
          *     400.
          */
         Kind: ("HUMAN" | "BOT" | "TEST" | "SYSTEM" | "ALL")[];
+        /** @description The accounts' kinds as kind elsewhere (L1), on a list whose kind is something else (a liquidation step's). */
+        UserKind: ("HUMAN" | "BOT" | "TEST" | "SYSTEM" | "ALL")[];
         Limit: number;
         /** @description From this time on (RFC 3339). */
         From: string;
@@ -11161,6 +11188,13 @@ export interface operations {
                 to?: components["parameters"]["ReportTo"];
                 /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
                 bucket?: components["parameters"]["ReportBucket"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
             };
             header?: never;
             path?: never;
@@ -11196,6 +11230,13 @@ export interface operations {
                 to?: components["parameters"]["ReportTo"];
                 /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
                 bucket?: components["parameters"]["ReportBucket"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
             };
             header?: never;
             path?: never;
@@ -11258,6 +11299,13 @@ export interface operations {
                 to?: components["parameters"]["ReportTo"];
                 /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
                 bucket?: components["parameters"]["ReportBucket"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
             };
             header?: never;
             path?: never;
@@ -11281,7 +11329,15 @@ export interface operations {
     };
     openInterestReport: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11316,6 +11372,13 @@ export interface operations {
                 to?: components["parameters"]["ReportTo"];
                 /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
                 bucket?: components["parameters"]["ReportBucket"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
             };
             header?: never;
             path?: never;
@@ -11331,7 +11394,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["UsersBucket"][];
-                        partial: "bots"[];
+                        /** @description Empty since L1 (the bots go by kind; without the kinds the report is 503). */
+                        partial: string[];
                     };
                 };
             };
@@ -11589,7 +11653,9 @@ export interface operations {
             query?: {
                 /** @description Days back, today included. */
                 days?: components["parameters"]["Days"];
-                /** @description Empty for all. */
+                /** @description The accounts' kinds as kind elsewhere (L1), on a list whose kind is something else (a liquidation step's). */
+                user_kind?: components["parameters"]["UserKind"];
+                /** @description The step's kind; empty for all. */
                 kind?: "WARNING" | "STARTED" | "FILLED" | "ADL";
                 /** @description One contract (BTC-USDT-PERP). */
                 symbol?: string;
@@ -12460,6 +12526,13 @@ export interface operations {
             query?: {
                 /** @description Days back, today included. */
                 days?: components["parameters"]["Days"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 account?: components["schemas"]["MarginAccountType"];
                 /** @description One pair's isolated accounts (BTC-USDT). */
                 symbol?: string;
@@ -12504,6 +12577,13 @@ export interface operations {
                 to?: components["parameters"]["ReportTo"];
                 /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
                 bucket?: components["parameters"]["ReportBucket"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description One asset; all when absent. */
                 asset?: string;
             };

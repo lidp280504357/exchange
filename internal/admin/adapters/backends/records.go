@@ -35,6 +35,28 @@ func kindArgs(f ports.KindFilter) []any {
 	return []any{f.Only != nil, idSet(f.Only), f.Except != nil, idSet(f.Except)}
 }
 
+// The other kinds of ports.ActivityKinds (L0).
+const (
+	kindBot    = "BOT"
+	kindTest   = "TEST"
+	kindSystem = "SYSTEM"
+)
+
+// kindCond is a kind filter's condition on a column of account IDs (L1)
+// with its arguments: the Only accounts kept, the Except ones left out.
+func kindCond(col string, f ports.KindFilter) (string, []any) {
+	c := "toString(" + col + ")"
+	return "(NOT ? OR " + c + " IN ?) AND (NOT ? OR " + c + " NOT IN ?)", kindArgs(f)
+}
+
+// kindsCond is a kind filter's condition on a trade's two sides: kept when
+// one of them is of the kinds (an Only side, or one not left out).
+func kindsCond(a, b string, f ports.KindFilter) (string, []any) {
+	a, b = "toString("+a+")", "toString("+b+")"
+	return "(NOT ? OR " + a + " IN ? OR " + b + " IN ?) AND (NOT ? OR NOT (" + a + " IN ? AND " + b + " IN ?))",
+		[]any{f.Only != nil, idSet(f.Only), idSet(f.Only), f.Except != nil, idSet(f.Except), idSet(f.Except)}
+}
+
 // kindQuerySize is how long a query with a kind filter may be: the
 // accounts go in as text, about 40 bytes each, and ClickHouse parses 256
 // KiB at most by default - 6,500 accounts, half that for a trade's two
@@ -47,6 +69,11 @@ func kindCtx(ctx context.Context, f ports.KindFilter) context.Context {
 	if !f.On() {
 		return ctx
 	}
+	return longQuery(ctx)
+}
+
+// longQuery is the context of a query that carries accounts as text.
+func longQuery(ctx context.Context) context.Context {
 	return clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"max_query_size": kindQuerySize}))
 }
 
@@ -203,22 +230,47 @@ func (r Records) Deposits(ctx context.Context, q ports.DepositQuery) ([]ports.De
 	return out[:min(len(out), pc.limit)], next, nil
 }
 
-// Activity sums the overview's figures: the last 24 hours' trades,
-// traders and turnover, the deposits and withdrawals waiting, the risk
-// events, and per UTC day for the last days the trades and the USDT
-// turnover.
-func (r Records) Activity(ctx context.Context, days int) (ports.Activity, error) {
-	out := ports.Activity{TradesByDay: map[string]uint64{}, TurnoverUSDTByDay: map[string]string{}}
+// Activity sums the overview's figures of the accounts k keeps (L1): the
+// last 24 hours' trades (those with a side of theirs), traders and
+// turnover, the deposits and withdrawals waiting, the risk events (a
+// symbol's too), and per UTC day for the last days the trades and the
+// USDT turnover; and apart, the other kinds' trades and traders.
+func (r Records) Activity(ctx context.Context, days int, k ports.ActivityKinds) (ports.Activity, error) {
+	out := ports.Activity{
+		TradesByDay: map[string]uint64{}, TurnoverUSDTByDay: map[string]string{},
+		OtherTrades24h: map[string]uint64{}, OtherTraders24h: map[string]uint64{},
+	}
+	if k.Keep.On() || len(k.Others) > 0 {
+		ctx = longQuery(ctx)
+	}
 	since := time.Now().Add(-24 * time.Hour).UnixMilli()
-	if err := r.Conn.QueryRow(ctx, `SELECT count(), uniqExact(u) FROM (
-			SELECT trade_id, buyer_user_id AS u FROM trades FINAL WHERE executed_at >= `+ms+`
-			UNION ALL SELECT trade_id, seller_user_id AS u FROM trades FINAL WHERE executed_at >= `+ms+`)`, since, since).
-		Scan(&out.Trades24h, &out.ActiveTraders24h); err != nil {
+	kept, keptArgs := kindsCond("b", "s", k.Keep)
+	test, bot := idSet(k.Others[kindTest]), idSet(k.Others[kindBot])
+	var testTrades, botTrades uint64
+	args := append(append([]any{}, keptArgs...), test, test, bot, bot, since)
+	if err := r.Conn.QueryRow(ctx, `SELECT countIf(kept), countIf(NOT kept AND test), countIf(NOT kept AND NOT test AND bot) FROM (
+			SELECT `+kept+` AS kept, (b IN ? OR s IN ?) AS test, (b IN ? OR s IN ?) AS bot FROM (
+				SELECT toString(buyer_user_id) AS b, toString(seller_user_id) AS s FROM trades FINAL WHERE executed_at >= `+ms+`))`, args...).
+		Scan(&out.Trades24h, &testTrades, &botTrades); err != nil {
 		return out, unavailable(err)
 	}
-	out.Trades24h /= 2 // each trade counted from both sides
-	rows, err := r.Conn.Query(ctx, `SELECT quote_asset, sum(quote_quantity) FROM trades FINAL WHERE executed_at >= `+ms+`
-		GROUP BY quote_asset ORDER BY quote_asset`, since)
+	keptTrader, traderArgs := kindCond("u", k.Keep)
+	system := idSet(k.Others[kindSystem])
+	var traders [3]uint64
+	args = append(append([]any{}, traderArgs...), bot, test, system, since, since)
+	if err := r.Conn.QueryRow(ctx, `SELECT uniqExactIf(u, `+keptTrader+`), uniqExactIf(u, u IN ?), uniqExactIf(u, u IN ?), uniqExactIf(u, u IN ?)
+		FROM (SELECT toString(buyer_user_id) AS u FROM trades FINAL WHERE executed_at >= `+ms+`
+			UNION ALL SELECT toString(seller_user_id) AS u FROM trades FINAL WHERE executed_at >= `+ms+`)`, args...).
+		Scan(&out.ActiveTraders24h, &traders[0], &traders[1], &traders[2]); err != nil {
+		return out, unavailable(err)
+	}
+	if len(k.Others) > 0 {
+		out.OtherTrades24h[kindTest], out.OtherTrades24h[kindBot] = testTrades, botTrades
+		out.OtherTraders24h[kindBot], out.OtherTraders24h[kindTest], out.OtherTraders24h[kindSystem] = traders[0], traders[1], traders[2]
+	}
+	keptTrade, tradeArgs := kindsCond("buyer_user_id", "seller_user_id", k.Keep)
+	rows, err := r.Conn.Query(ctx, `SELECT quote_asset, sum(quote_quantity) FROM trades FINAL WHERE executed_at >= `+ms+` AND `+keptTrade+`
+		GROUP BY quote_asset ORDER BY quote_asset`, append([]any{since}, tradeArgs...)...)
 	if err != nil {
 		return out, unavailable(err)
 	}
@@ -233,10 +285,15 @@ func (r Records) Activity(ctx context.Context, days int) (ports.Activity, error)
 		out.Turnover24h = append(out.Turnover24h, t)
 	}
 	_ = rows.Close()
+	deposit, depositArgs := kindCond("user_id", k.Keep)
+	withdrawal, withdrawalArgs := kindCond("user_id", k.Keep)
+	risk, riskArgs := kindCond("aggregate_id", k.Keep)
+	args = append(append(append(depositArgs, withdrawalArgs...), since), riskArgs...)
 	if err := r.Conn.QueryRow(ctx, `SELECT
-			(SELECT count() FROM wallet_deposits FINAL WHERE status IN ('DETECTED', 'CONFIRMING')),
-			(SELECT count() FROM wallet_withdrawals FINAL WHERE status = 'PENDING_REVIEW'),
-			(SELECT count() FROM events WHERE topic = 'risk.events' AND occurred_at >= `+ms+`)`, since).
+			(SELECT count() FROM wallet_deposits FINAL WHERE status IN ('DETECTED', 'CONFIRMING') AND `+deposit+`),
+			(SELECT count() FROM wallet_withdrawals FINAL WHERE status = 'PENDING_REVIEW' AND `+withdrawal+`),
+			(SELECT count() FROM events WHERE topic = 'risk.events' AND occurred_at >= `+ms+`
+				AND (aggregate_type != 'user' OR `+risk+`))`, args...).
 		Scan(&out.PendingDeposits, &out.PendingWithdraws, &out.RiskEvents24h); err != nil {
 		return out, unavailable(err)
 	}
@@ -244,7 +301,8 @@ func (r Records) Activity(ctx context.Context, days int) (ports.Activity, error)
 		return out, nil
 	}
 	daily, err := r.Conn.Query(ctx, `SELECT toString(toDate(executed_at)) AS day, count(), sumIf(quote_quantity, quote_asset = 'USDT')
-		FROM trades FINAL WHERE executed_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day`, days-1)
+		FROM trades FINAL WHERE executed_at >= toDateTime64(today() - ?, 3, 'UTC') AND `+keptTrade+` GROUP BY day`,
+		append([]any{days - 1}, tradeArgs...)...)
 	if err != nil {
 		return out, unavailable(err)
 	}

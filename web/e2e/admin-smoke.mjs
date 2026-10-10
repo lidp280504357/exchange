@@ -155,8 +155,14 @@ try {
   const health = await page.evaluate(() => document.body.innerText.match(/\d+ 个服务(全部就绪|未就绪)/)?.[0]);
   await waitText("库存估值");
   await page.waitForSelector("main svg[role=img]");
+  // The figures are the humans' (L1): the trend says so, the bots trading in small print.
+  await page.waitForSelector("[data-testid=trend-kinds]");
+  const tradersNote = await page
+    .waitForSelector("[data-testid=stat-note-traders24h]", { timeout: 20000 })
+    .then((el) => el.evaluate((e) => e.textContent.trim()));
+  if (!/机器人/.test(tradersNote)) throw new Error(`the traders' small print names no bots: ${tradersNote}`);
   await t.shot("1-overview");
-  ok(`the overview: figures, trend chart, ${health}, HOUSE`);
+  ok(`the overview: figures (the humans', ${tradersNote}), trend chart, ${health}, HOUSE`);
 
   // 2b. A section first opened from the sidebar (A40): while its chunk is
   // late the content area shows the page's skeleton, never nothing; and its
@@ -565,13 +571,16 @@ try {
   }
   await go("/reports");
   await page.waitForSelector("main svg[role=img]");
+  // Of the humans by default (L1); 类型 is there for every report but HOUSE's result.
+  await page.waitForFunction(() => document.querySelector('main button[role=combobox][aria-label="类型"]')?.innerText.trim() === "真人", { timeout: 10000 });
   await t.shot("4-reports");
   for (const tab of ["用户增长", "HOUSE 盈亏"]) {
     await clickButton(tab, "main");
     await page.waitForFunction((s) => document.querySelector("main h2")?.textContent === s && document.querySelector("main svg[role=img]"), { timeout: 20000 }, tab);
   }
+  if (await page.$('main button[role=combobox][aria-label="类型"]')) throw new Error("HOUSE's result offers a kind");
   await noError("the users' and HOUSE's reports");
-  ok("the ledger's reconciliation, the audit trail with an entry's detail and its CSV export, and the reports (the users, HOUSE's result)");
+  ok("the ledger's reconciliation, the audit trail with an entry's detail and its CSV export, and the reports (the humans' by default; the users, HOUSE's result)");
 
   // 9b. System: the administrators (this one marked, the roles' permissions),
   // the creation form (canceled), every service's health with details.

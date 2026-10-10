@@ -61,10 +61,14 @@ func (s *Service) houseLeverageMax(ctx context.Context) decimal.Decimal {
 		return houseCapsLeverageCeiling
 	}
 	raw, err := s.Catalog.List(ctx)
+	// A contract's leverage is its risk ladder's highest (the first tier's;
+	// the listing has no max_leverage of its own).
 	var doc struct {
 		Contracts []struct {
-			Status      string `json:"status"`
-			MaxLeverage int32  `json:"max_leverage"`
+			Status    string `json:"status"`
+			RiskTiers []struct {
+				MaxLeverage int32 `json:"max_leverage"`
+			} `json:"risk_tiers"`
 		} `json:"contracts"`
 	}
 	if err == nil {
@@ -72,8 +76,11 @@ func (s *Service) houseLeverageMax(ctx context.Context) decimal.Decimal {
 	}
 	var high int32
 	for _, c := range doc.Contracts {
-		if c.Status != "DELISTED" {
-			high = max(high, c.MaxLeverage)
+		if c.Status == "DELISTED" {
+			continue
+		}
+		for _, t := range c.RiskTiers {
+			high = max(high, t.MaxLeverage)
 		}
 	}
 	if err != nil || high < 1 {

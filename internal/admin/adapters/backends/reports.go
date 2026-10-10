@@ -17,14 +17,16 @@ import (
 // of its bucket.
 var bucketOf = map[string]string{ports.BucketDay: "toDate", ports.BucketWeek: "toMonday", ports.BucketMonth: "toStartOfMonth"}
 
-var reportMarker = regexp.MustCompile(`\{(day|range):([a-z_]+)\}`)
+var reportMarker = regexp.MustCompile(`\{(day|range|kind|kinds):([a-z_,]+)\}`)
 
 // chTime is how a bound goes to toDateTime64 (UTC).
 const chTime = "2006-01-02 15:04:05"
 
 // ranged fills a report's query for the period: {day:column} becomes the
-// column's bucket, {range:column} the period's bounds on the column, with
-// their arguments in the order they appear.
+// column's bucket, {range:column} the period's bounds on the column,
+// {kind:column} the range's kind filter on a column of accounts and
+// {kinds:buyer,seller} on a trade's two sides (L1: kindCond, kindsCond),
+// with their arguments in the order they appear.
 func ranged(query string, r ports.ReportRange) (string, []any) {
 	fn, ok := bucketOf[r.Bucket]
 	if !ok {
@@ -34,8 +36,18 @@ func ranged(query string, r ports.ReportRange) (string, []any) {
 	var args []any
 	out := reportMarker.ReplaceAllStringFunc(query, func(m string) string {
 		p := reportMarker.FindStringSubmatch(m)
-		if p[1] == "day" {
+		switch p[1] {
+		case "day":
 			return fn + "(" + p[2] + ")"
+		case "kind":
+			cond, a := kindCond(p[2], r.ByKind)
+			args = append(args, a...)
+			return cond
+		case "kinds":
+			buyer, seller, _ := strings.Cut(p[2], ",")
+			cond, a := kindsCond(buyer, seller, r.ByKind)
+			args = append(args, a...)
+			return cond
 		}
 		args = append(args, from, to)
 		return p[2] + " >= toDateTime64(?, 3, 'UTC') AND " + p[2] + " < toDateTime64(?, 3, 'UTC')"
@@ -45,15 +57,14 @@ func ranged(query string, r ports.ReportRange) (string, []any) {
 
 // usersReport counts per bucket the accounts registered and signed in
 // (auth events), trading on either side of a spot trade or with a
-// contract fill, and with a deposit credited; each once a bucket. The
-// accounts in the excluded list ({excluded}: HOUSE, the bots) are left
-// out.
+// contract fill, and with a deposit credited; each once a bucket; of the
+// kinds kept (L1: the humans by default, so without HOUSE and the bots).
 const usersReport = `SELECT day, sum(registered), sum(signed_in), sum(traders), sum(depositors) FROM
 	(
 		SELECT {day:occurred_at} AS day, uniqExactIf(aggregate_id, event_type = 'auth.UserRegistered') AS registered,
 			uniqExactIf(aggregate_id, event_type = 'auth.LoginSucceeded') AS signed_in, toUInt64(0) AS traders, toUInt64(0) AS depositors
 		FROM events WHERE topic = 'auth.events' AND event_type IN ('auth.UserRegistered', 'auth.LoginSucceeded') AND {range:occurred_at}
-			AND NOT has({excluded}, aggregate_id)
+			AND {kind:aggregate_id}
 		GROUP BY day
 		UNION ALL
 		SELECT day, toUInt64(0), toUInt64(0), uniqExact(user), toUInt64(0) FROM
@@ -63,23 +74,20 @@ const usersReport = `SELECT day, sum(registered), sum(signed_in), sum(traders), 
 			UNION ALL
 			SELECT {day:executed_at} AS day, toString(user_id) AS user FROM derivatives_fills FINAL WHERE {range:executed_at}
 		)
-		WHERE NOT has({excluded}, user) AND user != '00000000-0000-0000-0000-000000000000'
+		WHERE {kind:user} AND user != '00000000-0000-0000-0000-000000000000'
 		GROUP BY day
 		UNION ALL
 		SELECT {day:updated_at} AS day, toUInt64(0), toUInt64(0), toUInt64(0), uniqExact(user_id)
-		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND {range:updated_at} AND NOT has({excluded}, user_id)
+		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND {range:updated_at} AND {kind:user_id}
 		GROUP BY day
 	)
 	GROUP BY day ORDER BY day`
 
 // Users returns the users' activity per bucket of the period and how
-// many accounts registered before it.
-func (r Reports) Users(ctx context.Context, rng ports.ReportRange, exclude []string) ([]ports.UsersBucket, uint64, error) {
-	// Never empty: an empty array literal has no element type.
-	exclude = append([]string{""}, exclude...)
+// many accounts registered before it, of the kinds kept.
+func (r Reports) Users(ctx context.Context, rng ports.ReportRange) ([]ports.UsersBucket, uint64, error) {
+	ctx = kindCtx(ctx, rng.ByKind)
 	query, args := ranged(usersReport, rng)
-	// Each {excluded} takes the list, in its place among the bounds.
-	query, args = excluded(query, args, exclude)
 	rows, err := r.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, unavailable(err)
@@ -99,44 +107,13 @@ func (r Reports) Users(ctx context.Context, rng ports.ReportRange, exclude []str
 		return nil, 0, unavailable(err)
 	}
 	var before uint64
+	byKind, byKindArgs := kindCond("aggregate_id", rng.ByKind)
 	if err := r.Conn.QueryRow(ctx, `SELECT uniqExact(aggregate_id) FROM events
-		WHERE topic = 'auth.events' AND event_type = 'auth.UserRegistered' AND occurred_at < toDateTime64(?, 3, 'UTC')
-			AND NOT has(?, aggregate_id)`, rng.From.UTC().Format(chTime), exclude).Scan(&before); err != nil {
+		WHERE topic = 'auth.events' AND event_type = 'auth.UserRegistered' AND occurred_at < toDateTime64(?, 3, 'UTC') AND `+byKind,
+		append([]any{rng.From.UTC().Format(chTime)}, byKindArgs...)...).Scan(&before); err != nil {
 		return nil, 0, unavailable(err)
 	}
 	return out, before, nil
-}
-
-// excluded puts the excluded accounts in place of each {excluded}: the
-// arguments follow the placeholders' order, the bounds' pairs and the
-// list interleaved as they appear in the query.
-func excluded(query string, bounds []any, list []string) (string, []any) {
-	args := make([]any, 0, len(bounds)+4)
-	var b strings.Builder
-	next := 0
-	for {
-		i := strings.IndexAny(query, "?{")
-		if i < 0 {
-			b.WriteString(query)
-			break
-		}
-		if query[i] == '?' {
-			b.WriteString(query[:i+1])
-			query = query[i+1:]
-			args = append(args, bounds[next])
-			next++
-			continue
-		}
-		if strings.HasPrefix(query[i:], "{excluded}") {
-			b.WriteString(query[:i] + "?")
-			query = query[i+len("{excluded}"):]
-			args = append(args, list)
-			continue
-		}
-		b.WriteString(query[:i+1])
-		query = query[i+1:]
-	}
-	return b.String(), args
 }
 
 // houseSpotBefore sums HOUSE's spot trading per pair up to the period with

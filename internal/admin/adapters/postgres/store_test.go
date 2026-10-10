@@ -170,7 +170,7 @@ func (users) List(context.Context, ports.UserQuery) ([]ports.User, string, error
 	return nil, "", nil
 }
 
-func (users) Stats(context.Context, time.Time, int) (ports.UserStats, error) {
+func (users) Stats(context.Context, time.Time, int, []string) (ports.UserStats, error) {
 	return ports.UserStats{}, nil
 }
 

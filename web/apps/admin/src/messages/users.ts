@@ -163,6 +163,7 @@ export const usersZh = {
         humans: "其他类型的账户超过 {{max}} 个：这里只排除了机器人与系统账户，测试账户的记录也在其中",
         kept: "该类型的账户超过 {{max}} 个：只列出其中 {{max}} 个账户的记录",
       },
+      trend: "只算真人：新增用户是真人账户，成交是有真人一方的成交与成交额",
     },
   },
 };
@@ -330,6 +331,7 @@ export const usersEn = {
         humans: "More than {{max}} accounts of the other kinds: only the bots and system accounts are left out here, so test accounts' records show too",
         kept: "More than {{max}} accounts of this kind: the records of {{max}} of them are listed",
       },
+      trend: "The humans' only: new human accounts, and the trades with a human on a side and their turnover",
     },
   },
 };

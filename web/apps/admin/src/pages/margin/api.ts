@@ -59,20 +59,22 @@ export function useMarginAccount(userId: string, key: string) {
   });
 }
 
+/** kind is the accounts' (L1): none, the humans'; BOT, TEST, SYSTEM or ALL. */
 export type LiquidationQuery = {
-  days: number; account?: MarginAccount["account"]; symbol?: string; trigger?: "AUTO" | "MANUAL"; user_id?: string;
+  days: number; account?: MarginAccount["account"]; symbol?: string; trigger?: "AUTO" | "MANUAL"; user_id?: string; kind?: string;
 };
 
 /** liquidationsPage is a page of liquidations, newest first. */
 export async function liquidationsPage(q: LiquidationQuery, cursor: string | undefined): Promise<Page<MarginLiquidation>> {
-  return adminData(await adminApi.GET("/admin/v1/margin/liquidations", { params: { query: { ...q, cursor } } }));
+  return adminData(await adminApi.GET("/admin/v1/margin/liquidations", { params: { query: { ...q, kind: kindParam(q.kind) as never, cursor } } }));
 }
 
-export type InterestQuery = { days: number; bucket: "day" | "week" | "month"; asset?: string };
+/** kind as a LiquidationQuery's. */
+export type InterestQuery = { days: number; bucket: "day" | "week" | "month"; asset?: string; kind?: string };
 
 export function useMarginInterest(q: InterestQuery) {
   return useQuery({
     queryKey: [...marginKey, "interest", q],
-    queryFn: async () => adminData(await adminApi.GET("/admin/v1/margin/interest", { params: { query: q } })),
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/margin/interest", { params: { query: { ...q, kind: kindParam(q.kind) as never } } })),
   });
 }

@@ -1396,6 +1396,50 @@ else
   done
   echo "ok   are humans'"
 fi
+# The kinds in the reports, the steps of liquidations and the overview
+# (L1's third part): the humans' figures by default, at most every kind's;
+# the bots' trading on their pair; HOUSE's open interest is SYSTEM's; the
+# overview's small print counts the bots trading.
+as AUDITOR GET "/admin/v1/reports/trading?kind=ROBOT" ""
+if [[ $STATUS == 200 ]]; then
+  echo "skip the kinds in the reports: this admin-service is from before L1's third part"
+else
+  expect 400 COMMON_INVALID_ARGUMENT "a report of an unknown kind"
+  report_sum() { # report_sum PATH FIELD: a report's FIELD summed over its items
+    as AUDITOR GET "$1" ""
+    [[ $STATUS == 200 ]] || fail "$1: HTTP $STATUS"
+    jq "[.items[].$2 | tonumber] | add // 0" <<<"$BODY"
+  }
+  HUMAN_TRADES=$(report_sum "/admin/v1/reports/trading?days=7" trades)
+  ALL_TRADES=$(report_sum "/admin/v1/reports/trading?days=7&kind=ALL" trades)
+  BOT_TRADES=$(report_sum "/admin/v1/reports/trading?days=1&kind=BOT" trades)
+  [[ $HUMAN_TRADES -le $ALL_TRADES && $BOT_TRADES -ge 1 ]] || fail "spot trades: humans $HUMAN_TRADES, all $ALL_TRADES, bots today $BOT_TRADES"
+  echo "ok   spot trades of the week: the humans' $HUMAN_TRADES of $ALL_TRADES; the bots' today $BOT_TRADES"
+  HUMAN_SIGNUPS=$(report_sum "/admin/v1/reports/users?days=7" registered)
+  ALL_SIGNUPS=$(report_sum "/admin/v1/reports/users?days=7&kind=ALL" registered)
+  [[ $HUMAN_SIGNUPS -le $ALL_SIGNUPS ]] || fail "sign-ups: humans $HUMAN_SIGNUPS, all $ALL_SIGNUPS"
+  echo "ok   sign-ups of the week: the humans' $HUMAN_SIGNUPS of $ALL_SIGNUPS"
+  as AUDITOR GET "/admin/v1/reports/open-interest?kind=SYSTEM" ""
+  expect 200 - "HOUSE's open interest, by kind SYSTEM"
+  check '(.items | length) >= 1' "on its contracts"
+  as AUDITOR GET "/admin/v1/reports/wallet?days=7&kind=TEST" ""
+  expect 200 - "the test accounts' deposits and withdrawals"
+  as AUDITOR GET "/admin/v1/reports/derivatives?days=7&kind=SYSTEM" ""
+  expect 200 - "HOUSE's contract figures"
+  check '(.items | length) >= 1' "it trades every contract"
+  as AUDITOR GET "/admin/v1/derivatives/liquidations?user_kind=ROBOT" ""
+  expect 400 COMMON_INVALID_ARGUMENT "liquidation steps of an unknown kind (user_kind: kind is a step's)"
+  as AUDITOR GET "/admin/v1/derivatives/liquidations?days=7&user_kind=ALL&kind=STARTED&limit=5" ""
+  expect 200 - "the steps of every kind's accounts"
+  as AUDITOR GET "/admin/v1/margin/liquidations?kind=ROBOT" ""
+  expect 400 COMMON_INVALID_ARGUMENT "margin liquidations of an unknown kind"
+  as AUDITOR GET "/admin/v1/margin/interest?days=7&kind=ALL" ""
+  expect 200 - "every kind's margin interest"
+  as AUDITOR GET "/admin/v1/dashboard?days=7" ""
+  expect 200 - "the overview"
+  check '(.trading.other_traders_24h | map(select(.kind == "BOT")) | .[0].count // 0) >= 1 and (.trading.other_trades_24h | type) == "array"
+    and (.partial | index("kinds")) == null' "the humans' trading, the bots trading counted apart"
+fi
 as FINANCE GET "/admin/v1/withdrawals?status=ALL&limit=1" ""
 expect 200 - "withdrawals of every status"
 check '(.items | length) <= 1 and has("next_cursor")' "a page with its cursor"

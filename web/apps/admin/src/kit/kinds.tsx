@@ -26,11 +26,11 @@ function useKindOptions() {
   ];
 }
 
-/** useKindFilter is a list's 类型 filter in its FilterBar. */
-export function useKindFilter(): FilterDef {
+/** useKindFilter is a list's 类型 filter in its FilterBar: in the address as key (kind; user_kind where kind is something else). */
+export function useKindFilter(key = "kind"): FilterDef {
   const { t } = useTranslation();
   const options = useKindOptions();
-  return { key: "kind", label: t("admin.kinds.label"), kind: "select", width: 110, options };
+  return { key, label: t("admin.kinds.label"), kind: "select", width: 110, options };
 }
 
 /** KindSelect is the 类型 filter of a list without a FilterBar: "" is the humans. */

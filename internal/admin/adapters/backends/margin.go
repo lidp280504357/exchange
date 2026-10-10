@@ -131,7 +131,8 @@ func (m Margin) Liquidate(ctx context.Context, userID, account, approvalID, admi
 
 // marginLiquidations merges each liquidation's two events (anyLast skips
 // what an event left NULL) and pages them by when they started (their end
-// when the start is not known), newest first.
+// when the start is not known), newest first; {kind} is the accounts'
+// kinds' condition (L1, kindCond on uid).
 const marginLiquidations = `SELECT id, uid, acct, sym, trig, appr, lvl, assets, liabilities, rep, fee_paid, covered, rem, started, completed, at
 	FROM (
 		SELECT toString(liquidation_id) AS id, toString(anyLast(user_id)) AS uid, anyLast(account_type) AS acct, anyLast(symbol) AS sym,
@@ -142,7 +143,7 @@ const marginLiquidations = `SELECT id, uid, acct, sym, trig, appr, lvl, assets, 
 		FROM margin_liquidations GROUP BY liquidation_id
 	)
 	WHERE at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR acct = ?) AND (? = '' OR sym = ?) AND (? = '' OR trig = ?)
-		AND (? = '' OR uid = ?) AND (NOT ? OR (at, id) < (` + ms + `, ?))
+		AND (? = '' OR uid = ?) AND {kind} AND (NOT ? OR (at, id) < (` + ms + `, ?))
 	ORDER BY at DESC, id DESC LIMIT ?`
 
 // MarginLiquidations returns a page of margin liquidations, newest first.
@@ -151,8 +152,10 @@ func (r Reports) MarginLiquidations(ctx context.Context, q ports.MarginLiquidati
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := r.Conn.Query(ctx, marginLiquidations, q.Days-1, q.Account, q.Account, q.Symbol, q.Symbol, q.Trigger, q.Trigger, q.UserID, q.UserID,
-		pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+	byKind, byKindArgs := kindCond("uid", q.ByKind)
+	args := append([]any{q.Days - 1, q.Account, q.Account, q.Symbol, q.Symbol, q.Trigger, q.Trigger, q.UserID, q.UserID}, byKindArgs...)
+	args = append(args, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+	rows, err := r.Conn.Query(kindCtx(ctx, q.ByKind), strings.Replace(marginLiquidations, "{kind}", byKind, 1), args...)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
@@ -221,17 +224,18 @@ func amountsOf(s *string) []ports.MarginAmount {
 // ledger's interest rows (a charge lowers one, a repayment raises it),
 // owed carried from before the period; the principal and the rate from
 // margin_interest's hourly charges; the USDT values at each bucket's last
-// trade of the asset's USDT pair.
+// trade of the asset's USDT pair. Of the accounts of the kinds kept (L1;
+// {kind} in the one not ranged).
 const (
 	marginInterestRows   = `account_type IN ('MARGIN_CROSS_INTEREST', 'MARGIN_ISOLATED_INTEREST')`
 	marginInterestBefore = `SELECT asset, -sum(amount) FROM ledger_entries FINAL
-		WHERE ` + marginInterestRows + ` AND posted_at < toDateTime64(?, 3, 'UTC') AND (? = '' OR asset = ?) GROUP BY asset`
+		WHERE ` + marginInterestRows + ` AND posted_at < toDateTime64(?, 3, 'UTC') AND (? = '' OR asset = ?) AND {kind} GROUP BY asset`
 	marginInterestLedger = `SELECT {day:posted_at} AS day, asset, -sumIf(amount, amount < 0), sumIf(amount, amount > 0), sum(amount)
-		FROM ledger_entries FINAL WHERE ` + marginInterestRows + ` AND {range:posted_at} AND (? = '' OR asset = ?)
+		FROM ledger_entries FINAL WHERE ` + marginInterestRows + ` AND {range:posted_at} AND {kind:owner_id} AND (? = '' OR asset = ?)
 		GROUP BY day, asset ORDER BY day, asset`
 	marginInterestCharges = `SELECT {day:hour} AS day, asset, sum(principal), uniqExact(hour), sum(interest),
 			uniqExact(user_id, account_type, symbol)
-		FROM margin_interest FINAL WHERE {range:hour} AND (? = '' OR asset = ?) GROUP BY day, asset`
+		FROM margin_interest FINAL WHERE {range:hour} AND {kind:user_id} AND (? = '' OR asset = ?) GROUP BY day, asset`
 	// marginInterestPrices takes the pairs it reads (%s): one asset's own
 	// (symbol = ?, the trades' key) or every USDT pair.
 	marginInterestPrices = `SELECT {day:executed_at} AS day, substring(symbol, 1, length(symbol) - 5) AS base, argMax(price, executed_at)
@@ -240,8 +244,11 @@ const (
 
 // MarginInterest returns the interest per bucket and asset of the period.
 func (r Reports) MarginInterest(ctx context.Context, rng ports.ReportRange, asset string) ([]ports.MarginInterestBucket, error) {
+	ctx = kindCtx(ctx, rng.ByKind)
 	owed := map[string]decimal.Decimal{}
-	rows, err := r.Conn.Query(ctx, marginInterestBefore, rng.From.UTC().Format(chTime), asset, asset)
+	byKind, byKindArgs := kindCond("owner_id", rng.ByKind)
+	rows, err := r.Conn.Query(ctx, strings.Replace(marginInterestBefore, "{kind}", byKind, 1),
+		append([]any{rng.From.UTC().Format(chTime), asset, asset}, byKindArgs...)...)
 	if err != nil {
 		return nil, unavailable(err)
 	}

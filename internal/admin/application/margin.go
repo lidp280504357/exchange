@@ -1114,13 +1114,19 @@ func (s *Service) MarginLiquidations(ctx context.Context, p Principal, q MarginL
 		q.Limit = 100
 	}
 	q.Days = reportDays(q.Days)
+	// The accounts' kinds (L1): the humans' by default.
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, false); err != nil {
+		return nil, "", err
+	}
 	return s.MarginReports.MarginLiquidations(ctx, q)
 }
 
 // MarginInterest returns the interest per bucket and asset of the period
-// (one asset unless empty), oldest first.
+// (one asset unless empty), oldest first, of the accounts of the kinds
+// asked (L1: the humans' by default).
 func (s *Service) MarginInterest(ctx context.Context, p Principal, q ReportQuery, asset string) ([]ports.MarginInterestBucket, error) {
-	rng, err := s.reportRange(p, q)
+	rng, err := s.kindRange(ctx, p, q)
 	if err != nil {
 		return nil, err
 	}

@@ -4748,13 +4748,17 @@ paths:
       summary: Trades and orders per symbol and day, week or month (UTC), newest first
       description: |
         From the ClickHouse read models (trades, order_updates), which lag
-        the services by a few seconds. Needs reports.read.
+        the services by a few seconds. Of the accounts' kinds (kind, L1):
+        the trades with a side of theirs (by default a human on a side;
+        HOUSE is the other side of nearly every one) and their orders.
+        Needs reports.read.
       tags: [reports]
       parameters:
         - $ref: '#/components/parameters/Days'
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
         - $ref: '#/components/parameters/ReportBucket'
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The days.
@@ -4776,7 +4780,8 @@ paths:
       summary: Credited deposits and confirmed withdrawals per asset and day, week or month (UTC)
       description: |
         Deposits booked to users (not the unclaimed ones) by the day they
-        were credited; withdrawals by the day they were confirmed. Needs
+        were credited; withdrawals by the day they were confirmed; of the
+        accounts' kinds (kind, L1: the humans' by default). Needs
         reports.read.
       tags: [reports]
       parameters:
@@ -4784,6 +4789,7 @@ paths:
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
         - $ref: '#/components/parameters/ReportBucket'
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The days.
@@ -4850,6 +4856,9 @@ paths:
         their fees and results, the funding the positions paid and
         received at the day's settlements, the positions taken over, the
         auto-deleveraged counterparties and what the insurance fund paid.
+        Of the accounts' kinds (kind, L1: the humans' by default): their
+        fills, fees, results, funding and liquidations; the volume and
+        notional of the trades with a side of theirs, once per trade.
         Needs reports.read.
       tags: [reports, derivatives]
       parameters:
@@ -4857,6 +4866,7 @@ paths:
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
         - $ref: '#/components/parameters/ReportBucket'
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The days.
@@ -4878,8 +4888,12 @@ paths:
       summary: Each contract's open positions from the positions read model
       description: |
         The latest position snapshots (derivatives_positions); a few
-        seconds behind derivatives-service. Needs reports.read.
+        seconds behind derivatives-service. Of the accounts' kinds (kind,
+        L1): the humans' by default, HOUSE's with SYSTEM. Needs
+        reports.read.
       tags: [reports, derivatives]
+      parameters:
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The contracts with open positions.
@@ -4903,16 +4917,17 @@ paths:
         Per bucket: the accounts registered and signed in (the auth
         events), those trading (either side of a spot trade, or a
         contract fill) and those with a deposit credited, each counted
-        once; total is every account registered by the bucket's end.
-        HOUSE and the simulated market's bots are left out (partial names
-        "bots" when market-sim could not say which they are). Every bucket
-        of the period comes, empty ones too. Needs reports.read.
+        once; total is every account registered by the bucket's end. Of
+        the accounts' kinds (kind, L1): the humans' by default, so without
+        HOUSE, the simulated market's bots and the test accounts. Every
+        bucket of the period comes, empty ones too. Needs reports.read.
       tags: [reports]
       parameters:
         - $ref: '#/components/parameters/Days'
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
         - $ref: '#/components/parameters/ReportBucket'
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The buckets.
@@ -4928,9 +4943,9 @@ paths:
                       $ref: '#/components/schemas/UsersBucket'
                   partial:
                     type: array
+                    description: Empty since L1 (the bots go by kind; without the kinds the report is 503).
                     items:
                       type: string
-                      enum: [bots]
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/reports/house-pnl:
@@ -5217,13 +5232,16 @@ paths:
     get:
       operationId: listLiquidations
       summary: Liquidation steps, newest first
-      description: From the ClickHouse read model derivatives_liquidations. Needs derivatives.read.
+      description: >-
+        From the ClickHouse read model derivatives_liquidations; the steps of the accounts' kinds (user_kind, L1: the
+        humans' by default) unless user_id is given. Needs derivatives.read.
       tags: [derivatives]
       parameters:
         - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/UserKind'
         - name: kind
           in: query
-          description: Empty for all.
+          description: The step's kind; empty for all.
           schema:
             type: string
             enum: [WARNING, STARTED, FILLED, ADL]
@@ -6314,10 +6332,12 @@ paths:
         fund and any shortfall the fund covered; started in the last
         `days` (seen completed only: completed). A row seen completed only
         has no start fields, and one from before ClickHouse 00010 no
-        trigger or approval. Needs reports.read.
+        trigger or approval. Of the accounts' kinds (kind, L1: the humans'
+        by default) unless user_id is given. Needs reports.read.
       tags: [margin]
       parameters:
         - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/Kind'
         - name: account
           in: query
           schema:
@@ -6362,7 +6382,8 @@ paths:
         ledger_entries), what users owe at the bucket's end, the average
         principal and hourly rate and the accounts charged
         (margin_interest's hourly charges), in the asset and in USDT at the
-        bucket's last trade of its USDT pair (null without one). Needs
+        bucket's last trade of its USDT pair (null without one); of the
+        accounts' kinds (kind, L1: the humans' by default). Needs
         reports.read.
       tags: [margin]
       parameters:
@@ -6370,6 +6391,7 @@ paths:
         - $ref: '#/components/parameters/ReportFrom'
         - $ref: '#/components/parameters/ReportTo'
         - $ref: '#/components/parameters/ReportBucket'
+        - $ref: '#/components/parameters/Kind'
         - name: asset
           in: query
           description: One asset; all when absent.
@@ -6445,6 +6467,17 @@ components:
         HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
         Left out, the humans only (the console's default). Another value is
         400.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          type: string
+          enum: [HUMAN, BOT, TEST, SYSTEM, ALL]
+    UserKind:
+      name: user_kind
+      in: query
+      description: The accounts' kinds as kind elsewhere (L1), on a list whose kind is something else (a liquidation step's).
       style: form
       explode: true
       schema:
@@ -7020,7 +7053,10 @@ components:
                     format: int64
         trading:
           type: object
-          required: [trades_24h, active_traders_24h, turnover_24h]
+          required: [trades_24h, active_traders_24h, turnover_24h, other_trades_24h, other_traders_24h]
+          description: >-
+            The humans' (L1): the trades with a human on a side and their turnover, the humans trading; the other kinds'
+            beside them. Every account's, and nothing beside, when the kinds cannot be read (partial names kinds).
           properties:
             trades_24h:
               type: integer
@@ -7038,9 +7074,20 @@ components:
                     type: string
                   amount:
                     $ref: '#/components/schemas/Decimal'
+            other_trades_24h:
+              type: array
+              description: The trades without a human side, by the other kind on a side (TEST before BOT).
+              items:
+                $ref: '#/components/schemas/KindCount'
+            other_traders_24h:
+              type: array
+              description: The traders of each other kind (BOT, TEST, SYSTEM).
+              items:
+                $ref: '#/components/schemas/KindCount'
         wallet:
           type: object
           required: [pending_deposits, pending_withdrawals]
+          description: The humans' (L1), as the queues list by default.
           properties:
             pending_deposits:
               type: integer
@@ -7057,6 +7104,7 @@ components:
             events_24h:
               type: integer
               format: int64
+              description: The risk events of the last 24 hours, a symbol's and the humans' (L1).
         feed:
           description: The reference feed; null when market-data-service could not be asked.
           oneOf:
@@ -7064,7 +7112,9 @@ components:
             - $ref: '#/components/schemas/FeedStatus'
         series:
           type: array
-          description: One per UTC day, oldest first.
+          description: >-
+            One per UTC day, oldest first; the humans' (L1, A108): their new accounts, the trades with a human on a side and
+            their USDT turnover.
           items:
             type: object
             required: [day, new_users, trades, turnover_usdt]
@@ -7082,9 +7132,18 @@ components:
                 $ref: '#/components/schemas/Decimal'
         partial:
           type: array
-          description: The parts that could not be read (users, activity, feed).
+          description: The parts that could not be read (users, activity, feed; kinds - the figures are every account's).
           items:
             type: string
+    KindCount:
+      type: object
+      required: [kind, count]
+      properties:
+        kind:
+          $ref: '#/components/schemas/UserKind'
+        count:
+          type: integer
+          format: int64
     Decimal:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]+)?$'

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/skill/exchange/internal/admin/adapters/backends"
 	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/chx"
@@ -106,7 +108,7 @@ func TestReports(t *testing.T) {
 		perps[0].Liquidations != 1 || perps[0].ADL != 1 || perps[0].InsurancePaid != "100" {
 		t.Fatalf("derivatives report %+v", perps)
 	}
-	oi, err := r.OpenInterest(ctx)
+	oi, err := r.OpenInterest(ctx, ports.KindFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +121,16 @@ func TestReports(t *testing.T) {
 	}
 	if len(steps) != 4 || next != "" {
 		t.Fatalf("liquidations %+v %q", steps, next)
+	}
+	// By kind (L1): a step is its account's.
+	const liquidated = "0192a000-0000-7000-8000-0000000000b7"
+	for name, c := range map[string]struct {
+		f    ports.KindFilter
+		want int
+	}{"kept": {ports.KindFilter{Only: []string{liquidated}}, 1}, "left out": {ports.KindFilter{Except: []string{liquidated}}, 3}} {
+		if steps, _, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Limit: 10, ByKind: c.f}); err != nil || len(steps) != c.want {
+			t.Fatalf("the filled step's account %s: %+v %v", name, steps, err)
+		}
 	}
 	firstTwo, next, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Limit: 2})
 	if err != nil || len(firstTwo) != 2 || next == "" {
@@ -239,7 +251,10 @@ func TestUsersAndHouseReports(t *testing.T) {
 	r := backends.Reports{Conn: conn}
 	midnight := time.Now().UTC().Truncate(24 * time.Hour)
 	today := ports.ReportRange{From: midnight, To: midnight, Bucket: ports.BucketDay}
-	users, before, err := r.Users(ctx, today, []string{house, bot})
+	// The humans' (L1): HOUSE (SYSTEM) and the bot left out.
+	humans := today
+	humans.ByKind = ports.KindFilter{Except: []string{house, bot}}
+	users, before, err := r.Users(ctx, humans)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,5 +295,53 @@ func TestUsersAndHouseReports(t *testing.T) {
 	}
 	if trades != 3 {
 		t.Fatalf("by month %+v", trading)
+	}
+
+	// By kind (L1): a spot trade is the humans' when one side is a human's
+	// (both of HOUSE's with u1 and u2), the bot's when one side is its; a
+	// contract's fills, fees and results are their accounts', its volume
+	// the trades with a side of theirs, once (u1 bought from HOUSE); the
+	// funding and open interest their positions'.
+	// (A month's rows: two when the period crosses the first of a month.)
+	sum := func(rows []ports.TradingDay) (uint64, decimal.Decimal) {
+		var n uint64
+		v := decimal.Zero
+		for _, d := range rows {
+			n, v = n+d.Trades, v.Add(decimal.RequireFromString(d.Volume))
+		}
+		return n, v
+	}
+	month.ByKind = humans.ByKind
+	if trading, err = r.Trading(ctx, month); err != nil {
+		t.Fatal(err)
+	}
+	if n, v := sum(trading); n != 2 || v.String() != "1.5" {
+		t.Fatalf("the humans' trading %+v", trading)
+	}
+	month.ByKind = ports.KindFilter{Only: []string{bot}}
+	if trading, err = r.Trading(ctx, month); err != nil {
+		t.Fatal(err)
+	}
+	if n, v := sum(trading); n != 1 || v.String() != "1" {
+		t.Fatalf("the bot's trading %+v", trading)
+	}
+	perps, err := r.Derivatives(ctx, humans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(perps) != 1 || perps[0].Symbol != "BTC-USDT-PERP" || perps[0].Fills != 1 || perps[0].Volume != "0.1" || perps[0].Notional != "6000" ||
+		perps[0].Fees != "3" || perps[0].RealizedPnL != "0" || perps[0].FundingPaid != "0" {
+		t.Fatalf("the humans' contracts %+v", perps)
+	}
+	system := today
+	system.ByKind = ports.KindFilter{Only: []string{house}}
+	if perps, err = r.Derivatives(ctx, system); err != nil || len(perps) != 3 {
+		t.Fatalf("HOUSE's contracts %+v %v", perps, err)
+	}
+	if wallet, err := r.Wallet(ctx, system); err != nil || len(wallet) != 0 {
+		t.Fatalf("HOUSE's deposits %+v %v", wallet, err)
+	}
+	if wallet, err := r.Wallet(ctx, humans); err != nil || len(wallet) != 1 || wallet[0].Deposits != 2 || wallet[0].DepositAmount != "15" {
+		t.Fatalf("the humans' deposits %+v %v", wallet, err)
 	}
 }

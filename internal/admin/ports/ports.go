@@ -269,8 +269,8 @@ type Users interface {
 	// the next ("" on the last).
 	List(ctx context.Context, q UserQuery) ([]User, string, error)
 	// Stats counts all accounts, those created since, and per day for the
-	// last days.
-	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
+	// last days: of the kinds given, every kind's when none (B185, L1).
+	Stats(ctx context.Context, since time.Time, days int, kinds []string) (UserStats, error)
 	// ResetUsername gives an account a new drawn username and returns the
 	// one before; ResetAvatar takes it back to the default avatar and says
 	// whether there was one (design 2026-10-07, avatars and usernames §1.6).
@@ -1051,6 +1051,10 @@ type ReportRange struct {
 	From   time.Time
 	To     time.Time
 	Bucket string
+	// ByKind keeps the figures of the accounts of some kinds (L1, the
+	// humans' by default): a spot trade is theirs when one of its sides
+	// is.
+	ByKind KindFilter
 }
 
 // UsersBucket is the users' activity in one bucket: the accounts
@@ -1097,9 +1101,10 @@ type Reports interface {
 	Wallet(ctx context.Context, r ReportRange) ([]WalletDay, error)
 	Candles(ctx context.Context, symbol string, seconds uint32, limit int) ([]Candle, error)
 	Derivatives(ctx context.Context, r ReportRange) ([]DerivativesDay, error)
-	// Users returns the users' activity per bucket, the accounts in
-	// exclude left out, and how many registered before the period.
-	Users(ctx context.Context, r ReportRange, exclude []string) ([]UsersBucket, uint64, error)
+	// Users returns the users' activity per bucket, of the accounts the
+	// range's kind filter keeps, and how many of them registered before
+	// the period.
+	Users(ctx context.Context, r ReportRange) ([]UsersBucket, uint64, error)
 	// HouseSpot returns HOUSE's spot trading per pair and day in the
 	// period, and per pair before it (BeforePeriod, its Day zero: the
 	// sums and the last price up to the period).
@@ -1107,7 +1112,8 @@ type Reports interface {
 	// HouseContracts returns HOUSE's (houseUser's) contract results per
 	// day in the period.
 	HouseContracts(ctx context.Context, r ReportRange, houseUser string) ([]HouseContractDay, error)
-	OpenInterest(ctx context.Context) ([]OpenInterest, error)
+	// OpenInterest is of the accounts the kind filter keeps (L1).
+	OpenInterest(ctx context.Context, f KindFilter) ([]OpenInterest, error)
 	// Liquidations returns a page of the liquidation steps, newest first,
 	// and the cursor of the next ("" on the last).
 	Liquidations(ctx context.Context, q LiquidationQuery) ([]LiquidationStep, string, error)
@@ -1229,6 +1235,10 @@ type MarginLiquidationQuery struct {
 	UserID  string
 	Cursor  string
 	Limit   int
+	// Kinds are the accounts' kinds asked for (L1), ByKind their
+	// accounts.
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // MarginAmount is an amount of an asset.
@@ -1304,6 +1314,10 @@ type LiquidationQuery struct {
 	UserID string
 	Cursor string
 	Limit  int
+	// Kinds are the accounts' kinds asked for (L1; the query's
+	// user_kind, as kind is a step's), ByKind their accounts.
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // The accounts a list of orders or trades keeps (ASTRA design §8 item 6):
@@ -1452,6 +1466,20 @@ type Activity struct {
 	RiskEvents24h     uint64
 	TradesByDay       map[string]uint64
 	TurnoverUSDTByDay map[string]string
+	// OtherTrades24h are the last 24 hours' trades without a side of the
+	// kinds kept, by the other kind on a side (TEST before BOT);
+	// OtherTraders24h the traders of each other kind (L1).
+	OtherTrades24h  map[string]uint64
+	OtherTraders24h map[string]uint64
+}
+
+// ActivityKinds are the accounts the overview's figures are of (L1): Keep
+// filters them (the humans' by default); Others are the other kinds'
+// accounts by kind, counted apart for the cards' small print. Both empty
+// while the kinds cannot be read: every account, nothing apart.
+type ActivityKinds struct {
+	Keep   KindFilter
+	Others map[string][]string
 }
 
 // Records pages through the read models' orders, trades and deposits and
@@ -1462,7 +1490,7 @@ type Records interface {
 	Orders(ctx context.Context, q OrderQuery) ([]Order, string, error)
 	Trades(ctx context.Context, q TradeQuery) ([]Trade, string, error)
 	Deposits(ctx context.Context, q DepositQuery) ([]Deposit, string, error)
-	Activity(ctx context.Context, days int) (Activity, error)
+	Activity(ctx context.Context, days int, k ActivityKinds) (Activity, error)
 	// OpenOrders counts the orders resting on a pair or contract (spot
 	// and contract orders share the read model).
 	OpenOrders(ctx context.Context, symbol string) (int, error)

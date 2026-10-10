@@ -146,9 +146,11 @@ func (u Users) List(ctx context.Context, q ports.UserQuery) ([]ports.User, strin
 	return out, resp.GetNextCursor(), nil
 }
 
-// Stats counts accounts.
-func (u Users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
-	resp, err := u.User.UserStats(ctx, &userv1.UserStatsRequest{Since: timestamppb.New(since), Days: int32(min(days, 90))}) //nolint:gosec // bounded
+// Stats counts accounts, of the kinds given (every kind's when none).
+func (u Users) Stats(ctx context.Context, since time.Time, days int, kinds []string) (ports.UserStats, error) {
+	resp, err := u.User.UserStats(ctx, &userv1.UserStatsRequest{
+		Since: timestamppb.New(since), Days: int32(min(days, 90)), Kinds: kinds, //nolint:gosec // bounded
+	})
 	if err != nil {
 		return ports.UserStats{}, err
 	}
@@ -809,54 +811,64 @@ type Reports struct{ Conn driver.Conn }
 // The report queries mark a column's bucket {day:column} and the period's
 // bounds on a column {range:column}; ranged fills them in (reports.go).
 
+// tradingReport sums each pair's trades of the kinds kept (L1: one side of
+// theirs is enough) and their orders.
 const tradingReport = `SELECT day, symbol, trades, volume, quote_volume, orders, rejected FROM
 	(
 		SELECT {day:executed_at} AS day, symbol, count() AS trades, sum(quantity) AS volume, sum(quote_quantity) AS quote_volume
-		FROM trades FINAL WHERE {range:executed_at} GROUP BY day, symbol
+		FROM trades FINAL WHERE {range:executed_at} AND {kinds:buyer_user_id,seller_user_id} GROUP BY day, symbol
 	) AS t
 	FULL OUTER JOIN
 	(
 		SELECT {day:occurred_at} AS day, symbol, countIf(status = 'NEW') AS orders, countIf(status = 'REJECTED') AS rejected
-		FROM order_updates FINAL WHERE {range:occurred_at} GROUP BY day, symbol
+		FROM order_updates FINAL WHERE {range:occurred_at} AND {kind:user_id} GROUP BY day, symbol
 	) AS o USING (day, symbol)
 	ORDER BY day DESC, symbol`
 
+// walletReport sums the deposits credited to and withdrawals confirmed of
+// the accounts of the kinds kept (L1).
 const walletReport = `SELECT day, asset, deposits, deposit_amount, withdrawals, withdrawal_amount, withdrawal_fees FROM
 	(
 		SELECT {day:updated_at} AS day, asset, count() AS deposits, sum(amount) AS deposit_amount
-		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND {range:updated_at}
+		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND {range:updated_at} AND {kind:user_id}
 		GROUP BY day, asset
 	) AS d
 	FULL OUTER JOIN
 	(
 		SELECT {day:updated_at} AS day, asset, count() AS withdrawals, sum(amount) AS withdrawal_amount, sum(fee) AS withdrawal_fees
-		FROM wallet_withdrawals FINAL WHERE status = 'CONFIRMED' AND {range:updated_at}
+		FROM wallet_withdrawals FINAL WHERE status = 'CONFIRMED' AND {range:updated_at} AND {kind:user_id}
 		GROUP BY day, asset
 	) AS w USING (day, asset)
 	ORDER BY day DESC, asset`
 
-// derivativesReport sums each contract's day: its fills (volume and
-// notional once per trade, from the buying side), the funding its
-// positions paid and received at the day's settlements, and its
-// liquidations.
+// derivativesReport sums each contract's day for the accounts of the
+// kinds kept (L1): their fills, fees and results; the volume and notional
+// of the trades with a side of theirs, once per trade (from the buying
+// side, which may be HOUSE's); the funding their positions paid and
+// received at the day's settlements, and their liquidations.
 const derivativesReport = `SELECT day, symbol, fills, volume, notional, fees, realized_pnl, funding_paid, funding_received,
 		liquidations, adl, insurance_paid FROM
 	(
-		SELECT {day:executed_at} AS day, symbol, count() AS fills, sumIf(quantity, side = 'BUY') AS volume,
-			sumIf(notional, side = 'BUY') AS notional, sum(fee) AS fees, sum(realized_pnl) AS realized_pnl
-		FROM derivatives_fills FINAL WHERE {range:executed_at} GROUP BY day, symbol
+		SELECT {day:executed_at} AS day, symbol, countIf(mine) AS fills, sumIf(quantity, side = 'BUY' AND theirs) AS volume,
+			sumIf(notional, side = 'BUY' AND theirs) AS notional, sumIf(fee, mine) AS fees, sumIf(realized_pnl, mine) AS realized_pnl
+		FROM (
+			SELECT executed_at, symbol, side, quantity, notional, fee, realized_pnl, {kind:user_id} AS mine,
+				trade_id IN (SELECT trade_id FROM derivatives_fills FINAL WHERE {range:executed_at} AND {kind:user_id}) AS theirs
+			FROM derivatives_fills FINAL WHERE {range:executed_at}
+		)
+		GROUP BY day, symbol HAVING fills > 0 OR volume > 0
 	) AS f
 	FULL OUTER JOIN
 	(
 		SELECT {day:funding_time} AS day, symbol, -sumIf(amount, amount < 0) AS funding_paid,
 			sumIf(amount, amount > 0) AS funding_received
-		FROM derivatives_funding FINAL WHERE {range:funding_time} GROUP BY day, symbol
+		FROM derivatives_funding FINAL WHERE {range:funding_time} AND {kind:user_id} GROUP BY day, symbol
 	) AS u USING (day, symbol)
 	FULL OUTER JOIN
 	(
 		SELECT {day:occurred_at} AS day, symbol, countIf(kind = 'STARTED') AS liquidations, countIf(kind = 'ADL') AS adl,
 			sumIf(insurance_paid, kind = 'FILLED') AS insurance_paid
-		FROM derivatives_liquidations FINAL WHERE symbol != '' AND {range:occurred_at}
+		FROM derivatives_liquidations FINAL WHERE symbol != '' AND {range:occurred_at} AND {kind:user_id}
 		GROUP BY day, symbol
 	) AS l USING (day, symbol)
 	ORDER BY day DESC, symbol`
@@ -868,7 +880,7 @@ func unavailable(err error) error {
 // Trading returns trades and orders per symbol and bucket of the period.
 func (r Reports) Trading(ctx context.Context, rng ports.ReportRange) ([]ports.TradingDay, error) {
 	query, args := ranged(tradingReport, rng)
-	rows, err := r.Conn.Query(ctx, query, args...)
+	rows, err := r.Conn.Query(kindCtx(ctx, rng.ByKind), query, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -894,7 +906,7 @@ func (r Reports) Trading(ctx context.Context, rng ports.ReportRange) ([]ports.Tr
 // bucket of the period.
 func (r Reports) Wallet(ctx context.Context, rng ports.ReportRange) ([]ports.WalletDay, error) {
 	query, args := ranged(walletReport, rng)
-	rows, err := r.Conn.Query(ctx, query, args...)
+	rows, err := r.Conn.Query(kindCtx(ctx, rng.ByKind), query, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -945,7 +957,7 @@ func (r Reports) Candles(ctx context.Context, symbol string, seconds uint32, lim
 // per bucket of the period.
 func (r Reports) Derivatives(ctx context.Context, rng ports.ReportRange) ([]ports.DerivativesDay, error) {
 	query, args := ranged(derivativesReport, rng)
-	rows, err := r.Conn.Query(ctx, query, args...)
+	rows, err := r.Conn.Query(kindCtx(ctx, rng.ByKind), query, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -971,11 +983,13 @@ func (r Reports) Derivatives(ctx context.Context, rng ports.ReportRange) ([]port
 }
 
 // OpenInterest returns each contract's open long and short quantity and
-// positions from the latest position snapshots.
-func (r Reports) OpenInterest(ctx context.Context) ([]ports.OpenInterest, error) {
-	rows, err := r.Conn.Query(ctx, `SELECT symbol, sumIf(quantity, quantity > 0) AS long_qty, -sumIf(quantity, quantity < 0) AS short_qty,
+// positions from the latest position snapshots, of the accounts of the
+// kinds kept (L1: HOUSE's are SYSTEM's).
+func (r Reports) OpenInterest(ctx context.Context, f ports.KindFilter) ([]ports.OpenInterest, error) {
+	byKind, args := kindCond("user_id", f)
+	rows, err := r.Conn.Query(kindCtx(ctx, f), `SELECT symbol, sumIf(quantity, quantity > 0) AS long_qty, -sumIf(quantity, quantity < 0) AS short_qty,
 		countIf(quantity != 0) AS open_positions
-		FROM derivatives_positions FINAL GROUP BY symbol HAVING open_positions > 0 ORDER BY symbol`)
+		FROM derivatives_positions FINAL WHERE `+byKind+` GROUP BY symbol HAVING open_positions > 0 ORDER BY symbol`, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -1003,14 +1017,17 @@ func (r Reports) Liquidations(ctx context.Context, q ports.LiquidationQuery) ([]
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := r.Conn.Query(ctx, `SELECT toString(event_id), kind, toString(user_id), symbol, position_side, cross_margin, adl, trade_id,
-		price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at
+	// The accounts' kinds (L1): a step is its account's.
+	byKind, byKindArgs := kindCond("user_id", q.ByKind)
+	args := append([]any{q.Days - 1, q.Kind, q.Kind, q.Symbol, q.Symbol, q.UserID, q.UserID}, byKindArgs...)
+	args = append(args, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+	rows, err := r.Conn.Query(kindCtx(ctx, q.ByKind), `SELECT toString(event_id), kind, toString(user_id), symbol, position_side, cross_margin, adl,
+		trade_id, price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at
 		FROM derivatives_liquidations FINAL
 		WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR kind = ?) AND (? = '' OR symbol = ?)
-		AND (? = '' OR toString(user_id) = ?)
+		AND (? = '' OR toString(user_id) = ?) AND `+byKind+`
 		AND (NOT ? OR (occurred_at, toString(event_id)) < (`+ms+`, ?))
-		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, q.Days-1, q.Kind, q.Kind, q.Symbol, q.Symbol, q.UserID, q.UserID,
-		pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}

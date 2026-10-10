@@ -800,6 +800,11 @@ func (s *Service) Liquidations(ctx context.Context, p Principal, q ports.Liquida
 		q.Limit = 100
 	}
 	q.Days = reportDays(q.Days)
+	// The accounts' kinds (L1): the humans' steps by default.
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, false); err != nil {
+		return nil, "", err
+	}
 	steps, next, err := s.Reports.Liquidations(ctx, q)
 	if err != nil || len(steps) == 0 {
 		return steps, next, err
@@ -836,7 +841,7 @@ func reportDays(days int) int {
 // TradingReport returns trades and orders per symbol and bucket of the
 // period, from the ClickHouse read models.
 func (s *Service) TradingReport(ctx context.Context, p Principal, q ReportQuery) ([]ports.TradingDay, error) {
-	rng, err := s.reportRange(p, q)
+	rng, err := s.kindRange(ctx, p, q)
 	if err != nil {
 		return nil, err
 	}
@@ -845,7 +850,7 @@ func (s *Service) TradingReport(ctx context.Context, p Principal, q ReportQuery)
 
 // WalletReport returns deposits and withdrawals per asset and bucket.
 func (s *Service) WalletReport(ctx context.Context, p Principal, q ReportQuery) ([]ports.WalletDay, error) {
-	rng, err := s.reportRange(p, q)
+	rng, err := s.kindRange(ctx, p, q)
 	if err != nil {
 		return nil, err
 	}
@@ -855,7 +860,7 @@ func (s *Service) WalletReport(ctx context.Context, p Principal, q ReportQuery) 
 // DerivativesReport returns each contract's fills, fees, results,
 // funding and liquidations per bucket of the period.
 func (s *Service) DerivativesReport(ctx context.Context, p Principal, q ReportQuery) ([]ports.DerivativesDay, error) {
-	rng, err := s.reportRange(p, q)
+	rng, err := s.kindRange(ctx, p, q)
 	if err != nil {
 		return nil, err
 	}
@@ -871,12 +876,17 @@ func (s *Service) DerivativesReport(ctx context.Context, p Principal, q ReportQu
 }
 
 // OpenInterest returns each contract's open positions from the read
-// model.
-func (s *Service) OpenInterest(ctx context.Context, p Principal) ([]ports.OpenInterest, error) {
+// model, of the accounts of the kinds (L1: the humans' by default; HOUSE's
+// with SYSTEM).
+func (s *Service) OpenInterest(ctx context.Context, p Principal, kinds []string) ([]ports.OpenInterest, error) {
 	if err := p.require(domain.PermReportsRead); err != nil {
 		return nil, err
 	}
-	list, err := s.Reports.OpenInterest(ctx)
+	f, err := s.kindFilter(ctx, kinds, "", false)
+	if err != nil {
+		return nil, err
+	}
+	list, err := s.Reports.OpenInterest(ctx, f)
 	if err != nil || len(list) == 0 {
 		return list, err
 	}

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { Num, TimeText, UserCell } from "../../kit/format";
+import { kindParam, useKindFilter } from "../../kit/kinds";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { settleOf, useQuantityUnit } from "../../kit/settle";
@@ -27,11 +28,14 @@ export default function Liquidations(_: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
   const qtyUnit = useQuantityUnit();
-  const filters = useFilters(["kind", "symbol", "user_id", "days"]);
+  const filters = useFilters(["kind", "symbol", "user_id", "user_kind", "days"]);
+  // The accounts' kind (L1) is user_kind here: kind is a step's.
+  const userKind = useKindFilter("user_kind");
   const f = filters.values;
   const days = DAYS.includes(f.days ?? "") ? Number(f.days) : 30;
   const q = {
     days, kind: (f.kind || undefined) as never, symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined,
+    user_kind: kindParam(f.user_kind) as never,
   };
   const list = useCursorList<Step>(["admin", "derivatives", "liquidations", q], async (cursor) =>
     adminData(await adminApi.GET("/admin/v1/derivatives/liquidations", { params: { query: { ...q, cursor, limit: pageSize() } } })),
@@ -73,6 +77,7 @@ export default function Liquidations(_: { admin: Admin }) {
           { key: "kind", label: t("admin.derivatives.kind"), kind: "select", options: options(t("admin.common.all"), KINDS, (k) => label("liquidationKind", k)), width: 130 },
           { key: "symbol", label: t("admin.common.symbol"), kind: "text", placeholder: "BTC-USDT-PERP", width: 160 },
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
+          userKind,
           {
             key: "days", label: t("admin.liquidations.period"), kind: "select", width: 120,
             options: DAYS.map((d) => ({ value: d === "30" ? ALL : d, label: t("admin.reports.lastDays", { n: Number(d) }) })),

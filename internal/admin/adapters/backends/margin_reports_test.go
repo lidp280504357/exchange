@@ -112,6 +112,18 @@ func TestMarginReports(t *testing.T) {
 			t.Fatalf("filtered by %s: %+v %v", name, list, err)
 		}
 	}
+	// By kind (L1): the user's two when it is kept, none when left out.
+	for name, c := range map[string]struct {
+		f    ports.KindFilter
+		want int
+	}{
+		"kept": {ports.KindFilter{Only: []string{user}}, 2}, "left out": {ports.KindFilter{Except: []string{user}}, 0},
+	} {
+		list, _, err := r.MarginLiquidations(ctx, ports.MarginLiquidationQuery{Days: 7, Limit: 10, ByKind: c.f})
+		if err != nil || len(list) != c.want {
+			t.Fatalf("the user %s: %+v %v", name, list, err)
+		}
+	}
 
 	midnight := time.Now().UTC().Truncate(24 * time.Hour)
 	buckets, err := r.MarginInterest(ctx, ports.ReportRange{From: midnight.AddDate(0, 0, -1), To: midnight, Bucket: ports.BucketDay}, "ZETA")
@@ -126,5 +138,11 @@ func TestMarginReports(t *testing.T) {
 		b.Owed.String() != "0.65" || b.PrincipalAvg.String() != "100" || b.HourlyRateAvg.String() != "0.0015" || b.Accounts != 2 ||
 		b.ChargedUSDT == nil || *b.ChargedUSDT != "0.6" || *b.RepaidUSDT != "0.3" {
 		t.Fatalf("the day's interest %+v", b)
+	}
+	// The interest of the accounts of a kind (L1): the ledger's owner u
+	// left out, nothing charged or owed.
+	others := ports.ReportRange{From: midnight.AddDate(0, 0, -1), To: midnight, Bucket: ports.BucketDay, ByKind: ports.KindFilter{Except: []string{"u"}}}
+	if buckets, err = r.MarginInterest(ctx, others, "ZETA"); err != nil || len(buckets) != 0 {
+		t.Fatalf("u left out: %+v %v", buckets, err)
 	}
 }

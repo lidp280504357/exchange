@@ -261,7 +261,7 @@ func (h *Handler) marginLiquidations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	list, next, err := h.Svc.MarginLiquidations(r.Context(), principal(r), application.MarginLiquidationQuery{
 		Days: intParam(q, "days"), Account: q.Get("account"), Symbol: q.Get("symbol"), Trigger: q.Get("trigger"), UserID: q.Get("user_id"),
-		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"), Kinds: kindsParam(q),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

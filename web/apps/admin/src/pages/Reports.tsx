@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createContext, useContext, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Num } from "../kit/format";
+import { kindParam, KindSelect } from "../kit/kinds";
 import { Card, Page } from "../kit/Page";
 import { cents, settleOf, useQuantityUnit } from "../kit/settle";
 import { SignedChart } from "../kit/SignedChart";
@@ -22,8 +23,8 @@ const right: DataColumnMeta = { align: "right" };
 const PERIODS = ["7", "30", "90", "custom"];
 const TABS = ["trading", "wallet", "derivatives", "users", "housePnl", "openInterest"];
 
-/** Period is a report's period as the API takes it: the last days, or from and to; and the bucket. */
-type Period = { days?: number; from?: string; to?: string; bucket: Bucket };
+/** Period is a report's period as the API takes it: the last days, or from and to; the bucket; and the accounts' kind (L1, none: the humans). */
+type Period = { days?: number; from?: string; to?: string; bucket: Bucket; kind?: string };
 
 /** today is the UTC date, as the reports count days. */
 const today = () => new Date().toISOString().slice(0, 10);
@@ -41,8 +42,9 @@ export default function Reports() {
   const [from, setFrom] = useState(daysAgo(89));
   const [to, setTo] = useState(today());
   const [bucket, setBucket] = useState<Bucket>("day");
+  const [kind, setKind] = useState("");
   const mode = useState("chart");
-  const period: Period = preset === "custom" ? { from, to, bucket } : { days: Number(preset), bucket };
+  const period: Period = preset === "custom" ? { from, to, bucket, kind } : { days: Number(preset), bucket, kind };
   const dateInput = "h-8 rounded-1 border border-line-1 bg-bg-1 px-2 text-sm text-fg-1";
   return (
     <Page title={t("admin.nav.reports")} help={t("admin.reports.help")}>
@@ -51,8 +53,11 @@ export default function Reports() {
         value={tab}
         onValueChange={setTab}
         extra={
-          tab !== "openInterest" && (
-            <span className="flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-center gap-2">
+            {/* Every report but HOUSE's result is of some accounts' kinds (L1): the humans' by default. */}
+            {tab !== "housePnl" && <KindSelect value={kind} onValueChange={setKind} />}
+            {tab !== "openInterest" && (
+              <>
               <Select
                 size="sm"
                 value={preset}
@@ -75,8 +80,9 @@ export default function Reports() {
                 items={(["day", "week", "month"] as const).map((b) => ({ value: b, label: t(`admin.reports.bucket.${b}`) }))}
                 aria-label={t("admin.reports.bucketLabel")}
               />
-            </span>
-          )
+              </>
+            )}
+          </span>
         }
       />
       <ViewMode.Provider value={mode}>
@@ -86,7 +92,7 @@ export default function Reports() {
         {tab === "users" && <Users period={period} />}
         {tab === "housePnl" && <HousePnL period={period} />}
       </ViewMode.Provider>
-      {tab === "openInterest" && <Interest />}
+      {tab === "openInterest" && <Interest kind={kind} />}
     </Page>
   );
 }
@@ -155,9 +161,12 @@ function View<T>({
   );
 }
 
+/** Query is a period as the API takes it: the kind as its list of kinds (L1). */
+type Query = Omit<Period, "kind"> & { kind?: never };
+
 /** useReport reads a report for the period. */
-function useReport<T>(name: string, period: Period, read: (query: Period) => Promise<T>) {
-  return useQuery({ queryKey: ["admin", "report", name, period], queryFn: () => read(period) });
+function useReport<T>(name: string, period: Period, read: (query: Query) => Promise<T>) {
+  return useQuery({ queryKey: ["admin", "report", name, period], queryFn: () => read({ ...period, kind: kindParam(period.kind) as never }) });
 }
 
 function Trading({ period }: { period: Period }) {
@@ -294,7 +303,6 @@ function Users({ period }: { period: Period }) {
       retry={() => void q.refetch()}
       columns={columns}
       rowId={(r) => r.day}
-      note={q.data?.partial.includes("bots") ? t("admin.reports.botsUnknown") : undefined}
       chart={byBucket(rows, period.bucket, { registered: (r) => r.registered, signedIn: (r) => r.signed_in, traders: (r) => r.traders, depositors: (r) => r.depositors })}
       series={[
         { key: "registered", label: t("admin.reports.registered"), kind: "bar", color: "chart-1" },
@@ -313,7 +321,10 @@ function usdtColumn(key: Exclude<keyof HousePnLBucket, "day">, name: string): Co
 
 function HousePnL({ period }: { period: Period }) {
   const { t } = useTranslation();
-  const q = useReport("house-pnl", period, async (query) => adminData(await adminApi.GET("/admin/v1/reports/house-pnl", { params: { query } })));
+  // HOUSE's own result: no accounts' kinds.
+  const q = useReport("house-pnl", { ...period, kind: undefined }, async (query) =>
+    adminData(await adminApi.GET("/admin/v1/reports/house-pnl", { params: { query } })),
+  );
   const columns = useMemo<ColumnDef<HousePnLBucket, unknown>[]>(
     () => [
       { accessorKey: "day", header: t("admin.reports.day") },
@@ -353,10 +364,13 @@ function HousePnL({ period }: { period: Period }) {
   );
 }
 
-function Interest() {
+function Interest({ kind }: { kind: string }) {
   const { t } = useTranslation();
   const qtyUnit = useQuantityUnit();
-  const q = useQuery({ queryKey: ["admin", "report", "oi"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/reports/open-interest")).items });
+  const q = useQuery({
+    queryKey: ["admin", "report", "oi", kind],
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/reports/open-interest", { params: { query: { kind: kindParam(kind) as never } } })).items,
+  });
   const columns = useMemo<ColumnDef<OpenInterest, unknown>[]>(
     () => [
       { accessorKey: "symbol", header: t("admin.common.symbol") },

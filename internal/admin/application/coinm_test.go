@@ -39,7 +39,7 @@ func (coinmReports) Derivatives(context.Context, ports.ReportRange) ([]ports.Der
 	return []ports.DerivativesDay{{Symbol: "ETH-USD-PERP"}, {Symbol: "GONE-USDT-PERP"}}, nil
 }
 
-func (coinmReports) OpenInterest(context.Context) ([]ports.OpenInterest, error) {
+func (coinmReports) OpenInterest(context.Context, ports.KindFilter) ([]ports.OpenInterest, error) {
 	return []ports.OpenInterest{{Symbol: "BTC-USD-PERP"}}, nil
 }
 
@@ -165,7 +165,7 @@ func TestSettlementAssetsOfReadModels(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		oi, err := h.svc.OpenInterest(ctx, auditor)
+		oi, err := h.svc.OpenInterest(ctx, auditor, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

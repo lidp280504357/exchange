@@ -88,6 +88,146 @@ func TestKindFilter(t *testing.T) {
 	}
 }
 
+// The overview (L1, A108): every kind's account counts, the humans' per
+// day (user-service asked twice); the activity is the humans' with each
+// other kind's accounts apart; without the kinds, everyone's figures,
+// said in partial when they could not be read.
+func TestDashboardByKind(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	records := &pageRecords{}
+	h.svc.Records = records
+	ids := &fakeKindIDs{of: map[string][]string{"BOT": {"b1"}, "TEST": {"t1"}, "SYSTEM": {"s1"}}}
+	h.svc.KindIDs = ids
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	auditor := h.login(t, "audit@example.com")
+	d, err := h.svc.Dashboard(ctx, auditor, 7)
+	if err != nil || len(d.Partial) != 0 || d.Users.Total != 9 || len(d.Users.Days) != 1 || d.Users.Days["of HUMAN"] != 1 {
+		t.Fatalf("dashboard %+v %v", d, err)
+	}
+	if !slices.Equal(h.users.stats, []string{"", "HUMAN"}) {
+		t.Fatalf("stats asked for %q", h.users.stats)
+	}
+	k := records.activity[0]
+	if !slices.Equal(k.Keep.Except, []string{"b1", "t1", "s1"}) || !slices.Equal(k.Others["BOT"], []string{"b1"}) ||
+		!slices.Equal(k.Others["TEST"], []string{"t1"}) || !slices.Equal(k.Others["SYSTEM"], []string{"s1"}) {
+		t.Fatalf("activity of %+v", k)
+	}
+	h.svc.KindIDs = failingKindIDs{}
+	if d, err = h.svc.Dashboard(ctx, auditor, 7); err != nil || !slices.Equal(d.Partial, []string{"kinds"}) || records.activity[1].Keep.On() {
+		t.Fatalf("without the kinds: %+v %+v %v", d.Partial, records.activity[1], err)
+	}
+}
+
+// failingKindIDs cannot read the accounts' kinds.
+type failingKindIDs struct{}
+
+func (failingKindIDs) IDs(context.Context, []string) ([]string, error) {
+	return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "user-service is down")
+}
+
+// The read models' reports and lists of steps (L1): the humans' by
+// default, another kind's when asked; a liquidation list's step kind is
+// kind, its accounts' user_kind (transport).
+func TestReportsByKind(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	reports := &kindReports{}
+	h.svc.Reports, h.svc.MarginReports = reports, reports
+	h.svc.KindIDs = &fakeKindIDs{of: map[string][]string{"BOT": {"b1"}, "TEST": {"t1"}, "SYSTEM": {"s1"}}}
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	auditor := h.login(t, "audit@example.com")
+	if _, err := h.svc.TradingReport(ctx, auditor, ReportQuery{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.WalletReport(ctx, auditor, ReportQuery{Kinds: []string{"BOT"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.UsersReport(ctx, auditor, ReportQuery{Kinds: []string{"ALL"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.OpenInterest(ctx, auditor, []string{"SYSTEM"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.svc.Liquidations(ctx, auditor, ports.LiquidationQuery{Kind: "ADL"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.svc.MarginLiquidations(ctx, auditor, MarginLiquidationQuery{Kinds: []string{"TEST"}, UserID: someUser}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.MarginInterest(ctx, auditor, ReportQuery{Kinds: []string{"TEST"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.DerivativesReport(ctx, auditor, ReportQuery{Kinds: []string{"robot"}}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an unknown kind: %v", err)
+	}
+	want := []string{
+		"trading except [b1 t1 s1]", "wallet only [b1]", "users every kind", "open interest only [s1]", "liquidations except [b1 t1 s1]",
+		"margin liquidations every kind", "margin interest only [t1]",
+	}
+	if !slices.Equal(reports.asked, want) {
+		t.Fatalf("asked\n%q\nwant\n%q", reports.asked, want)
+	}
+}
+
+// kindReports records the kinds each report or list was asked of.
+type kindReports struct {
+	ports.Reports
+	ports.MarginReports
+	asked []string
+}
+
+func (r *kindReports) record(what string, f ports.KindFilter) {
+	switch {
+	case f.Only != nil:
+		r.asked = append(r.asked, fmt.Sprintf("%s only %v", what, f.Only))
+	case f.Except != nil:
+		r.asked = append(r.asked, fmt.Sprintf("%s except %v", what, f.Except))
+	default:
+		r.asked = append(r.asked, what+" every kind")
+	}
+}
+
+func (r *kindReports) Trading(_ context.Context, rng ports.ReportRange) ([]ports.TradingDay, error) {
+	r.record("trading", rng.ByKind)
+	return nil, nil
+}
+
+func (r *kindReports) Wallet(_ context.Context, rng ports.ReportRange) ([]ports.WalletDay, error) {
+	r.record("wallet", rng.ByKind)
+	return nil, nil
+}
+
+func (r *kindReports) Derivatives(_ context.Context, rng ports.ReportRange) ([]ports.DerivativesDay, error) {
+	r.record("derivatives", rng.ByKind)
+	return nil, nil
+}
+
+func (r *kindReports) Users(_ context.Context, rng ports.ReportRange) ([]ports.UsersBucket, uint64, error) {
+	r.record("users", rng.ByKind)
+	return nil, 0, nil
+}
+
+func (r *kindReports) OpenInterest(_ context.Context, f ports.KindFilter) ([]ports.OpenInterest, error) {
+	r.record("open interest", f)
+	return nil, nil
+}
+
+func (r *kindReports) Liquidations(_ context.Context, q ports.LiquidationQuery) ([]ports.LiquidationStep, string, error) {
+	r.record("liquidations", q.ByKind)
+	return nil, "", nil
+}
+
+func (r *kindReports) MarginLiquidations(_ context.Context, q ports.MarginLiquidationQuery) ([]ports.MarginLiquidation, string, error) {
+	r.record("margin liquidations", q.ByKind)
+	return nil, "", nil
+}
+
+func (r *kindReports) MarginInterest(_ context.Context, rng ports.ReportRange, _ string) ([]ports.MarginInterestBucket, error) {
+	r.record("margin interest", rng.ByKind)
+	return nil, nil
+}
+
 // The lists services serve (L1 over L2/L3's POST .../list): the humans'
 // by default, another kind's when asked, a user's whatever its kind; the
 // badges count the humans'; a filter cut to MaxKindIDs is said in the

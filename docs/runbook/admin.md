@@ -137,6 +137,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - 24 小时风控事件；
   - 行情连接状态与因断流暂停的交易对（market-data 的 `/internal/market/feed`）；
   - 按日的新增用户、成交笔数与 USDT 成交额。
+- 都只算真人（L1 第二部分 c、A108）：账户数用 user-service 的 `by_kind` 中的真人（另两项小字给其他类型）；按日新增用户再问一次 user-service、只要 HUMAN（B185 的 `kinds`）；成交笔数、成交额与按日的成交算「有真人一方的成交」，活跃交易用户算真人；待确认充值、待审核提现与侧栏角标、默认队列一致只算真人；风控事件算交易对的与真人账户的。成交与活跃用户卡片下小字给其他类型：成交是没有真人一方的成交按其中一方的类型（测试优先于机器人），活跃用户是各类型的交易账户数（`trading.other_trades_24h`、`other_traders_24h`）；趋势图上方注明只算真人。读不到类型时这些数字是全部账户的，`partial` 含 `kinds`。
 
   哪一部分读不到就留空，并记在 `partial` 里。
 - 页面另读待办（`/todo`）、服务健康（`/health`）、HOUSE（`/house`）与托管方（`/custody`）；「服务状态」卡片有「详情」进入「系统健康」。
@@ -147,7 +148,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 - `GET /admin/v1/users`：账户，新到旧，可按状态、地区、注册时间与关键字 `q` 过滤，数据来自 user-service 的 `ListUsers`；列表带标签。关键字（A93）：用户名、邮箱或手机号里含有它的账户（不分大小写；邮箱与手机号由 auth-service `SearchUsers` 找出、最多 500 个），最多 254 个字符、不能含控制字符，否则 400。
 - 页面的搜索框（A93）：回车时先按用户 ID、邮箱、手机号或用户名精确查找（`lookup`），找到就打开该用户；查不到（404）就把输入当关键字筛选下方列表（地址栏 `q`，「重置」一并清掉，保存的视图也带上它），框下显示当前关键字；只有超长或含不可见字符才提示「输入有误」。关键字要 2–64 个字符（auth-service 与 user-service 的界限，B170；`GET /admin/v1/users` 的 `q` 超出即 400），查不到而输入只有 1 个或超过 64 个字符时提示「没有完全匹配的账户；按关键字筛选需 2–64 个字符」、列表不变。地址栏或保存的视图带来的 `q` 按同一规则（去掉首尾空白后 2–64 个字符、无不可见字符）检查：不合规则时列表不按它筛选（请求不带 `q`），框下关键字一行用黄字写「关键字需 2–64 个字符、不含不可见字符，列表没有按它筛选」（A104、A106）。文本筛选（地区等）停止输入 300 毫秒后自动生效，回车立即生效；地区框写「如 SG」，大小写都行。
-- 账户类型（L1，设计 [用户类型标记](../设计-用户类型标记-2026-10-09.md) §1 #5）：列表有「类型」列（真人、机器人、测试、系统）与「类型」筛选，**默认只列真人**——筛选选「真人」即地址栏不带 `kind`，选机器人/测试/系统各列那一类，选「全部」为 `kind=ALL`；「重置」回到真人，保存的视图带上它。接口 `GET /admin/v1/users?kind=…`（逗号分隔或重复，不分大小写；不带为 HUMAN，ALL 为全部，别的值 400），经 user-service `ListUsers` 的 `kinds`；账户摘要（列表、用户页、查找）都带 `kind`，用户页状态旁显示类型标签。类型由运维与脚本打（`exchangectl users kind`、`astra.sh mark`、端到端退出钩子），后台不改；已清理的测试账户（L4）不出现在列表里。概览的「注册用户」与「24 小时新增」只算真人，卡片下小字写其它类型（如「另有机器人 24、系统 1」），`GET /admin/v1/dashboard` 的 `users.by_kind` 给出各类型的总数与 24 小时新增；成交与新增用户趋势图的按天新增仍含全部类型（user-service 的按天统计还不分类型）。
+- 账户类型（L1，设计 [用户类型标记](../设计-用户类型标记-2026-10-09.md) §1 #5）：列表有「类型」列（真人、机器人、测试、系统）与「类型」筛选，**默认只列真人**——筛选选「真人」即地址栏不带 `kind`，选机器人/测试/系统各列那一类，选「全部」为 `kind=ALL`；「重置」回到真人，保存的视图带上它。接口 `GET /admin/v1/users?kind=…`（逗号分隔或重复，不分大小写；不带为 HUMAN，ALL 为全部，别的值 400），经 user-service `ListUsers` 的 `kinds`；账户摘要（列表、用户页、查找）都带 `kind`，用户页状态旁显示类型标签。类型由运维与脚本打（`exchangectl users kind`、`astra.sh mark`、端到端退出钩子），后台不改；已清理的测试账户（L4）不出现在列表里。概览的「注册用户」与「24 小时新增」只算真人，卡片下小字写其它类型（如「另有机器人 24、系统 1」），`GET /admin/v1/dashboard` 的 `users.by_kind` 给出各类型的总数与 24 小时新增；成交与新增用户趋势图也只算真人（第二部分 c 起，见「概览」）。
 - 读模型列表的账户类型（L1 第二部分，§1 #8）：订单、成交与充值记录（「全部」页签）同样有「类型」筛选、默认只列真人，取值与地址栏 `kind` 同上；订单页原来的「账户（机器人/用户）」筛选由它取代（接口的 `accounts` 参数保留给脚本，给出时不读 `kind`）。按用户（`user_id`）查时不分类型。admin-service 向 user-service 取各类型的账户 ID（`GET /internal/users/ids?kind=…`，`USER_SERVICE_URL`，compose 内为 `http://user-service:8082`；按类型组合缓存 1 分钟，到期带 ETag 再问；user-service 不答时沿用上次读到的，从没读到过的类型组合答 503），在 ClickHouse 里用 `IN`/`NOT IN`：真人 = 排除其他类型的账户（没有用户的充值也留着），某类型 = 只留该类型的账户；成交按任一方算——选机器人是有机器人一方的成交，默认是有真人一方的（HOUSE 几乎是每笔成交的另一方，只排除两方都是非真人的）。用 `has()` 逐行扫数组在测试服 1,710 个非真人 ID 上要 3.7 秒（订单）与 1.5 秒（成交），`IN` 为 0.7 秒与 0.07 秒；ID 以文本进查询，这类查询把 ClickHouse 的 `max_query_size` 放到 16 MiB（默认 256 KiB 约容 6,500 个 ID，成交两方各带一份）。测试服的充值几乎都是端到端账户的，默认列表为空，选「测试」能看到。
 - 服务实时列表的账户类型（L1 第二部分 b，§1 #8）：提现（审核队列与各状态）、待处理与等回调的充值、托管方手续费（按提现的用户）、合约仓位与风险仓位、杠杆账户同样有「类型」筛选、默认只列真人（HOUSE 的合约仓位在「系统」里；没有用户的充值留在默认列表）。admin-service 把类型换成账户 ID，经各服务的 `POST …/list` 变体放在请求体里（`user_ids` 只留、`exclude_user_ids` 排除，L2/L3），不筛选时仍走 GET；一次最多 5,000 个 ID——超过时真人列表只排除机器人与 HOUSE（测试账户的记录也会出现），其他类型只取前 5,000 个账户，回答带 `kinds_narrowed: true`，页面在筛选栏下注明。侧栏的待办角标（待审提现、待处理充值）与默认列表一致，只数真人的（读不到类型时数全部）。测试服的提现全是端到端账户的，默认队列为空，选「测试」能看到。
 - 列表与用户页显示用户名与头像（设计 [用户头像与用户名](../设计-用户头像与用户名-2026-10-07.md)，I3）：上传的头像（列表用 64 px 缩略图，`/uploads/avatars/` 由 nginx 直出，后台站点同样可访问），没有上传时是与两站相同的内置头像（按用户 ID 在 12 个里选，`Avatar` 的 `seed`，A79）。用户页有「重置用户名」（重新随机一个 `user_` + 8 位）与「恢复默认头像」（`POST /admin/v1/users/{id}/username-reset`、`…/avatar-reset`，要 `users.status` 与理由，一人即可；审计 `admin.users.username_reset`（前后用户名）与 `admin.users.avatar_reset`，用户在站内收到通知）。本机开发时 Vite 把 `/uploads` 与 `/downloads` 也代理到测试服。
@@ -281,7 +282,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 ### 仓位与强平记录
 
 - **仓位**（`/positions`，C3）：全部用户的合约持仓，按保证金率（维持保证金 ÷ 保证金余额）从高到低、每 5 秒刷新。「风险仓位」只看被预警（含全仓账户被预警）、被接管或保证金率 ≥ 50% 的，不含 HOUSE（C5.5 ⑨）；可按合约、用户筛选。HOUSE 的仓位排在最后并标出（它的单按最高杠杆记保证金，零盈亏时保证金率约 50%，不排后会占满"最危险"；它是用户的对手方，不能在这里平）；标记价不新鲜的行在标记价下标「标记价过期」（C5.5 ⑨）；其余可强制平仓（`derivatives.write`，同用户页）。接口 `GET /admin/v1/positions`（最多 500 个，`truncated` 表示还有更多；derivatives-service 的内部接口 `/internal/derivatives/positions`）。
-- **强平记录**（`/liquidations`，C3）：强平引擎的每一步（预警、接管、强平成交、自动减仓），按环节（WARNING/STARTED/FILLED/ADL/ENDED）、合约、用户、近 1/7/30/90 天筛选（读模型；`limit` 最多 500）。
+- **强平记录**（`/liquidations`，C3）：强平引擎的每一步（预警、接管、强平成交、自动减仓），按环节（WARNING/STARTED/FILLED/ADL/ENDED）、合约、用户、账户类型（L1：默认真人；这一页的 `kind` 是环节，类型用 `user_kind`，地址栏同名）、近 1/7/30/90 天筛选（读模型；`limit` 最多 500）。
 
 ### 合约与保险基金
 
@@ -406,8 +407,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **杠杆账户**（`/margin/accounts`）：一次查询（类型、交易对、用户交给服务端，状态页签在返回的列表上筛），按风险率从低到高、最多 500 个（`truncated` 提示还有更多；margin-service 最多扫 5000 个账户，逐个用户取持仓估值，账户多时一次约 10 秒）；`frozen_reason` 不是管理员冻结时为空串；每个账户带待审的手工强平（`pending_approval_id`）。详情（`GET …/accounts/{user_id}/{account}`，`account` 为 `MARGIN_CROSS` 或 `MARGIN_ISOLATED:<交易对>`）：余额与估值、借款、借还流水（`journal_key` 是账本分录的幂等键，如 `margin-interest:<资产>:<整点 Unix 秒>`）、计息、最近 20 次强平（margin-service 自己的记录，带步骤与说明；`SHORTFALL` 表示保险基金缺某个资产，负债保留到补足后的下一轮）。
   - 冻结与解冻：`POST …/freeze`、`…/unfreeze`（带理由，冻结理由最多 500 字节），立即生效，审计 `admin.margin.account_frozen`、`admin.margin.account_unfrozen`（对象 `user:<id>`，详情有账户）。冻结时 margin-service 撤销账户的全部挂单（E3；撤单失败只记日志、冻结照样生效，可再撤），冻结后不能下单、借币或划出，可以还款，利息照常计、到强平线仍会强平。已冻结或强平中 409 `MARGIN_FROZEN`；同一管理员以同样理由再冻结（应答丢失后的重试）返回账户并补记审计。不是管理员冻结的（强平中）不能解冻：409 `MARGIN_NOT_FROZEN`。
   - 手工强平：`POST …/liquidate`（带 `Idempotency-Key`），一律等第二位有 `derivatives.write` 的管理员（202，审批 `MARGIN_LIQUIDATE`，`value_usdt` 为总负债，载荷保留申请时的状态、风险率与资产负债）。只有 margin-service 在强平时（开关 `margin.liquidation`，按账户所属用户判断，与 margin-service 的监控相同；它的手工强平路径本身不查开关）才能申请和执行：申请时关着 409 `ADMIN_MARGIN_LIQUIDATION_OFF`（开关整个关着时页面按钮置灰并说明，按规则打开时以服务端对该用户的判断为准）；批准时关着，申请记为失败（结果为 `ADMIN_MARGIN_LIQUIDATION_OFF`），不发给 margin-service；没有负债 409 `ADMIN_MARGIN_NOTHING_OWED`；强平中 409 `MARGIN_FROZEN`；同一账户一次一条待审。批准后 margin-service 以申请人的名义、按审批 ID 只启动一次（`POST /internal/margin/accounts/{user}/{account}/liquidate`，请求体只有 `approval_id`，触发方式 `MANUAL`），申请结果写强平 ID；一天未决即过期。
-- **杠杆强平**（`/margin/liquidations`）：读模型 `margin_liquidations`（按 `liquidation_id` 合并开始与完成两条事件，`anyLast` 跳过空值），近 1/7/30/90 天，按类型、交易对、触发方式、用户筛选，游标分页。只见到完成事件的行没有开始的字段，ClickHouse 00010 之前的行没有触发方式与审批号，页面显示「—」。
-- **利息报表**（`/margin/interest`）：按天、周或月与资产：计息与已还（账本 `ledger_entries` 的全仓/逐仓利息行：计息使其减少、还款使其增加）、期末未还（加上期初以前的累计）、平均本金与小时利率、计息账户数（`margin_interest` 的逐小时计息），折合 USDT 按该资产 USDT 交易对在桶内最后一笔成交价（没有则为空，USDT 按 1）。
+- **杠杆强平**（`/margin/liquidations`）：读模型 `margin_liquidations`（按 `liquidation_id` 合并开始与完成两条事件，`anyLast` 跳过空值），近 1/7/30/90 天，按类型、交易对、触发方式、用户、账户类型（`kind`，L1，默认真人）筛选，游标分页。只见到完成事件的行没有开始的字段，ClickHouse 00010 之前的行没有触发方式与审批号，页面显示「—」。
+- **利息报表**（`/margin/interest`）：按天、周或月与资产：计息与已还（账本 `ledger_entries` 的全仓/逐仓利息行：计息使其减少、还款使其增加）、期末未还（加上期初以前的累计）、平均本金与小时利率、计息账户数（`margin_interest` 的逐小时计息），折合 USDT 按该资产 USDT 交易对在桶内最后一笔成交价（没有则为空，USDT 按 1）。按账户类型（`kind`，L1，默认真人的计息与还款）。
 - **上线检查清单**：`margin` 项（见「上线检查清单」的表）——开关关着为达标；开着时要求 `margin.liquidation` 也开着，且 `margin.enabled` 与 `margin.auto_borrow` 都不对所有人全局打开。测试服三个杠杆开关自 2026-10-06 13:25 起对所有人打开，所以这一项在测试服为未达标；上线前三个开关回到按用户或地区的规则。
 - **审批页**：`MARGIN_PARAMS` 显示对象与每个改动字段的前后值，`MARGIN_LIQUIDATE` 显示用户、账户与申请时的风险率、负债；决定分别要 `instruments.trading` 与 `derivatives.write`；一天后标「已过期」。（`HOUSE_CAPS` 见「HOUSE 敞口」的额度一条。）
 - **审计**：立即生效的 `admin.margin.asset_changed`、`admin.margin.pair_changed`（对象 `margin:asset:<资产>`、`margin:pair:<交易对>`）；申请与决定 `admin.margin.params_requested/approved/rejected/failed`（对象 `margin:<目标>`，目标为 `asset:<资产>`、`pair:<交易对>` 或 `cross`）与 `admin.margin.liquidation_requested/approved/rejected/failed`（对象 `user:<id>`）；冻结与解冻见上。
@@ -546,10 +547,11 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 `/reports`（任务 12 起，所有角色可读，`reports.read`）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），比服务晚几秒。图表与表格两种视图（切换标签时保持），近 7/30/90 天或自定日期，按日、周或月汇总（C4c）。
 
 - **时间范围**：交易、充提、合约、用户与 HOUSE 报表都接受 `days`（近 N 天，最多 90）或 `from`/`to`（UTC 日期，含两端，`to` 默认今天），以及 `bucket=day|week|month`（周从周一起；一行的 `day` 是它所在区间的第一天）。按日最长一年，按周或按月最长三年；`bucket` 不对、开始晚于结束、结束晚于今天都是 400。
+- **账户类型**（L1 第二部分 c，§1 #8）：交易、充提、合约、用户增长与持仓量都带 `kind`（同列表：不带为真人，`ALL` 为全部，未知值 400），页面右上角「类型」（HOUSE 盈亏是 HOUSE 自己的，不分类型、不显示这个选择）。口径：现货成交有一方属于该类型即算（默认是有真人一方的成交，HOUSE 几乎是每笔成交的另一方），订单按下单账户；合约的成交笔数、手续费、已实现盈亏、资金费、强平与 ADL 按该类型的账户，成交量与成交额按「有一方属于该类型的成交」、仍按买方算一次（买方可能是 HOUSE）；充提按账户；持仓量按持仓账户（HOUSE 的在「系统」里）；用户增长按账户（默认即不含 HOUSE、机器人与测试账户）。读不到类型时报表答 503。
 - **交易**：按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单（含合约）；任意交易对 1m/5m/15m/1h/4h/1d K 线。
 - **充提**：按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）。
 - **合约**：按合约与日的成交（双边笔数、成交量与成交额按买方算一次、手续费、已实现盈亏）、资金费付出与收到、强平数、ADL 数、保险基金垫付；当前各合约持仓量（多头、空头、持仓数）。
-- **用户增长**（`GET /admin/v1/reports/users`）：每个区间的注册数与登录人数（auth 事件）、交易人数（现货任一方或合约成交）、充值到账人数，各自按人去重；`total` 是区间结束时的累计注册数。HOUSE 与模拟市场的机器人不计（机器人名单读 market-sim 的 `GET /internal/sim`，`MARKET_SIM_URL`；读不到时 `partial` 含 `bots`，页面提示数字包含机器人）。每个区间都有一行，没有数据的也是 0。
+- **用户增长**（`GET /admin/v1/reports/users`）：每个区间的注册数与登录人数（auth 事件）、交易人数（现货任一方或合约成交）、充值到账人数，各自按人去重；`total` 是区间结束时的累计注册数。按账户类型（见上；L1 之前按 market-sim 的机器人名单排除，`partial` 的 `bots` 已不再出现）。每个区间都有一行，没有数据的也是 0。
 - **HOUSE 盈亏**（`GET /admin/v1/reports/house-pnl`，USDT）：
   - 现货按天估值：每个交易对上 HOUSE 收到减付出的计价资产，加上它因交易持有的基础资产按当天最后成交价计；非 USDT 计价的交易对按其计价资产的 USDT 交易对当天收盘折算。`spot_pnl` 是区间内的变化，`spot_result` 是开始以来到区间结束时的累计结果（与 HOUSE 页的交易盈亏同口径）。需要价格时没有价格的交易对整段不计，列在 `unpriced`。
   - 合约：HOUSE 用户（`HOUSE_USER_ID`）成交的已实现盈亏减手续费（`contracts_pnl`），以及它收到的资金费（`funding`，付出为负）；未实现盈亏不计。币本位合约的这些数以币计，按该笔成交价、资金费按结算时的标记价折成 USDT（美元按 USDT 计；读模型里 G1 之前的行没有结算币，按 USDT）。

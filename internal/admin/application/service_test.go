@@ -220,6 +220,8 @@ type fakeUsers struct {
 	matches   map[string][]string
 	listed    ports.UserQuery
 	asked     []string
+	// stats are the kinds the stats were asked for, joined.
+	stats []string
 }
 
 func (u *fakeUsers) Find(_ context.Context, identifier string) (string, error) {
@@ -258,8 +260,13 @@ func (u *fakeUsers) List(_ context.Context, q ports.UserQuery) ([]ports.User, st
 	return out, "", nil
 }
 
-func (u *fakeUsers) Stats(context.Context, time.Time, int) (ports.UserStats, error) {
-	return ports.UserStats{}, nil
+// Stats answers every kind's (no kinds asked) apart from some kinds'.
+func (u *fakeUsers) Stats(_ context.Context, _ time.Time, _ int, kinds []string) (ports.UserStats, error) {
+	u.stats = append(u.stats, strings.Join(kinds, ","))
+	if len(kinds) > 0 {
+		return ports.UserStats{Total: 2, Days: map[string]int64{"of " + strings.Join(kinds, ","): 1}}, nil
+	}
+	return ports.UserStats{Total: 9, Days: map[string]int64{"of every kind": 1}}, nil
 }
 
 // ResetUsername gives a known account user_reset; ResetAvatar clears its

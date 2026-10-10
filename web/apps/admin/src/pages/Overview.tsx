@@ -56,18 +56,21 @@ export default function Overview({ admin }: { admin: Admin }) {
     "0"
   );
   const count = (n: number | undefined) => (n === undefined ? undefined : <CountUp value={String(n)} decimals={0} />);
-  // The accounts are the humans' (L1); the other kinds in small print beside them.
-  const others = (pick: (k: { total: number; new_24h: number }) => number) => {
-    const list = (d?.users.by_kind ?? []).filter((k) => k.kind !== "HUMAN" && pick(k) > 0);
-    return list.length
-      ? t("admin.kinds.others", { list: list.map((k) => t("admin.kinds.count", { kind: label("userKind", k.kind), n: formatAmount(String(pick(k)), 0) })).join(t("admin.summary.sep")) })
+  // The figures are the humans' (L1); the other kinds in small print beside them.
+  const othersOf = (list: { kind: string; n: number }[]) => {
+    const some = list.filter((k) => k.kind !== "HUMAN" && k.n > 0);
+    return some.length
+      ? t("admin.kinds.others", { list: some.map((k) => t("admin.kinds.count", { kind: label("userKind", k.kind), n: formatAmount(String(k.n), 0) })).join(t("admin.summary.sep")) })
       : undefined;
   };
+  const others = (pick: (k: { total: number; new_24h: number }) => number) => othersOf((d?.users.by_kind ?? []).map((k) => ({ kind: k.kind, n: pick(k) })));
+  const otherTrading = (list: { kind: string; count: number }[] | undefined) => othersOf((list ?? []).map((k) => ({ kind: k.kind, n: k.count })));
   const stats: { key: string; value: ReactNode; to?: string; note?: string }[] = [
     { key: "users", value: count(d?.users.total), to: "/users", note: others((k) => k.total) },
     { key: "new24h", value: count(d?.users.new_24h), note: others((k) => k.new_24h) },
-    { key: "trades24h", value: count(d?.trading.trades_24h), to: "/orders?tab=trades" },
-    { key: "traders24h", value: count(d?.trading.active_traders_24h) },
+    // A trade is the humans' when one side is (HOUSE is the other side of nearly every one); the other kinds' trades without a human side apart.
+    { key: "trades24h", value: count(d?.trading.trades_24h), to: "/orders?tab=trades", note: otherTrading(d?.trading.other_trades_24h) },
+    { key: "traders24h", value: count(d?.trading.active_traders_24h), note: otherTrading(d?.trading.other_traders_24h) },
     { key: "turnover24h", value: turnover },
     { key: "pendingWithdrawals", value: count(d?.wallet.pending_withdrawals), to: "/withdrawals" },
     { key: "pendingDeposits", value: count(d?.wallet.pending_deposits), to: "/deposits?status=CONFIRMING" },
@@ -131,6 +134,9 @@ export default function Overview({ admin }: { admin: Admin }) {
           />
         }
       >
+        <p className="mb-2 text-xs text-fg-3" data-testid="trend-kinds">
+          {t("admin.kinds.trend")}
+        </p>
         {d ? (
           <Reveal key={days}>
             <TrendChart

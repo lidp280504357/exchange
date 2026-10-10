@@ -19,12 +19,24 @@ import (
 
 // ReportQuery is a report's period as asked: from and to (YYYY-MM-DD, UTC,
 // both included; to defaults to today), or the last days (7 by default,
-// at most 90); and the bucket, day by default.
+// at most 90); the bucket, day by default; and the accounts' kinds (L1,
+// the humans when none; HOUSE's result has no kinds).
 type ReportQuery struct {
 	Days   int
 	From   string
 	To     string
 	Bucket string
+	Kinds  []string
+}
+
+// kindRange is a report's period with its accounts' kinds (L1).
+func (s *Service) kindRange(ctx context.Context, p Principal, q ReportQuery) (ports.ReportRange, error) {
+	rng, err := s.reportRange(p, q)
+	if err != nil {
+		return rng, err
+	}
+	rng.ByKind, err = s.kindFilter(ctx, q.Kinds, "", false)
+	return rng, err
 }
 
 // The longest periods: a year in days, three years in weeks or months.
@@ -110,7 +122,8 @@ func buckets(r ports.ReportRange) []time.Time {
 }
 
 // UsersReport is the users' activity per bucket; Partial names what could
-// not be read ("bots": the simulated market's bots are counted).
+// not be read (none since L1: the kinds are read or the report is
+// unavailable).
 type UsersReport struct {
 	Items   []ports.UsersBucket `json:"items"`
 	Partial []string            `json:"partial"`
@@ -118,27 +131,16 @@ type UsersReport struct {
 
 // UsersReport returns, per bucket of the period and oldest first, the
 // accounts registered, signed in, trading and with a deposit credited,
-// and every account registered by the bucket's end. HOUSE and the
-// simulated market's bots are left out.
+// and every account registered by the bucket's end, of the kinds asked
+// (L1: the humans' by default, without HOUSE, the bots and the test
+// accounts).
 func (s *Service) UsersReport(ctx context.Context, p Principal, q ReportQuery) (UsersReport, error) {
-	rng, err := s.reportRange(p, q)
+	rng, err := s.kindRange(ctx, p, q)
 	if err != nil {
 		return UsersReport{}, err
 	}
 	out := UsersReport{Items: []ports.UsersBucket{}, Partial: []string{}}
-	var exclude []string
-	if s.HouseBook.User != "" {
-		exclude = append(exclude, s.HouseBook.User)
-	}
-	if s.SimBots == nil {
-		out.Partial = append(out.Partial, "bots")
-	} else if bots, err := s.SimBots.BotUsers(ctx); err != nil {
-		s.Log.WarnContext(ctx, "reports: the bots are unknown", "error", err)
-		out.Partial = append(out.Partial, "bots")
-	} else {
-		exclude = append(exclude, bots...)
-	}
-	rows, before, err := s.Reports.Users(ctx, rng, exclude)
+	rows, before, err := s.Reports.Users(ctx, rng)
 	if err != nil {
 		return UsersReport{}, err
 	}

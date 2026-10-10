@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -313,8 +314,18 @@ func (c *leverageCatalog) List(context.Context) (json.RawMessage, error) {
 	if c.down {
 		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is down")
 	}
-	return json.RawMessage(`{"assets":[],"pairs":[],"contracts":[{"symbol":"BTC-USDT-PERP","status":"TRADING","max_leverage":150},` +
-		`{"symbol":"OLD-USDT-PERP","status":"DELISTED","max_leverage":200},{"symbol":"BTC-USD-PERP","status":"TRADING","max_leverage":125}]}`), nil
+	// As the listing has them (protojson of instrument-service's
+	// contracts): a contract's leverage is its tiers'.
+	tiers := func(lev ...int) string {
+		var out []string
+		for _, l := range lev {
+			out = append(out, fmt.Sprintf(`{"max_notional":"1","max_leverage":%d,"mmr":"0.001"}`, l))
+		}
+		return "[" + strings.Join(out, ",") + "]"
+	}
+	return json.RawMessage(`{"assets":[],"pairs":[],"contracts":[{"symbol":"BTC-USDT-PERP","status":"TRADING","risk_tiers":` + tiers(150, 100) + `},` +
+		`{"symbol":"OLD-USDT-PERP","status":"DELISTED","risk_tiers":` + tiers(200) + `},` +
+		`{"symbol":"BTC-USD-PERP","status":"TRADING","risk_tiers":` + tiers(125, 50) + `}]}`), nil
 }
 
 // TestHouseCapsShown checks the console's view of market-maker's history:

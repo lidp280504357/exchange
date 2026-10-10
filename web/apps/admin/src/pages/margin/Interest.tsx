@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { FilterBar, useFilters } from "../../kit/filters";
 import { Num } from "../../kit/format";
+import { useKindFilter } from "../../kit/kinds";
 import { Card, Page } from "../../kit/Page";
 import { useMarginInterest, type InterestQuery, type MarginInterestBucket } from "./api";
 import { Rate } from "./common";
@@ -21,10 +22,11 @@ const BUCKETS = ["day", "week", "month"] as const;
  */
 export default function Interest(_: { admin: Admin }) {
   const { t } = useTranslation();
-  const filters = useFilters(["bucket", "asset"]);
+  const filters = useFilters(["bucket", "asset", "kind"]);
+  const kind = useKindFilter();
   const f = filters.values;
   const bucket: InterestQuery["bucket"] = (BUCKETS as readonly string[]).includes(f.bucket ?? "") ? (f.bucket as InterestQuery["bucket"]) : "day";
-  const q = useMarginInterest({ days: 30, bucket, asset: f.asset?.toUpperCase() || undefined });
+  const q = useMarginInterest({ days: 30, bucket, asset: f.asset?.toUpperCase() || undefined, kind: f.kind || undefined });
   const rows = q.data?.items ?? [];
   const sum = (pick: (r: MarginInterestBucket) => string | null) => rows.reduce((s, r) => (pick(r) !== null ? dec.add(s, pick(r)!) : s), "0");
   const chart = useMemo(() => {
@@ -65,7 +67,11 @@ export default function Interest(_: { admin: Admin }) {
         />
       }
     >
-      <FilterBar page="margin-interest" filters={filters} defs={[{ key: "asset", label: t("admin.common.asset"), kind: "text", placeholder: "USDT", width: 120 }]} />
+      <FilterBar
+        page="margin-interest"
+        filters={filters}
+        defs={[{ key: "asset", label: t("admin.common.asset"), kind: "text", placeholder: "USDT", width: 120 }, kind]}
+      />
       {q.isError ? (
         <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />
       ) : (

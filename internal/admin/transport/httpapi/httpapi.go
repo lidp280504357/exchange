@@ -476,9 +476,13 @@ func userJSON(u ports.User) map[string]any {
 
 // kindsParam reads a list's kind filter (L1): kind, comma-separated or
 // repeated; none leaves the humans-only default to the service.
-func kindsParam(q url.Values) []string {
+func kindsParam(q url.Values) []string { return kindsNamed(q, "kind") }
+
+// kindsNamed reads the kind filter of a list whose kind is something else
+// (the liquidation steps': user_kind).
+func kindsNamed(q url.Values, name string) []string {
 	var out []string
-	for _, v := range q["kind"] {
+	for _, v := range q[name] {
 		for _, k := range strings.Split(v, ",") {
 			if k = strings.TrimSpace(k); k != "" {
 				out = append(out, k)
@@ -698,10 +702,22 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	users["by_kind"] = byKind
+	// The trading figures are the humans' too; the other kinds' trades
+	// (those without a human side) and traders apart, in the kinds' order.
+	others := func(m map[string]uint64) []map[string]any {
+		out := []map[string]any{}
+		for _, k := range []string{application.KindBot, application.KindTest, application.KindSystem} {
+			if n, ok := m[k]; ok {
+				out = append(out, map[string]any{"kind": k, "count": n})
+			}
+		}
+		return out
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"users": users,
 		"trading": map[string]any{
 			"trades_24h": d.Activity.Trades24h, "active_traders_24h": d.Activity.ActiveTraders24h, "turnover_24h": turnover,
+			"other_trades_24h": others(d.Activity.OtherTrades24h), "other_traders_24h": others(d.Activity.OtherTraders24h),
 		},
 		"wallet":  map[string]any{"pending_deposits": d.Activity.PendingDeposits, "pending_withdrawals": d.Activity.PendingWithdraws},
 		"risk":    map[string]any{"events_24h": d.Activity.RiskEvents24h},
@@ -1176,11 +1192,12 @@ func csvText(s string) string {
 	return s
 }
 
-// reportQuery reads a report's period: days, or from and to, and the bucket.
+// reportQuery reads a report's period: days, or from and to, the bucket,
+// and the accounts' kinds (L1).
 func reportQuery(r *http.Request) application.ReportQuery {
 	q := r.URL.Query()
 	days, _ := strconv.Atoi(q.Get("days"))
-	return application.ReportQuery{Days: days, From: q.Get("from"), To: q.Get("to"), Bucket: q.Get("bucket")}
+	return application.ReportQuery{Days: days, From: q.Get("from"), To: q.Get("to"), Bucket: q.Get("bucket"), Kinds: kindsParam(q)}
 }
 
 func (h *Handler) tradingReport(w http.ResponseWriter, r *http.Request) {
@@ -1244,7 +1261,7 @@ func (h *Handler) housePnLReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) openInterest(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.OpenInterest(r.Context(), principal(r))
+	list, err := h.Svc.OpenInterest(r.Context(), principal(r), kindsParam(r.URL.Query()))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -1288,7 +1305,7 @@ func (h *Handler) liquidations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	list, next, err := h.Svc.Liquidations(r.Context(), principal(r), ports.LiquidationQuery{
 		Days: intParam(q, "days"), Kind: q.Get("kind"), Symbol: q.Get("symbol"), UserID: q.Get("user_id"), Cursor: q.Get("cursor"),
-		Limit: intParam(q, "limit"),
+		Limit: intParam(q, "limit"), Kinds: kindsNamed(q, "user_kind"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
