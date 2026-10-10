@@ -1117,8 +1117,11 @@ as AUDITOR GET /admin/v1/sim/token ""
 expect 200 - "who holds the coin"
 check ".asset == \"${SIM_PAIR%-USDT}\" and .bots.holders == $BOTS and (.issued | tonumber) > 0 and (.top | length) >= 1" \
   "every bot holds some; what was issued; the largest holders"
-check '((.bots.amount | tonumber) + (.users.amount | tonumber) + ([.platform[].amount | tonumber] | add // 0) - (.issued | tonumber) | fabs) < 0.001' \
-  "the bots, the users and the platform hold all that was issued"
+check '((.bots.amount | tonumber) + (.users.amount | tonumber) + ((.test.amount // "0") | tonumber) + ([.platform[].amount | tonumber] | add // 0)
+  - (.issued | tonumber) | fabs) < 0.001' \
+  "the bots, the users, the test accounts and the platform (HOUSE in it) hold all that was issued"
+check '(.partial | index("kinds")) == null and (.test | type) == "object" and all(.top[]; .user_id != null)' \
+  "the test accounts told apart (A125), the kinds known"
 as OPERATOR POST /admin/v1/sim/mint '{"asset":"USDT","amount":"1","reason":"e2e: operators print no money"}'
 expect 403 ADMIN_FORBIDDEN "an OPERATOR mints nothing"
 as FINANCE POST /admin/v1/sim/mint "$(jq -nc --argjson n "$BOTS" '{asset: "USDT", amount: ($n / 100 | tostring), reason: "e2e: a cent for every bot"}')"

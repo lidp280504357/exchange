@@ -2352,10 +2352,12 @@ export interface paths {
          * @description The coin (the base of market-sim's pair, ASTRA) as the ledger holds
          *     it now (ledger-service's ListHolders and system accounts, A123; the
          *     read model's lines it once summed expire after 15 days): the bots
-         *     (market-sim's list) and the other users with how many of each hold
-         *     some (a margin debt counts against its holder), the platform's
-         *     system accounts, what manual adjustments issued (the ADJUSTMENT
-         *     account's debit) and the 20 largest holders. Needs reports.read.
+         *     (market-sim's list), the test accounts and the other users with how
+         *     many of each hold some (a margin debt counts against its holder),
+         *     the platform's system accounts with HOUSE's (A125), what manual
+         *     adjustments issued (the ADJUSTMENT account's debit) and the 20
+         *     largest holders. Read as one moment: the holders again after the
+         *     system accounts until their total holds still. Needs reports.read.
          */
         get: operations["getSimToken"];
         put?: never;
@@ -4994,9 +4996,11 @@ export interface components {
             /** @description The pair's last trade as market-sim reads it; null before the first. */
             price: components["schemas"]["NullableDecimal"];
             bots: components["schemas"]["SimHolding"];
-            /** @description Every other user (HOUSE included, when it holds the coin). */
+            /** @description Every other user: not the bots, not HOUSE (in platform) and, when told apart, not the test accounts (test; a margin debt counts against its holder). */
             users: components["schemas"]["SimHolding"];
-            /** @description The system accounts holding some (fees and the like), ADJUSTMENT apart. */
+            /** @description The test accounts (kind TEST, A125), told apart when every account holding or owing the coin could be listed (fewer than 1,000); null when not (then among users, and partial says so). */
+            test: components["schemas"]["SimHolding"] | null;
+            /** @description The system accounts holding some (fees and the like), ADJUSTMENT apart, and HOUSE: the users of kind SYSTEM (its contracts' margin) as account_type HOUSE. */
             platform: {
                 /** @example FEE_REVENUE */
                 account_type: string;
@@ -5004,7 +5008,9 @@ export interface components {
             }[];
             /** @description What manual adjustments issued (the ADJUSTMENT account's debit); the bots, users and platform hold it all. */
             issued: components["schemas"]["Decimal"];
-            /** @description The largest holders, largest first (20 at most). */
+            /** @description What could not be told apart: kinds (the accounts' kinds unknown: HOUSE and the test accounts among users and top), test (1,000 or more accounts hold or owe the coin: the test accounts among users). */
+            partial: ("kinds" | "test")[];
+            /** @description The largest holders, largest first (20 at most), neither HOUSE nor a test account. */
             top: {
                 /** Format: uuid */
                 user_id: string;

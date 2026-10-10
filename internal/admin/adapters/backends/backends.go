@@ -207,20 +207,36 @@ func (l Ledger) SystemBalances(ctx context.Context, asset string) ([]ports.Balan
 	return out, nil
 }
 
-// Holders returns what each user holds of an asset now (B199's
-// ListHolders), largest first.
-func (l Ledger) Holders(ctx context.Context, asset string) ([]ports.Holder, error) {
-	resp, err := l.C.ListHolders(ctx, &ledgerv1.ListHoldersRequest{Asset: asset})
+// Holders reads who holds an asset now (ledger-service ListHolders, B199
+// and B201): the largest holders and the sums apart and of the others.
+func (l Ledger) Holders(ctx context.Context, asset string, limit int, apart []string) (ports.HolderPage, error) {
+	resp, err := l.C.ListHolders(ctx, &ledgerv1.ListHoldersRequest{Asset: asset, Limit: int32(limit), ApartUserIds: apart}) //nolint:gosec // bounded by the caller
 	if err != nil {
-		return nil, err
+		return ports.HolderPage{}, err
 	}
-	out := make([]ports.Holder, 0, len(resp.GetHolders()))
+	shape := func(err error) error {
+		return apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service answered the holders in another shape")
+	}
+	out := ports.HolderPage{Top: make([]ports.Holder, 0, len(resp.GetHolders()))}
 	for _, h := range resp.GetHolders() {
 		amount, err := decimal.NewFromString(h.GetAmount())
 		if err != nil {
-			return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service answered a holder's amount in another shape")
+			return ports.HolderPage{}, shape(err)
 		}
-		out = append(out, ports.Holder{UserID: h.GetUserId(), Amount: amount})
+		out.Top = append(out.Top, ports.Holder{UserID: h.GetUserId(), Amount: amount})
+	}
+	for _, sum := range []struct {
+		in  *ledgerv1.HolderSum
+		out *ports.HolderSum
+	}{{resp.GetOthers(), &out.Others}, {resp.GetApart(), &out.Apart}} {
+		if sum.in == nil || sum.in.GetAmount() == "" {
+			continue // none of them: zero
+		}
+		amount, err := decimal.NewFromString(sum.in.GetAmount())
+		if err != nil {
+			return ports.HolderPage{}, shape(err)
+		}
+		*sum.out = ports.HolderSum{Amount: amount, Holders: sum.in.GetHolders()}
 	}
 	return out, nil
 }

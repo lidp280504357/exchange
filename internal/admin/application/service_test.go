@@ -592,8 +592,36 @@ type fakeLedger struct {
 	holders map[string][]ports.Holder
 }
 
-func (l *fakeLedger) Holders(_ context.Context, asset string) ([]ports.Holder, error) {
-	return l.holders[asset], nil
+// Holders answers as ListHolders does: the largest holders, largest
+// first and those owing last, at most limit (0 is 100), the users holding
+// nothing left out; the sums of the users apart and of the others, debts
+// counted in, with how many of them hold more than zero.
+func (l *fakeLedger) Holders(_ context.Context, asset string, limit int, apart []string) (ports.HolderPage, error) {
+	if limit == 0 {
+		limit = 100
+	}
+	out := ports.HolderPage{Top: []ports.Holder{}}
+	for _, h := range l.holders[asset] {
+		sum := &out.Others
+		if slices.Contains(apart, h.UserID) {
+			sum = &out.Apart
+		}
+		sum.Amount = sum.Amount.Add(h.Amount)
+		if h.Amount.IsPositive() {
+			sum.Holders++
+		}
+		if !h.Amount.IsZero() {
+			out.Top = append(out.Top, h)
+		}
+	}
+	slices.SortStableFunc(out.Top, func(a, b ports.Holder) int {
+		if c := b.Amount.Cmp(a.Amount); c != 0 {
+			return c
+		}
+		return strings.Compare(a.UserID, b.UserID)
+	})
+	out.Top = out.Top[:min(len(out.Top), limit)]
+	return out, nil
 }
 
 func (l *fakeLedger) Adjust(_ context.Context, key, userID, account, asset string, amount decimal.Decimal, actor, memo string) (string, error) {

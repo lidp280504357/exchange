@@ -67,10 +67,11 @@ func (s *Service) simState(ctx context.Context) (simState, error) {
 	return st, nil
 }
 
-// SimTokenHoldings returns who holds the simulated market's coin: the
-// bots, the users, the system accounts and the largest holders, as the
+// SimTokenHoldings returns who holds the simulated market's coin as the
 // ledger holds it now (A123: the read model's lines it once summed expire
-// after 15 days).
+// after 15 days): the bots, the users, the test accounts apart, the system
+// accounts with HOUSE's, and the largest holders (A125: neither HOUSE nor
+// the test accounts among them).
 func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, error) {
 	if err := p.require(domain.PermReportsRead); err != nil {
 		return SimToken{}, err
@@ -79,18 +80,19 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 	if err != nil {
 		return SimToken{}, err
 	}
-	bots := make(map[string]bool, len(st.Bots))
+	bots := make([]string, 0, len(st.Bots))
 	for _, b := range st.Bots {
-		bots[b.UserID] = true
+		bots = append(bots, b.UserID)
 	}
-	// Up to seven reads of ledger-service, bounded together (A125).
+	kinds := s.holderKinds(ctx)
+	// Up to ten reads of ledger-service, bounded together (A125).
 	read, cancel := context.WithTimeout(ctx, coinReadTimeout)
 	defer cancel()
-	holders, system, err := s.coinBalances(read, st.coin())
+	m, err := s.coinBalances(read, st.coin(), bots, kinds.system)
 	if err != nil {
 		return SimToken{}, err
 	}
-	h, err := holdingsOf(holders, bots, system, simTopHolders)
+	h, err := holdingsOf(m, kinds, simTopHolders)
 	if err != nil {
 		return SimToken{}, err
 	}
@@ -106,73 +108,127 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 // coinReadTimeout bounds the reads of who holds the coin.
 const coinReadTimeout = 10 * time.Second
 
-// coinBalances reads an asset's holders and system accounts as one moment:
-// the holders again after the system accounts, until their total held
-// still (a trade's fee moves the coin from a holder to FEE_REVENUE
-// between two reads); three tries, then the last read stands.
-func (s *Service) coinBalances(ctx context.Context, asset string) ([]ports.Holder, []ports.Balance, error) {
-	holders, err := s.Ledger.Holders(ctx, asset)
-	if err != nil {
-		return nil, nil, err
+// simHolderLimit is how many of the largest holders are read (ListHolders
+// takes at most 1,000): with every holder listed (fewer than that), the
+// test accounts are told apart from the users.
+const simHolderLimit = 1000
+
+// houseRow is the platform row of the system accounts' users (HOUSE).
+const houseRow = "HOUSE"
+
+// holderKinds are the accounts the coin's figures tell apart by their kind
+// (L0): the system users (HOUSE, in the platform's row) and the test
+// accounts; partial when their kinds could not be read.
+type holderKinds struct {
+	system  []string
+	test    map[string]bool
+	partial bool
+}
+
+func (s *Service) holderKinds(ctx context.Context) holderKinds {
+	if s.KindIDs == nil {
+		return holderKinds{partial: true}
 	}
-	var system []ports.Balance
+	system, err := s.KindIDs.IDs(ctx, []string{KindSystem})
+	if err != nil {
+		s.Log.WarnContext(ctx, "the coin's holders: the accounts' kinds unknown", "error", err)
+		return holderKinds{partial: true}
+	}
+	test, err := s.KindIDs.IDs(ctx, []string{KindTest})
+	if err != nil {
+		s.Log.WarnContext(ctx, "the coin's holders: the accounts' kinds unknown", "error", err)
+		return holderKinds{partial: true}
+	}
+	out := holderKinds{system: system, test: make(map[string]bool, len(test))}
+	for _, id := range test {
+		out.test[id] = true
+	}
+	return out
+}
+
+// coinMoment is the coin as one read of the ledger saw it: the holders
+// with the bots and the system users apart (at most limit of them listed,
+// those owing last), the system users alone, and the system accounts.
+type coinMoment struct {
+	all         ports.HolderPage
+	limit       int
+	systemUsers ports.HolderSum
+	system      []ports.Balance
+	houseApart  map[string]bool
+}
+
+// coinBalances reads the coin's holders and system accounts as one moment:
+// the holders again after the others, until what they hold together held
+// still (a trade's fee moves the coin to FEE_REVENUE between two reads);
+// three tries, then the last read stands.
+func (s *Service) coinBalances(ctx context.Context, asset string, bots, system []string) (coinMoment, error) {
+	apart := append(slices.Clone(bots), system...)
+	read := func() (ports.HolderPage, error) { return s.Ledger.Holders(ctx, asset, simHolderLimit, apart) }
+	all, err := read()
+	if err != nil {
+		return coinMoment{}, err
+	}
+	m := coinMoment{limit: simHolderLimit, houseApart: make(map[string]bool, len(system))}
+	for _, id := range system {
+		m.houseApart[id] = true
+	}
 	for range 3 {
-		if system, err = s.Ledger.SystemBalances(ctx, asset); err != nil {
-			return nil, nil, err
+		if m.system, err = s.Ledger.SystemBalances(ctx, asset); err != nil {
+			return coinMoment{}, err
 		}
-		again, err := s.Ledger.Holders(ctx, asset)
+		if len(system) > 0 {
+			house, err := s.Ledger.Holders(ctx, asset, 1, system)
+			if err != nil {
+				return coinMoment{}, err
+			}
+			m.systemUsers = house.Apart
+		}
+		again, err := read()
 		if err != nil {
-			return nil, nil, err
+			return coinMoment{}, err
 		}
-		before, after := heldBy(holders), heldBy(again)
-		holders = again
+		before, after := all.Others.Amount.Add(all.Apart.Amount), again.Others.Amount.Add(again.Apart.Amount)
+		all = again
 		if before.Equal(after) {
 			break
 		}
 	}
-	return holders, system, nil
+	m.all = all
+	return m, nil
 }
 
-// heldBy is what the holders hold together.
-func heldBy(holders []ports.Holder) decimal.Decimal {
-	sum := decimal.Zero
-	for _, h := range holders {
-		sum = sum.Add(h.Amount)
-	}
-	return sum
-}
-
-// holdingsOf sums the holders of an asset: the bots apart from the other
-// users (what each kind holds, owing included, and how many hold some),
-// the system accounts by type (those not at zero) and the top largest
-// holders.
-func holdingsOf(holders []ports.Holder, bots map[string]bool, system []ports.Balance, top int) (ports.Holdings, error) {
-	out := ports.Holdings{System: map[string]decimal.Decimal{}, Top: []ports.Holder{}}
-	for _, h := range holders {
-		some := h.Amount.IsPositive()
-		if bots[h.UserID] {
-			out.Bots = out.Bots.Add(h.Amount)
-			if some {
-				out.BotHolders++
+// holdingsOf sums the coin's holders: the bots (the apart sum less the
+// system users'), the users (the others less the test accounts, told apart
+// when every holder was listed - those owing too, who count in the sums
+// but not as holders), the system accounts by type with the system users'
+// as HOUSE (those not at zero), and the top largest holders above zero but
+// HOUSE and the test accounts.
+func holdingsOf(m coinMoment, kinds holderKinds, top int) (ports.Holdings, error) {
+	out := ports.Holdings{System: map[string]decimal.Decimal{}, Top: []ports.Holder{}, Partial: []string{}}
+	bots := m.all.Apart
+	bots.Amount, bots.Holders = bots.Amount.Sub(m.systemUsers.Amount), bots.Holders-m.systemUsers.Holders
+	out.Bots, out.BotHolders = bots.Amount, uint64(max(bots.Holders, 0)) //nolint:gosec // not below zero
+	users := m.all.Others
+	switch {
+	case kinds.partial:
+		out.Partial = append(out.Partial, "kinds")
+	case len(m.all.Top) >= m.limit:
+		out.Partial = append(out.Partial, "test") // the list was cut: the test accounts stay among the users
+	default:
+		var test ports.HolderSum
+		for _, h := range m.all.Top {
+			if kinds.test[h.UserID] {
+				test.Amount = test.Amount.Add(h.Amount)
+				if h.Amount.IsPositive() {
+					test.Holders++
+				}
 			}
-		} else {
-			out.Users = out.Users.Add(h.Amount)
-			if some {
-				out.UserHolders++
-			}
 		}
-		if some {
-			out.Top = append(out.Top, h)
-		}
+		users.Amount, users.Holders = users.Amount.Sub(test.Amount), users.Holders-test.Holders
+		out.Test = &test
 	}
-	slices.SortStableFunc(out.Top, func(a, b ports.Holder) int {
-		if c := b.Amount.Cmp(a.Amount); c != 0 {
-			return c
-		}
-		return strings.Compare(a.UserID, b.UserID)
-	})
-	out.Top = out.Top[:min(len(out.Top), top)]
-	for _, b := range system {
+	out.Users, out.UserHolders = users.Amount, uint64(max(users.Holders, 0)) //nolint:gosec // not below zero
+	for _, b := range m.system {
 		available, err := decimal.NewFromString(b.Available)
 		if err != nil {
 			return ports.Holdings{}, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service answered a balance in another shape")
@@ -184,6 +240,18 @@ func holdingsOf(holders []ports.Holder, bots map[string]bool, system []ports.Bal
 		if sum := available.Add(frozen); !sum.IsZero() {
 			out.System[b.AccountType] = out.System[b.AccountType].Add(sum)
 		}
+	}
+	if !m.systemUsers.Amount.IsZero() {
+		out.System[houseRow] = m.systemUsers.Amount
+	}
+	for _, h := range m.all.Top {
+		if len(out.Top) == top || !h.Amount.IsPositive() {
+			break // the largest first: those owing last
+		}
+		if m.houseApart[h.UserID] || kinds.test[h.UserID] {
+			continue
+		}
+		out.Top = append(out.Top, h)
 	}
 	return out, nil
 }

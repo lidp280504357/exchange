@@ -108,6 +108,11 @@ export const simZh = {
       mintSubmit: "增发", mintTitle: "给机器人增发", mintSplit: "分给{{to}}（{{n}} 个）",
       tokenHelp: "平台币在站点上的资料（名称、简介、链接与图标），以及谁持有它：机器人、用户与平台账户。持有数据来自账本的当前余额（用户的杠杆借款计为负，算进合计、不算持有人），每分钟刷新。",
       issued: "发行总量", asOf: "截至", marketValue: "市值（按最近成交价）", botsHold: "机器人持有", usersHold: "用户持有", platformHold: "平台账户",
+      testHold: "测试账户持有",
+      partial: {
+        kinds: "读不到账户类型：HOUSE 与测试账户算在「用户持有」与最大的持有者里",
+        test: "持有或欠这个币的账户达到 1,000 个：测试账户算在「用户持有」里",
+      },
       holders: "{{n}} 个账户持有", distribution: "持有分布", topHolders: "最大的持有者", noHolders: "还没有持有者", profile: "代币资料",
       account: "账户", shareOf: "占比", heldDiffers: "持有合计 {{held}} 与发行总量 {{issued}} 不一致（读取期间有成交时会有细小差异，刷新后再看）",
     },
@@ -230,6 +235,11 @@ export const simEn = {
       mintSubmit: "Mint", mintTitle: "Mint for the bots", mintSplit: "for {{to}} ({{n}})",
       tokenHelp: "The platform coin's profile on the sites (name, introductions, links, logo) and who holds it: the bots, the users, the platform's accounts. The holdings are the ledger's balances now (a user's margin debt counts against them: in the totals, not among the holders), refreshed every minute.",
       issued: "Issued", asOf: "As of", marketValue: "Market value (last price)", botsHold: "Bots hold", usersHold: "Users hold", platformHold: "Platform accounts",
+      testHold: "Test accounts hold",
+      partial: {
+        kinds: "The accounts' kinds are unknown: HOUSE and the test accounts count among the users and the largest holders",
+        test: "1,000 or more accounts hold or owe the coin: the test accounts count among the users",
+      },
       holders: "{{n}} accounts hold some", distribution: "Holders", topHolders: "Largest holders", noHolders: "No holders yet", profile: "The coin's profile",
       account: "Account", shareOf: "Share", heldDiffers: "Held {{held}} differs from issued {{issued}} (a trade between the two reads makes a small difference; refresh)",
     },

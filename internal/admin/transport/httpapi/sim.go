@@ -210,13 +210,17 @@ func (h *Handler) simPreview(w http.ResponseWriter, r *http.Request) {
 
 // SimTokenJSON is who holds the simulated market's coin.
 type SimTokenJSON struct {
-	Asset    string           `json:"asset"`
-	Price    *string          `json:"price"`
-	Bots     HoldingJSON      `json:"bots"`
-	Users    HoldingJSON      `json:"users"`
+	Asset string       `json:"asset"`
+	Price *string      `json:"price"`
+	Bots  HoldingJSON  `json:"bots"`
+	Users HoldingJSON  `json:"users"`
+	Test  *HoldingJSON `json:"test"`
+	// Platform has HOUSE's row (the system users, A125) with the system
+	// accounts'.
 	Platform []SystemHoldJSON `json:"platform"`
 	Issued   string           `json:"issued"`
 	Top      []HolderJSON     `json:"top"`
+	Partial  []string         `json:"partial"`
 	At       string           `json:"at"`
 }
 
@@ -251,7 +255,13 @@ func (h *Handler) simToken(w http.ResponseWriter, r *http.Request) {
 	out := SimTokenJSON{
 		Asset: t.Asset, Bots: HoldingJSON{Amount: t.Bots.String(), Holders: t.BotHolders},
 		Users: HoldingJSON{Amount: t.Users.String(), Holders: t.UserHolders}, Platform: []SystemHoldJSON{},
-		Issued: t.System[adjustmentAccount].Neg().String(), Top: []HolderJSON{}, At: httpx.FormatTime(t.At),
+		Issued: t.System[adjustmentAccount].Neg().String(), Top: []HolderJSON{}, Partial: t.Partial, At: httpx.FormatTime(t.At),
+	}
+	if out.Partial == nil {
+		out.Partial = []string{}
+	}
+	if t.Test != nil {
+		out.Test = &HoldingJSON{Amount: t.Test.Amount.String(), Holders: uint64(max(t.Test.Holders, 0))} //nolint:gosec // not below zero
 	}
 	if t.Price != nil {
 		v := t.Price.String()

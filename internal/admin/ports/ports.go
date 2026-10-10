@@ -904,10 +904,12 @@ type Ledger interface {
 	FundInsurance(ctx context.Context, key, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
 	// SystemBalances returns the system accounts in an asset.
 	SystemBalances(ctx context.Context, asset string) ([]Balance, error)
-	// Holders returns what each user holds of an asset now, all its
-	// accounts summed (margin debts included), for the users whose sum is
-	// not zero, largest first (ledger-service ListHolders, A123).
-	Holders(ctx context.Context, asset string) ([]Holder, error)
+	// Holders reads who holds an asset now (ledger-service ListHolders,
+	// A123b): the largest holders, largest first and those owing last, at
+	// most limit (those holding nothing left out), and what the users apart
+	// and the others hold - each user's accounts summed, margin debts
+	// counted in.
+	Holders(ctx context.Context, asset string, limit int, apart []string) (HolderPage, error)
 	// PlaceHold freezes part of a user's SPOT balance under the hold ID
 	// (repeating it returns the hold); ReleaseHold returns it; the ledger
 	// audits both with actor.
@@ -1313,15 +1315,34 @@ type Holder struct {
 	Amount decimal.Decimal
 }
 
+// HolderPage is who holds an asset: the largest holders (those owing
+// last) and the sums of the users apart and of the others.
+type HolderPage struct {
+	Top           []Holder
+	Others, Apart HolderSum
+}
+
+// HolderSum is what some users hold of an asset (debts counted in) and how
+// many of them hold more than zero.
+type HolderSum struct {
+	Amount  decimal.Decimal
+	Holders int64
+}
+
 // Holdings is how an asset is held (the ledger's balances now, A123): the
-// users' and the bots' with how many of each hold some, the system
-// accounts' by type (ADJUSTMENT owes what manual adjustments created) and
-// the largest holders.
+// users' and the bots' with how many of each hold some, the test accounts'
+// apart when told (A125: nil when not), the system accounts' by type with
+// HOUSE's (ADJUSTMENT owes what manual adjustments created) and the
+// largest holders, neither HOUSE nor the test accounts among them. Partial
+// names what could not be told apart: "kinds" (the accounts' kinds
+// unknown), "test" (the holders' list cut at its limit).
 type Holdings struct {
 	Users, Bots             decimal.Decimal
 	UserHolders, BotHolders uint64
+	Test                    *HolderSum
 	System                  map[string]decimal.Decimal
 	Top                     []Holder
+	Partial                 []string
 }
 
 // LiquidationQuery selects liquidation steps of the last Days: of one

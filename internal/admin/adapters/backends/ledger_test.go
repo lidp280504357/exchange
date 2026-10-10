@@ -2,6 +2,7 @@ package backends
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -10,36 +11,47 @@ import (
 	"github.com/skill/exchange/internal/platform/apperr"
 )
 
-// holdersClient answers ListHolders with its holders and keeps the asset
-// asked for.
+// holdersClient answers ListHolders with its page and keeps what was asked.
 type holdersClient struct {
 	ledgerv1.LedgerServiceClient
-	asked   string
-	holders []*ledgerv1.Holder
+	asked *ledgerv1.ListHoldersRequest
+	page  *ledgerv1.ListHoldersResponse
 }
 
 func (c *holdersClient) ListHolders(_ context.Context, in *ledgerv1.ListHoldersRequest, _ ...grpc.CallOption) (*ledgerv1.ListHoldersResponse, error) {
-	c.asked = in.GetAsset()
-	return &ledgerv1.ListHoldersResponse{Holders: c.holders}, nil
+	c.asked = in
+	return c.page, nil
 }
 
-// Who holds an asset is ledger-service's ListHolders (A123): the asset
-// asked for, each holder's amount as a decimal (a debt below zero), none
-// for none; an amount in another shape is unavailable, not a zero.
+// Who holds an asset is ledger-service's ListHolders (A123b): the asset,
+// the limit and the users apart asked for; the largest holders and the
+// two sums as decimals (debts below zero), zero for a sum not given; an
+// amount in another shape is unavailable, not a zero.
 func TestLedgerHolders(t *testing.T) {
 	ctx := context.Background()
-	c := &holdersClient{holders: []*ledgerv1.Holder{{UserId: "u1", Amount: "990.5"}, {UserId: "u2", Amount: "-0.25"}}}
-	got, err := Ledger{C: c}.Holders(ctx, "ASTRA")
-	if err != nil || c.asked != "ASTRA" || len(got) != 2 || got[0].UserID != "u1" || got[0].Amount.String() != "990.5" ||
-		got[1].Amount.String() != "-0.25" {
-		t.Fatalf("holders %+v %v (asked %q)", got, err, c.asked)
+	c := &holdersClient{page: &ledgerv1.ListHoldersResponse{
+		Holders: []*ledgerv1.Holder{{UserId: "b1", Amount: "990.5"}, {UserId: "u1", Amount: "9.5"}},
+		Others:  &ledgerv1.HolderSum{Amount: "9.25", Holders: 1},
+		Apart:   &ledgerv1.HolderSum{Amount: "990.5", Holders: 1},
+	}}
+	got, err := Ledger{C: c}.Holders(ctx, "ASTRA", 1000, []string{"b1"})
+	if err != nil || c.asked.GetAsset() != "ASTRA" || c.asked.GetLimit() != 1000 || !slices.Equal(c.asked.GetApartUserIds(), []string{"b1"}) {
+		t.Fatalf("asked %v: %v", c.asked, err)
 	}
-	c.holders = nil
-	if none, err := (Ledger{C: c}).Holders(ctx, "ASTRA"); err != nil || len(none) != 0 || none == nil {
-		t.Fatalf("no holders %#v %v", none, err)
+	if len(got.Top) != 2 || got.Top[0].UserID != "b1" || got.Top[0].Amount.String() != "990.5" || got.Others.Amount.String() != "9.25" ||
+		got.Others.Holders != 1 || got.Apart.Amount.String() != "990.5" || got.Apart.Holders != 1 {
+		t.Fatalf("the page %+v", got)
 	}
-	c.holders = []*ledgerv1.Holder{{UserId: "u1", Amount: "a lot"}}
-	if _, err := (Ledger{C: c}).Holders(ctx, "ASTRA"); apperr.From(err).Kind != apperr.KindUnavailable {
+	c.page = &ledgerv1.ListHoldersResponse{}
+	if none, err := (Ledger{C: c}).Holders(ctx, "ASTRA", 1, nil); err != nil || len(none.Top) != 0 || none.Top == nil || !none.Apart.Amount.IsZero() {
+		t.Fatalf("nobody %#v %v", none, err)
+	}
+	c.page = &ledgerv1.ListHoldersResponse{Others: &ledgerv1.HolderSum{Amount: "a lot"}}
+	if _, err := (Ledger{C: c}).Holders(ctx, "ASTRA", 1, nil); apperr.From(err).Kind != apperr.KindUnavailable {
+		t.Fatalf("a sum in another shape: %v", err)
+	}
+	c.page = &ledgerv1.ListHoldersResponse{Holders: []*ledgerv1.Holder{{UserId: "u1", Amount: "-"}}}
+	if _, err := (Ledger{C: c}).Holders(ctx, "ASTRA", 1, nil); apperr.From(err).Kind != apperr.KindUnavailable {
 		t.Fatalf("an amount in another shape: %v", err)
 	}
 }

@@ -40,7 +40,8 @@ export default function SimTokenPage({ admin }: { admin: Admin }) {
   const bots = useMemo(() => new Map((sim.data?.bots ?? []).map((b) => [b.user_id, b])), [sim.data]);
   const tok = q.data;
   const platform = tok ? tok.platform.reduce((a, p) => dec.add(a, p.amount), "0") : "0";
-  const held = tok ? dec.add(dec.add(tok.bots.amount, tok.users.amount), platform) : "0";
+  // The test accounts apart when told (A125); HOUSE is in the platform's rows.
+  const held = tok ? dec.add(dec.add(dec.add(tok.bots.amount, tok.users.amount), tok.test?.amount ?? "0"), platform) : "0";
   const columns = useMemo<ColumnDef<Holder, unknown>[]>(
     () => [
       { id: "rank", header: "#", cell: ({ row }) => <span className="font-mono text-xs text-fg-3">{row.index + 1}</span> },
@@ -119,12 +120,13 @@ function Holding({ title, h, asset, held, index, testid }: {
   );
 }
 
-/** Distribution is the coin's holders as one bar: the bots, the users, the platform's accounts. */
+/** Distribution is the coin's holders as one bar: the bots, the users, the test accounts when told apart, the platform's accounts. */
 function Distribution({ tok, platform, held }: { tok: SimToken; platform: string; held: string }) {
   const { t } = useTranslation();
   const parts = [
     { key: "bots", label: t("admin.sim.botsHold"), amount: tok.bots.amount, className: "bg-chart-1" },
     { key: "users", label: t("admin.sim.usersHold"), amount: tok.users.amount, className: "bg-chart-3" },
+    ...(tok.test ? [{ key: "test", label: t("admin.sim.testHold"), amount: tok.test.amount, className: "bg-chart-4" }] : []),
     { key: "platform", label: t("admin.sim.platformHold"), amount: platform, className: "bg-chart-5" },
   ];
   const width = (v: string) => (dec.gt(held, "0") ? Math.max(0, (dec.toNumber(v) / dec.toNumber(held)) * 100) : 0);
@@ -149,6 +151,11 @@ function Distribution({ tok, platform, held }: { tok: SimToken; platform: string
         ))}
       </div>
       {!dec.eq(held, tok.issued) && <p className="text-xs text-warn-strong">{t("admin.sim.heldDiffers", { held, issued: tok.issued })}</p>}
+      {tok.partial.map((p) => (
+        <p key={p} className="text-xs text-fg-3" data-testid={`sim-token-partial-${p}`}>
+          {t(`admin.sim.partial.${p}`)}
+        </p>
+      ))}
     </div>
   );
 }

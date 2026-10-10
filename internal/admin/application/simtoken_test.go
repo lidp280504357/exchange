@@ -226,36 +226,56 @@ func (coinLedger) SystemBalances(_ context.Context, asset string) ([]ports.Balan
 	}, nil
 }
 
-// Who holds the coin (A123): the ledger's balances now, the bots (market-
-// sim's) apart from the other users - what each kind holds, a debt
-// included, and how many hold some - the system accounts not at zero,
-// and the largest holders, bots among them.
+// Who holds the coin (A123, A123b, A125): the ledger's balances now - the
+// bots (market-sim's) apart from the users with what each kind holds, a
+// debt included, and how many hold some; HOUSE (a system user) in the
+// platform's row; the test accounts apart, one owing among them; the
+// system accounts not at zero; the largest holders above zero, neither
+// HOUSE nor a test account among them.
 func TestWhoHoldsTheCoin(t *testing.T) {
+	const house, test, testOwing = "0192a000-0000-7000-8000-0000000000aa", "0192a000-0000-7000-8000-0000000000e2", "0192a000-0000-7000-8000-0000000000e3"
 	user1, user2, owing := "0192a000-0000-7000-8000-0000000000c1", "0192a000-0000-7000-8000-0000000000c2", "0192a000-0000-7000-8000-0000000000c3"
 	led := &fakeLedger{holders: map[string][]ports.Holder{"ASTRA": {
 		{UserID: botA, Amount: decimal.NewFromInt(600)},
+		{UserID: house, Amount: decimal.NewFromInt(500)},
 		{UserID: botB, Amount: decimal.NewFromInt(390)},
+		{UserID: test, Amount: decimal.NewFromInt(52)},
 		{UserID: user1, Amount: decimal.RequireFromString("9.9")},
 		{UserID: user2, Amount: decimal.RequireFromString("9.9")},
 		{UserID: owing, Amount: decimal.RequireFromString("-0.5")},
+		{UserID: testOwing, Amount: decimal.NewFromInt(-2)},
 	}}}
+	kinds := &fakeKindIDs{of: map[string][]string{"SYSTEM": {house}, "TEST": {test, testOwing}}}
 	at := time.Date(2026, 10, 3, 1, 0, 0, 0, time.UTC)
-	svc := &Service{Sim: &stateSim{}, Ledger: coinLedger{led}, Now: func() time.Time { return at }}
+	svc := &Service{Sim: &stateSim{}, Ledger: coinLedger{led}, KindIDs: kinds, Now: func() time.Time { return at }}
 	tok, err := svc.SimTokenHoldings(context.Background(), reader)
 	if err != nil || tok.Asset != "ASTRA" || tok.Price == nil || tok.Price.String() != "1.25" || !tok.At.Equal(at) {
 		t.Fatalf("the coin %+v %v", tok, err)
 	}
 	h := tok.Holdings
 	if h.Bots.String() != "990" || h.BotHolders != 2 || h.Users.String() != "19.3" || h.UserHolders != 2 ||
-		len(h.System) != 2 || h.System["ADJUSTMENT"].String() != "-1000" || h.System["FEE_REVENUE"].String() != "0.1" {
+		h.Test == nil || h.Test.Amount.String() != "50" || h.Test.Holders != 1 || len(h.Partial) != 0 ||
+		len(h.System) != 3 || h.System["ADJUSTMENT"].String() != "-1000" || h.System["FEE_REVENUE"].String() != "0.1" || h.System["HOUSE"].String() != "500" {
 		t.Fatalf("holdings %+v", h)
 	}
 	if len(h.Top) != 4 || h.Top[0].UserID != botA || h.Top[1].UserID != botB || h.Top[2].UserID != user1 || h.Top[3].UserID != user2 {
-		t.Fatalf("the largest holders, the user IDs settling a tie %+v", h.Top)
+		t.Fatalf("the largest holders but HOUSE and the test account, the user IDs settling a tie %+v", h.Top)
 	}
-	cut, err := holdingsOf(led.holders["ASTRA"], nil, nil, 2)
-	if err != nil || len(cut.Top) != 2 || cut.BotHolders != 0 || cut.UserHolders != 4 || cut.Users.String() != "1009.3" {
-		t.Fatalf("without bots everyone is a user, the top cut at 2 %+v %v", cut, err)
+	// Without the accounts' kinds: HOUSE and the test accounts among the users, told so.
+	svc.KindIDs = nil
+	if tok, err := svc.SimTokenHoldings(context.Background(), reader); err != nil || tok.Users.String() != "569.3" || tok.UserHolders != 4 ||
+		tok.Test != nil || !slices.Equal(tok.Partial, []string{"kinds"}) || len(tok.Top) != 6 || tok.Top[1].UserID != house {
+		t.Fatalf("the kinds unknown %+v %v", tok.Holdings, err)
+	}
+	// The list cut at its limit: the test accounts stay among the users, told so.
+	m, err := svc.coinBalances(context.Background(), "ASTRA", []string{botA, botB}, []string{house})
+	if err != nil || m.limit != 1000 || len(m.all.Top) != 8 {
+		t.Fatalf("read %+v %v", m, err)
+	}
+	m.all.Top, m.limit = m.all.Top[:2], 2
+	cut, err := holdingsOf(m, holderKinds{system: []string{house}, test: map[string]bool{test: true, testOwing: true}}, 20)
+	if err != nil || cut.Test != nil || !slices.Equal(cut.Partial, []string{"test"}) || cut.Users.String() != "69.3" || cut.UserHolders != 3 {
+		t.Fatalf("too many to tell %+v %v", cut, err)
 	}
 }
 
@@ -272,9 +292,13 @@ func (l *movingLedger) fees() decimal.Decimal {
 	return decimal.NewFromInt(int64(min(l.now, l.still))).Div(decimal.NewFromInt(10))
 }
 
-func (l *movingLedger) Holders(context.Context, string) ([]ports.Holder, error) {
+func (l *movingLedger) Holders(_ context.Context, _ string, _ int, apart []string) (ports.HolderPage, error) {
 	l.reads++
-	return []ports.Holder{{UserID: botA, Amount: decimal.NewFromInt(100).Sub(l.fees())}}, nil
+	held := ports.HolderSum{Amount: decimal.NewFromInt(100).Sub(l.fees()), Holders: 1}
+	if slices.Contains(apart, botA) {
+		return ports.HolderPage{Top: []ports.Holder{{UserID: botA, Amount: held.Amount}}, Apart: held}, nil
+	}
+	return ports.HolderPage{Top: []ports.Holder{{UserID: botA, Amount: held.Amount}}, Others: held}, nil
 }
 
 func (l *movingLedger) SystemBalances(context.Context, string) ([]ports.Balance, error) {
@@ -286,7 +310,7 @@ func (l *movingLedger) SystemBalances(context.Context, string) ([]ports.Balance,
 // read, so that what they hold adds up to what was issued.
 func TestTheCoinReadAsOneMoment(t *testing.T) {
 	led := &movingLedger{fakeLedger: &fakeLedger{}, still: 3}
-	svc := &Service{Sim: &stateSim{}, Ledger: led, Now: time.Now}
+	svc := &Service{Sim: &stateSim{}, Ledger: led, Now: time.Now, Log: slog.New(slog.DiscardHandler)}
 	tok, err := svc.SimTokenHoldings(context.Background(), reader)
 	if err != nil || led.reads != 3 {
 		t.Fatalf("the holders read %d times: %v", led.reads, err)
@@ -306,18 +330,18 @@ func TestTheCoinReadAsOneMoment(t *testing.T) {
 // downLedger is ledger-service not answering who holds the coin.
 type downLedger struct{ *fakeLedger }
 
-func (downLedger) Holders(context.Context, string) ([]ports.Holder, error) {
-	return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service is down")
+func (downLedger) Holders(context.Context, string, int, []string) (ports.HolderPage, error) {
+	return ports.HolderPage{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service is down")
 }
 
 // Nobody holds the coin yet: no holder, an empty list of the largest, the
 // system accounts as they are; ledger-service down: unavailable, not zero
 // (A125 ③).
 func TestTheCoinWithoutHoldersOrLedger(t *testing.T) {
-	svc := &Service{Sim: &stateSim{}, Ledger: &fakeLedger{}, Now: time.Now}
+	svc := &Service{Sim: &stateSim{}, Ledger: &fakeLedger{}, KindIDs: &fakeKindIDs{}, Now: time.Now}
 	tok, err := svc.SimTokenHoldings(context.Background(), reader)
 	if err != nil || tok.UserHolders != 0 || tok.BotHolders != 0 || tok.Top == nil || len(tok.Top) != 0 || !tok.Users.IsZero() ||
-		tok.System["FEE_REVENUE"].String() != "7" || tok.System["PNL_CLEARING"].String() != "-12.5" {
+		tok.Test == nil || !tok.Test.Amount.IsZero() || tok.System["FEE_REVENUE"].String() != "7" || tok.System["PNL_CLEARING"].String() != "-12.5" {
 		t.Fatalf("no holders %+v %v", tok.Holdings, err)
 	}
 	svc.Ledger = downLedger{&fakeLedger{}}
