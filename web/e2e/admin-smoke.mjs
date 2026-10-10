@@ -298,6 +298,8 @@ try {
     );
     const purgedAt = await page.waitForSelector("aside [data-testid=user-purged]", { timeout: 20000 }).then((el) => el.evaluate((e) => e.textContent.trim()));
     await go(`${new URL(page.url()).pathname}?tab=balances`);
+    // The account known (its mark again) and its balances read: no adjustment then either (A127).
+    await page.waitForSelector("aside [data-testid=user-purged]", { timeout: 20000 });
     await waitText("总估值");
     await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
     if (await page.evaluate(() => [...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim() === "调整余额"))) {

@@ -63,8 +63,10 @@ export default function UserPage({ admin }: { admin: Admin }) {
   if (detail.isError) return <ErrorState message={errorText(detail.error)} onRetry={() => void detail.refetch()} />;
   const u = detail.data;
   // A test account cleared out (L4) is closed and empty for good: its money,
-  // orders and positions are left alone (L1); notes and tags stay.
-  const acting = u?.purged_at ? withoutMoney(admin) : admin;
+  // orders and positions are left alone (L1); notes and tags stay. Nothing
+  // moves money before the account is known, so a cleared-out one's tabs
+  // never offer it while its page loads (A127).
+  const acting = !u || u.purged_at ? withoutMoney(admin) : admin;
   return (
     <div className="flex flex-col gap-4">
       <Link to="/users" className="inline-flex w-fit items-center gap-1 text-sm text-fg-3 hover:text-fg-1">
