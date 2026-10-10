@@ -5,7 +5,7 @@
 // and helpers that find elements the way a user does, by their visible
 // text.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { loadContracts } from "./contract.mjs";
 
@@ -106,7 +106,11 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
     } catch {
       return; // body unavailable (navigated away)
     }
-    if (typeof body?.user_id === "string" && typeof body?.access_token === "string") userId = body.user_id;
+    if (typeof body?.user_id === "string" && typeof body?.access_token === "string") {
+      userId = body.user_id;
+      // A sign-up, not a sign-in: the run's exit hook clears the account out (F38).
+      if (r.status() === 201 && new URL(r.url()).pathname === "/v1/auth/register/complete") noteRegistered(body.user_id);
+    }
     const path = new URL(r.url()).pathname;
     if (!path.startsWith(apiPrefix) || path.startsWith("/v1/dev/") || path === "/v1/ws") return;
     const problem = contracts.check(r.request().method(), path, r.status(), body);
@@ -485,6 +489,18 @@ export function indicatorsAway(page, scope) {
     }
     return away;
   }, scope);
+}
+
+/**
+ * noteRegistered adds an account this run signed up to $E2E_REGISTERED,
+ * the file the shell scripts' exit hook clears out (scripts/e2e/lib/
+ * common.sh: their accounts are named for the run, E2E_RUN, and marked
+ * TEST by that; cleared out by these IDs). Run by hand, without the file,
+ * it does nothing (F38).
+ */
+export function noteRegistered(userId) {
+  const file = process.env.E2E_REGISTERED;
+  if (file && userId) appendFileSync(file, `${userId}\n`);
 }
 
 /** note prints what a run could not check here, without failing it. */
