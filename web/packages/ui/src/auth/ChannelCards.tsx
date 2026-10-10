@@ -33,14 +33,36 @@ export function ChannelCards({ options, value, onValueChange, size = "md", loadi
   const { t } = useTranslation();
   const where = (o: ChannelOption) => o.target ?? t(`ui.otpChannel.yours.${o.channel}`);
   if (loading) {
+    // The cards' own rows with their words hidden under the skeletons: the
+    // same height as the cards to come, whatever the language and fonts
+    // (a row is taller than its nominal line height, F46).
     return (
       <div aria-busy="true" data-testid="otp-channel-loading" className={cn("grid auto-cols-fr grid-flow-col gap-2", className)}>
-        {[0, 1].map((i) => (
-          <div key={i} className={cn("flex flex-col gap-1 rounded-2 border border-line-1 bg-bg-2 px-3", size === "lg" ? "py-3" : "py-2.5")}>
-            <Skeleton className="h-5 w-20" />
-            <Skeleton className="h-4 w-full" />
-          </div>
-        ))}
+        {(["EMAIL", "SMS"] as const).map((channel) => {
+          const Icon = ICONS[channel];
+          return (
+            <div
+              key={channel}
+              className={cn("flex min-w-0 flex-col items-start gap-1 rounded-2 border border-line-1 bg-bg-2 px-3", size === "lg" ? "py-3" : "py-2.5")}
+            >
+              <span className="relative flex items-center gap-1.5 text-sm font-medium">
+                <span className="invisible flex items-center gap-1.5">
+                  <Icon size={16} className="shrink-0" />
+                  {t(`ui.otpChannel.name.${channel}`)}
+                </span>
+                <span className="absolute inset-0">
+                  <Skeleton className="size-full" />
+                </span>
+              </span>
+              <span className="relative w-full truncate text-xs tabular-nums">
+                <span className="invisible">{t(`ui.otpChannel.yours.${channel}`)}</span>
+                <span className="absolute inset-0">
+                  <Skeleton className="size-full" />
+                </span>
+              </span>
+            </div>
+          );
+        })}
       </div>
     );
   }
