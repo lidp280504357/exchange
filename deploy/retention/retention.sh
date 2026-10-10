@@ -39,18 +39,26 @@ fi
 printf 'cron retention.sh (server) since %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$INFRA_DIR/ops.lock.owner"
 owner=1
 
+# The run's arguments ask for a dry run as exchangectl reads them (Go's
+# flag package: one dash or two, =true and the like; B203).
+dry=""
+for a in "$@"; do
+  if [[ $a =~ ^--?dry-run(=(1|t|T|true|TRUE|True))?$ ]]; then dry=1; fi
+done
+
 # docker compose run only lets go of its container when signalled (B201):
 # a stop of the unit (SIGTERM to this script, KillMode=mixed) stops the
-# container - exchangectl ends the statement it is in - and removes it.
-# Each step runs in the background and is waited for, so that the signal
-# is handled at once (bash runs a trap only after a foreground command);
-# a reconcile under way finishes in ledger-service on its own (it reads).
+# step's container - exchangectl ends the statement it is in - and removes
+# it. Each step runs in a named container of its own in the background and
+# is waited for, so that the signal is handled at once (bash runs a trap
+# only after a foreground command); further signals are ignored while it
+# stops, so the way out still clears the lock's owner (B203).
 child=""
 stop_run() {
-  trap - TERM INT
-  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) stopped: stopping $NAME"
-  sudo docker stop -t 60 "$NAME" >/dev/null 2>&1 || true
-  sudo docker rm -f "$NAME" >/dev/null 2>&1 || true
+  trap '' TERM INT
+  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) stopped: stopping $NAME and $NAME-reconcile"
+  sudo docker stop -t 60 "$NAME" "$NAME-reconcile" >/dev/null 2>&1 || true
+  sudo docker rm -f "$NAME" "$NAME-reconcile" >/dev/null 2>&1 || true
   if [[ -n $child ]]; then
     kill "$child" 2>/dev/null || true
     wait "$child" 2>/dev/null || true
@@ -67,8 +75,8 @@ sizes() {
   echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) $1: database $db, disk $(df -h --output=used,size,pcent / | awk 'NR == 2 {print $1 " of " $2 " (" $3 ")"}')"
 }
 sizes before
-# A container left from a run killed outright (the unit's SIGKILL).
-sudo docker rm "$NAME" >/dev/null 2>&1 || true
+# Containers left from a run killed outright (the unit's SIGKILL).
+sudo docker rm "$NAME" "$NAME-reconcile" >/dev/null 2>&1 || true
 # A container of its own (the services' image and settings), not one inside
 # user-service's: the run does not share the service's memory (B199).
 "${COMPOSE[@]}" run --rm --no-deps -T --name "$NAME" -e EXCHANGECTL_ACTOR=cron-retention \
@@ -76,17 +84,16 @@ sudo docker rm "$NAME" >/dev/null 2>&1 || true
 child=$!
 wait "$child"
 sizes after
-"${COMPOSE[@]}" exec -T ledger-service /app/exchangectl ledger reconcile &
+"${COMPOSE[@]}" run --rm --no-deps -T --name "$NAME-reconcile" -e EXCHANGECTL_ACTOR=cron-retention \
+  ledger-service /app/exchangectl ledger reconcile &
 child=$!
 wait "$child"
 child=""
 # A dry run deletes nothing: it does not count as the day's run.
-for a in "$@"; do
-  if [[ $a == --dry-run ]]; then
-    echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) done (dry run: the success metric left as it was)"
-    exit 0
-  fi
-done
+if [[ -n $dry ]]; then
+  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) done (dry run: the success metric left as it was)"
+  exit 0
+fi
 printf '# HELP exchange_retention_last_success_timestamp_seconds When the history retention and the ledger reconcile after it last finished without a failure.\n# TYPE exchange_retention_last_success_timestamp_seconds gauge\nexchange_retention_last_success_timestamp_seconds %s\n' \
   "$(date +%s)" >"$METRICS_DIR/exchange_retention.prom.tmp"
 mv "$METRICS_DIR/exchange_retention.prom.tmp" "$METRICS_DIR/exchange_retention.prom"

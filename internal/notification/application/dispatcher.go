@@ -101,6 +101,7 @@ func NewDispatcher(routes Routes, store ports.DeliveryStore, log *slog.Logger, r
 		domain.ChannelEmail: append(slices.Clone(routes.Email), routes.Mock),
 		domain.ChannelSMS:   routes.SMS,
 	} {
+		d.failed.WithLabelValues(string(channel))
 		for _, p := range chain {
 			if p == nil {
 				continue

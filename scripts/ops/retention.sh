@@ -15,7 +15,8 @@ COMPOSE="sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml"
 
 dry=""
 for a in "$@"; do
-  [[ $a == --dry-run ]] && dry=1
+  # As exchangectl reads it (Go's flag package; B203).
+  if [[ $a =~ ^--?dry-run(=(1|t|T|true|TRUE|True))?$ ]]; then dry=1; fi
 done
 if [[ -z ${OPS_LOCK_HELD:-} && -z $dry ]]; then
   exec "$(dirname "$0")/lock.sh" run --owner "ops retention.sh" -- bash "$0" "$@"

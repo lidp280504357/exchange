@@ -251,8 +251,9 @@ func TestDispatcherSeriesFromTheStart(t *testing.T) {
 			series[f.GetName()]++
 		}
 	}
-	// EMAIL resend and mock, SMS sms: three results each; three circuits.
-	if series["notify_sends_total"] != 9 || series["notify_provider_circuit_open"] != 3 {
+	// EMAIL resend and mock, SMS sms: three results each; three circuits;
+	// the two channels' failures.
+	if series["notify_sends_total"] != 9 || series["notify_provider_circuit_open"] != 3 || series["notify_deliveries_failed_total"] != 2 {
 		t.Fatalf("series %v", series)
 	}
 }
