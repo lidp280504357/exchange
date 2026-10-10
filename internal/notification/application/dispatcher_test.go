@@ -230,3 +230,29 @@ func TestSendOTPValidatesAndMasks(t *testing.T) {
 		t.Fatalf("provider = %s", p)
 	}
 }
+
+// A dispatcher just made exports every provider's series at zero, before
+// any send: ops.sh checks them right after a deploy.
+func TestDispatcherSeriesFromTheStart(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	mail, mock, sms := &scriptedProvider{name: "resend"}, &scriptedProvider{name: "mock"}, &scriptedProvider{name: "sms"}
+	NewDispatcher(Routes{Email: []ports.Provider{mail}, SMS: []ports.Provider{sms}, Mock: mock}, newMemDeliveries(),
+		slog.New(slog.DiscardHandler), reg)
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	series := map[string]int{}
+	for _, f := range families {
+		for _, m := range f.GetMetric() {
+			if m.GetCounter().GetValue() != 0 || m.GetGauge().GetValue() != 0 {
+				t.Fatalf("%s starts at %v", f.GetName(), m)
+			}
+			series[f.GetName()]++
+		}
+	}
+	// EMAIL resend and mock, SMS sms: three results each; three circuits.
+	if series["notify_sends_total"] != 9 || series["notify_provider_circuit_open"] != 3 {
+		t.Fatalf("series %v", series)
+	}
+}

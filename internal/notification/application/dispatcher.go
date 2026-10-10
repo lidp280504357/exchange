@@ -94,6 +94,23 @@ func NewDispatcher(routes Routes, store ports.DeliveryStore, log *slog.Logger, r
 		cancel: cancel,
 	}
 	reg.MustRegister(d.sends, d.circuit, d.failed)
+	// Every provider's series from the start, at zero: a service just
+	// started exports them before its first send (ops.sh right after a
+	// deploy), and a rate over a restart has its first point.
+	for channel, chain := range map[domain.Channel][]ports.Provider{
+		domain.ChannelEmail: append(slices.Clone(routes.Email), routes.Mock),
+		domain.ChannelSMS:   routes.SMS,
+	} {
+		for _, p := range chain {
+			if p == nil {
+				continue
+			}
+			for _, result := range []string{"ok", "error", "skipped"} {
+				d.sends.WithLabelValues(string(channel), p.Name(), result)
+			}
+			d.circuit.WithLabelValues(p.Name()).Set(0)
+		}
+	}
 	return d
 }
 
