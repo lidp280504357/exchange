@@ -600,7 +600,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - `ADMIN_SECRET_KEY` 在服务器 `/opt/exchange/infra/admin/admin.env`（目录 700、文件 600，属主 root，只注入 admin-service，不在 `apps.env`），2026-09-29 用 `openssl rand -base64 32` 生成，从未打印。本机开发的在 `.env`。
 - 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（对方会话结束，得到一次性设置链接交给本人，本人自己设新的；C5.5 ⑪）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
-- 服务地址（compose）：`DERIVATIVES_SERVICE_URL`（`http://derivatives-service:8095`）、`NOTIFICATION_SERVICE_URL`、`MARKET_SIM_URL` 等；`HOUSE_USER_ID` 从 `apps.env` 读；`ADMIN_CHANGE_DELAY_FLOOR`（测试服 60 秒）；`SIM_ADMIN_API_SECRET` 在 `sim/admin.env`；`HOUSE_CAPS_ADMIN_API_SECRET` 在 `house/admin.env`（HOUSE 额度的 `admin` 键，C47）与 `MARKET_MAKER_URL`（`http://market-maker:8091`）。
+- 服务地址（compose）：`DERIVATIVES_SERVICE_URL`（`http://derivatives-service:8095`）、`NOTIFICATION_SERVICE_URL`、`MARKET_SIM_URL` 等；`HOUSE_USER_ID` 从 `apps.env` 读（空或一个用户 ID，别的值启动时报错，A129：代币信息拿它去问账本）；`ADMIN_CHANGE_DELAY_FLOOR`（测试服 60 秒）；`SIM_ADMIN_API_SECRET` 在 `sim/admin.env`；`HOUSE_CAPS_ADMIN_API_SECRET` 在 `house/admin.env`（HOUSE 额度的 `admin` 键，C47）与 `MARKET_MAKER_URL`（`http://market-maker:8091`）。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
 
 ## 测试

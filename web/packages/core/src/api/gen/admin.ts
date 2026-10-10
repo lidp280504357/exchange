@@ -5006,11 +5006,11 @@ export interface components {
                 account_type: string;
                 amount: components["schemas"]["Decimal"];
             }[];
-            /** @description What manual adjustments issued (the ADJUSTMENT account's debit); the bots, users and platform hold it all. */
+            /** @description What manual adjustments issued (the ADJUSTMENT account's debit); the bots, users, test accounts and platform hold it all. */
             issued: components["schemas"]["Decimal"];
-            /** @description What could not be told apart: kinds (the accounts' kinds unknown: the test accounts among users and top; HOUSE known from HOUSE_USER_ID all the same), test (1,000 or more accounts hold or owe the coin: the test accounts among users). */
+            /** @description What could not be told apart: kinds (the accounts' kinds unknown: the test accounts among users and top; HOUSE known all the same when HOUSE_USER_ID is configured), test (1,000 or more accounts hold or owe the coin: the test accounts among users). */
             partial: ("kinds" | "test")[];
-            /** @description The largest holders, largest first (20 at most), neither HOUSE nor a test account. */
+            /** @description The largest holders above zero, largest first (20 at most), neither HOUSE (the users of kind SYSTEM, and HOUSE_USER_ID when configured) nor a test account (when the kinds are known). */
             top: {
                 /** Format: uuid */
                 user_id: string;

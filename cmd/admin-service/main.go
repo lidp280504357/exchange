@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 
@@ -114,7 +115,8 @@ type settings struct {
 	// (PASSWORD_HASH_CONCURRENCY), 64 MiB each.
 	PasswordHashConcurrency int `koanf:"password_hash_concurrency"`
 	// HouseUser is HOUSE's account on the contracts (HOUSE_USER_ID, in
-	// apps.env); without it the HOUSE page shows no contracts.
+	// apps.env); without it the HOUSE page shows no contracts. A user ID
+	// or nothing: the coin's holders ask the ledger with it (A129).
 	HouseUser string `koanf:"house_user_id"`
 	// HealthTargets are the services whose /readyz the overview shows
 	// (HEALTH_TARGETS, "name=http://host:port,..."; the compose network's
@@ -157,6 +159,9 @@ func (s *settings) Validate() error {
 	if _, err := secretbox.New(s.SecretKey); err != nil {
 		errs = append(errs, errors.New("ADMIN_SECRET_KEY must be base64 of 32 bytes"))
 	}
+	if _, err := uuid.Parse(s.HouseUser); s.HouseUser != "" && err != nil {
+		errs = append(errs, fmt.Errorf("HOUSE_USER_ID %q is not a user ID", s.HouseUser))
+	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate(), s.Redis.Validate())...)
 }
 
@@ -177,6 +182,9 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
+	}
+	if cfg.HouseUser != "" {
+		cfg.HouseUser = uuid.MustParse(cfg.HouseUser).String() // checked by Validate; written as the ledger writes it
 	}
 	targets, err := healthTargets(cfg.HealthTargets)
 	if err != nil {

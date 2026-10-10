@@ -261,7 +261,8 @@ func TestWhoHoldsTheCoin(t *testing.T) {
 	if len(h.Top) != 4 || h.Top[0].UserID != botA || h.Top[1].UserID != botB || h.Top[2].UserID != user1 || h.Top[3].UserID != user2 {
 		t.Fatalf("the largest holders but HOUSE and the test account, the user IDs settling a tie %+v", h.Top)
 	}
-	// Without the accounts' kinds: HOUSE and the test accounts among the users, told so.
+	// Without the accounts' kinds and without HOUSE_USER_ID configured: HOUSE
+	// and the test accounts among the users, told so.
 	svc.KindIDs = nil
 	if tok, err := svc.SimTokenHoldings(context.Background(), reader); err != nil || tok.Users.String() != "569.3" || tok.UserHolders != 4 ||
 		tok.Test != nil || !slices.Equal(tok.Partial, []string{"kinds"}) || len(tok.Top) != 6 || tok.Top[1].UserID != house {
