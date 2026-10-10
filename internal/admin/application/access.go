@@ -2,13 +2,17 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
 	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/totp"
 )
@@ -18,13 +22,14 @@ import (
 // within it.
 const accessRefresh = 5 * time.Second
 
-// The code switch's name (N1: the settings page, the launch checklist,
-// exchangectl), and the audit of the access switches: their target and
-// the code switch's action.
+// The switches' names (N1: the settings page, the launch checklist,
+// exchangectl), and their audit: the target and each switch's action.
 const (
 	settingRequireTOTP = "admin.require_totp"
+	settingRestriction = "admin.access_restriction"
 	accessTarget       = "settings:access"
 	actionRequireTOTP  = "admin.settings.require_totp"
+	actionRestriction  = "admin.settings.access_restriction"
 )
 
 // TOTPRequired reports whether sign-in asks for the authenticator code
@@ -36,6 +41,18 @@ func (s *Service) TOTPRequired() bool {
 
 // setAccess keeps the switches in effect.
 func (s *Service) setAccess(a domain.ConsoleAccess) { s.access.Store(&a) }
+
+// Allows reports whether a request from ip (the client's address as the
+// proxies passed it on) reaches the console's API: the restriction's list
+// when it is on (admin.access_restriction, N1).
+func (s *Service) Allows(ip string) bool {
+	a := s.access.Load()
+	if a == nil {
+		return true // before the switches are read, nothing is restricted
+	}
+	addr, _ := netip.ParseAddr(ip)
+	return a.Allows(addr)
+}
 
 // LoadAccess reads the console's access switches, storing them the first
 // time it runs: sign-in asks for the code unless the flag it replaces,
@@ -123,18 +140,20 @@ func boundAdmins(admins []domain.Admin) int {
 // them (N1): the switches and who changed them last; whether the caller's
 // authenticator is bound and how many active ADMINs' are; the active
 // administrators without one, who cannot sign in while the code is asked
-// (named to those who manage administrators, counted for the others).
+// (named to those who manage administrators, counted for the others); the
+// address the caller's request came from, as the restriction sees it.
 type AccessView struct {
 	domain.ConsoleAccess
 	YouBound     bool
 	BoundAdmins  int
 	Unbound      []domain.Admin
 	UnboundCount int
+	YourIP       string
 }
 
-// Access returns the console's access switches; every administrator may
-// read them.
-func (s *Service) Access(ctx context.Context, p Principal) (AccessView, error) {
+// Access returns the console's access switches, for a request from ip;
+// every administrator may read them.
+func (s *Service) Access(ctx context.Context, p Principal, ip string) (AccessView, error) {
 	r := s.Store.Read()
 	cur, err := r.Access().Get(ctx)
 	if err != nil {
@@ -147,7 +166,7 @@ func (s *Service) Access(ctx context.Context, p Principal) (AccessView, error) {
 	if err != nil {
 		return AccessView{}, err
 	}
-	out := AccessView{ConsoleAccess: *cur, BoundAdmins: boundAdmins(admins), Unbound: []domain.Admin{}}
+	out := AccessView{ConsoleAccess: *cur, BoundAdmins: boundAdmins(admins), Unbound: []domain.Admin{}, YourIP: ip}
 	names := p.require(domain.PermAdminsManage) == nil
 	for _, a := range admins {
 		if a.Status != domain.StatusActive {
@@ -172,7 +191,7 @@ func (s *Service) Access(ctx context.Context, p Principal) (AccessView, error) {
 // (ADMIN_TOTP_NOT_BOUND otherwise). Sessions already open stay open. As it
 // is already, nothing changes and nothing is audited; otherwise audited as
 // admin.settings.require_totp.
-func (s *Service) SetRequireTOTP(ctx context.Context, p Principal, on bool, reason string) (AccessView, error) {
+func (s *Service) SetRequireTOTP(ctx context.Context, p Principal, on bool, ip, reason string) (AccessView, error) {
 	if err := p.require(domain.PermSettingsEdit); err != nil {
 		return AccessView{}, err
 	}
@@ -203,7 +222,8 @@ func (s *Service) SetRequireTOTP(ctx context.Context, p Principal, on bool, reas
 				return domain.ErrTOTPNotBound.WithDetail("you_bound", you).WithDetail("bound_admins", bound)
 			}
 		}
-		next := domain.ConsoleAccess{RequireTOTP: on, UpdatedBy: p.Admin.Email, UpdatedAt: s.Now()}
+		next := changed(cur, p.Admin.Email, s.Now())
+		next.RequireTOTP = on
 		if err := r.Access().Put(ctx, next); err != nil {
 			return err
 		}
@@ -215,10 +235,123 @@ func (s *Service) SetRequireTOTP(ctx context.Context, p Principal, on bool, reas
 	if err != nil {
 		return AccessView{}, err
 	}
+	return s.accessChanged(ctx, p, ip)
+}
+
+// changed is the switches to store in place of cur (nil before the first
+// row: the defaults, the code asked), changed by who at now.
+func changed(cur *domain.ConsoleAccess, who string, now time.Time) domain.ConsoleAccess {
+	next := domain.ConsoleAccess{RequireTOTP: true}
+	if cur != nil {
+		next = *cur
+	}
+	next.UpdatedBy, next.UpdatedAt = who, now
+	return next
+}
+
+// accessChanged takes a change in effect here at once (the other
+// instances read it within accessRefresh) and answers with the switches.
+func (s *Service) accessChanged(ctx context.Context, p Principal, ip string) (AccessView, error) {
 	if err := s.LoadAccess(ctx); err != nil {
 		s.Log.WarnContext(ctx, "console access: read after a change failed; the next refresh takes it", "error", err)
 	}
-	return s.Access(ctx, p)
+	return s.Access(ctx, p, ip)
+}
+
+// SetAccessRestriction sets the addresses the console's API answers
+// (admin.access_restriction, N1), with a reason; ADMIN only. On, the list
+// has 1 to MaxAllowlist entries (IPv4 or IPv6 addresses or CIDR prefixes)
+// and must hold ip, the caller's own address (ADMIN_ACCESS_SELF_LOCKOUT
+// with the detail ip otherwise); off keeps the list given (or the one
+// stored when none is). A request from elsewhere is refused at once
+// (ADMIN_ACCESS_DENIED), sign-in included; the other instances follow
+// within accessRefresh. As it is, nothing changes; otherwise audited as
+// admin.settings.access_restriction with the lists before and after.
+func (s *Service) SetAccessRestriction(ctx context.Context, p Principal, on bool, list []string, ip, reason string) (AccessView, error) {
+	if err := p.require(domain.PermSettingsEdit); err != nil {
+		return AccessView{}, err
+	}
+	if err := needReason(reason); err != nil {
+		return AccessView{}, err
+	}
+	var allow []netip.Prefix
+	if list != nil {
+		var err error
+		if allow, err = domain.ParseAllowlist(list); err != nil {
+			return AccessView{}, err
+		}
+	}
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Access().GetForUpdate(ctx)
+		if err != nil {
+			return err
+		}
+		next := changed(cur, p.Admin.Email, s.Now())
+		before := next
+		next.Restricted = on
+		if list != nil {
+			next.Allowlist = allow
+		}
+		if on {
+			if len(next.Allowlist) == 0 {
+				return apperr.Invalid("the restriction needs at least one address")
+			}
+			addr, _ := netip.ParseAddr(ip)
+			if !next.Allows(addr) {
+				return domain.ErrAccessSelfLockout.WithDetail("ip", ip)
+			}
+		}
+		if cur != nil && before.Restricted == next.Restricted && slices.Equal(before.Allowlist, next.Allowlist) {
+			return nil
+		}
+		if err := r.Access().Put(ctx, next); err != nil {
+			return err
+		}
+		details, err := json.Marshal(map[string]any{
+			"from": map[string]any{"enabled": before.Restricted, "allowlist": domain.AllowlistText(before.Allowlist)},
+			"to":   map[string]any{"enabled": next.Restricted, "allowlist": domain.AllowlistText(next.Allowlist)},
+			"ip":   ip,
+		})
+		if err != nil {
+			return err
+		}
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: accessTarget, Action: actionRestriction, Actor: p.Admin.Email, Reason: strings.TrimSpace(reason), Details: string(details),
+		}, p.Admin.Email)
+	})
+	if err != nil {
+		return AccessView{}, err
+	}
+	return s.accessChanged(ctx, p, ip)
+}
+
+// SwitchOffAccessRestriction lets every address reach the console's API
+// again: exchangectl's way in admin-service's container when nobody's
+// address is in the list (N1); admin-service reads it within
+// accessRefresh. The list stays. Audited as
+// admin.settings.access_restriction; reports whether it was on.
+func SwitchOffAccessRestriction(ctx context.Context, store ports.Store, actor, reason string, now time.Time) (bool, error) {
+	if err := needReason(reason); err != nil {
+		return false, err
+	}
+	was := false
+	err := store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Access().GetForUpdate(ctx)
+		if err != nil || cur == nil || !cur.Restricted {
+			return err
+		}
+		next := changed(cur, actor, now)
+		next.Restricted = false
+		if err := r.Access().Put(ctx, next); err != nil {
+			return err
+		}
+		was = true
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: accessTarget, Action: actionRestriction, Actor: actor, Reason: strings.TrimSpace(reason),
+			Details: `{"from":{"enabled":true},"to":{"enabled":false},"via":"exchangectl"}`,
+		}, actor)
+	})
+	return was, err
 }
 
 // SwitchOffRequireTOTP stops sign-in asking for the authenticator code:
@@ -229,7 +362,7 @@ func SwitchOffRequireTOTP(ctx context.Context, store ports.Store, actor, reason 
 	if err := needReason(reason); err != nil {
 		return false, err
 	}
-	changed := false
+	was := false
 	err := store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Access().GetForUpdate(ctx)
 		if err != nil {
@@ -238,16 +371,18 @@ func SwitchOffRequireTOTP(ctx context.Context, store ports.Store, actor, reason 
 		if cur != nil && !cur.RequireTOTP {
 			return nil
 		}
-		if err := r.Access().Put(ctx, domain.ConsoleAccess{RequireTOTP: false, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+		next := changed(cur, actor, now)
+		next.RequireTOTP = false
+		if err := r.Access().Put(ctx, next); err != nil {
 			return err
 		}
-		changed = true
+		was = true
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
 			Target: accessTarget, Action: actionRequireTOTP, Actor: actor, Reason: strings.TrimSpace(reason),
 			Details: `{"from":true,"to":false,"via":"exchangectl"}`,
 		}, actor)
 	})
-	return changed, err
+	return was, err
 }
 
 // RemoveOwnTOTP unbinds the signed-in administrator's authenticator while

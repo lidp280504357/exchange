@@ -36,7 +36,7 @@ const (
 // H4) and the product lines (product switches design 2026-10-07 §1 #5,
 // K3); the last two for information, OK whatever is offered or open.
 var launchKeys = []string{
-	"welcome_credits", "test_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
+	"welcome_credits", "test_mode", "registration", "admin_totp", "admin_access", "two_person", "test_assets", "custodian", "withdraw",
 	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house", "margin", "insurance", "coin_m", "app_downloads",
 	"products",
 }
@@ -115,6 +115,7 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 		set(key, status, value)
 	}
 	put("admin_totp")(s.launchTOTP(ctx))
+	put("admin_access")(s.launchRestriction(ctx))
 	flagItem("two_person", flags.KeyTwoPerson, true)
 	flagItem("test_assets", flags.KeyTestAssets, false)
 	flagItem("withdraw", flags.KeyWithdraw, true)
@@ -579,6 +580,24 @@ func (s *Service) launchTOTP(ctx context.Context) (string, map[string]any) {
 	}
 	value := map[string]any{"setting": settingRequireTOTP, "enabled": on, "bound_admins": boundAdmins(admins)}
 	if !on {
+		return LaunchFail, value
+	}
+	return LaunchOK, value
+}
+
+// launchRestriction: only the addresses of a list reach the console's API
+// (admin.access_restriction in the console's settings, N1), with the list.
+func (s *Service) launchRestriction(ctx context.Context) (string, map[string]any) {
+	cur, err := s.Store.Read().Access().Get(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "launch checklist: the console's access switches are unknown", "error", err)
+		return LaunchUnknown, map[string]any{"setting": settingRestriction}
+	}
+	if cur == nil {
+		cur = &domain.ConsoleAccess{}
+	}
+	value := map[string]any{"setting": settingRestriction, "enabled": cur.Restricted, "allowlist": domain.AllowlistText(cur.Allowlist)}
+	if !cur.Restricted || len(cur.Allowlist) == 0 {
 		return LaunchFail, value
 	}
 	return LaunchOK, value

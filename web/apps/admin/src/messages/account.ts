@@ -34,6 +34,7 @@ export const accountZh = {
     ADMIN_PASSWORD_CHANGE_REQUIRED: "请先修改口令",
     ADMIN_PASSWORD_WRONG: "当前口令不正确",
     ADMIN_TOTP_CODE_WRONG: "验证码不正确或已用过，请核对手机时间后等下一个验证码",
+    ADMIN_ACCESS_DENIED: "后台只接受访问名单里的地址，当前网络不在其中：请换到允许的网络，或请运维调整名单",
   },
 };
 
@@ -71,5 +72,6 @@ export const accountEn = {
     ADMIN_PASSWORD_CHANGE_REQUIRED: "Change your password first",
     ADMIN_PASSWORD_WRONG: "The current password is wrong",
     ADMIN_TOTP_CODE_WRONG: "Wrong or used code; check your phone's clock and wait for the next code",
+    ADMIN_ACCESS_DENIED: "The console only answers the addresses of its access list, and this network is not on it: use an allowed network, or ask operations to change the list",
   },
 };

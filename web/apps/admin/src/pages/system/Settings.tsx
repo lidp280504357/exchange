@@ -12,7 +12,7 @@ import { Card, Page } from "../../kit/Page";
 import { settingsKey, useConsoleSettings } from "../../live";
 import { setTheme, useTheme } from "../../theme";
 import { ReadOnly } from "../../kit/ReadOnly";
-import { SignInCode } from "./access";
+import { AccessRestriction, SignInCode } from "./access";
 
 const LIMITS = ["single_max_usdt", "daily_max_usdt", "withdrawal_max_usdt"] as const;
 type Limit = (typeof LIMITS)[number];
@@ -40,7 +40,10 @@ export default function Settings({ admin }: { admin: Admin }) {
       <Card title={t("admin.access.totp")} className="stagger" style={stagger(1)}>
         <SignInCode admin={admin} />
       </Card>
-      <Card title={t("admin.settings.appearance")} className="stagger" style={stagger(2)}>
+      <Card title={t("admin.access.restriction")} className="stagger" style={stagger(2)}>
+        <AccessRestriction admin={admin} />
+      </Card>
+      <Card title={t("admin.settings.appearance")} className="stagger" style={stagger(3)}>
         <Appearance />
       </Card>
     </Page>

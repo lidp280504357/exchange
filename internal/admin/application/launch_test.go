@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -133,7 +134,8 @@ func TestLaunchChecklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"welcome_credits": LaunchFail, "test_mode": LaunchFail, "registration": LaunchOK, "admin_totp": LaunchFail, "two_person": LaunchOK,
+		"welcome_credits": LaunchFail, "test_mode": LaunchFail, "registration": LaunchOK, "admin_totp": LaunchFail, "admin_access": LaunchFail,
+		"two_person":  LaunchOK,
 		"test_assets": LaunchFail, "custodian": LaunchPending, "withdraw": LaunchOK, "brand": LaunchFail, "coin_profile": LaunchFail,
 		"legal": LaunchPending, "third_party": LaunchFail, "admins": LaunchFail, "domain": LaunchOK, "house": LaunchFail,
 		"app_downloads": LaunchOK,
@@ -211,7 +213,7 @@ func TestLaunchChecklist(t *testing.T) {
 	// then the code asked at sign-in.
 	h.login(t, "boss@example.com")
 	h.login(t, "second@example.com")
-	h.store.access = &domain.ConsoleAccess{RequireTOTP: true}
+	h.store.access = &domain.ConsoleAccess{RequireTOTP: true, Restricted: true, Allowlist: []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}}
 	// Still the seeded name, in any case: the brand is not the platform's own yet.
 	for _, seeded := range []string{"Astras", "ASTRAS "} {
 		pl.profile["name"] = seeded

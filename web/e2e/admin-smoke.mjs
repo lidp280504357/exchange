@@ -1045,6 +1045,17 @@ try {
     await page.waitForSelector("[data-testid=access-you][data-bound=false]");
     await waitText("你自己与至少一位启用的 ADMIN 要先绑定验证器");
   }
+  // The access restriction (N1): its state, the address this browser comes
+  // from, the guard against locking oneself out and the IPv6 advice; not switched.
+  const restricted = await page.waitForSelector("[data-testid=access-restriction]", { timeout: 20000 }).then((el) => el.evaluate((e) => e.dataset.on));
+  const access = await page.evaluate(async () => {
+    const r = await fetch("/admin/v1/settings/access");
+    return { status: r.status, body: r.ok ? await r.json() : null };
+  });
+  if (access.status !== 200 || String(access.body.access_restriction) !== restricted) throw new Error(`the access restriction shows ${restricted}: ${JSON.stringify(access)}`);
+  await page.waitForFunction((ip) => document.querySelector("[data-testid=access-your-ip]")?.textContent.trim() === ip, { timeout: 10000 }, access.body.your_ip);
+  await waitText("你当前的地址必须在名单里");
+  await waitText("IPv6 /64");
   const stream = await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -1064,7 +1075,10 @@ try {
     throw new Error(`event stream: ${JSON.stringify(stream)}`);
   }
   await t.shot("5-settings");
-  ok(`fund operations: the approval mode, the form and the records; the settings with the sign-in code (${signInCode === "true" ? "on" : "off, held back until bound"}); the event stream (${JSON.stringify(stream)})`);
+  ok(
+    `fund operations: the approval mode, the form and the records; the settings with the sign-in code (${signInCode === "true" ? "on" : "off, held back until bound"}) ` +
+      `and the access restriction (${restricted === "true" ? "on" : "off"}, this browser at ${access.body.your_ip}); the event stream (${JSON.stringify(stream)})`,
+  );
 
   // 10b. The account page: one's own password and authenticator, and whether it is bound (N1; nothing changed).
   await go("/account");

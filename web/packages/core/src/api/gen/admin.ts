@@ -456,13 +456,18 @@ export interface paths {
         /**
          * The console's access switches
          * @description Whether sign-in asks for the authenticator code (admin.require_totp,
-         *     design 2026-10-02 N1), who changed it last, whether the caller's
-         *     authenticator is bound, how many active ADMINs' are, and the
-         *     active administrators without one - named to those with
-         *     admins.manage, counted for the others. admin-service stored the
-         *     switch from the retired flag admin.login_without_totp at its first
-         *     start (on only once an active ADMIN had a bound authenticator).
-         *     Every administrator may read them.
+         *     design 2026-10-02 N1), whether only the addresses of a list reach
+         *     the console's API (admin.access_restriction) and the list, who
+         *     changed them last, whether the caller's authenticator is bound,
+         *     how many active ADMINs' are, the active administrators without one
+         *     - named to those with admins.manage, counted for the others - and
+         *     the address the caller's request came from (your_ip, as the
+         *     restriction sees it: nginx's X-Real-IP from Cloudflare's
+         *     CF-Connecting-IP; an IPv6 address for a dual-stack client).
+         *     admin-service stored the code switch from the retired flag
+         *     admin.login_without_totp at its first start (on only once an
+         *     active ADMIN had a bound authenticator). Every administrator may
+         *     read them.
          */
         get: operations["getConsoleAccess"];
         put?: never;
@@ -495,6 +500,41 @@ export interface paths {
          *     Needs settings.write (ADMIN).
          */
         put: operations["setRequireTOTP"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/settings/access/restriction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the addresses the console's API answers
+         * @description admin.access_restriction (N1). While on, every request to
+         *     /admin/v1/* - sign-in included - from an address the list does not
+         *     have is refused, 403 ADMIN_ACCESS_DENIED (the list is not told);
+         *     admin-service's health checks are on its operations port and are
+         *     not affected, nor are the console's static pages. On needs a list
+         *     of 1 to 50 IPv4 or IPv6 addresses or CIDR prefixes (normalized:
+         *     masked, once each, no /0) that holds the caller's own address
+         *     (409 ADMIN_ACCESS_SELF_LOCKOUT with the detail ip otherwise; a
+         *     dual-stack client comes over IPv6 from addresses that change, so
+         *     a /64 prefix is the entry to give). Off keeps the list given, or
+         *     the one stored without allowlist. As it is, nothing changes. The
+         *     other instances follow within 5 seconds; in an emergency
+         *     `exchangectl admin settings access-restriction off --reason ...`
+         *     in the admin-service container switches it off. Audited as
+         *     admin.settings.access_restriction with the lists before and after
+         *     and the caller's address. Needs settings.write (ADMIN).
+         */
+        put: operations["setAccessRestriction"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5302,7 +5342,11 @@ export interface components {
         };
         LaunchItem: {
             /**
-             * @description products (product switches design 2026-10-07 §1 #5, K0): for
+             * @description admin_totp and admin_access (design 2026-10-02 N1): the
+             *     console's settings admin.require_totp (value: setting, enabled,
+             *     bound_admins) and admin.access_restriction, on with a list
+             *     (value: setting, enabled, allowlist).
+             *     products (product switches design 2026-10-07 §1 #5, K0): for
              *     information, OK whatever is open (value: spot, usdt_m and coin_m,
              *     each its enabled and closed_at).
              *     insurance (coin-margined design 2026-10-06 §2.7): the insurance
@@ -5316,7 +5360,7 @@ export interface components {
              *     the download entries' switch, since H5).
              * @enum {string}
              */
-            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m" | "app_downloads" | "products";
+            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "admin_access" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin" | "insurance" | "coin_m" | "app_downloads" | "products";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
@@ -5723,6 +5767,12 @@ export interface components {
         ConsoleAccess: {
             /** @description Whether sign-in asks for the authenticator code (admin.require_totp). */
             require_totp: boolean;
+            /** @description Whether only the addresses of access_allowlist reach the console's API (admin.access_restriction). */
+            access_restriction: boolean;
+            /** @description The addresses and CIDR prefixes, normalized (a single host without its length); kept while off. */
+            access_allowlist: string[];
+            /** @description The address the caller's request came from, as the restriction sees it. */
+            your_ip: string;
             /** @description Who changed it last (an email, exchangectl's actor, or migration:admin.login_without_totp). */
             updated_by: string | null;
             /** Format: date-time */
@@ -7989,6 +8039,36 @@ export interface operations {
             content: {
                 "application/json": {
                     enabled: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The switches after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAccess"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setAccessRestriction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    /** @description Replaces the list; left out, the stored one stays. */
+                    allowlist?: string[];
                     reason: string;
                 };
             };

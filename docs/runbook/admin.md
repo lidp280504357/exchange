@@ -21,7 +21,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
               ──admin schema──> 管理员、会话、资金操作、待生效修改、设置、幂等键；自己的 outbox 发 audit.events
 ```
 
-- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`、`console_access`、`instrument_changes`、平台表 `idempotency_keys`）。契约 `api/admin/admin.yaml`（不进公开 API 文档；改完 `task web:types`）。
+- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`、`console_access`（登录验证器与访问限制，N1）、`instrument_changes`、平台表 `idempotency_keys`）。契约 `api/admin/admin.yaml`（不进公开 API 文档；改完 `task web:types`）。
 - 前端：`https://admin.astras.vip`（`web/apps/admin`，浅色主题）。整站包含 `snippets/admin-access*.conf`，可以挂访问限制，见 [web.md](web.md)；用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件。阶段 2 的旧后台 `web/admin`（`https://astras.vip/admin/`）已删除，旧地址 301 到新后台的同一路径。本机 `task web:dev -- admin`（http://localhost:5180），`/admin/v1` 代理到测试服。
 - 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目先用同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。阶段 4 起后台有了独立域名 `admin.astras.vip`；访问限制与 TOTP 目前按用户决定暂缓（见下文）。
 - 请求体大小：后台 API 一般限 64 KB（nginx），文章与资产资料的接口放宽到 512 KB（长正文、base64 图标）。
@@ -38,6 +38,13 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - 接口：`GET /admin/v1/settings/access`（任何管理员可读）、`PUT /admin/v1/settings/access/totp`（`{enabled, reason}`）。登录页仍按 `GET /admin/v1/login-options` 的 `totp_required` 决定是否显示验证码输入框（选项读到之前登录按钮等待，读不到时显示输入框）。
   - 关着时验证码不要求也不校验，登录审计的 `details` 带 `"totp_checked":false`，锁定与限流不变。测试服现在关着。
   - **紧急关闭**（开着后没人能登录时）：在服务器上 `sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T admin-service /app/exchangectl admin settings require-totp off --reason "..."`，5 秒内恢复只凭口令登录（审计 actor 为命令的执行者，详情 `"via":"exchangectl"`）；`exchangectl admin settings show` 看当前值。命令行只能关，打开要走后台的守卫。
+- **访问限制**（N1，同在「系统设置」页，设置项 `admin.access_restriction`，存在同一张 `console_access` 表（admin 00019 加 `access_restriction`、`access_allowlist`）：开着时 admin-service 对全部 `/admin/v1/*`（登录与登录选项也在内）只接受名单里的地址，其它地址 403 `ADMIN_ACCESS_DENIED`，不透露名单；后台的静态页面照常能打开（nginx 不改），admin-service 运维端口的 `/healthz`、`/readyz` 与指标不受影响。
+  - 地址按 `httpx.ClientIPFrom`：nginx 用 Cloudflare 的 `CF-Connecting-IP` 设 `X-Real-IP`，与登录记录同源；只在直连方是可信代理（内网段）时才认这个头。
+  - 名单：IPv4 / IPv6 地址或 CIDR 网段，最多 50 条，规范化保存（网段取网络地址、单个地址不带长度、去重，拒绝 `/0`）。用户决定 Cloudflare 的 IPv6 不关，双栈客户端经 IPv6 到达且地址常变：卡片说明建议填所在网络的 IPv6 `/64` 前缀；卡片显示「你当前的地址」（`your_ip`，原样，可能是 IPv6），可一键加入名单。
+  - 打开、或开着时修改名单要 `settings.write`（ADMIN）、理由与确认词（开 `on`、关 `off`、改名单 `save`），且请求者的地址必须在新名单里，否则 409 `ADMIN_ACCESS_SELF_LOCKOUT`（详情 `ip`，卡片在保存前也提示）；开着时名单不能为空。关闭保留名单。审计 `admin.settings.access_restriction`（对象 `settings:access`，详情为前后的开关与名单和请求者地址）。其它实例 5 秒内跟上。
+  - 接口：`GET /admin/v1/settings/access` 带 `access_restriction`、`access_allowlist`、`your_ip`；`PUT /admin/v1/settings/access/restriction`（`{enabled, allowlist?, reason}`，不带 `allowlist` 时沿用已存的名单）。
+  - **紧急关闭**（名单写错、谁都进不来时）：`... exec -T admin-service /app/exchangectl admin settings access-restriction off --reason "..."`，5 秒内恢复（名单保留，审计详情 `"via":"exchangectl"`）。
+  - 测试服平时关着；admin.sh 在运维锁下打开（本机地址 + 一个测试网段）、从 compose 网络直连 admin-service 带 `X-Real-IP` 验证名单外 403、名单内网段 200、运维端口健康检查 200，再关上（退出时 exchangectl 兜底关闭）。
 - 会话：随机令牌只存 SHA-256；Cookie `admin_session`，HttpOnly、Secure、SameSite=Strict、Path=/admin/；8 小时到期，1 小时无请求失效；退出或停用管理员时服务端撤销。
 - 没有会话时打开控制台的任何地址都转到 `/login?next=<原地址>`，登录后回到原地址（只认控制台自己的路径，其他的回概览；人工检查清单 1）。
 - CSRF：除 GET 外每个请求必须带 `X-Admin-CSRF: 1`（跨站表单无法设置自定义头；Cookie 又是 SameSite=Strict）。
@@ -521,6 +528,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 测试模式 `test_mode` | 平台资料 | 关（正式模式） | 平台设置 |
 | 注册方式 `registration` | 平台资料 | 开放或按运营决定（只显示，不影响可上线） | 平台设置 |
 | 后台登录需验证码 `admin_totp` | 系统设置 → 登录验证器（`admin.require_totp`，N1），附已绑定验证器的启用 ADMIN 数 | 开（先在「账号与安全」绑定再开启） | 系统设置 |
+| 后台访问限制 `admin_access` | 系统设置 → 访问限制（`admin.access_restriction`，N1），附名单 | 开，且名单非空 | 系统设置 |
 | 双人审批 `two_person` | 开关 `admin.two_person_approval` | 开 | 功能开关 |
 | 测试资产资格 `test_assets` | 开关 `wallet.test_assets` | 关（带地区规则也算开） | 功能开关 |
 | 托管方 `custodian` | wallet-service `/internal/wallet/custody` 的 `configured` 与 `gateway_host`（UDUN） | 已配置且不是 `udun-mock`；没有 `gateway_host` 字段时待接入 | 上线手册 |
@@ -623,6 +631,8 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_LOGIN_FAILED` | 邮箱、密码或验证码错误，或验证码已用过（`admin.require_totp` 关着时只看邮箱与密码） |
 | `ADMIN_TOTP_NOT_BOUND` | 开启登录验证器前，当前管理员与至少一位启用的 ADMIN 要先绑定验证器（详情 `you_bound`、`bound_admins`） |
 | `ADMIN_TOTP_REQUIRED` | 登录验证器开着：自己的验证器只能换绑，不能解绑 |
+| `ADMIN_ACCESS_DENIED` | 访问限制开着，请求的地址不在名单里（403，不透露名单） |
+| `ADMIN_ACCESS_SELF_LOCKOUT` | 打开访问限制或开着时改名单，请求者自己的地址不在新名单里（详情 `ip`） |
 | `ADMIN_LOCKED` | 连续失败 5 次，锁定 15 分钟 |
 | `ADMIN_UNAUTHORIZED` | 没有会话或会话已过期/撤销 |
 | `ADMIN_FORBIDDEN` | 角色没有该权限 |

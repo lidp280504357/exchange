@@ -25,7 +25,8 @@ const tone: Record<Status, SummaryStatus["tone"]> = { OK: "success", FAIL: "dang
 
 /** Where each item is changed: a page of the console, or the launch handbook. */
 const FIX: Record<Key, string | null> = {
-  welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/settings", two_person: "/risk",
+  welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/settings", admin_access: "/settings",
+  two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
   third_party: null, admins: "/admins", domain: "/platform", house: "/house", margin: "/risk", insurance: "/derivatives",
   coin_m: "/risk", app_downloads: "/platform/apps", products: "/instruments",
@@ -172,6 +173,24 @@ function describe({ key, value: v, status }: Item, t: Translate): Described {
         lines: [
           [t("admin.summary.launch.setting"), <KeyTag key="k">{String(v.setting ?? "admin.require_totp")}</KeyTag>],
           [t("admin.access.boundAdmins"), String(v.bound_admins ?? "—")],
+        ],
+      };
+    case "admin_access":
+      // The console's setting admin.access_restriction (N1), with its list.
+      return {
+        summary: <OnOff on={v.enabled} />,
+        lines: [
+          [t("admin.summary.launch.setting"), <KeyTag key="k">{String(v.setting ?? "admin.access_restriction")}</KeyTag>],
+          [
+            t("admin.access.list"),
+            Array.isArray(v.allowlist) && v.allowlist.length ? (
+              <span key="l" className="font-mono text-xs">
+                {(v.allowlist as string[]).join(", ")}
+              </span>
+            ) : (
+              t("admin.access.empty")
+            ),
+          ],
         ],
       };
     case "two_person":

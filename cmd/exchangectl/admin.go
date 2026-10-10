@@ -16,6 +16,7 @@ import (
 
 	"github.com/skill/exchange/internal/admin/adapters/postgres"
 	"github.com/skill/exchange/internal/admin/application"
+	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/migrate"
 	"github.com/skill/exchange/internal/platform/password"
@@ -91,11 +92,12 @@ func adminWith(ctx context.Context, db *pg.DB, secretKey string, args []string, 
 }
 
 // adminSettings shows the console's access switches, or switches one off
-// (design 2026-10-02, N1): the way back in when nobody can sign in;
-// admin-service reads it within 5 seconds. Switching on takes the
-// console's guards, so it is not offered here.
+// (design 2026-10-02, N1): the way back in when nobody can sign in or
+// nobody's address is in the restriction's list; admin-service reads it
+// within 5 seconds. Switching on takes the console's guards, so it is not
+// offered here.
 func adminSettings(ctx context.Context, store *postgres.Store, args []string, out io.Writer) error {
-	const use = "usage: exchangectl admin settings show | require-totp off --reason TEXT"
+	const use = "usage: exchangectl admin settings show | require-totp off --reason TEXT | access-restriction off --reason TEXT"
 	if len(args) == 0 {
 		return errors.New(use)
 	}
@@ -109,27 +111,33 @@ func adminSettings(ctx context.Context, store *postgres.Store, args []string, ou
 			fmt.Fprintln(out, "not stored yet: admin-service stores them at its first start")
 			return nil
 		}
-		fmt.Fprintf(out, "admin.require_totp  %s  (%s, %s)\n", onOff(a.RequireTOTP), a.UpdatedBy, a.UpdatedAt.UTC().Format(time.RFC3339))
+		fmt.Fprintf(out, "admin.require_totp        %s\n", onOff(a.RequireTOTP))
+		fmt.Fprintf(out, "admin.access_restriction  %s  %s\n", onOff(a.Restricted), strings.Join(domain.AllowlistText(a.Allowlist), " "))
+		fmt.Fprintf(out, "changed by %s at %s\n", a.UpdatedBy, a.UpdatedAt.UTC().Format(time.RFC3339))
 		return nil
-	case "require-totp":
+	case "require-totp", "access-restriction":
 		if len(args) < 2 || args[1] != "off" {
 			return errors.New(use + " (only off: switching on takes the console's guards)")
 		}
-		fs := flag.NewFlagSet("admin settings require-totp off", flag.ContinueOnError)
+		fs := flag.NewFlagSet("admin settings "+args[0]+" off", flag.ContinueOnError)
 		fs.SetOutput(out)
 		reason := fs.String("reason", "", "why (audited)")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
-		changed, err := application.SwitchOffRequireTOTP(ctx, store, actor(), *reason, time.Now())
+		off, name, done := application.SwitchOffRequireTOTP, "admin.require_totp", "sign-in takes the password alone"
+		if args[0] == "access-restriction" {
+			off, name, done = application.SwitchOffAccessRestriction, "admin.access_restriction", "every address reaches the console"
+		}
+		was, err := off(ctx, store, actor(), *reason, time.Now())
 		if err != nil {
 			return err
 		}
-		if !changed {
-			fmt.Fprintln(out, "admin.require_totp is off already")
+		if !was {
+			fmt.Fprintf(out, "%s is off already\n", name)
 			return nil
 		}
-		fmt.Fprintln(out, "admin.require_totp off: sign-in takes the password alone within 5 seconds")
+		fmt.Fprintf(out, "%s off: %s within 5 seconds\n", name, done)
 		return nil
 	default:
 		return errors.New(use)

@@ -11,10 +11,13 @@ info:
     (POST /admin/v1/admins), or with `exchangectl admin create` when no
     ADMIN can sign in (no sign-up). Signing in takes the password and a code of the
     authenticator app bound at creation; each code works once, and five
-    failures lock the account for 15 minutes. The feature flag
-    admin.login_without_totp switches the code off (test environments):
-    the password alone signs in, and GET /admin/v1/login-options tells the
-    sign-in page not to ask for it. The session is an HttpOnly,
+    failures lock the account for 15 minutes. The console's setting
+    admin.require_totp switches the code off (N1; it replaced the flag
+    admin.login_without_totp): the password alone signs in, and GET
+    /admin/v1/login-options tells the sign-in page not to ask for it. While
+    the setting admin.access_restriction is on, every /admin/v1/* request
+    from an address outside its list fails with 403 ADMIN_ACCESS_DENIED
+    (PUT /admin/v1/settings/access/restriction). The session is an HttpOnly,
     Secure, SameSite=Strict cookie `admin_session` scoped to /admin/; it
     ends after 8 hours, or after an hour without a request. Every request
     other than GET must carry the header `X-Admin-CSRF: 1`.
@@ -740,13 +743,18 @@ paths:
       summary: The console's access switches
       description: |
         Whether sign-in asks for the authenticator code (admin.require_totp,
-        design 2026-10-02 N1), who changed it last, whether the caller's
-        authenticator is bound, how many active ADMINs' are, and the
-        active administrators without one - named to those with
-        admins.manage, counted for the others. admin-service stored the
-        switch from the retired flag admin.login_without_totp at its first
-        start (on only once an active ADMIN had a bound authenticator).
-        Every administrator may read them.
+        design 2026-10-02 N1), whether only the addresses of a list reach
+        the console's API (admin.access_restriction) and the list, who
+        changed them last, whether the caller's authenticator is bound,
+        how many active ADMINs' are, the active administrators without one
+        - named to those with admins.manage, counted for the others - and
+        the address the caller's request came from (your_ip, as the
+        restriction sees it: nginx's X-Real-IP from Cloudflare's
+        CF-Connecting-IP; an IPv6 address for a dual-stack client).
+        admin-service stored the code switch from the retired flag
+        admin.login_without_totp at its first start (on only once an
+        active ADMIN had a bound authenticator). Every administrator may
+        read them.
       tags: [session]
       responses:
         '200':
@@ -786,6 +794,60 @@ paths:
               properties:
                 enabled:
                   type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The switches after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAccess'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/settings/access/restriction:
+    put:
+      operationId: setAccessRestriction
+      summary: Set the addresses the console's API answers
+      description: |
+        admin.access_restriction (N1). While on, every request to
+        /admin/v1/* - sign-in included - from an address the list does not
+        have is refused, 403 ADMIN_ACCESS_DENIED (the list is not told);
+        admin-service's health checks are on its operations port and are
+        not affected, nor are the console's static pages. On needs a list
+        of 1 to 50 IPv4 or IPv6 addresses or CIDR prefixes (normalized:
+        masked, once each, no /0) that holds the caller's own address
+        (409 ADMIN_ACCESS_SELF_LOCKOUT with the detail ip otherwise; a
+        dual-stack client comes over IPv6 from addresses that change, so
+        a /64 prefix is the entry to give). Off keeps the list given, or
+        the one stored without allowlist. As it is, nothing changes. The
+        other instances follow within 5 seconds; in an emergency
+        `exchangectl admin settings access-restriction off --reason ...`
+        in the admin-service container switches it off. Audited as
+        admin.settings.access_restriction with the lists before and after
+        and the caller's address. Needs settings.write (ADMIN).
+      tags: [session]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, reason]
+              properties:
+                enabled:
+                  type: boolean
+                allowlist:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: string
+                    examples: ['203.0.113.7', '2001:db8:1:2::/64']
+                  description: Replaces the list; left out, the stored one stays.
                 reason:
                   type: string
                   minLength: 3
@@ -8490,9 +8552,13 @@ components:
       properties:
         key:
           type: string
-          enum: [welcome_credits, test_mode, registration, admin_totp, two_person, test_assets, custodian, withdraw, brand, coin_profile, legal,
-            third_party, admins, domain, house, margin, insurance, coin_m, app_downloads, products]
+          enum: [welcome_credits, test_mode, registration, admin_totp, admin_access, two_person, test_assets, custodian, withdraw, brand,
+            coin_profile, legal, third_party, admins, domain, house, margin, insurance, coin_m, app_downloads, products]
           description: |
+            admin_totp and admin_access (design 2026-10-02 N1): the
+            console's settings admin.require_totp (value: setting, enabled,
+            bound_admins) and admin.access_restriction, on with a list
+            (value: setting, enabled, allowlist).
             products (product switches design 2026-10-07 §1 #5, K0): for
             information, OK whatever is open (value: spot, usdt_m and coin_m,
             each its enabled and closed_at).
@@ -9162,11 +9228,23 @@ components:
             one, or binding one on the account page; false again once it is reset or removed.
     ConsoleAccess:
       type: object
-      required: [require_totp, updated_by, updated_at, you_bound, bound_admins, unbound, unbound_count]
+      required: [require_totp, access_restriction, access_allowlist, your_ip, updated_by, updated_at, you_bound, bound_admins, unbound,
+        unbound_count]
       properties:
         require_totp:
           type: boolean
           description: Whether sign-in asks for the authenticator code (admin.require_totp).
+        access_restriction:
+          type: boolean
+          description: Whether only the addresses of access_allowlist reach the console's API (admin.access_restriction).
+        access_allowlist:
+          type: array
+          items:
+            type: string
+          description: The addresses and CIDR prefixes, normalized (a single host without its length); kept while off.
+        your_ip:
+          type: string
+          description: The address the caller's request came from, as the restriction sees it.
         updated_by:
           type: [string, 'null']
           description: Who changed it last (an email, exchangectl's actor, or migration:admin.login_without_totp).

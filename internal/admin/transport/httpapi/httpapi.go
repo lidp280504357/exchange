@@ -9,6 +9,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -59,7 +60,7 @@ func principal(r *http.Request) application.Principal {
 // Routes mounts the API on r.
 func (h *Handler) Routes(r chi.Router) {
 	r.Route("/admin/v1", func(r chi.Router) {
-		r.Use(h.csrf)
+		r.Use(h.restrict, h.csrf)
 		r.Get("/login-options", h.loginOptions)
 		r.Post("/login", h.login)
 		r.Post("/setup/inspect", h.inspectSetup)
@@ -76,6 +77,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Put("/settings", h.updateSettings)
 			r.Get("/settings/access", h.access)
 			r.Put("/settings/access/totp", h.setRequireTOTP)
+			r.Put("/settings/access/restriction", h.setRestriction)
 			r.Get("/todo", h.todo)
 			r.Get("/events", h.events)
 			r.Get("/users", h.users)
@@ -268,9 +270,14 @@ func (h *Handler) authenticate(next http.Handler) http.Handler {
 	})
 }
 
+// clientIP is the client's address as the proxies passed it on (nginx's
+// X-Real-IP from Cloudflare's CF-Connecting-IP), else the peer's.
 func clientIP(r *http.Request) string {
 	if ip := httpx.ClientIPFrom(r.Context()); ip != "" {
 		return ip
+	}
+	if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
+		return ap.Addr().Unmap().String()
 	}
 	return r.RemoteAddr
 }

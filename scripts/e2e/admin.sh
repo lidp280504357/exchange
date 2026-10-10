@@ -254,6 +254,55 @@ else
   fi
 fi
 
+# The access restriction (N1, admin.access_restriction): on, every
+# /admin/v1/* request from an address outside its list is refused (403
+# ADMIN_ACCESS_DENIED), sign-in included; the operations port's health
+# checks are not affected. Through Cloudflare the source address cannot
+# be made up, so the other addresses' requests go straight to
+# admin-service on the compose network with the X-Real-IP nginx would set.
+# Switched on with this machine's address and a test network, then off
+# (exchangectl in the container switches it off when the run ends).
+echo "== the access restriction (N1)"
+as AUDITOR GET /admin/v1/settings/access ""
+if [[ $STATUS != 200 || $(jq -r 'has("access_restriction")' <<<"$BODY") != true ]]; then
+  echo "skip the access restriction: this admin-service is from before N1's second part"
+elif [[ $(jq -r .access_restriction <<<"$BODY") == true ]]; then
+  echo "skip switching the access restriction: it is on here"
+else
+  MY_IP=$(jq -r .your_ip <<<"$BODY")
+  [[ -n $MY_IP && $MY_IP != null ]] || fail "the caller's address is not told: $BODY"
+  echo "ok   off here; this machine's address as the console sees it: $MY_IP"
+  inside() { # inside IP PORT PATH: the status of GET PATH from IP, straight to admin-service on the compose network
+    remote "sudo docker compose $COMPOSE_FILES exec -T nginx sh -c \"wget -q -S -O /dev/null --header 'X-Real-IP: $1' http://admin-service:$2$3 2>&1 | grep -o 'HTTP/1\\.[01] [0-9][0-9][0-9]' | tail -1 | cut -d' ' -f2\""
+  }
+  as OPERATOR PUT /admin/v1/settings/access/restriction '{"enabled":true,"allowlist":["192.0.2.0/24"],"reason":"e2e"}'
+  expect 403 ADMIN_FORBIDDEN "OPERATOR does not restrict it"
+  as ADMIN PUT /admin/v1/settings/access/restriction '{"enabled":true,"allowlist":["192.0.2.0/24"],"reason":"e2e: without this machine"}'
+  expect 409 ADMIN_ACCESS_SELF_LOCKOUT "a list without the caller's address is refused"
+  check ".details.ip == \"$MY_IP\"" "naming the caller's address"
+  as ADMIN PUT /admin/v1/settings/access/restriction '{"enabled":true,"allowlist":["0.0.0.0/0"],"reason":"e2e: everyone"}'
+  expect 400 COMMON_INVALID_ARGUMENT "a list that lets every address in is refused"
+  # shellcheck disable=SC2016 # expanded when the script ends
+  at_exit 'remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin settings access-restriction off --reason \"e2e run over\"" >/dev/null'
+  as ADMIN PUT /admin/v1/settings/access/restriction \
+    "$(jq -nc --arg ip "$MY_IP" '{enabled: true, allowlist: [$ip, "192.0.2.0/24"], reason: "e2e: this machine and a test network"}')"
+  expect 200 - "ADMIN restricts the console to this machine and a test network"
+  check '.access_restriction == true and (.access_allowlist | length) == 2' "on, with both"
+  as AUDITOR GET /admin/v1/me ""
+  expect 200 - "this machine still reaches the console"
+  [[ $(inside 198.51.100.7 8093 /admin/v1/login-options) == 403 ]] || fail "an address outside the list reaches the sign-in options"
+  echo "ok   an address outside the list is refused, the sign-in options included"
+  [[ $(inside 192.0.2.77 8093 /admin/v1/login-options) == 200 ]] || fail "an address of the listed network is refused"
+  echo "ok   an address of the listed network reaches them"
+  [[ $(inside 198.51.100.7 9094 /readyz) == 200 ]] || fail "admin-service's health check is refused"
+  echo "ok   the health check on the operations port is not restricted"
+  as ADMIN PUT /admin/v1/settings/access/restriction '{"enabled":false,"reason":"e2e: open again"}'
+  expect 200 - "and switches it off again"
+  check '.access_restriction == false and (.access_allowlist | length) == 2' "off, the list kept"
+  open_again() { [[ $(inside 198.51.100.7 8093 /admin/v1/login-options) == 200 ]]; }
+  eventually 20 "every address reaches the console again" open_again
+fi
+
 echo "== roles"
 as AUDITOR PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}'
 expect 403 ADMIN_FORBIDDEN "AUDITOR cannot switch a flag"
@@ -2550,6 +2599,8 @@ check '.ready == false and ([.items[] | select(.key == "admin_totp" or .key == "
   "the test server is not ready: the console's sign-in code is off and the test assets are on"
 check '.items[] | select(.key == "admin_totp") | .status == "UNKNOWN" or (.value.enabled == false and (.value.bound_admins | type) == "number")' \
   "the sign-in code's item reads the setting (N1), with the ADMINs whose authenticator is bound"
+check '[.items[] | select(.key == "admin_access")] | all(.status == "UNKNOWN" or (.status == "FAIL" and .value.enabled == false and (.value.allowlist | type) == "array"))' \
+  "the access restriction's item reads the setting (N1): off here"
 check '.items[] | select(.key == "test_mode") | .status == "FAIL" and .value.enabled == true and (.value.banner | type) == "boolean"' \
   "and it is in test mode (design 2026-10-04 §4.3)"
 as AUDITOR GET /admin/v1/platform/profile ""

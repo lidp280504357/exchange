@@ -2,6 +2,7 @@ package migrations_test
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"regexp"
@@ -531,4 +532,13 @@ func TestAdminSchema(t *testing.T) {
 	accepts(t, db, access, true, false)
 	rejects(t, db, "a second row", access, true, true)
 	accepts(t, db, `UPDATE admins SET totp_confirmed_at = now() WHERE id = $1`, a)
+	restrict := `UPDATE console_access SET access_restriction = $1, access_allowlist = $2`
+	rejects(t, db, "a restriction without a list", restrict, true, []string{})
+	accepts(t, db, restrict, true, []string{"203.0.113.0/24", "2001:db8:1:2::/64"})
+	many := make([]string, 51)
+	for i := range many {
+		many[i] = fmt.Sprintf("10.0.0.%d", i)
+	}
+	rejects(t, db, "at most 50 addresses", restrict, false, many)
+	accepts(t, db, restrict, false, many[:50])
 }
