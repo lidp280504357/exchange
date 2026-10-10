@@ -507,6 +507,79 @@ export function indicatorsAway(page, scope) {
 }
 
 /**
+ * arrivalStaysInside clicks the 100% under the slider in scope - the
+ * arrival's effect plays for the user's own moves only (B183) - pauses
+ * the effect as soon as its layers are in the page and steps it through
+ * every 20 ms of its run, measuring the scroll containers around the
+ * slider and the page each time: none may get wider inside than it was
+ * (B194: the light, drawn past the track's ends, widened the order panels,
+ * which scrolled sideways while it played). Returns what it measured.
+ */
+export async function arrivalStaysInside(page, scope) {
+  const hundred = await page.waitForFunction(
+    (scope) => {
+      const wrap = document.querySelector(`${scope} [role=slider]`)?.closest(".select-none");
+      return [...(wrap?.querySelectorAll("button") ?? [])].find((b) => b.innerText.trim() === "100%" && !b.disabled) ?? false;
+    },
+    { timeout: 20000 },
+    scope,
+  );
+  await page.evaluate((scope) => {
+    const wrap = document.querySelector(`${scope} [role=slider]`).closest(".select-none");
+    // The scroll containers around it and the page, and how much wider
+    // inside than out each is before the effect.
+    const boxes = [];
+    for (let el = wrap.parentElement; el; el = el.parentElement) {
+      if (/auto|scroll|hidden/.test(getComputedStyle(el).overflowX)) boxes.push(el);
+    }
+    boxes.push(document.scrollingElement);
+    window.__arrivalBoxes = boxes.map((b) => ({ b, before: b.scrollWidth - b.clientWidth }));
+    window.__arrival = new Promise((resolve) => {
+      const watch = new MutationObserver(() => {
+        if (!wrap.querySelector(".slider-fx-clip")) return;
+        for (const a of wrap.getAnimations({ subtree: true })) a.pause();
+        watch.disconnect();
+        resolve(true);
+      });
+      watch.observe(wrap, { childList: true, subtree: true });
+      setTimeout(() => (watch.disconnect(), resolve(false)), 5000);
+    });
+  }, scope);
+  await hundred.asElement().click();
+  const m = await page.evaluate(async (scope) => {
+    if (!(await window.__arrival)) return { played: false };
+    const wrap = document.querySelector(`${scope} [role=slider]`).closest(".select-none");
+    const clip = wrap.querySelector(".slider-fx-clip");
+    const boxes = window.__arrivalBoxes.map((x) => x.b);
+    const before = window.__arrivalBoxes.map((x) => x.before);
+    const wider = (b) => b.scrollWidth - b.clientWidth;
+    const anims = wrap.getAnimations({ subtree: true });
+    const worst = boxes.map(() => ({ by: 0, at: 0 }));
+    const end = Math.max(...anims.map((a) => a.effect.getComputedTiming().endTime));
+    let steps = 0;
+    for (let t = 0; t <= end + 20; t += 20, steps++) {
+      for (const a of anims) a.currentTime = t;
+      boxes.forEach((b, i) => {
+        const by = wider(b) - Math.max(0, before[i]);
+        if (by > worst[i].by) worst[i] = { by, at: t };
+      });
+    }
+    const attached = clip.isConnected;
+    for (const a of anims) a.finish();
+    const name = (el) =>
+      el === document.scrollingElement ? "the page" : `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""} (${Math.round(el.clientWidth)} px)`;
+    return { played: true, attached, steps, end: Math.round(end), boxes: boxes.map((b, i) => ({ name: name(b), before: before[i], ...worst[i] })) };
+  }, scope);
+  if (!m.played) throw new Error(`${scope}: clicking 100% under the slider played no arrival effect`);
+  if (!m.attached) throw new Error(`${scope}: the arrival's effect was gone before it could be measured (the slider left 100%)`);
+  const over = m.boxes.filter((b) => b.by > 0);
+  if (over.length) {
+    throw new Error(`${scope}: the arrival's light scrolls ${over.map((b) => `${b.name} ${b.by} px sideways at ${b.at} ms`).join(", ")}`);
+  }
+  return m;
+}
+
+/**
  * noteRegistered adds an account this run signed up to $E2E_REGISTERED,
  * the file the shell scripts' exit hook clears out (scripts/e2e/lib/
  * common.sh: their accounts are named for the run, E2E_RUN, and marked

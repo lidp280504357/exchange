@@ -53,15 +53,18 @@ export const Tones: Story = {
  */
 export const EndsAndPeak: Story = {
   render: () => {
+    const ref = useRef<HTMLDivElement>(null);
     const [v, setV] = useState(75);
     return (
       <div className="flex flex-col gap-6">
         {[0, 50, 100].map((at) => (
           <Slider key={at} value={at} onValueChange={() => {}} pulseAtMax={false} marks={[0, 25, 50, 75, 100]} markLabels formatMark={(m) => `${m}%`} aria-label={`${at}%`} />
         ))}
-        <Slider value={v} onValueChange={setV} tone="up" marks={[0, 25, 50, 75, 100]} markLabels formatMark={(m) => `${m}%`} aria-label="Pulse at 100%" />
+        <div ref={ref}>
+          <Slider value={v} onValueChange={setV} tone="up" marks={[0, 25, 50, 75, 100]} markLabels formatMark={(m) => `${m}%`} aria-label="Pulse at 100%" />
+        </div>
         <div className="flex gap-2 text-xs">
-          <button type="button" className="rounded border border-line-2 px-2 py-1" onClick={() => setV(100)}>100%</button>
+          <button type="button" className="rounded border border-line-2 px-2 py-1" onClick={() => pressEnd(ref.current)}>100%</button>
           <button type="button" className="rounded border border-line-2 px-2 py-1" onClick={() => setV(75)}>75%</button>
         </div>
       </div>
@@ -70,6 +73,14 @@ export const EndsAndPeak: Story = {
 };
 
 const marks = [0, 25, 50, 75, 100];
+
+// Only an arrival the user made plays (B183): the stories press End on the
+// sliders' thumbs, as a keyboard would, instead of setting the value.
+function pressEnd(root: HTMLElement | null) {
+  for (const thumb of root?.querySelectorAll<HTMLElement>("[role=slider]") ?? []) {
+    thumb.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+  }
+}
 
 /**
  * The arrival in slow motion (B176): every animation under the story at
@@ -91,7 +102,7 @@ export const ArrivalSlowMotion: Story = {
     }, [rate]);
     const replay = () => {
       setV(75);
-      requestAnimationFrame(() => setV(100));
+      requestAnimationFrame(() => pressEnd(ref.current));
     };
     return (
       <div ref={ref} className="flex flex-col gap-6">
@@ -122,29 +133,30 @@ export const ArrivalSlowMotion: Story = {
 function ArrivalFrame({ at }: { at: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [v, setV] = useState(75);
-  useEffect(() => setV(100), []);
   useEffect(() => {
-    if (v !== 100) return;
-    let raf = 0;
+    const root = ref.current;
+    if (!root) return;
+    // Paused at `at` as soon as the layers are in the page: an observer,
+    // not animation frames, which a hidden tab does not run (the effect
+    // would play through and be gone).
     const seek = () => {
-      const all = ref.current?.getAnimations({ subtree: true }) ?? [];
-      if (all.length === 0) {
-        raf = requestAnimationFrame(seek);
-        return;
-      }
+      const all = root.getAnimations({ subtree: true });
       for (const a of all) {
         a.pause();
         a.currentTime = at;
       }
+      return all.length > 0;
     };
-    raf = requestAnimationFrame(seek);
-    return () => cancelAnimationFrame(raf);
-  }, [v, at]);
+    const watch = new MutationObserver(() => seek() && watch.disconnect());
+    watch.observe(root, { childList: true, subtree: true });
+    pressEnd(root);
+    return () => watch.disconnect();
+  }, [at]);
   return (
     <div className="flex items-center gap-4">
       <span className="w-16 shrink-0 text-right font-mono text-xs text-fg-3">{at} ms</span>
       <div ref={ref} className="w-72">
-        <Slider value={v} onValueChange={() => {}} marks={marks} aria-label={`${at} ms`} />
+        <Slider value={v} onValueChange={setV} marks={marks} aria-label={`${at} ms`} />
       </div>
     </div>
   );
@@ -159,6 +171,29 @@ export const ArrivalFrames: Story = {
       ))}
     </div>
   ),
+};
+
+/**
+ * In the boxes the order forms sit in (B194): a PC terminal's order panel
+ * (290 px, p-3) and a phone's order sheet (390 px, px-4), both scrolling.
+ * The arrival's light stays inside them: neither scrolls sideways while it
+ * plays (the browser smokes measure the real ones).
+ */
+export const InPanels: Story = {
+  render: () => {
+    const [a, setA] = useState(75);
+    const [b, setB] = useState(75);
+    return (
+      <div className="flex flex-col gap-6">
+        <div data-testid="pc-panel" className="w-[290px] overflow-y-auto bg-bg-1 p-3">
+          <Slider className="px-1" value={a} onValueChange={setA} marks={marks} markLabels formatMark={(m) => `${m}%`} aria-label="PC order panel" />
+        </div>
+        <div data-testid="m-sheet" className="w-[390px] overflow-y-auto bg-bg-1 px-4 pb-4">
+          <Slider className="px-1" value={b} onValueChange={setB} tone="up" marks={marks} markLabels formatMark={(m) => `${m}%`} aria-label="Phone order sheet" />
+        </div>
+      </div>
+    );
+  },
 };
 
 export const Leverage: Story = {

@@ -26,8 +26,8 @@
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
 import {
-  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, firstVisitLocale, indicatorsAway, legendClear, menuOnTop, note, ok, pickLanguage, sleep,
-  start, withApps, withFuturesAccount, withProducts,
+  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, arrivalStaysInside, choosePicture, decodeQr, firstVisitLocale, indicatorsAway, legendClear, menuOnTop, note, ok,
+  pickLanguage, sleep, start, withApps, withFuturesAccount, withProducts,
 } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
@@ -331,6 +331,10 @@ try {
     timeout: 20000,
   });
   ok("cancelling it empties the open orders (engine and push)");
+  // 4b. The slider's arrival at 100% (B176, B194): its light, drawn past the
+  // track's ends, made the order panel scroll sideways while it played.
+  const spotArrival = await arrivalStaysInside(page, "#order-form");
+  ok(`the spot order form's slider at 100%: its arrival (${spotArrival.end} ms, measured every 20 ms) leaves the order panel and the page as wide as they were`);
 
   // 5. A transfer to futures, then its ledger entry.
   await go("/assets/transfer");
@@ -447,6 +451,14 @@ try {
   await waitText("标记价格");
   await waitText("资金费率");
   ok("the futures terminal shows the mark price and the funding countdown");
+  // The futures order forms' sliders at 100% (B194), USDⓈ-M and coin-margined.
+  await arrivalStaysInside(page, "#order-form");
+  await go("/futures/BTC-USD-PERP");
+  await waitText("标记价格");
+  await arrivalStaysInside(page, "#order-form");
+  ok("the futures order forms' sliders at 100% (BTC-USDT-PERP, BTC-USD-PERP): their arrival leaves the order panel and the page as wide as they were");
+  await go("/futures/BTC-USDT-PERP");
+  await waitText("标记价格");
   // The candle charts start below their legends (B116: the legend sits over
   // the plot, and the candles' scale leaves room for it).
   const clearOf = async (where) => {

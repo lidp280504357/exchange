@@ -144,67 +144,72 @@ export function Slider({
           />
         ))}
         {peaking && (
+          // The light is clipped a little past the track's ends, so it
+          // never widens the panel the slider sits in (B194: theme.css).
           <span
             key={peaks}
             aria-hidden
-            className={cn("slider-fx pointer-events-none absolute inset-0", c.text)}
+            className="slider-fx-clip pointer-events-none absolute"
             onAnimationEnd={(e) => {
               // The outer glow ends last (its soft fade under reduced motion).
               if (e.animationName === "slider-glow-outer" || e.animationName === "slider-soft-glow") setPlayed(peaks);
             }}
           >
-            <span className="slider-glow-2" />
-            <span className="slider-glow-1" />
-            <span className="slider-fx-motion">
-              {marks
-                .filter((m) => m < max)
-                .map((m) => (
+            <span className={cn("slider-fx absolute", c.text)}>
+              <span className="slider-glow-2" />
+              <span className="slider-thumb-halo" />
+              <span className="slider-glow-1" />
+              <span className="slider-fx-motion">
+                {marks
+                  .filter((m) => m < max)
+                  .map((m) => (
+                    <span
+                      key={m}
+                      className="slider-mark-glow"
+                      style={{
+                        left: `${pct(m)}%`,
+                        animation: `slider-mark-glow ${ms(MARK_GLOW)} ease-out ${ms(CHARGE + RUN * (1 - pct(m) / 100) - MARK_GLOW * 0.35)} both`,
+                      }}
+                    />
+                  ))}
+                <span className="slider-bands">
+                  {BANDS.map((b) => (
+                    <span
+                      key={b.wave}
+                      className="slider-band"
+                      style={{
+                        animation: `slider-band-x ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both, slider-band-fade ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both`,
+                      }}
+                    >
+                      <span
+                        className="absolute top-0 left-0"
+                        style={{ scale: b.scale, opacity: b.opacity, animation: `slider-wave-${b.wave} ${ms(RUN)} ease-in-out ${ms(CHARGE + b.lag)} both` }}
+                      >
+                        <span className="slider-band-trail" />
+                        <span className="slider-band-head" />
+                      </span>
+                    </span>
+                  ))}
+                </span>
+                <span className="slider-burst" />
+                {SPARKS.map((p, i) => (
                   <span
-                    key={m}
-                    className="slider-mark-glow"
-                    style={{
-                      left: `${pct(m)}%`,
-                      animation: `slider-mark-glow ${ms(MARK_GLOW)} ease-out ${ms(CHARGE + RUN * (1 - pct(m) / 100) - MARK_GLOW * 0.35)} both`,
-                    }}
+                    key={i}
+                    className="slider-spark"
+                    style={
+                      {
+                        left: `${p.x}%`,
+                        width: p.size,
+                        height: p.size,
+                        margin: `${-p.size / 2}px 0 0 ${-p.size / 2}px`,
+                        "--dx": `${p.dx}px`,
+                        "--dy": `${p.dy}px`,
+                        animation: `slider-spark-fly ${ms(p.dur)} cubic-bezier(0.15, 0.75, 0.35, 1) ${ms(p.delay)} both`,
+                      } as CSSProperties
+                    }
                   />
                 ))}
-              <span className="slider-bands">
-                {BANDS.map((b) => (
-                  <span
-                    key={b.wave}
-                    className="slider-band"
-                    style={{
-                      animation: `slider-band-x ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both, slider-band-fade ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both`,
-                    }}
-                  >
-                    <span
-                      className="absolute top-0 left-0"
-                      style={{ scale: b.scale, opacity: b.opacity, animation: `slider-wave-${b.wave} ${ms(RUN)} ease-in-out ${ms(CHARGE + b.lag)} both` }}
-                    >
-                      <span className="slider-band-trail" />
-                      <span className="slider-band-head" />
-                    </span>
-                  </span>
-                ))}
               </span>
-              <span className="slider-burst" />
-              {SPARKS.map((p, i) => (
-                <span
-                  key={i}
-                  className="slider-spark"
-                  style={
-                    {
-                      left: `${p.x}%`,
-                      width: p.size,
-                      height: p.size,
-                      margin: `${-p.size / 2}px 0 0 ${-p.size / 2}px`,
-                      "--dx": `${p.dx}px`,
-                      "--dy": `${p.dy}px`,
-                      animation: `slider-spark-fly ${ms(p.dur)} cubic-bezier(0.15, 0.75, 0.35, 1) ${ms(p.delay)} both`,
-                    } as CSSProperties
-                  }
-                />
-              ))}
             </span>
           </span>
         )}
@@ -213,7 +218,6 @@ export function Slider({
           aria-valuetext={formatValue?.(value)}
           className="group relative block size-0 outline-none"
         >
-          {peaking && <span key={peaks} aria-hidden className={cn("slider-fx slider-thumb-halo pointer-events-none", c.text)} />}
           <span
             aria-hidden
             className={cn(

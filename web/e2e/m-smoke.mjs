@@ -21,8 +21,8 @@
 // the step-up's channel cards, the language switch, a first visit's language and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
 import {
-  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, firstVisitLocale, indicatorsAway, legendClear, note, ok, pickLanguage, sleep, start, withApps,
-  withFuturesAccount, withProducts,
+  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, arrivalStaysInside, choosePicture, firstVisitLocale, indicatorsAway, legendClear, note, ok, pickLanguage,
+  sleep, start, withApps, withFuturesAccount, withProducts,
 } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
@@ -160,6 +160,10 @@ try {
   await clickButton("买入 BTC");
   await sheetOpen();
   await page.waitForFunction(() => Number(document.querySelector('[role=dialog] input[aria-label="价格"]')?.value) > 0, { timeout: 20000 });
+  // The slider's arrival at 100% (B176, B194): its light, drawn past the
+  // track's ends, made the sheet scroll sideways while it played.
+  await arrivalStaysInside(page, "[role=dialog]");
+  ok("the spot order sheet's slider at 100%: its arrival (measured every 20 ms) leaves the sheet and the page as wide as they were");
   const last = await page.$eval('[role=dialog] input[aria-label="价格"]', (el) => Number(el.value));
   const price = (Math.floor(last * 0.95 * 100) / 100).toFixed(2);
   await typeInto('[role=dialog] input[aria-label="价格"]', price);
@@ -265,6 +269,19 @@ try {
   await waitText("标记价格");
   await waitText("资金费率");
   ok("the futures terminal shows the mark price and the funding countdown");
+  // The futures order sheets' sliders at 100% (B194), USDⓈ-M and coin-margined.
+  for (const symbol of ["BTC-USDT-PERP", "BTC-USD-PERP"]) {
+    await go(`/futures/${symbol}`);
+    await waitText("标记价格");
+    await clickButton("开多");
+    await sheetOpen();
+    await arrivalStaysInside(page, "[role=dialog]");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("[role=dialog]", { hidden: true });
+  }
+  ok("the futures order sheets' sliders at 100% (BTC-USDT-PERP, BTC-USD-PERP): their arrival leaves the sheet and the page as wide as they were");
+  await go("/futures/BTC-USDT-PERP");
+  await waitText("标记价格");
   // The candle charts start below their legends (B116: the legend sits over
   // the plot, and the candles' scale leaves room for it).
   const clearOf = async (where) => {

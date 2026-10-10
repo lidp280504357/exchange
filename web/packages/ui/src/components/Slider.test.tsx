@@ -4,9 +4,10 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { Slider } from "./Slider";
 
-// The thumb's halo is its extra element; the dot is always there.
-const halo = (container: HTMLElement) => container.querySelector("[role=slider] > .slider-thumb-halo");
-const effect = (container: HTMLElement) => container.querySelector<HTMLElement>(".slider-fx:not(.slider-thumb-halo)");
+// The effect's layers, the thumb's halo among them, are in one clip box
+// (B194); the dot is always there.
+const halo = (container: HTMLElement) => container.querySelector(".slider-fx-clip > .slider-fx > .slider-thumb-halo");
+const effect = (container: HTMLElement) => container.querySelector<HTMLElement>(".slider-fx-clip > .slider-fx");
 
 // A form's slider: the value the user moves it to, or settle(value) once
 // the form has worked out what it means (a lot-rounded share of a
@@ -46,7 +47,12 @@ describe("Slider at its maximum (B176, B183)", () => {
     fireEvent.keyDown(thumb(container), { key: "End" });
     const first = halo(container);
     expect(first).not.toBeNull();
-    expect(container.querySelector("[role=slider] > span:last-child")?.className).toContain("slider-dot-burst");
+    expect(container.querySelector("[role=slider] > span:last-child")?.classList.contains("slider-dot-burst")).toBe(true);
+    // Nothing of it is drawn outside the clip box (B194): the thumb holds
+    // its dot alone, and the clip box's one child is the effect.
+    expect(thumb(container).children).toHaveLength(1);
+    expect(container.querySelectorAll(".slider-fx-clip")).toHaveLength(1);
+    expect(container.querySelector(".slider-fx-clip")?.children).toHaveLength(1);
     // Two glow layers; under reduced motion (the stylesheet) only the outer
     // one stays, fading in and out: the moving parts are in slider-fx-motion
     // - a soft glow for each mark below the end, timed to the first band's

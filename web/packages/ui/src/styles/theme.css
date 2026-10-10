@@ -135,8 +135,33 @@
  *   1000-1400 ms  the glow breathes once and settles
  * Under prefers-reduced-motion one soft glow over the fill, fading in and
  * out, is all.
+ *
+ * The layers are clipped 1.25 rem past the track's ends (B194): drawn
+ * further, they widened the order panel around the slider, which then
+ * scrolled sideways while they played. The room there is the track's
+ * inset (mx-2, 0.5 rem), the forms' px-1 (0.25 rem) and the panel's own
+ * padding (the PC panels' p-3, 0.75 rem; the sheets' px-4): the clip
+ * takes half a rem of the padding, so a slider with less room than that
+ * around it inside a scroll container would scroll it again (the browser
+ * smokes measure the real ones). The light fades out over the last half
+ * rem instead of being cut; 3 rem above and below the track is room
+ * enough for every layer.
  */
-[data-theme="dark"] .slider-fx {
+.slider-fx-clip {
+  inset: -3rem -1.25rem;
+  overflow: hidden;
+  overflow: clip;
+  -webkit-mask-image: linear-gradient(90deg, transparent, var(--black) 0.5rem, var(--black) calc(100% - 0.5rem), transparent);
+  mask-image: linear-gradient(90deg, transparent, var(--black) 0.5rem, var(--black) calc(100% - 0.5rem), transparent);
+}
+
+/* The track's own box, inside the clip. */
+.slider-fx-clip > .slider-fx {
+  inset: 3rem 1.25rem;
+}
+
+/* The mask makes the clip a group of its own: it is what blends. */
+[data-theme="dark"] .slider-fx-clip {
   mix-blend-mode: screen;
 }
 
@@ -451,12 +476,13 @@
   }
 }
 
-/* The thumb's halo: it charges, flares with the end and breathes with
-   the glow; the dot itself swells once at the flare. */
+/* The thumb's halo, around the track's end where the thumb is: it charges,
+   flares with the end and breathes with the glow; the dot itself swells
+   once at the flare. */
 .slider-thumb-halo {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 50%;
+  left: 100%;
   width: 34px;
   height: 34px;
   margin: -17px 0 0 -17px;

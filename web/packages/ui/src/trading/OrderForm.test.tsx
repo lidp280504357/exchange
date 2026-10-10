@@ -266,7 +266,7 @@ describe("OrderForm", () => {
     // its label lit.
     expect(field("Amount").value).toBe("0.5321");
     expect(Number(container.querySelector("[role=slider]")?.getAttribute("aria-valuenow"))).toBeCloseTo(99.98, 2);
-    expect(container.querySelector(".slider-fx:not(.slider-thumb-halo)")).not.toBeNull();
+    expect(container.querySelector(".slider-fx-clip > .slider-fx")).not.toBeNull();
     // By class token: the label's own hover:text-fg-1 holds the text too (B193).
     expect(hundred.classList.contains("text-fg-1")).toBe(true);
     const dots = [...container.querySelectorAll<HTMLElement>("span.rotate-45")];
