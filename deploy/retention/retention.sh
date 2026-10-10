@@ -30,13 +30,20 @@ trap ': >"$INFRA_DIR/ops.lock.owner"' EXIT
 
 # docker compose run only lets go of its container when signalled (B201):
 # a stop of the unit (SIGTERM to this script, KillMode=mixed) stops the
-# container - exchangectl ends the statement it is in - and waits for it.
+# container - exchangectl ends the statement it is in - and removes it.
+# Each step runs in the background and is waited for, so that the signal
+# is handled at once (bash runs a trap only after a foreground command);
+# a reconcile under way finishes in ledger-service on its own (it reads).
 child=""
 stop_run() {
   trap - TERM INT
   echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) stopped: stopping $NAME"
   sudo docker stop -t 60 "$NAME" >/dev/null 2>&1 || true
-  [[ -n $child ]] && wait "$child" 2>/dev/null
+  sudo docker rm -f "$NAME" >/dev/null 2>&1 || true
+  if [[ -n $child ]]; then
+    kill "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
   exit 143
 }
 trap stop_run TERM INT
@@ -48,8 +55,10 @@ sudo docker rm "$NAME" >/dev/null 2>&1 || true
   user-service /app/exchangectl retention run "$@" &
 child=$!
 wait "$child"
+"${COMPOSE[@]}" exec -T ledger-service /app/exchangectl ledger reconcile &
+child=$!
+wait "$child"
 child=""
-"${COMPOSE[@]}" exec -T ledger-service /app/exchangectl ledger reconcile
 printf '# HELP exchange_retention_last_success_timestamp_seconds When the history retention and the ledger reconcile after it last finished without a failure.\n# TYPE exchange_retention_last_success_timestamp_seconds gauge\nexchange_retention_last_success_timestamp_seconds %s\n' \
   "$(date +%s)" >"$METRICS_DIR/exchange_retention.prom.tmp"
 mv "$METRICS_DIR/exchange_retention.prom.tmp" "$METRICS_DIR/exchange_retention.prom"

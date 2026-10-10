@@ -217,7 +217,7 @@ func runRetention(ctx context.Context, policies []retention.Policy, open func(sc
 	fmt.Fprintf(out, "%s %d rows, about %s of the tables' size (an estimate; reused by the tables, returned to the disk only by VACUUM FULL)\n",
 		verb, rows, humanBytes(bytes))
 	if len(failed) > 0 {
-		return fmt.Errorf("retention: %d of the schemas failed: %w", len(failed), errors.Join(failed...))
+		return fmt.Errorf("retention: %d failed (schemas, the read models, a stop): %w", len(failed), errors.Join(failed...))
 	}
 	return nil
 }
