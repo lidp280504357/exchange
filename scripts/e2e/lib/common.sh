@@ -153,8 +153,9 @@ wait_resend() {
 }
 
 # register EMAIL DEVICE PASSWORD signs a new APP user up and sets BODY to
-# the token response. The first one has this run's accounts marked TEST
-# and cleared out when the script ends (mark_test_accounts).
+# the token response, and notes the account in $E2E_REGISTERED: this run's
+# accounts are marked TEST and cleared out when the script ends
+# (mark_test_accounts).
 register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
   local email=$1 device=$2 password=$3 country=${4:-SG} terms risk
   call GET /v1/auth/terms ""
@@ -164,43 +165,45 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
   otp REGISTER "$email" "$device"
   call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"$password\",\"country\":\"$country\",\"terms_version\":\"$terms\",\"risk_disclosure_version\":\"$risk\",\"device_id\":\"$device\"}" "${APP[@]}"
   expect 201 - "register"
-  REGISTERED+=("$(jq -r .user_id <<<"$BODY")")
-  if [[ -z $MARKS_TEST_ACCOUNTS ]]; then
-    MARKS_TEST_ACCOUNTS=1
-    at_exit mark_test_accounts
-  fi
+  jq -r .user_id <<<"$BODY" >>"$E2E_REGISTERED"
 }
+
+# E2E_REGISTERED lists the accounts this run signed up, an ID a line:
+# register adds its own, and a program the script runs that signs accounts
+# up itself (the browser smokes) adds its ones to the same file - it is
+# exported - so that the exit hook clears them out too.
+export E2E_REGISTERED="$WORK/registered"
+: >"$E2E_REGISTERED"
 
 # mark_test_accounts marks the accounts this run registered TEST (L0: the
 # console leaves test accounts out of its lists by default), in one call
 # by their emails (e2e-...-$RUN@example.com, the fault drills'
 # fault-...-$RUN@example.com) through exchangectl in a container on the
-# test server, then clears out the ones register signed up (L4:
+# test server, then clears out the ones in $E2E_REGISTERED (L4:
 # exchangectl users purge by their IDs, not by the emails' second-long
 # RUN, which a script of another session may share - B184 ④; the
 # accounts' balances go to ADJUSTMENT, the accounts are closed and hidden;
 # one still holding a contract position, a margin debt or a withdrawal in
 # flight is left, and so is one exempt from the purge, funding.sh's
-# standing hedges). It runs after the script's own clean-ups (registered
-# with the first account, it is the last at_exit to run). A failure only
-# warns.
-MARKS_TEST_ACCOUNTS=""
-REGISTERED=()
+# standing hedges). Registered when this file is sourced, it is the last
+# at_exit to run, after the script's own clean-ups; with no account
+# signed up it does nothing. A failure only warns.
 mark_test_accounts() {
   local out name ctl ids
+  ids=$(sort -u "$E2E_REGISTERED" 2>/dev/null | grep -E '^[0-9a-f-]{36}$' | paste -sd, - || true)
+  [[ -n $ids ]] || return 0
   name=$(basename "$0" .sh)
   ctl="cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl"
   if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users kind --email-like '%-$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not marked TEST: $(tail -1 <<<"$out")" >&2
     return 0
   fi
-  ids=$(IFS=,; echo "${REGISTERED[*]+"${REGISTERED[*]}"}")
-  [[ -n $ids ]] || return 0
   if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users purge --user '$ids' --pace 0s --reason 'e2e $name done'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not all cleared out: $(grep -v '^skip' <<<"$out" | tail -1)" >&2
   fi
   grep '^skip\|^purged' <<<"$out" | sed 's/^/note: /' >&2 || true
 }
+at_exit mark_test_accounts
 
 # eventually TRIES WHAT CMD... reruns CMD every half second until it
 # succeeds.
