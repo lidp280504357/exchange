@@ -159,12 +159,14 @@ try {
   // small print - while the simulated market runs and they traded in the
   // last 24 hours (A113).
   await page.waitForSelector("[data-testid=trend-kinds]");
-  const botsTrading = await page.evaluate(async () => {
+  // A refused answer fails here: read as "none" it would skip for good (A118).
+  const overview = await page.evaluate(async () => {
     const r = await fetch("/admin/v1/dashboard?days=7");
-    return r.ok ? ((await r.json()).trading.other_traders_24h ?? []).some((k) => k.kind === "BOT" && k.count > 0) : false;
+    return { status: r.status, botsTrading: r.ok ? ((await r.json()).trading.other_traders_24h ?? []).some((k) => k.kind === "BOT" && k.count > 0) : false };
   });
+  if (overview.status !== 200) throw new Error(`the overview's figures: ${overview.status}`);
   let tradersNote = "no bot traded in the last 24 hours";
-  if (botsTrading) {
+  if (overview.botsTrading) {
     tradersNote = await page
       .waitForSelector("[data-testid=stat-note-traders24h]", { timeout: 20000 })
       .then((el) => el.evaluate((e) => e.textContent.trim()));
@@ -279,12 +281,14 @@ try {
   ok(`users: the humans by default (${humans.length}), the bots by kind (${bots.length}), every kind (${[...every].join(", ")})`);
   // The test accounts cleared out (L4) are listed only when asked, marked
   // (the end-to-end scripts clear theirs out when they end) - when the
-  // first page has one (a new database has none: skipped, A117).
-  const purgedFirst = await page.evaluate(async () => {
+  // first page has one (a new database has none: skipped, A117); a refused
+  // answer fails (A118).
+  const purged = await page.evaluate(async () => {
     const r = await fetch("/admin/v1/users?kind=TEST&include_purged=true&limit=20");
-    return r.ok ? ((await r.json()).items ?? []).some((u) => u.purged_at) : false;
+    return { status: r.status, first: r.ok ? ((await r.json()).items ?? []).some((u) => u.purged_at) : false };
   });
-  if (purgedFirst) {
+  if (purged.status !== 200) throw new Error(`the test accounts with those cleared out: ${purged.status}`);
+  if (purged.first) {
     await go("/users?kind=TEST&include_purged=true");
     await page.waitForSelector("main tbody [data-testid=user-purged]", { timeout: 20000 });
     // One's page says when and offers no money operation: no adjustment,
