@@ -290,7 +290,8 @@ else
   restore_list() { # restore_list: off, with the list as it was before the run
     as ADMIN PUT /admin/v1/settings/access/restriction "$(jq -nc --argjson l "$LIST_BEFORE" '{enabled: false, allowlist: $l, reason: "e2e: the list as it was"}')"
   }
-  at_exit 'restore_list >/dev/null'
+  # shellcheck disable=SC2016 # expanded when the script ends
+  at_exit 'restore_list >/dev/null; [[ $STATUS == 200 ]] || { echo "FAIL the access list was not put back ($STATUS)" >&2; EXIT_FAILED=1; }'
   as ADMIN PUT /admin/v1/settings/access/restriction \
     "$(jq -nc --arg ip "$MY_IP" '{enabled: true, allowlist: [$ip, "192.0.2.0/24"], reason: "e2e: this machine and a test network"}')"
   expect 200 - "ADMIN restricts the console to this machine and a test network"

@@ -303,6 +303,29 @@ func TestTheCoinReadAsOneMoment(t *testing.T) {
 	}
 }
 
+// downLedger is ledger-service not answering who holds the coin.
+type downLedger struct{ *fakeLedger }
+
+func (downLedger) Holders(context.Context, string) ([]ports.Holder, error) {
+	return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service is down")
+}
+
+// Nobody holds the coin yet: no holder, an empty list of the largest, the
+// system accounts as they are; ledger-service down: unavailable, not zero
+// (A125 ③).
+func TestTheCoinWithoutHoldersOrLedger(t *testing.T) {
+	svc := &Service{Sim: &stateSim{}, Ledger: &fakeLedger{}, Now: time.Now}
+	tok, err := svc.SimTokenHoldings(context.Background(), reader)
+	if err != nil || tok.UserHolders != 0 || tok.BotHolders != 0 || tok.Top == nil || len(tok.Top) != 0 || !tok.Users.IsZero() ||
+		tok.System["FEE_REVENUE"].String() != "7" || tok.System["PNL_CLEARING"].String() != "-12.5" {
+		t.Fatalf("no holders %+v %v", tok.Holdings, err)
+	}
+	svc.Ledger = downLedger{&fakeLedger{}}
+	if _, err := svc.SimTokenHoldings(context.Background(), reader); apperr.From(err).Kind != apperr.KindUnavailable {
+		t.Fatalf("ledger-service down: %v", err)
+	}
+}
+
 // pageRecords answers one page of orders and trades and keeps the query.
 type pageRecords struct {
 	ports.Records

@@ -130,6 +130,12 @@ func (s *Service) changeAdmin(ctx context.Context, p Principal, id, reason, acti
 	}
 	var out domain.Admin
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		// The code switch's row first, as SetRequireTOTP and RemoveOwnTOTP
+		// lock it before an administrator's (A124).
+		sw, err := r.Access().GetForUpdate(ctx)
+		if err != nil {
+			return err
+		}
 		a, err := r.Admins().GetForUpdate(ctx, id)
 		if err != nil {
 			return err
@@ -141,6 +147,9 @@ func (s *Service) changeAdmin(ctx context.Context, p Principal, id, reason, acti
 		if err != nil {
 			return err
 		}
+		if err := keepsBoundAdmin(ctx, r, sw, *a); err != nil {
+			return err
+		}
 		if err := r.Admins().Update(ctx, *a); err != nil {
 			return err
 		}
@@ -150,6 +159,34 @@ func (s *Service) changeAdmin(ctx context.Context, p Principal, id, reason, acti
 		}, p.Admin.Email)
 	})
 	return out, err
+}
+
+// ErrLastBoundAdmin refuses a reset, a demotion or a disabling that would
+// leave sign-in asking for the code with no active ADMIN able to give one
+// (A124): everyone else would be shut out until exchangectl switched it off.
+var ErrLastBoundAdmin = apperr.New(apperr.KindConflict, "ADMIN_LAST_BOUND_ADMIN",
+	"sign-in asks for the authenticator code: at least one active ADMIN must keep a bound authenticator")
+
+// keepsBoundAdmin checks the roster with changed in it while the code
+// switch sw (locked) is on: an active ADMIN with a bound authenticator
+// must remain.
+func keepsBoundAdmin(ctx context.Context, r ports.Repos, sw *domain.ConsoleAccess, changed domain.Admin) error {
+	if sw == nil || !sw.RequireTOTP {
+		return nil
+	}
+	list, err := r.Admins().List(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		if list[i].ID == changed.ID {
+			list[i] = changed
+		}
+	}
+	if boundAdmins(list) == 0 {
+		return ErrLastBoundAdmin
+	}
+	return nil
 }
 
 // lastAdmin reports whether a is the only active ADMIN; the roster stays

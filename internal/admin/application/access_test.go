@@ -307,3 +307,42 @@ func TestAccessRestriction(t *testing.T) {
 		t.Fatalf("read off: %v", err)
 	}
 }
+
+// While sign-in asks for the code, an active ADMIN with a bound
+// authenticator remains (A124): another ADMIN still signed in from before
+// (not bound) cannot reset, disable or demote the last one; with a second
+// bound ADMIN they can.
+func TestTheLastBoundAdminStays(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "early@example.com", domain.RoleAdmin)
+	h.admin(t, "bound@example.com", domain.RoleAdmin)
+	h.store.access = &domain.ConsoleAccess{RequireTOTP: false}
+	if err := h.svc.LoadAccess(ctx); err != nil {
+		t.Fatal(err)
+	}
+	early, bound := h.login(t, "early@example.com"), h.login(t, "bound@example.com")
+	bind(t, h, bound, "bound@example.com")
+	if _, err := h.svc.SetRequireTOTP(ctx, bound, true, testIP, "the launch"); err != nil {
+		t.Fatal(err)
+	}
+	id := h.idOf("bound@example.com")
+	if _, err := h.svc.ResetAdminTOTP(ctx, early, id, "lost the phone"); code(err) != "ADMIN_LAST_BOUND_ADMIN" {
+		t.Fatalf("the last bound authenticator reset: %v", err)
+	}
+	if _, err := h.svc.SetAdminStatus(ctx, early, id, false, "left"); code(err) != "ADMIN_LAST_BOUND_ADMIN" {
+		t.Fatalf("the last bound ADMIN disabled: %v", err)
+	}
+	if _, err := h.svc.SetAdminRole(ctx, early, id, domain.RoleOperator, "another job"); code(err) != "ADMIN_LAST_BOUND_ADMIN" {
+		t.Fatalf("the last bound ADMIN demoted: %v", err)
+	}
+	if a := h.store.admins[id]; !a.TOTPBound() || a.Status != domain.StatusActive || a.Role != domain.RoleAdmin {
+		t.Fatalf("changed all the same %+v", a)
+	}
+	// A second bound ADMIN: the reset goes through.
+	h.admin(t, "second@example.com", domain.RoleAdmin)
+	h.login(t, "second@example.com") // the code checked at sign-in binds it
+	if _, err := h.svc.ResetAdminTOTP(ctx, early, id, "lost the phone"); err != nil {
+		t.Fatalf("with another bound ADMIN: %v", err)
+	}
+}

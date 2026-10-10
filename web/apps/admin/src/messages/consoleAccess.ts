@@ -68,6 +68,7 @@ export const consoleAccessZh = {
     ADMIN_TOTP_NOT_BOUND: "你自己与至少一位启用的 ADMIN 要先绑定验证器，才能开启登录验证器",
     ADMIN_TOTP_REQUIRED: "登录验证器已开启：验证器只能更换，不能解绑",
     ADMIN_ACCESS_SELF_LOCKOUT: "名单里没有你当前的地址：这样会把你自己锁在外面，请把它（或所在网段）加入名单",
+    ADMIN_LAST_BOUND_ADMIN: "登录验证器开着：至少要留一位已绑定验证器的启用 ADMIN，否则之后谁都登录不了",
   },
 };
 
@@ -137,5 +138,6 @@ export const consoleAccessEn = {
     ADMIN_TOTP_NOT_BOUND: "You and at least one active ADMIN bind an authenticator before the sign-in code is switched on",
     ADMIN_TOTP_REQUIRED: "The sign-in code is on: the authenticator can be replaced, not removed",
     ADMIN_ACCESS_SELF_LOCKOUT: "The list does not have your address: you would lock yourself out. Add it (or its network)",
+    ADMIN_LAST_BOUND_ADMIN: "The sign-in code is on: an active ADMIN with a bound authenticator must remain, or nobody could sign in",
   },
 };

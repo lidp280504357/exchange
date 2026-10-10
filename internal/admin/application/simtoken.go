@@ -83,7 +83,10 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 	for _, b := range st.Bots {
 		bots[b.UserID] = true
 	}
-	holders, system, err := s.coinBalances(ctx, st.coin())
+	// Up to seven reads of ledger-service, bounded together (A125).
+	read, cancel := context.WithTimeout(ctx, coinReadTimeout)
+	defer cancel()
+	holders, system, err := s.coinBalances(read, st.coin())
 	if err != nil {
 		return SimToken{}, err
 	}
@@ -99,6 +102,9 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 	}
 	return out, nil
 }
+
+// coinReadTimeout bounds the reads of who holds the coin.
+const coinReadTimeout = 10 * time.Second
 
 // coinBalances reads an asset's holders and system accounts as one moment:
 // the holders again after the system accounts, until their total held

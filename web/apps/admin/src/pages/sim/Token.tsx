@@ -12,7 +12,8 @@ import { simKey, useSim, type SimBot } from "./common";
 
 // The platform coin (ASTRA design §5.2, §6.1): its profile as the sites
 // show it, and who holds it — the bots, the users, the platform's
-// accounts — from the ledger's lines in the read model.
+// accounts — as the ledger holds it now (A123: ledger-service's balances,
+// a margin debt counting against its holder).
 
 type SimToken = AdminSchemas["SimToken"];
 type Holder = SimToken["top"][number];

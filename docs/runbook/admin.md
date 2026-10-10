@@ -478,7 +478,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - 「新建管理员」填邮箱、姓名、角色与理由，确认词为角色的小写代码；成功后弹窗显示**一次性设置链接**（见「登录与会话」），关闭后无法再看，经安全渠道交给本人。
 - 行内「操作」：修改角色（下一个请求起生效）、重置口令（旧口令立即失效、结束对方全部会话，给设置链接）、重置身份验证器（旧的立即失效、会话结束，给设置链接）、查看会话（抽屉，可结束全部会话）、停用（会话立即结束）/启用（同时清除锁定与失败次数）。每项都要理由与确认词（ID 后 4 位），审计 `admin.created`、`admin.role_changed`、`admin.password_reset`、`admin.totp_reset`、`admin.sessions_revoked`、`admin.disabled`、`admin.enabled`，对象 `admin:<id>`。
 - 下方「角色权限」矩阵只读（来自 `GET /admin/v1/roles`）。
-- 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话，口令与身份验证器在「账号与安全」改）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`；检查与修改在同一个事务里，事务先取咨询锁 `pg_advisory_xact_lock(7331001)`，两位 ADMIN 同时互相降级也会留下一位，C5.5 ⑪）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
+- 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话，口令与身份验证器在「账号与安全」改）；登录验证器开着时，最后一位已绑定验证器的启用 ADMIN 不能被重置验证器、停用或降级（409 `ADMIN_LAST_BOUND_ADMIN`，N1/A124：否则只剩之前登录的会话，新登录全被挡在外面；与开关的切换、解绑锁同一行）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`；检查与修改在同一个事务里，事务先取咨询锁 `pg_advisory_xact_lock(7331001)`，两位 ADMIN 同时互相降级也会留下一位，C5.5 ⑪）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
 - 接口：`GET /admin/v1/admins`、`POST /admin/v1/admins`（201，`{admin, setup: {token, kind, expires_at}}`）、`POST /admin/v1/admins/{id}/status`（`{enabled, reason}`）、`…/role`（`{role, reason}`）、`…/password-reset`、`…/totp-reset`（`{reason}`，返回 `{setup}`）、`GET …/sessions`（最多 50 个进行中的会话）、`POST …/sessions/revoke`（204）。
 - 与设计稿 §5 的差别：管理员接口没有删除（停用即可，审计需要保留账号）。
 
@@ -645,6 +645,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_EXISTS` | 新建管理员（后台或 `admin create`）的邮箱已存在 |
 | `ADMIN_SELF` | 不能在后台修改自己的管理员账号 |
 | `ADMIN_LAST_ADMIN` | 最后一位启用的 ADMIN 不能被停用或降级 |
+| `ADMIN_LAST_BOUND_ADMIN` | 登录验证器开着时，最后一位已绑定验证器的启用 ADMIN 不能被重置验证器、停用或降级 |
 | `ADMIN_SETUP_INVALID` | 设置链接不存在、已经用过或已过期（24 小时）：请 ADMIN 重新重置 |
 | `ADMIN_PASSWORD_CHANGE_REQUIRED` | 命令行生成的口令要先改掉（`POST /admin/v1/me/password`） |
 | `ADMIN_PASSWORD_WRONG` | 改自己的口令或身份验证器时，当前口令不对 |

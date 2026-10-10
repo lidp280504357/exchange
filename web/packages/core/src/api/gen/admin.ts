@@ -292,8 +292,10 @@ export interface paths {
          * @description Disabling ends their sessions at once; enabling also lifts a lock
          *     after failed sign-ins. Nobody changes their own account here
          *     (ADMIN_SELF), and an active ADMIN always remains
-         *     (ADMIN_LAST_ADMIN). Audited as admin.disabled or admin.enabled.
-         *     Needs admins.manage.
+         *     (ADMIN_LAST_ADMIN) - while sign-in asks for the code
+         *     (admin.require_totp), one with a bound authenticator
+         *     (ADMIN_LAST_BOUND_ADMIN, N1). Audited as admin.disabled or
+         *     admin.enabled. Needs admins.manage.
          */
         post: operations["setAdminStatus"];
         delete?: never;
@@ -314,8 +316,9 @@ export interface paths {
         /**
          * Change an administrator's role
          * @description Takes effect on their next request. Not one's own (ADMIN_SELF), nor
-         *     the last active ADMIN's (ADMIN_LAST_ADMIN). Audited as
-         *     admin.role_changed. Needs admins.manage.
+         *     the last active ADMIN's (ADMIN_LAST_ADMIN), nor - while sign-in
+         *     asks for the code - the last bound ADMIN's (ADMIN_LAST_BOUND_ADMIN,
+         *     N1). Audited as admin.role_changed. Needs admins.manage.
          */
         post: operations["setAdminRole"];
         delete?: never;
@@ -360,9 +363,11 @@ export interface paths {
          * Reset an administrator's authenticator
          * @description The old authenticator stops working and their sessions end;
          *     answers with a one-time setup link's token (a day, no-store, never
-         *     logged or audited) whose holder binds a new one (C5.5 ⑪). Not
-         *     one's own (ADMIN_SELF). Audited as admin.totp_reset. Needs
-         *     admins.manage.
+         *     logged or audited) whose holder binds a new one (C5.5 ⑪); until
+         *     then it is not bound. Not one's own (ADMIN_SELF), nor - while
+         *     sign-in asks for the code - the last active ADMIN's with a bound
+         *     authenticator (ADMIN_LAST_BOUND_ADMIN, N1). Audited as
+         *     admin.totp_reset. Needs admins.manage.
          */
         post: operations["resetAdminTOTP"];
         delete?: never;
