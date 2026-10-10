@@ -55,7 +55,7 @@ outbox、inbox、HTTP 幂等键不在这里：各服务的 janitor 已按 7 天�
 
 ## ClickHouse
 
-读模型同样只留 15 天（clickhouse 00013 的 TTL，按时间自动删除）：events、event_ingest_log、ledger_entries、orders、order_updates、trades、derivatives_fills、derivatives_funding、derivatives_liquidations、margin_interest、audit_logs。不设 TTL：orders_state（订单当前状态，后台按交易对数挂单读它；它由 orders 与 order_updates 经物化视图写入，原表过期不影响它）、按 ID 的持仓/充值/提现/杠杆强平状态表、K 线（candles_1m，图表要历史）；futures_liquidations 保持 7 天。后台报表选超过 15 天的区间只看得到最近 15 天。
+读模型同样只留 15 天（clickhouse 00013 的 TTL，按时间自动删除）：events、event_ingest_log、ledger_entries、orders、order_updates、derivatives_fills、derivatives_funding、derivatives_liquidations、margin_interest、audit_logs。后台报表要加总"本期之前"的，不删：注册事件（用户报表的"此前注册"）、账本里的杠杆利息行（利息报表结转的"欠息"）与现货成交表 trades（HOUSE 报表本期之前的持仓与资金，约 1 MB/天）。不设 TTL：orders_state（订单当前状态，后台按交易对数挂单读它；它由 orders 与 order_updates 经物化视图写入，原表过期不影响它）、按 ID 的持仓/充值/提现/杠杆强平状态表（ReplacingMergeTree 删掉最新版本会让旧版本回来）、K 线（candles_1m，图表要历史）；futures_liquidations 保持 7 天。后台报表选超过 15 天的区间只看得到最近 15 天（上面几项"本期之前"的合计除外）。
 
 ## 排查
 
