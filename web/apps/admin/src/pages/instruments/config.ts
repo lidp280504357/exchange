@@ -66,11 +66,14 @@ function same(a: unknown, b: unknown): boolean {
 /** Decimal fields of the forms: required, a non-negative decimal string. */
 export const isAmount = (v: string) => dec.isDecimal(v.trim()) && !v.trim().startsWith("-");
 
+/** LEVERAGE_CAP bounds a tier's leverage, as instrument-service's LeverageCap does (B171: 150, A98). */
+export const LEVERAGE_CAP = 150;
+
 /**
  * riskTierProblems checks a contract's ladder as instrument-service does:
- * 1-20 tiers; notionals positive and rising; leverage 1-125, never
- * rising; mmr positive, below 1/leverage, never falling. Each problem is
- * "kind:index" (the row) or "tiers" (their number).
+ * 1-20 tiers; notionals positive and rising; leverage 1 to LEVERAGE_CAP,
+ * never rising; mmr positive, below 1/leverage, never falling. Each
+ * problem is "kind:index" (the row) or "tiers" (their number).
  */
 export function riskTierProblems(tiers: RiskTier[]): string[] {
   const out: string[] = [];
@@ -79,7 +82,7 @@ export function riskTierProblems(tiers: RiskTier[]): string[] {
     const notional = isAmount(tier.max_notional) && dec.gt(tier.max_notional, "0");
     const mmr = isAmount(tier.mmr) && dec.gt(tier.mmr, "0");
     if (!notional) out.push(`notional:${i}`);
-    if (!Number.isInteger(tier.max_leverage) || tier.max_leverage < 1 || tier.max_leverage > 125) out.push(`leverage:${i}`);
+    if (!Number.isInteger(tier.max_leverage) || tier.max_leverage < 1 || tier.max_leverage > LEVERAGE_CAP) out.push(`leverage:${i}`);
     if (!mmr || dec.toNumber(tier.mmr) * Math.max(tier.max_leverage, 1) >= 1) out.push(`mmr:${i}`);
     const prev = tiers[i - 1];
     if (!prev) return;

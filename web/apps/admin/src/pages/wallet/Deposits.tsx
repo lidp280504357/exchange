@@ -7,7 +7,7 @@ import { EnumBadge, useEnum } from "../../kit/enums";
 import { Fields } from "../../kit/fields";
 import { FilterBar, options, useFilters } from "../../kit/filters";
 import { Num, TimeText, UserCell } from "../../kit/format";
-import { useKindFilter } from "../../kit/kinds";
+import { KindsNarrowed, useKindFilter } from "../../kit/kinds";
 import { Page } from "../../kit/Page";
 import { useTodo } from "../../live";
 import { DepositsTable, useDeposits, type Deposit } from "../records/tables";
@@ -126,8 +126,9 @@ function AllDeposits({ filters }: { filters: Filters }) {
 /** ToHandle lists wallet-service's deposits of a review view; a row opens its details and decisions. */
 function ToHandle({ admin, view, filters }: { admin: Admin; view: ReviewView; filters: Filters }) {
   const { t } = useTranslation();
+  const kind = useKindFilter();
   const f = filters.values;
-  const list = useReviewDeposits(view, { user_id: f.user_id, network: f.network?.toUpperCase() });
+  const list = useReviewDeposits(view, { user_id: f.user_id, network: f.network?.toUpperCase(), kind: f.kind });
   const [open, setOpen] = useState<ReviewDeposit | null>(null);
   return (
     <>
@@ -137,8 +138,10 @@ function ToHandle({ admin, view, filters }: { admin: Admin; view: ReviewView; fi
         defs={[
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
           { key: "network", label: t("admin.common.network"), kind: "text", placeholder: "TRON", width: 140 },
+          kind,
         ]}
       />
+      <KindsNarrowed narrowed={list.narrowed} kind={f.kind} />
       <ReviewDepositsTable admin={admin} view={view} list={list} onRowClick={setOpen} />
       {open && <ReviewDepositDrawer admin={admin} d={open} onClose={() => setOpen(null)} />}
     </>

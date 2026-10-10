@@ -71,7 +71,7 @@ func (h *Handler) depositReviews(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw, err := h.Svc.DepositsForReview(r.Context(), principal(r), ports.DepositReviewQuery{
 		UserID: q.Get("user_id"), Status: q.Get("status"), Network: q.Get("network"), Attention: q.Get("attention") == "true",
-		ManualPending: q.Get("manual_pending") == "true", Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		ManualPending: q.Get("manual_pending") == "true", Cursor: q.Get("cursor"), Limit: intParam(q, "limit"), Kinds: kindsParam(q),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

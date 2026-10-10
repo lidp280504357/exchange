@@ -7,6 +7,7 @@ import { EnumBadge } from "../../kit/enums";
 import { Fields } from "../../kit/fields";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
 import { FundAction } from "../../kit/funds";
+import { kindParam } from "../../kit/kinds";
 import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
 import { todoKey } from "../../live";
 import { clean } from "../records/tables";
@@ -19,7 +20,8 @@ import { clean } from "../records/tables";
 
 export type ReviewDeposit = AdminSchemas["ReviewDeposit"];
 export type ReviewView = "attention" | "manual";
-export type ReviewQuery = { user_id?: string; network?: string };
+/** kind is the accounts' (L1): none, the humans' (and nobody's); BOT, TEST, SYSTEM or ALL. */
+export type ReviewQuery = { user_id?: string; network?: string; kind?: string };
 
 const right: DataColumnMeta = { align: "right" };
 /** NO_OWNER is wallet-service's owner of a deposit of nobody (B7a). */
@@ -48,8 +50,8 @@ export function useReviewDeposits(view: ReviewView, q: ReviewQuery) {
       await adminApi.GET("/admin/v1/deposits/review", {
         params: {
           query: {
-            ...clean(q), attention: view === "attention" ? "true" : undefined, manual_pending: view === "manual" ? "true" : undefined, cursor,
-            limit: pageSize(),
+            ...clean(q), attention: view === "attention" ? "true" : undefined, manual_pending: view === "manual" ? "true" : undefined,
+            kind: kindParam(q.kind) as never, cursor, limit: pageSize(),
           },
         },
       }),

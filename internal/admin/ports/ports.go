@@ -461,6 +461,10 @@ type WithdrawalQuery struct {
 	MinValue string
 	MaxValue string
 	MinRisk  int
+	// Kinds are the kinds asked for (L1), ByKind their accounts (the
+	// application's, at most 5,000 for the service's POST .../list).
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // Suspension is an asset whose withdrawals are suspended: new requests are
@@ -486,6 +490,9 @@ type DepositReviewQuery struct {
 	ManualPending bool
 	Cursor        string
 	Limit         int
+	// Kinds and ByKind as a WithdrawalQuery's (L1).
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // ManualDeposit is a backfill of a custodian deposit whose callback was
@@ -547,6 +554,10 @@ type FeeQuery struct {
 	Status   string
 	Cursor   string
 	Limit    int
+	// Kinds and ByKind as a WithdrawalQuery's (L1): the withdrawals'
+	// users.
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // FeeBooking is an administrator's decision to book a custodian's fee
@@ -704,8 +715,9 @@ type Derivatives interface {
 	// LiftReduceOnly ends a contract's reduce-only; the answer says
 	// whether it was on.
 	LiftReduceOnly(ctx context.Context, symbol, actor string) (json.RawMessage, error)
-	// Risk returns the positions warned, taken over or close to it.
-	Risk(ctx context.Context) (json.RawMessage, error)
+	// Risk returns the positions warned, taken over or close to it, of
+	// the accounts a kind filter keeps (L1).
+	Risk(ctx context.Context, f KindFilter) (json.RawMessage, error)
 	// OpenPositions returns every user's open positions, riskiest first:
 	// {positions, truncated}.
 	OpenPositions(ctx context.Context, q PositionQuery) (json.RawMessage, error)
@@ -825,6 +837,9 @@ type PositionQuery struct {
 	UserID string
 	Watch  bool
 	Limit  int
+	// Kinds and ByKind as a WithdrawalQuery's (L1).
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // Flag is a feature switch.
@@ -1187,6 +1202,9 @@ type MarginAccountQuery struct {
 	Symbol  string
 	UserID  string
 	Limit   int
+	// Kinds and ByKind as a WithdrawalQuery's (L1).
+	Kinds  []string
+	ByKind KindFilter
 }
 
 // MarginReports reads margin trading's read models (ClickHouse

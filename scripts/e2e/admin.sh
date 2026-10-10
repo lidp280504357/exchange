@@ -731,6 +731,11 @@ else
     "the six caps with their version, the latest changes and the first version's, nothing waiting"
   CAPS_V=$(jq -r .caps.version <<<"$BODY")
   SAFETY=$(jq -r .caps.safety <<<"$BODY")
+  # The leverage cap's bound is the contracts' highest leverage (A97; 125
+  # before it).
+  LEV_MAX=$(jq -r '.contract_leverage_max // "125"' <<<"$BODY")
+  [[ $LEV_MAX =~ ^[0-9]+$ && $LEV_MAX -ge 1 ]] || fail "the leverage cap's bound: $LEV_MAX"
+  echo "ok   the leverage cap goes up to the contracts' highest leverage ($LEV_MAX)"
   NEW_SAFETY=$(jq -nr --arg s "$SAFETY" '($s | tonumber) + 1 | tostring')
   caps_body() { jq -nc --arg s "$1" --argjson v "$2" --arg r "$3" '{caps: {safety: $s}, version: $v, reason: $r}'; }
   as OPERATOR POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$CAPS_V" "e2e")"
@@ -738,7 +743,7 @@ else
   as FINANCE POST /admin/v1/house/caps "$(caps_body "$NEW_SAFETY" "$((CAPS_V - 1))" "e2e reads an old version")"
   expect 409 HOUSE_CAPS_VERSION "a stale version"
   # Each cap within its range (user 06:0x): refused before anything is asked.
-  for bad in '{"contract_leverage":"126"}' '{"contract_leverage":"0.5"}' '{"symbol":"0"}' '{"safety":"0"}' '{"level":"-1"}' \
+  for bad in "{\"contract_leverage\":\"$((LEV_MAX + 1))\"}" '{"contract_leverage":"0.5"}' '{"symbol":"0"}' '{"safety":"0"}' '{"level":"-1"}' \
     '{"total":"1000000000000000.01"}'; do
     as FINANCE POST /admin/v1/house/caps "$(jq -nc --argjson c "$bad" --argjson v "$CAPS_V" '{caps: $c, version: $v, reason: "e2e out of range"}')"
     expect 400 COMMON_INVALID_ARGUMENT "out of its range: $bad"
@@ -1332,6 +1337,64 @@ else
     expect 200 - "their depositor"
     check '.kind == "HUMAN"' "is a human"
   done
+fi
+# The kinds in the lists the services serve (L1 over their POST .../list):
+# withdrawals, deposits to handle, custody fees, contract positions and
+# risk, margin accounts - the humans' by default, another kind's by kind.
+# kind_of ID prints an account's kind.
+kind_of() {
+  as AUDITOR GET "/admin/v1/users/$1" ""
+  [[ $STATUS == 200 ]] || fail "the account $1: HTTP $STATUS"
+  jq -r .kind <<<"$BODY"
+}
+as FINANCE GET "/admin/v1/withdrawals?kind=ROBOT" ""
+if [[ $STATUS == 200 ]]; then
+  echo "skip the kinds in the services' lists: this admin-service is from before L1's second part"
+else
+  expect 400 COMMON_INVALID_ARGUMENT "the withdrawals of an unknown kind"
+  for kind in TEST HUMAN; do
+    as FINANCE GET "/admin/v1/withdrawals?status=ALL&limit=3$([[ $kind == TEST ]] && echo '&kind=TEST')" ""
+    expect 200 - "the withdrawals of every status, $kind by kind"
+    for user in $(jq -r '.items[].user_id' <<<"$BODY"); do
+      [[ $(kind_of "$user") == "$kind" ]] || fail "a withdrawal of $user listed as $kind's"
+    done
+    echo "ok   their accounts are $kind ($(jq '.items | length' <<<"$BODY") looked at)"
+  done
+  as FINANCE GET "/admin/v1/deposits/review?attention=true&limit=3" ""
+  expect 200 - "the deposits to handle, by default"
+  for user in $(jq -r '.items[].user_id | select(. != "00000000-0000-0000-0000-000000000000")' <<<"$BODY"); do
+    [[ $(kind_of "$user") == HUMAN ]] || fail "a deposit to handle of $user listed as a human's"
+  done
+  echo "ok   are humans' or nobody's"
+  as FINANCE GET "/admin/v1/custody/fees?kind=TEST&limit=2" ""
+  expect 200 - "the custody fees of the test accounts' withdrawals"
+  for wd in $(jq -r '.items[].withdrawal_id' <<<"$BODY"); do
+    as FINANCE GET "/admin/v1/withdrawals/$wd" ""
+    expect 200 - "a fee's withdrawal"
+    [[ $(kind_of "$(jq -r '.withdrawal.user_id // .user_id' <<<"$BODY")") == TEST ]] || fail "the fee of $wd is not a test account's"
+  done
+  as AUDITOR GET "/admin/v1/positions?kind=SYSTEM" ""
+  expect 200 - "the contract positions of kind SYSTEM"
+  HOUSE_ID=$(jq -r '.house_user_id // ""' <<<"$BODY")
+  check "(.positions | length) >= 1 and all(.positions[]; .user_id == \"$HOUSE_ID\")" "are HOUSE's"
+  as AUDITOR GET "/admin/v1/positions" ""
+  expect 200 - "the contract positions without a kind"
+  check "all(.positions[]; .user_id != \"$HOUSE_ID\")" "have none of HOUSE's"
+  as AUDITOR GET "/admin/v1/derivatives/risk?kind=BOT" ""
+  expect 200 - "the contract positions at risk of kind BOT"
+  check '.positions | type == "array"' "a list"
+  as AUDITOR GET "/admin/v1/margin/accounts?kind=TEST&limit=3" ""
+  expect 200 - "the margin accounts of kind TEST"
+  for user in $(jq -r '[.items[].user_id] | unique | .[:3] | .[]' <<<"$BODY"); do
+    [[ $(kind_of "$user") == TEST ]] || fail "a margin account of $user listed as a test account's"
+  done
+  echo "ok   are test accounts'"
+  as AUDITOR GET "/admin/v1/margin/accounts?limit=3" ""
+  expect 200 - "the margin accounts without a kind"
+  for user in $(jq -r '[.items[].user_id] | unique | .[:3] | .[]' <<<"$BODY"); do
+    [[ $(kind_of "$user") == HUMAN ]] || fail "a margin account of $user listed as a human's"
+  done
+  echo "ok   are humans'"
 fi
 as FINANCE GET "/admin/v1/withdrawals?status=ALL&limit=1" ""
 expect 200 - "withdrawals of every status"

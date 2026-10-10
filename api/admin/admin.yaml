@@ -941,7 +941,9 @@ paths:
         attention=true lists the deposits waiting for a decision (booked
         to UNCLAIMED_DEPOSIT, or a backfill the custodian's callback
         disagreed with), manual_pending=true the backfilled ones without
-        a callback yet. Needs withdrawals.read.
+        a callback yet. The accounts' kinds (kind, L1) narrow it - the
+        humans' deposits and nobody's by default - unless user_id is
+        given. Needs withdrawals.read.
       tags: [withdrawals]
       parameters:
         - $ref: '#/components/parameters/UserFilter'
@@ -964,6 +966,7 @@ paths:
           schema:
             type: string
             enum: ['true']
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -981,6 +984,8 @@ paths:
                       $ref: '#/components/schemas/ReviewDeposit'
                   next_cursor:
                     $ref: '#/components/schemas/NextCursor'
+                  kinds_narrowed:
+                    $ref: '#/components/schemas/KindsNarrowed'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/deposits/manual/check:
@@ -2219,7 +2224,8 @@ paths:
       description: |
         From wallet-service. The review queue (PENDING_REVIEW) lists oldest
         first, every other status newest first, unless order says otherwise.
-        Needs withdrawals.read.
+        The accounts' kinds (kind, L1) narrow it - the humans' withdrawals
+        by default - unless user_id is given. Needs withdrawals.read.
       tags: [withdrawals]
       parameters:
         - name: status
@@ -2263,6 +2269,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -2280,6 +2287,8 @@ paths:
                       $ref: '#/components/schemas/Withdrawal'
                   next_cursor:
                     $ref: '#/components/schemas/NextCursor'
+                  kinds_narrowed:
+                    $ref: '#/components/schemas/KindsNarrowed'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/withdrawals/{id}/review:
@@ -5182,8 +5191,11 @@ paths:
         Live from derivatives-service: positions taken over, warned
         (margin balance at most 1.2 × maintenance margin) or with a margin
         ratio of at least 0.5, riskiest first. Cross positions are
-        measured on their own here. Needs derivatives.read.
+        measured on their own here. The accounts' kinds (kind, L1) narrow
+        it, the humans' by default. Needs derivatives.read.
       tags: [derivatives]
+      parameters:
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The positions.
@@ -5197,6 +5209,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/RiskPosition'
+                  kinds_narrowed:
+                    $ref: '#/components/schemas/KindsNarrowed'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/derivatives/liquidations:
@@ -5255,7 +5269,9 @@ paths:
         on their own; their liquidation price is on the user's page, and
         they count as warned when their cross account is. mark_fresh says
         whether the mark price is fresh. At most `limit` (500) positions;
-        `truncated` says there are more. Needs derivatives.read.
+        `truncated` says there are more. The accounts' kinds (kind, L1)
+        narrow it - the humans' positions by default, HOUSE's with SYSTEM -
+        unless user_id is given. Needs derivatives.read.
       tags: [derivatives]
       parameters:
         - name: symbol
@@ -5276,6 +5292,7 @@ paths:
             minimum: 1
             maximum: 500
             default: 500
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The positions.
@@ -5294,6 +5311,8 @@ paths:
                   house_user_id:
                     type: [string, 'null']
                     description: HOUSE's account on the contracts (its positions are the counterparty of users').
+                  kinds_narrowed:
+                    $ref: '#/components/schemas/KindsNarrowed'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/derivatives/insurance-fund:
@@ -5451,7 +5470,8 @@ paths:
         within its range (user 2026-10-07 06:0x, review C47) - level zero or
         more (zero: a level is not capped), symbol, total, contract and
         safety above zero, every USDT cap at most 1e15, contract_leverage
-        from 1 to 125 - and moving each at most ten times up or down (400
+        from 1 to the contracts' highest leverage (contract_leverage_max,
+        A97; details max_leverage) - and moving each at most ten times up or down (400
         HOUSE_CAPS_STEP with cap, from and to, as market-maker refuses it;
         a level cap going to or from 0 is not a step) - become a
         HOUSE_CAPS request that always waits for a second administrator,
@@ -5722,7 +5742,9 @@ paths:
         comes (BOOKABLE; journal_id null while GAS_SUPPLY is short), or
         held for a person (HELD: its unit on the network is not confirmed,
         or it looks wrong) who books or writes it off (C6). One
-        custodian's when `provider` is given. Needs withdrawals.read.
+        custodian's when `provider` is given. The kinds of the withdrawals'
+        accounts (kind, L1) narrow it, the humans' by default. Needs
+        withdrawals.read.
       tags: [custody]
       parameters:
         - name: provider
@@ -5737,6 +5759,7 @@ paths:
           schema:
             type: string
             enum: [HELD, BOOKABLE, WRITTEN_OFF]
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -5754,6 +5777,8 @@ paths:
                       $ref: '#/components/schemas/CustodyFee'
                   next_cursor:
                     $ref: '#/components/schemas/NextCursor'
+                  kinds_narrowed:
+                    $ref: '#/components/schemas/KindsNarrowed'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/custody/fees/{withdrawal_id}/book:
@@ -6096,7 +6121,8 @@ paths:
         the accounts without liabilities last, by net assets. Accounts that
         hold or owe nothing are left out. At most `limit`; truncated says
         there are more. Each with the liquidation by hand waiting for it.
-        Needs derivatives.read.
+        The accounts' kinds (kind, L1) narrow it - the humans' by default -
+        unless user_id is given. Needs derivatives.read.
       tags: [margin]
       parameters:
         - name: status
@@ -6121,6 +6147,7 @@ paths:
             minimum: 1
             maximum: 500
             default: 500
+        - $ref: '#/components/parameters/Kind'
       responses:
         '200':
           description: The accounts.
@@ -6136,6 +6163,8 @@ paths:
                       $ref: '#/components/schemas/MarginAccount'
                   truncated:
                     type: boolean
+                  kinds_narrowed:
+                    $ref: '#/components/schemas/KindsNarrowed'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/margin/accounts/{user_id}/{account}:
@@ -6770,6 +6799,13 @@ components:
         bots; TEST, the end-to-end scripts' accounts; SYSTEM, HOUSE and the
         like. Operators and scripts set it, not the console; only the
         console's lists and figures read it.
+    KindsNarrowed:
+      type: boolean
+      description: |
+        L1: true when a list a service serves got its kind filter cut to
+        5,000 accounts (the services' bound): the humans' then leaves out
+        the bots and HOUSE only, another kind's keeps the first 5,000 of
+        its accounts. Absent otherwise.
     Note:
       type: object
       required: [id, body, admin_id, admin_email, created_at]
@@ -7787,7 +7823,9 @@ components:
           description: The backed inventory kept back and the quote asset kept when buying, USDT; above zero.
           $ref: '#/components/schemas/Decimal'
         contract_leverage:
-          description: All contract positions of a settlement asset together at most this many times HOUSE's contract equity in it; 1 to 125.
+          description: >-
+            All contract positions of a settlement asset together at most this many times HOUSE's contract equity in it;
+            1 to the contracts' highest leverage (HouseCapsView.contract_leverage_max).
           $ref: '#/components/schemas/Decimal'
         version:
           type: integer
@@ -7833,8 +7871,14 @@ components:
           format: date-time
     HouseCapsView:
       type: object
-      required: [caps, pending, changes, initial]
+      required: [caps, pending, changes, initial, contract_leverage_max]
       properties:
+        contract_leverage_max:
+          type: string
+          description: >-
+            A97: the highest the contract leverage cap may take - the contracts' highest leverage (their max_leverage, the
+            delisted aside), as market-maker bounds it by the contracts it quotes (review C73); market-maker's own bound
+            (1000) while instrument-service does not answer. A request beyond it is 400.
         caps:
           $ref: '#/components/schemas/HouseCaps'
         pending:
@@ -8123,6 +8167,9 @@ components:
         default_locale:
           type: string
           enum: [zh-CN, zh-TW, en]
+          description: >-
+            The sites' fallback language (A96, the console's 回退语言): they follow the visitor's browser, and use this one
+            when it asks for none of theirs; a language a user chose stays theirs. The field keeps its name.
         test_mode:
           type: object
           description: >-
@@ -8223,6 +8270,9 @@ components:
         default_locale:
           type: string
           enum: [zh-CN, zh-TW, en]
+          description: >-
+            The sites' fallback language (A96, the console's 回退语言): they follow the visitor's browser, and use this one
+            when it asks for none of theirs; a language a user chose stays theirs. The field keeps its name.
         test_mode:
           type: object
           description: >-
@@ -9889,7 +9939,7 @@ components:
           $ref: '#/components/schemas/Decimal'
         risk_tiers:
           type: array
-          description: 1-20 tiers, growing notionals, falling leverage (1-125), mmr below 1/leverage.
+          description: 1-20 tiers, growing notionals, falling leverage (1-150, instrument-service's LeverageCap), mmr below 1/leverage.
           items:
             $ref: '#/components/schemas/RiskTier'
         funding_interval_hours:

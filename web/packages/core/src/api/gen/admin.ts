@@ -559,7 +559,9 @@ export interface paths {
          *     attention=true lists the deposits waiting for a decision (booked
          *     to UNCLAIMED_DEPOSIT, or a backfill the custodian's callback
          *     disagreed with), manual_pending=true the backfilled ones without
-         *     a callback yet. Needs withdrawals.read.
+         *     a callback yet. The accounts' kinds (kind, L1) narrow it - the
+         *     humans' deposits and nobody's by default - unless user_id is
+         *     given. Needs withdrawals.read.
          */
         get: operations["listReviewDeposits"];
         put?: never;
@@ -1401,7 +1403,8 @@ export interface paths {
          * Withdrawals, the review queue by default
          * @description From wallet-service. The review queue (PENDING_REVIEW) lists oldest
          *     first, every other status newest first, unless order says otherwise.
-         *     Needs withdrawals.read.
+         *     The accounts' kinds (kind, L1) narrow it - the humans' withdrawals
+         *     by default - unless user_id is given. Needs withdrawals.read.
          */
         get: operations["listWithdrawals"];
         put?: never;
@@ -3348,7 +3351,8 @@ export interface paths {
          * @description Live from derivatives-service: positions taken over, warned
          *     (margin balance at most 1.2 × maintenance margin) or with a margin
          *     ratio of at least 0.5, riskiest first. Cross positions are
-         *     measured on their own here. Needs derivatives.read.
+         *     measured on their own here. The accounts' kinds (kind, L1) narrow
+         *     it, the humans' by default. Needs derivatives.read.
          */
         get: operations["listRiskPositions"];
         put?: never;
@@ -3394,7 +3398,9 @@ export interface paths {
          *     on their own; their liquidation price is on the user's page, and
          *     they count as warned when their cross account is. mark_fresh says
          *     whether the mark price is fresh. At most `limit` (500) positions;
-         *     `truncated` says there are more. Needs derivatives.read.
+         *     `truncated` says there are more. The accounts' kinds (kind, L1)
+         *     narrow it - the humans' positions by default, HOUSE's with SYSTEM -
+         *     unless user_id is given. Needs derivatives.read.
          */
         get: operations["listPositions"];
         put?: never;
@@ -3531,7 +3537,8 @@ export interface paths {
          *     within its range (user 2026-10-07 06:0x, review C47) - level zero or
          *     more (zero: a level is not capped), symbol, total, contract and
          *     safety above zero, every USDT cap at most 1e15, contract_leverage
-         *     from 1 to 125 - and moving each at most ten times up or down (400
+         *     from 1 to the contracts' highest leverage (contract_leverage_max,
+         *     A97; details max_leverage) - and moving each at most ten times up or down (400
          *     HOUSE_CAPS_STEP with cap, from and to, as market-maker refuses it;
          *     a level cap going to or from 0 is not a step) - become a
          *     HOUSE_CAPS request that always waits for a second administrator,
@@ -3721,7 +3728,9 @@ export interface paths {
          *     comes (BOOKABLE; journal_id null while GAS_SUPPLY is short), or
          *     held for a person (HELD: its unit on the network is not confirmed,
          *     or it looks wrong) who books or writes it off (C6). One
-         *     custodian's when `provider` is given. Needs withdrawals.read.
+         *     custodian's when `provider` is given. The kinds of the withdrawals'
+         *     accounts (kind, L1) narrow it, the humans' by default. Needs
+         *     withdrawals.read.
          */
         get: operations["listCustodyFees"];
         put?: never;
@@ -3978,7 +3987,8 @@ export interface paths {
          *     the accounts without liabilities last, by net assets. Accounts that
          *     hold or owe nothing are left out. At most `limit`; truncated says
          *     there are more. Each with the liquidation by hand waiting for it.
-         *     Needs derivatives.read.
+         *     The accounts' kinds (kind, L1) narrow it - the humans' by default -
+         *     unless user_id is given. Needs derivatives.read.
          */
         get: operations["listMarginAccounts"];
         put?: never;
@@ -4277,6 +4287,13 @@ export interface components {
          * @enum {string}
          */
         UserKind: "HUMAN" | "BOT" | "TEST" | "SYSTEM";
+        /**
+         * @description L1: true when a list a service serves got its kind filter cut to
+         *     5,000 accounts (the services' bound): the humans' then leaves out
+         *     the bots and HOUSE only, another kind's keeps the first 5,000 of
+         *     its accounts. Absent otherwise.
+         */
+        KindsNarrowed: boolean;
         Note: {
             /** Format: uuid */
             id: string;
@@ -4890,7 +4907,7 @@ export interface components {
             contract: components["schemas"]["Decimal"];
             /** @description The backed inventory kept back and the quote asset kept when buying, USDT; above zero. */
             safety: components["schemas"]["Decimal"];
-            /** @description All contract positions of a settlement asset together at most this many times HOUSE's contract equity in it; 1 to 125. */
+            /** @description All contract positions of a settlement asset together at most this many times HOUSE's contract equity in it; 1 to the contracts' highest leverage (HouseCapsView.contract_leverage_max). */
             contract_leverage: components["schemas"]["Decimal"];
             /** Format: int64 */
             version: number;
@@ -4920,6 +4937,8 @@ export interface components {
             at: string;
         };
         HouseCapsView: {
+            /** @description A97: the highest the contract leverage cap may take - the contracts' highest leverage (their max_leverage, the delisted aside), as market-maker bounds it by the contracts it quotes (review C73); market-maker's own bound (1000) while instrument-service does not answer. A request beyond it is 400. */
+            contract_leverage_max: string;
             caps: components["schemas"]["HouseCaps"];
             /** @description The HOUSE_CAPS request that waits; null for none. */
             pending: components["schemas"]["Approval"] | null;
@@ -5084,7 +5103,10 @@ export interface components {
                 kind: string;
                 url: string;
             }[];
-            /** @enum {string} */
+            /**
+             * @description The sites' fallback language (A96, the console's 回退语言): they follow the visitor's browser, and use this one when it asks for none of theirs; a language a user chose stays theirs. The field keeps its name.
+             * @enum {string}
+             */
             default_locale: "zh-CN" | "zh-TW" | "en";
             /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is true, text in a banner at the top. text is required only while enabled and banner. */
             test_mode: {
@@ -5133,7 +5155,10 @@ export interface components {
                 /** @description An https URL of at most 300 characters. */
                 url: string;
             }[];
-            /** @enum {string} */
+            /**
+             * @description The sites' fallback language (A96, the console's 回退语言): they follow the visitor's browser, and use this one when it asks for none of theirs; a language a user chose stays theirs. The field keeps its name.
+             * @enum {string}
+             */
             default_locale: "zh-CN" | "zh-TW" | "en";
             /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is true, text in a banner at the top. text is required only while enabled and banner. */
             test_mode: {
@@ -6118,7 +6143,7 @@ export interface components {
             max_quantity: components["schemas"]["Decimal"];
             min_notional: components["schemas"]["Decimal"];
             price_band: components["schemas"]["Decimal"];
-            /** @description 1-20 tiers, growing notionals, falling leverage (1-125), mmr below 1/leverage. */
+            /** @description 1-20 tiers, growing notionals, falling leverage (1-150, instrument-service's LeverageCap), mmr below 1/leverage. */
             risk_tiers: components["schemas"]["RiskTier"][];
             funding_interval_hours: number;
             interest_rate: components["schemas"]["Decimal"];
@@ -7979,6 +8004,13 @@ export interface operations {
                 network?: string;
                 attention?: "true";
                 manual_pending?: "true";
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
@@ -7998,6 +8030,7 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["ReviewDeposit"][];
                         next_cursor: components["schemas"]["NextCursor"];
+                        kinds_narrowed?: components["schemas"]["KindsNarrowed"];
                     };
                 };
             };
@@ -9133,6 +9166,13 @@ export interface operations {
                 max_value_usdt?: components["schemas"]["Decimal"];
                 /** @description The lowest risk score listed. */
                 min_risk?: number;
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
@@ -9152,6 +9192,7 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["Withdrawal"][];
                         next_cursor: components["schemas"]["NextCursor"];
+                        kinds_narrowed?: components["schemas"]["KindsNarrowed"];
                     };
                 };
             };
@@ -11513,7 +11554,15 @@ export interface operations {
     };
     listRiskPositions: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11528,6 +11577,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         positions: components["schemas"]["RiskPosition"][];
+                        kinds_narrowed?: components["schemas"]["KindsNarrowed"];
                     };
                 };
             };
@@ -11577,6 +11627,13 @@ export interface operations {
                 /** @description true for the positions under watch only (warned, their cross account warned, taken over, margin ratio ≥ 0.5); never HOUSE's. */
                 watch?: "true";
                 limit?: number;
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
             };
             header?: never;
             path?: never;
@@ -11595,6 +11652,7 @@ export interface operations {
                         truncated: boolean;
                         /** @description HOUSE's account on the contracts (its positions are the counterparty of users'). */
                         house_user_id: string | null;
+                        kinds_narrowed?: components["schemas"]["KindsNarrowed"];
                     };
                 };
             };
@@ -11961,6 +12019,13 @@ export interface operations {
                 provider?: "UDUN" | "UDUNMOCK";
                 /** @description One status; every status when empty. */
                 status?: "HELD" | "BOOKABLE" | "WRITTEN_OFF";
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
@@ -11980,6 +12045,7 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["CustodyFee"][];
                         next_cursor: components["schemas"]["NextCursor"];
+                        kinds_narrowed?: components["schemas"]["KindsNarrowed"];
                     };
                 };
             };
@@ -12236,6 +12302,13 @@ export interface operations {
                 symbol?: string;
                 user_id?: components["parameters"]["UserFilter"];
                 limit?: number;
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
             };
             header?: never;
             path?: never;
@@ -12252,6 +12325,7 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["MarginAccount"][];
                         truncated: boolean;
+                        kinds_narrowed?: components["schemas"]["KindsNarrowed"];
                     };
                 };
             };

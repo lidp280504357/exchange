@@ -23,7 +23,8 @@ export function RowActions({ children, className }: { children: ReactNode; class
 // loaded as the page scrolls; lists do not poll whole, a light probe of
 // the newest record offers "new data" instead.
 
-export type Page<T> = { items: T[]; next_cursor?: string | null };
+/** A page; kinds_narrowed says its kind filter was cut short (L1, see KindsNarrowed). */
+export type Page<T> = { items: T[]; next_cursor?: string | null; kinds_narrowed?: boolean };
 
 /** The page sizes Settings offers (every list takes up to 200). */
 export const PAGE_SIZES = [20, 50, 100, 200] as const;
@@ -53,10 +54,11 @@ export function useCursorList<T>(key: QueryKey, fetchPage: (cursor: string | und
     enabled,
   });
   const rows = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
+  const narrowed = query.data?.pages.some((p) => p.kinds_narrowed) ?? false;
   const loadMore = () => {
     if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
   };
-  return { rows, query, loadMore, key };
+  return { rows, query, loadMore, key, narrowed };
 }
 
 /**

@@ -69,7 +69,7 @@ func (d WalletDeposits) List(ctx context.Context, q ports.DepositReviewQuery) (j
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
 	}
-	return d.do(ctx, http.MethodGet, d.Base+"/internal/wallet/deposits?"+v.Encode(), nil, nil)
+	return d.list(ctx, d.Base+"/internal/wallet/deposits", v, q.ByKind)
 }
 
 // WalletDeposits implements ports.Deposits over wallet-service's internal

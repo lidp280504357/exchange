@@ -8,6 +8,7 @@ import { DangerAction } from "../../kit/actions";
 import { closeOutcome, forceClose } from "../users/money";
 import { FilterBar, useFilters } from "../../kit/filters";
 import { Num, UserCell } from "../../kit/format";
+import { kindParam, KindsNarrowed, useKindFilter } from "../../kit/kinds";
 import { Page } from "../../kit/Page";
 import { settleOf, useQuantityUnit } from "../../kit/settle";
 
@@ -23,20 +24,22 @@ const WATCH = "0.5";
  * positions, riskiest first (margin ratio, then size), refreshed every 5
  * seconds; ?view=watch keeps those under watch (warned, taken over,
  * margin ratio ≥ 0.5). HOUSE's positions are the counterparty of users'
- * and are marked; a user's position can be closed at the market.
+ * and are marked; a user's position can be closed at the market. The
+ * humans' by default (L1): HOUSE's are listed with 系统 (SYSTEM).
  */
 export default function Positions({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
-  const filters = useFilters(["view", "symbol", "user_id"]);
+  const filters = useFilters(["view", "symbol", "user_id", "kind"]);
+  const kind = useKindFilter();
   const f = filters.values;
   const watch = f.view === "watch";
   const symbol = f.symbol?.toUpperCase() || undefined;
   const q = useQuery({
-    queryKey: ["admin", "positions", { watch, symbol, user_id: f.user_id }],
+    queryKey: ["admin", "positions", { watch, symbol, user_id: f.user_id, kind: f.kind }],
     queryFn: async () =>
       adminData(
         await adminApi.GET("/admin/v1/positions", {
-          params: { query: { symbol, user_id: f.user_id || undefined, watch: watch ? "true" : undefined } },
+          params: { query: { symbol, user_id: f.user_id || undefined, watch: watch ? "true" : undefined, kind: kindParam(f.kind) as never } },
         }),
       ),
     refetchInterval: 5_000,
@@ -132,8 +135,10 @@ export default function Positions({ admin }: { admin: Admin }) {
         defs={[
           { key: "symbol", label: t("admin.common.symbol"), kind: "text", placeholder: "BTC-USDT-PERP", width: 160 },
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
+          kind,
         ]}
       />
+      <KindsNarrowed narrowed={q.data?.kinds_narrowed} kind={f.kind} />
       {q.data?.truncated && <p className="text-sm text-warn-strong">{t("admin.positions.truncated", { n: q.data.positions.length })}</p>}
       {q.isError ? (
         <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />

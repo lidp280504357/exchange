@@ -369,7 +369,15 @@ func (s *Service) Withdrawals(ctx context.Context, p Principal, q ports.Withdraw
 		}
 	}
 	q.Limit = pageLimit(q.Limit)
-	return s.Wallet.List(ctx, q)
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, true); err != nil {
+		return nil, err
+	}
+	raw, err := s.Wallet.List(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return withNarrowed(raw, q.ByKind)
 }
 
 // pageLimit bounds a page: 1 to 200, 50 by default.
@@ -707,12 +715,21 @@ func (s *Service) LiftReduceOnly(ctx context.Context, p Principal, symbol, reaso
 }
 
 // DerivativesRisk returns the positions warned, taken over by the
-// liquidation engine or close to it.
-func (s *Service) DerivativesRisk(ctx context.Context, p Principal) ([]byte, error) {
+// liquidation engine or close to it, of the accounts of the kinds (L1;
+// the humans' by default).
+func (s *Service) DerivativesRisk(ctx context.Context, p Principal, kinds []string) ([]byte, error) {
 	if err := p.require(domain.PermDerivativesRead); err != nil {
 		return nil, err
 	}
-	return s.Derivatives.Risk(ctx)
+	f, err := s.kindFilter(ctx, kinds, "", true)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := s.Derivatives.Risk(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return withNarrowed(raw, f)
 }
 
 // System accounts of perpetual contracts in the ledger.

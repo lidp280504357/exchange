@@ -19,11 +19,12 @@ func (h *Handler) houseCaps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := struct {
-		Caps    application.HouseCaps         `json:"caps"`
-		Pending *ApprovalJSON                 `json:"pending"`
-		Changes []application.HouseCapsChange `json:"changes"`
-		Initial json.RawMessage               `json:"initial"`
-	}{Caps: v.Caps, Changes: v.Changes, Initial: v.Initial}
+		Caps        application.HouseCaps         `json:"caps"`
+		Pending     *ApprovalJSON                 `json:"pending"`
+		Changes     []application.HouseCapsChange `json:"changes"`
+		Initial     json.RawMessage               `json:"initial"`
+		LeverageMax string                        `json:"contract_leverage_max"`
+	}{Caps: v.Caps, Changes: v.Changes, Initial: v.Initial, LeverageMax: v.LeverageMax.String()}
 	if v.Pending != nil {
 		a := approvalJSON(*v.Pending)
 		out.Pending = &a

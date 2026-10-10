@@ -32,8 +32,8 @@ import (
 // the order the console shows them.
 var houseCapsFields = []string{"level", "symbol", "total", "contract", "safety", "contract_leverage"}
 
-// houseCapsLeverage is the one cap that is a multiple, from 1 to 125
-// (the contracts' own highest leverage); the others are USDT.
+// houseCapsLeverage is the one cap that is a multiple, from 1 to the
+// contracts' highest leverage (houseLeverageMax); the others are USDT.
 const houseCapsLeverage = "contract_leverage"
 
 // houseCapsLevel is the one USDT cap that may be zero: a level not capped.
@@ -42,12 +42,46 @@ const houseCapsLevel = "level"
 var (
 	// houseCapsMax bounds the USDT caps.
 	houseCapsMax = decimal.New(1, 15)
-	// houseCapsLeverageMax is the contracts' highest leverage.
-	houseCapsLeverageMax = decimal.NewFromInt(125)
+	// houseCapsLeverageCeiling bounds the leverage while the contracts'
+	// highest is unknown: market-maker's own bound (MaxContractLeverage),
+	// which then checks it against the contracts HOUSE quotes.
+	houseCapsLeverageCeiling = decimal.NewFromInt(1000)
 	// houseCapsStep is how many times up or down one change may move a
 	// cap (market-maker's HOUSE_CAPS_STEP, review C47 ②).
 	houseCapsStep = decimal.NewFromInt(10)
 )
+
+// houseLeverageMax is the highest leverage of the contracts not delisted
+// (their max_leverage, instrument-service): HOUSE's contract leverage goes
+// from 1 to it, as market-maker bounds it by the contracts it quotes
+// (review C73, A97: 150 since B171, not a fixed 125).
+// houseCapsLeverageCeiling while instrument-service does not answer.
+func (s *Service) houseLeverageMax(ctx context.Context) decimal.Decimal {
+	if s.Catalog == nil {
+		return houseCapsLeverageCeiling
+	}
+	raw, err := s.Catalog.List(ctx)
+	var doc struct {
+		Contracts []struct {
+			Status      string `json:"status"`
+			MaxLeverage int32  `json:"max_leverage"`
+		} `json:"contracts"`
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &doc)
+	}
+	var high int32
+	for _, c := range doc.Contracts {
+		if c.Status != "DELISTED" {
+			high = max(high, c.MaxLeverage)
+		}
+	}
+	if err != nil || high < 1 {
+		s.Log.WarnContext(ctx, "house caps: the contracts' highest leverage is unknown", "error", err)
+		return houseCapsLeverageCeiling
+	}
+	return decimal.NewFromInt32(high)
+}
 
 // errHouseCapsStep refuses a change that moves a cap more than
 // houseCapsStep times, as market-maker would when it is approved.
@@ -66,12 +100,13 @@ func checkHouseCapStep(name string, was, d decimal.Decimal) error {
 
 // checkHouseCap refuses a cap out of its range: the level cap zero or
 // more (zero: a level is not capped), the other USDT caps above zero, all
-// of them at most 1e15 USDT; the leverage from 1 to 125.
-func checkHouseCap(name string, d decimal.Decimal) error {
+// of them at most 1e15 USDT; the leverage from 1 to leverageMax.
+func checkHouseCap(name string, d, leverageMax decimal.Decimal) error {
 	switch {
 	case name == houseCapsLeverage:
-		if d.LessThan(decimal.NewFromInt(1)) || d.GreaterThan(houseCapsLeverageMax) {
-			return apperr.Invalid(name + " must be from 1 to 125")
+		if d.LessThan(decimal.NewFromInt(1)) || d.GreaterThan(leverageMax) {
+			return apperr.Invalid(name+" must be from 1 to "+leverageMax.String()+", the contracts' highest leverage").
+				WithDetail("max_leverage", leverageMax.String())
 		}
 	case d.GreaterThan(houseCapsMax):
 		return apperr.Invalid(name + " must be at most 1000000000000000 USDT")
@@ -142,12 +177,14 @@ type HouseCapsChange struct {
 // HouseCapsView is the caps with the request that waits to change them
 // (nil for none), the latest changes, newest first, and the caps of the
 // first version - the deployment's, from market-maker's environment (nil
-// when it is not among the latest changes read).
+// when it is not among the latest changes read); LeverageMax is the
+// highest contract leverage the leverage cap may take (A97).
 type HouseCapsView struct {
-	Caps    HouseCaps
-	Pending *domain.Approval
-	Changes []HouseCapsChange
-	Initial json.RawMessage
+	Caps        HouseCaps
+	Pending     *domain.Approval
+	Changes     []HouseCapsChange
+	Initial     json.RawMessage
+	LeverageMax decimal.Decimal
 }
 
 // HouseCapsRequest asks to change some caps (by their names) of the
@@ -184,7 +221,7 @@ func (s *Service) HouseCapsOf(ctx context.Context, p Principal) (HouseCapsView, 
 	if err != nil {
 		return HouseCapsView{}, err
 	}
-	out := HouseCapsView{Caps: caps, Changes: []HouseCapsChange{}}
+	out := HouseCapsView{Caps: caps, Changes: []HouseCapsChange{}, LeverageMax: s.houseLeverageMax(ctx)}
 	pending, err := s.Store.Read().Approvals().PendingOfKind(ctx, domain.KindHouseCaps)
 	if err != nil {
 		return HouseCapsView{}, err
@@ -238,6 +275,10 @@ func (s *Service) RequestHouseCaps(ctx context.Context, p Principal, in HouseCap
 		return domain.Approval{}, errHouseCapsVersion.WithDetail("version", cur.Version)
 	}
 	asked, previous := map[string]string{}, map[string]string{}
+	leverageMax := houseCapsLeverageCeiling
+	if _, ok := in.Caps[houseCapsLeverage]; ok {
+		leverageMax = s.houseLeverageMax(ctx)
+	}
 	var changed []string
 	for _, name := range houseCapsFields {
 		v, ok := in.Caps[name]
@@ -248,7 +289,7 @@ func (s *Service) RequestHouseCaps(ctx context.Context, p Principal, in HouseCap
 		if err != nil {
 			return domain.Approval{}, apperr.Invalid(name + " must be a decimal")
 		}
-		if err := checkHouseCap(name, d); err != nil {
+		if err := checkHouseCap(name, d, leverageMax); err != nil {
 			return domain.Approval{}, err
 		}
 		if was, err := decimal.NewFromString(cur.value(name)); err == nil {

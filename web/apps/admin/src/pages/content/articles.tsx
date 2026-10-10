@@ -1,3 +1,4 @@
+import { LOCALES as SITE_LOCALES } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { bundledSource, listSlugs, type ContentSection } from "@exchange/core/content/loader";
 import { excerpt, parseMarkdown, renderByMode, type ContentMode } from "@exchange/core/content/markdown";
@@ -28,7 +29,8 @@ export type Section = Article["section"];
 type ListSection = Extract<Section, "ANNOUNCEMENT" | "HELP">;
 type Locale = Text["locale"];
 
-const LOCALES: Locale[] = ["zh-CN", "zh-TW", "en"];
+/** The sites' languages, from core's one list (F30, A99); an article's locale is one of them. */
+const LOCALES: readonly Locale[] = SITE_LOCALES;
 /** Each language's tab label. */
 const LOCALE_LABEL: Record<Locale, string> = { "zh-CN": "admin.content.zh", "zh-TW": "admin.content.zhTW", en: "admin.content.en" };
 const CATEGORIES: Record<ListSection, string[]> = {

@@ -32,8 +32,14 @@ const todoPage = 200
 // leaves its count at zero and is named in Partial.
 func (s *Service) Todo(ctx context.Context, p Principal) (Todo, error) {
 	out := Todo{Partial: []string{}}
+	// The badges count what the lists show by default: the humans' (L1);
+	// everyone's while the accounts' kinds cannot be read.
+	humans, err := s.kindFilter(ctx, nil, "", true)
+	if err != nil {
+		s.Log.WarnContext(ctx, "todo: the accounts' kinds unavailable", "error", err)
+	}
 	if p.require(domain.PermWithdrawalsRead) == nil {
-		raw, err := s.Wallet.List(ctx, ports.WithdrawalQuery{Status: "PENDING_REVIEW", Limit: todoPage})
+		raw, err := s.Wallet.List(ctx, ports.WithdrawalQuery{Status: "PENDING_REVIEW", Limit: todoPage, ByKind: humans})
 		var page struct {
 			Items []json.RawMessage `json:"items"`
 		}
@@ -62,7 +68,7 @@ func (s *Service) Todo(ctx context.Context, p Principal) (Todo, error) {
 		out.IdentityRequests = len(list)
 	}
 	if p.require(domain.PermDepositsReview) == nil {
-		raw, err := s.Deposits.List(ctx, ports.DepositReviewQuery{Attention: true, Limit: todoPage})
+		raw, err := s.Deposits.List(ctx, ports.DepositReviewQuery{Attention: true, Limit: todoPage, ByKind: humans})
 		var page struct {
 			Items []json.RawMessage `json:"items"`
 		}

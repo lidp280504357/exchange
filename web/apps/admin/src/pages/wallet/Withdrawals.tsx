@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { errorToast, useOperationKey } from "../../kit/actions";
 import { useEnum } from "../../kit/enums";
 import { ALL, FilterBar, useFilters } from "../../kit/filters";
+import { kindParam, KindsNarrowed, useKindFilter } from "../../kit/kinds";
 import { NewerBar, useNewer } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { todoKey } from "../../live";
@@ -32,13 +33,14 @@ const LOW_RISK = 50;
 export default function Withdrawals({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
-  const filters = useFilters(["status", "user_id", "asset", "network", "held", "min_value_usdt", "max_value_usdt", "min_risk"]);
+  const filters = useFilters(["status", "user_id", "asset", "network", "held", "min_value_usdt", "max_value_usdt", "min_risk", "kind"]);
+  const kind = useKindFilter();
   const f = filters.values;
   const status = f.status || "PENDING_REVIEW";
   const decimal = (v: string | undefined) => (v && dec.isDecimal(v) ? v : undefined);
   const q = {
     status, user_id: f.user_id, asset: f.asset?.toUpperCase(), network: f.network?.toUpperCase(), held: f.held,
-    min_value_usdt: decimal(f.min_value_usdt), max_value_usdt: decimal(f.max_value_usdt), min_risk: f.min_risk,
+    min_value_usdt: decimal(f.min_value_usdt), max_value_usdt: decimal(f.max_value_usdt), min_risk: f.min_risk, kind: f.kind,
   };
   const list = useWithdrawals(q);
   const [open, setOpen] = useState<Withdrawal | null>(null);
@@ -47,7 +49,11 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
   const newer = useNewer(
     list.key,
     async () =>
-      adminData(await adminApi.GET("/admin/v1/withdrawals", { params: { query: { status, order: "desc", limit: 1 } } })).items[0]?.id,
+      adminData(
+        await adminApi.GET("/admin/v1/withdrawals", {
+          params: { query: { status, order: "desc", limit: 1, kind: kindParam(f.kind) as never } },
+        }),
+      ).items[0]?.id,
     status === "PENDING_REVIEW" ? newestOf(list.rows) : list.rows[0]?.id,
   );
   const chosen = list.rows.filter((w) => selection[w.id]);
@@ -87,8 +93,10 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
             ],
             width: 110,
           },
+          kind,
         ]}
       />
+      <KindsNarrowed narrowed={list.narrowed} kind={f.kind} />
       {batch && list.rows.length > 0 && (
         <BatchBar
           chosen={chosen}

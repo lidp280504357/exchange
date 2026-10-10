@@ -9,14 +9,22 @@ export const HOUSE_CAPS = ["level", "symbol", "total", "contract", "safety", "co
 export type CapName = (typeof HOUSE_CAPS)[number];
 
 /**
+ * LEVERAGE_CEILING bounds the leverage cap while the contracts' highest
+ * leverage is unknown (an admin-service without contract_leverage_max):
+ * market-maker's own bound, which checks the contracts it quotes.
+ */
+export const LEVERAGE_CEILING = "1000";
+
+/**
  * inRange reports whether a cap's value is within its range, as
  * admin-service checks it: the level cap zero or more (zero: not capped),
- * the other USDT caps above zero, all at most 1e15; the leverage 1 to 125.
+ * the other USDT caps above zero, all at most 1e15; the leverage 1 to
+ * leverageMax, the contracts' highest leverage (A97).
  */
-export function inRange(name: CapName, raw: string): boolean {
+export function inRange(name: CapName, raw: string, leverageMax: string = LEVERAGE_CEILING): boolean {
   const v = raw.trim();
   if (!dec.isDecimal(v)) return false;
-  if (name === "contract_leverage") return dec.gte(v, "1") && dec.lte(v, "125");
+  if (name === "contract_leverage") return dec.gte(v, "1") && dec.lte(v, leverageMax);
   if (dec.gt(v, "1000000000000000")) return false;
   return name === "level" ? !dec.lt(v, "0") : dec.gt(v, "0");
 }
@@ -34,15 +42,15 @@ export function stepOK(before: string, after: string): boolean {
 
 /**
  * stepRange is how far one change can move a cap from before (stepOK)
- * within its range: a tenth to ten times, the leverage within 1 to 125 (10
- * to 125 takes 10 → 100 → 125); null where no step applies (before not
- * above zero: a level cap of zero is no cap).
+ * within its range: a tenth to ten times, the leverage within 1 to
+ * leverageMax (10 to 150 takes 10 → 100 → 150); null where no step
+ * applies (before not above zero: a level cap of zero is no cap).
  */
-export function stepRange(name: CapName, before: string): { min: string; max: string } | null {
+export function stepRange(name: CapName, before: string, leverageMax: string = LEVERAGE_CEILING): { min: string; max: string } | null {
   if (!dec.isDecimal(before) || !dec.gt(before, "0")) return null;
   const min = dec.div(before, "10", dec.decimalsOf(before) + 1);
   const max = dec.mul(before, "10");
-  if (name === "contract_leverage") return { min: dec.max(min, "1"), max: dec.min(max, "125") };
+  if (name === "contract_leverage") return { min: dec.max(min, "1"), max: dec.min(max, leverageMax) };
   return { min, max: dec.min(max, "1000000000000000") };
 }
 

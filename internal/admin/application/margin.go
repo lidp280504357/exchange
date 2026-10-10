@@ -256,6 +256,8 @@ type marginItem = map[string]json.RawMessage
 type marginList struct {
 	Items     []marginItem `json:"items"`
 	Truncated *bool        `json:"truncated,omitempty"`
+	// KindsNarrowed says the kind filter was cut to MaxKindIDs (L1).
+	KindsNarrowed bool `json:"kinds_narrowed,omitempty"`
 }
 
 func readMarginList(raw json.RawMessage) (marginList, error) {
@@ -817,6 +819,11 @@ func (s *Service) MarginAccounts(ctx context.Context, p Principal, q MarginAccou
 	if q.Limit <= 0 || q.Limit > 500 {
 		q.Limit = 500
 	}
+	// The humans' by default (L1).
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, true); err != nil {
+		return nil, err
+	}
 	raw, err := s.Margin.Accounts(ctx, q)
 	if err != nil {
 		return nil, err
@@ -825,6 +832,7 @@ func (s *Service) MarginAccounts(ctx context.Context, p Principal, q MarginAccou
 	if err != nil {
 		return nil, err
 	}
+	l.KindsNarrowed = q.ByKind.Narrowed
 	pending, err := s.pendingLiquidations(ctx)
 	if err != nil {
 		return nil, err

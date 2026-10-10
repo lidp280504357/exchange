@@ -15,7 +15,7 @@ import (
 func (h *Handler) custodyFees(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw, err := h.Svc.CustodyFees(r.Context(), principal(r), ports.FeeQuery{
-		Provider: q.Get("provider"), Status: q.Get("status"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		Provider: q.Get("provider"), Status: q.Get("status"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"), Kinds: kindsParam(q),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

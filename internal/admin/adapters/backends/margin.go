@@ -101,7 +101,7 @@ func (m Margin) Accounts(ctx context.Context, q ports.MarginAccountQuery) (json.
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
 	}
-	return m.do(ctx, http.MethodGet, m.path("accounts")+"?"+v.Encode(), nil, nil)
+	return m.list(ctx, m.path("accounts"), v, q.ByKind)
 }
 
 // Account returns one account in full.

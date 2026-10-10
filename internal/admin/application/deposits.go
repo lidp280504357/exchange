@@ -31,7 +31,17 @@ func (s *Service) DepositsForReview(ctx context.Context, p Principal, q ports.De
 		}
 	}
 	q.Limit = pageLimit(q.Limit)
-	return s.Deposits.List(ctx, q)
+	// The humans' by default (L1); a deposit nobody has claimed (the nil
+	// UUID) is no other kind's and stays.
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, true); err != nil {
+		return nil, err
+	}
+	raw, err := s.Deposits.List(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return withNarrowed(raw, q.ByKind)
 }
 
 // DepositDetail returns one of wallet-service's deposits.

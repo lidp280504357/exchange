@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 
 	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // The user-dimension lists by kind (L1, the user-kind design §1 #8): the
@@ -24,7 +26,10 @@ var nonHuman = []string{KindBot, KindTest, KindSystem}
 
 // kindFilter resolves a list's kinds (the request's, as UserKinds reads
 // them) to the accounts to keep or leave out; capped bounds them for a
-// service's list (MaxKindIDs), a read model takes them all.
+// service's list (MaxKindIDs), a read model takes them all - with no bound
+// of its own: past what user-service's answer holds (8 MiB, some 200,000
+// accounts) or a ClickHouse query (16 MiB, kindQuerySize), the list is
+// unavailable (503) rather than wrong (A111).
 func (s *Service) kindFilter(ctx context.Context, raw []string, userID string, capped bool) (ports.KindFilter, error) {
 	kinds, err := UserKinds(raw)
 	if err != nil || kinds == nil || userID != "" || s.KindIDs == nil {
@@ -68,4 +73,18 @@ func (s *Service) kindFilter(ctx context.Context, raw []string, userID string, c
 	}
 	// nonNil: none of the kinds is a filter that keeps nothing, not none.
 	return ports.KindFilter{Only: nonNil(only)}, nil
+}
+
+// withNarrowed marks a service's list (a JSON object) whose kind filter
+// was cut to MaxKindIDs (kinds_narrowed: the console says so).
+func withNarrowed(raw json.RawMessage, f ports.KindFilter) (json.RawMessage, error) {
+	if !f.Narrowed {
+		return raw, nil
+	}
+	var page map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &page); err != nil || page == nil {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the service answered in another shape")
+	}
+	page["kinds_narrowed"] = json.RawMessage("true")
+	return json.Marshal(page)
 }

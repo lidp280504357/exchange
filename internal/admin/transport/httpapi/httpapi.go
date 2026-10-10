@@ -410,7 +410,7 @@ func (h *Handler) withdrawals(w http.ResponseWriter, r *http.Request) {
 	raw, err := h.Svc.Withdrawals(r.Context(), principal(r), ports.WithdrawalQuery{
 		Status: q.Get("status"), UserID: q.Get("user_id"), Asset: q.Get("asset"), Network: q.Get("network"), Cursor: q.Get("cursor"),
 		Limit: intParam(q, "limit"), Order: q.Get("order"), Held: q.Get("held"), MinValue: q.Get("min_value_usdt"),
-		MaxValue: q.Get("max_value_usdt"), MinRisk: intParam(q, "min_risk"),
+		MaxValue: q.Get("max_value_usdt"), MinRisk: intParam(q, "min_risk"), Kinds: kindsParam(q),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -1276,7 +1276,7 @@ func (h *Handler) liftReduceOnly(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) derivativesRisk(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.Svc.DerivativesRisk(r.Context(), principal(r))
+	raw, err := h.Svc.DerivativesRisk(r.Context(), principal(r), kindsParam(r.URL.Query()))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -1302,7 +1302,7 @@ func (h *Handler) liquidations(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) positions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, err := h.Svc.OpenPositions(r.Context(), principal(r), ports.PositionQuery{
-		Symbol: q.Get("symbol"), UserID: q.Get("user_id"), Watch: q.Get("watch") == "true", Limit: intParam(q, "limit"),
+		Symbol: q.Get("symbol"), UserID: q.Get("user_id"), Watch: q.Get("watch") == "true", Limit: intParam(q, "limit"), Kinds: kindsParam(q),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

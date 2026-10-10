@@ -30,6 +30,8 @@ type fakeMargin struct {
 	liquidated []string
 	// lose applies the next change but loses its answer.
 	lose bool
+	// lists are the kind filters of the account lists asked for.
+	lists []ports.KindFilter
 }
 
 type fakeMarginAsset struct {
@@ -153,7 +155,8 @@ func (f *fakeMargin) SetPair(_ context.Context, symbol string, terms json.RawMes
 	return f.answer(p)
 }
 
-func (f *fakeMargin) Accounts(context.Context, ports.MarginAccountQuery) (json.RawMessage, error) {
+func (f *fakeMargin) Accounts(_ context.Context, q ports.MarginAccountQuery) (json.RawMessage, error) {
+	f.lists = append(f.lists, q.ByKind)
 	items := []any{}
 	for _, a := range f.accounts {
 		items = append(items, a)

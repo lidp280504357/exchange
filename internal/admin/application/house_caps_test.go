@@ -124,13 +124,23 @@ func TestHouseCaps(t *testing.T) {
 	}
 	m := newFakeMarketMaker()
 	h.svc.MarketMaker = m
+	catalog := &leverageCatalog{}
+	h.svc.Catalog = catalog
 
-	// Every administrator reads them, with the first version's.
+	// Every administrator reads them, with the first version's and the
+	// contracts' highest leverage, the leverage cap's bound (A97).
 	v, err := h.svc.HouseCapsOf(ctx, auditor)
 	if err != nil || v.Caps.Level != "500000000" || v.Caps.ContractLeverage != "10" || v.Caps.Version != 1 || v.Pending != nil || len(v.Changes) != 1 ||
-		!strings.Contains(string(v.Initial), `"safety":"1000"`) {
+		!strings.Contains(string(v.Initial), `"safety":"1000"`) || v.LeverageMax.String() != "150" {
 		t.Fatalf("read %+v %v", v, err)
 	}
+	// Without instrument-service, market-maker's own bound: it checks the
+	// leverage against the contracts it quotes when the change is made.
+	catalog.down = true
+	if got := h.svc.houseLeverageMax(ctx); !got.Equal(houseCapsLeverageCeiling) {
+		t.Fatalf("instrument-service down: %s", got)
+	}
+	catalog.down = false
 	lower := HouseCapsRequest{Caps: map[string]string{"level": "400000000", "symbol": "500000000"}, Version: 1, Reason: "smaller levels"}
 	for _, who := range []Principal{ops, auditor} {
 		if _, err := h.svc.RequestHouseCaps(ctx, who, lower); code(err) != "ADMIN_FORBIDDEN" {
@@ -138,7 +148,8 @@ func TestHouseCaps(t *testing.T) {
 		}
 	}
 	// Each cap within its range (user 06:0x): the level zero or more, the
-	// other USDT caps above zero, none above 1e15; the leverage 1 to 125.
+	// other USDT caps above zero, none above 1e15; the leverage 1 to the
+	// contracts' highest (150; a delisted contract's 200 does not count).
 	for name, bad := range map[string]HouseCapsRequest{
 		"no such cap":        {Caps: map[string]string{"depth": "1"}, Version: 1, Reason: "x y z"},
 		"below zero":         {Caps: map[string]string{"total": "-1"}, Version: 1, Reason: "x y z"},
@@ -149,7 +160,7 @@ func TestHouseCaps(t *testing.T) {
 		"not a decimal":      {Caps: map[string]string{"safety": "lots"}, Version: 1, Reason: "x y z"},
 		"no leverage":        {Caps: map[string]string{"contract_leverage": "0"}, Version: 1, Reason: "x y z"},
 		"under 1x":           {Caps: map[string]string{"contract_leverage": "0.5"}, Version: 1, Reason: "x y z"},
-		"over 125x":          {Caps: map[string]string{"contract_leverage": "126"}, Version: 1, Reason: "x y z"},
+		"over 150x":          {Caps: map[string]string{"contract_leverage": "151"}, Version: 1, Reason: "x y z"},
 		"nothing changes":    {Caps: map[string]string{"level": "500000000.00"}, Version: 1, Reason: "x y z"},
 		"without a reason":   {Caps: map[string]string{"level": "1"}, Version: 1},
 		"nothing asked for":  {Version: 1, Reason: "x y z"},
@@ -174,8 +185,8 @@ func TestHouseCaps(t *testing.T) {
 	if err := checkHouseCapStep("total", decimal.NewFromInt(100), decimal.NewFromInt(1000)); err != nil {
 		t.Fatalf("ten times: %v", err)
 	}
-	// The edges are in: a level not capped, 1x and 125x, 1e15.
-	for _, edge := range []map[string]string{{"level": "0"}, {"contract_leverage": "1"}, {"contract_leverage": "125"}, {"total": "1000000000000000"}} {
+	// The edges are in: a level not capped, 1x and 150x, 1e15.
+	for _, edge := range []map[string]string{{"level": "0"}, {"contract_leverage": "1"}, {"contract_leverage": "150"}, {"total": "1000000000000000"}} {
 		if err := checkEdge(edge); err != nil {
 			t.Fatalf("%v refused: %v", edge, err)
 		}
@@ -280,14 +291,30 @@ func TestHouseCaps(t *testing.T) {
 	}
 }
 
-// checkEdge checks each cap of caps against its range.
+// checkEdge checks each cap of caps against its range, the contracts'
+// highest leverage 150.
 func checkEdge(caps map[string]string) error {
 	for name, v := range caps {
-		if err := checkHouseCap(name, decimal.RequireFromString(v)); err != nil {
+		if err := checkHouseCap(name, decimal.RequireFromString(v), decimal.NewFromInt(150)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// leverageCatalog lists contracts with their highest leverage, a delisted
+// one's above the others (A97); down fails as instrument-service would.
+type leverageCatalog struct {
+	ports.Instruments
+	down bool
+}
+
+func (c *leverageCatalog) List(context.Context) (json.RawMessage, error) {
+	if c.down {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is down")
+	}
+	return json.RawMessage(`{"assets":[],"pairs":[],"contracts":[{"symbol":"BTC-USDT-PERP","status":"TRADING","max_leverage":150},` +
+		`{"symbol":"OLD-USDT-PERP","status":"DELISTED","max_leverage":200},{"symbol":"BTC-USD-PERP","status":"TRADING","max_leverage":125}]}`), nil
 }
 
 // TestHouseCapsShown checks the console's view of market-maker's history:

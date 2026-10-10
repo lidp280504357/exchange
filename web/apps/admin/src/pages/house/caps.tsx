@@ -9,7 +9,7 @@ import { Num, TimeText } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { Card } from "../../kit/Page";
 import { Lines } from "../../kit/summary";
-import { direction, holdings, HOUSE_CAPS, inRange, over, stepOK, stepRange, totalOver, type CapName, type Holding } from "./capsRules";
+import { direction, holdings, HOUSE_CAPS, inRange, LEVERAGE_CEILING, over, stepOK, stepRange, totalOver, type CapName, type Holding } from "./capsRules";
 
 // HOUSE's caps at run time (user 2026-10-07, A69; market-maker review C45):
 // what HOUSE quotes within - each cap with its unit, current and first
@@ -99,10 +99,12 @@ export function HouseCapsCard({ admin, assets }: { admin: Admin; assets?: readon
   });
   const held = useMemo(() => (assets ? holdings(assets) : undefined), [assets]);
   const v = q.data;
+  // The leverage cap's bound: the contracts' highest leverage (A97).
+  const leverageMax = v?.contract_leverage_max ?? LEVERAGE_CEILING;
   return (
     <Card
       title={t("admin.house.caps.title")}
-      extra={v && can(admin, "ledger.adjust.request") && !v.pending && <RequestCaps caps={v.caps} held={held} />}
+      extra={v && can(admin, "ledger.adjust.request") && !v.pending && <RequestCaps caps={v.caps} held={held} leverageMax={leverageMax} />}
     >
       <p className="mb-3 text-xs text-fg-3">{t("admin.house.caps.hint")}</p>
       {q.isError ? (
@@ -114,7 +116,7 @@ export function HouseCapsCard({ admin, assets }: { admin: Admin; assets?: readon
           <div data-testid="house-caps">
             <SummaryTable label={t("admin.house.caps.title")} noStatus headings={{ item: t("admin.summary.caps.cap"), summary: t("admin.house.caps.current") }}>
               {HOUSE_CAPS.map((f) => (
-                <CapRow key={f} name={f} value={v.caps[f]} initial={v.initial?.[f]} held={held} />
+                <CapRow key={f} name={f} value={v.caps[f]} initial={v.initial?.[f]} held={held} leverageMax={leverageMax} />
               ))}
             </SummaryTable>
           </div>
@@ -151,9 +153,11 @@ function HeldText({ asset, value, cap }: { asset?: string; value: string; cap: s
  * what HOUSE holds against it (the per-asset and total caps); opened, its
  * key and unit, range, first value and what lowering or raising it does.
  */
-function CapRow({ name, value, initial, held }: { name: CapName; value: string; initial: string | undefined; held: Held | undefined }) {
+function CapRow({ name, value, initial, held, leverageMax }: {
+  name: CapName; value: string; initial: string | undefined; held: Held | undefined; leverageMax: string;
+}) {
   const { t } = useTranslation();
-  const item = (k: string) => t(`admin.house.caps.items.${name}.${k}`);
+  const item = (k: string) => t(`admin.house.caps.items.${name}.${k}`, { max: formatDecimal(leverageMax) });
   const moved = initial !== undefined && dec.isDecimal(initial) && dec.isDecimal(value) && !dec.eq(initial, value);
   return (
     <SummaryRow
@@ -273,19 +277,21 @@ function History({ changes, audit }: { changes: View["changes"]; audit: boolean 
  * each from and to with what that does, in red where the per-asset or
  * total cap would be below what HOUSE holds (review R18: it stops buying).
  */
-function RequestCaps({ caps, held }: { caps: Caps; held: Held | undefined }) {
+function RequestCaps({ caps, held, leverageMax }: { caps: Caps; held: Held | undefined; leverageMax: string }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const initial = () => Object.fromEntries(HOUSE_CAPS.map((f) => [f, caps[f]])) as Record<CapName, string>;
   const [values, setValues] = useState(initial);
-  const ok = (f: CapName) => inRange(f, values[f]) && stepOK(caps[f], values[f]);
+  const max = formatDecimal(leverageMax);
+  const range = (f: CapName) => t(`admin.house.caps.items.${f}.range`, { max });
+  const ok = (f: CapName) => inRange(f, values[f], leverageMax) && stepOK(caps[f], values[f]);
   const changed = HOUSE_CAPS.filter((f) => ok(f) && !dec.eq(values[f].trim(), caps[f]));
   const bad = HOUSE_CAPS.some((f) => !ok(f));
   const symbolOver: Holding[] = held && changed.includes("symbol") ? over(held.list, values.symbol) : [];
   const totalBeyond = !!held && changed.includes("total") && totalOver(held.total, values.total);
   // How far one change can move a cap from its value now.
   const stepError = (f: CapName) => {
-    const r = stepRange(f, caps[f]);
+    const r = stepRange(f, caps[f], leverageMax);
     return r ? t("admin.house.caps.stepTo", { min: formatDecimal(r.min), max: formatDecimal(r.max) }) : t("admin.house.caps.step");
   };
   return (
@@ -326,15 +332,15 @@ function RequestCaps({ caps, held }: { caps: Caps; held: Held | undefined }) {
       <div className="grid gap-2 sm:grid-cols-2">
         {HOUSE_CAPS.map((f) => (
           <label key={f} className="flex flex-col gap-1 text-xs text-fg-2">
-            {t("admin.house.caps.withRange", { name: t(`admin.house.caps.items.${f}.name`), range: t(`admin.house.caps.items.${f}.range`) })}
+            {t("admin.house.caps.withRange", { name: t(`admin.house.caps.items.${f}.name`), range: range(f) })}
             <Input
               size="sm"
               value={values[f]}
               inputMode="decimal"
               unit={f === "contract_leverage" ? t("admin.house.caps.times") : "USDT"}
               error={
-                !inRange(f, values[f])
-                  ? t("admin.house.caps.outOfRange", { range: t(`admin.house.caps.items.${f}.range`) })
+                !inRange(f, values[f], leverageMax)
+                  ? t("admin.house.caps.outOfRange", { range: range(f) })
                   : !stepOK(caps[f], values[f])
                     ? stepError(f)
                     : undefined
@@ -346,7 +352,7 @@ function RequestCaps({ caps, held }: { caps: Caps; held: Held | undefined }) {
         ))}
       </div>
       <p className="text-xs text-fg-3" data-testid="house-caps-step-hint">
-        {t("admin.house.caps.stepHint")}
+        {t("admin.house.caps.stepHint", { max })}
       </p>
       {!bad && changed.length === 0 ? (
         <p className="text-xs text-fg-3">{t("admin.house.caps.nothingChanges")}</p>

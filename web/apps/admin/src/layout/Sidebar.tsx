@@ -77,7 +77,7 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
           const items = visible.filter((s) => s.group === g);
           if (items.length === 0) return null;
           if (g === "overview" || g === "users") {
-            return items.map((s) => <Item key={s.key} s={s} collapsed={collapsed} count={counts[s.key]} active={isActive(s)} />);
+            return items.map((s) => <Item key={s.key} s={s} collapsed={collapsed} count={counts[s.key]} active={isActive(s)} route={pathname} />);
           }
           const open = !closed.has(g) || items.some(isActive);
           return (
@@ -98,7 +98,7 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
               {(open || collapsed) && (
                 <div className="flex flex-col gap-0.5">
                   {items.map((s, i) => (
-                    <Item key={s.key} s={s} collapsed={collapsed} count={counts[s.key]} active={isActive(s)} index={i} />
+                    <Item key={s.key} s={s} collapsed={collapsed} count={counts[s.key]} active={isActive(s)} route={pathname} index={i} />
                   ))}
                 </div>
               )}
@@ -119,7 +119,9 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
   );
 }
 
-function Item({ s, collapsed, count, active, index = 0 }: { s: Section; collapsed: boolean; count?: number; active: boolean; index?: number }) {
+function Item({ s, collapsed, count, active, route, index = 0 }: {
+  s: Section; collapsed: boolean; count?: number; active: boolean; route: string; index?: number;
+}) {
   const { t } = useTranslation();
   const label = t(`admin.nav.${s.key}`);
   return (
@@ -135,7 +137,16 @@ function Item({ s, collapsed, count, active, index = 0 }: { s: Section; collapse
         active ? "bg-brand-soft font-medium text-fg-1" : "hover:bg-bg-2 hover:text-fg-1",
       )}
     >
-      {active && <motion.span layoutId="nav-active" className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand" transition={{ duration: 0.2 }} />}
+      {active && (
+        <motion.span
+          layoutId="nav-active"
+          // Slides only when the route changes; when the list moves (a group
+          // opened or closed above it), it moves with its item (A109, as F40).
+          layoutDependency={route}
+          className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand"
+          transition={{ duration: 0.2 }}
+        />
+      )}
       <s.icon size={18} className={cn("shrink-0", active && "text-brand")} />
       <span className={cn("min-w-0 flex-1 truncate whitespace-nowrap transition-opacity duration-200", collapsed && "opacity-0")}>{label}</span>
       {count ? <CountBadge value={count} className={cn(collapsed && "absolute right-1 top-0.5 scale-75")} /> : null}

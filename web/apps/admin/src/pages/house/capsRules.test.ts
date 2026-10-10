@@ -11,10 +11,13 @@ describe("HOUSE's caps", () => {
       expect(inRange(name, "1000000000000000")).toBe(true);
       expect(inRange(name, "1000000000000000.01")).toBe(false);
     }
-    expect(inRange("contract_leverage", "0.5")).toBe(false);
-    expect(inRange("contract_leverage", "1")).toBe(true);
-    expect(inRange("contract_leverage", "125")).toBe(true);
-    expect(inRange("contract_leverage", "126")).toBe(false);
+    // The leverage up to the contracts' highest (A97), market-maker's own bound while unknown.
+    expect(inRange("contract_leverage", "0.5", "150")).toBe(false);
+    expect(inRange("contract_leverage", "1", "150")).toBe(true);
+    expect(inRange("contract_leverage", "150", "150")).toBe(true);
+    expect(inRange("contract_leverage", "151", "150")).toBe(false);
+    expect(inRange("contract_leverage", "1000")).toBe(true);
+    expect(inRange("contract_leverage", "1001")).toBe(false);
     expect(inRange("safety", " 1000 ")).toBe(true);
     expect(inRange("safety", "lots")).toBe(false);
     expect(inRange("safety", "")).toBe(false);
@@ -34,14 +37,14 @@ describe("HOUSE's caps", () => {
     expect(stepRange("total", "500000000")).toEqual({ min: "50000000", max: "5000000000" });
     expect(stepRange("safety", "12.5")).toEqual({ min: "1.25", max: "125" });
     expect(stepRange("symbol", "500000000000000")).toEqual({ min: "50000000000000", max: "1000000000000000" });
-    // The leverage too: 10 to 125 takes two changes.
-    expect(stepRange("contract_leverage", "10")).toEqual({ min: "1", max: "100" });
-    expect(stepRange("contract_leverage", "100")).toEqual({ min: "10", max: "125" });
+    // The leverage too: 10 to 150 takes two changes.
+    expect(stepRange("contract_leverage", "10", "150")).toEqual({ min: "1", max: "100" });
+    expect(stepRange("contract_leverage", "100", "150")).toEqual({ min: "10", max: "150" });
     expect(stepRange("level", "0")).toBe(null);
     expect(stepRange("level", "x")).toBe(null);
     for (const [name, before] of [["total", "500000000"], ["safety", "12.5"], ["contract_leverage", "10"]] as const) {
-      const r = stepRange(name, before);
-      expect(r && stepOK(before, r.min) && stepOK(before, r.max) && inRange(name, r.min) && inRange(name, r.max)).toBe(true);
+      const r = stepRange(name, before, "150");
+      expect(r && stepOK(before, r.min) && stepOK(before, r.max) && inRange(name, r.min, "150") && inRange(name, r.max, "150")).toBe(true);
     }
   });
 

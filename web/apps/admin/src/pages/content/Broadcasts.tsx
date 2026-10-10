@@ -1,3 +1,4 @@
+import { LOCALES, type Locale } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, Drawer, Input, KeyTag, Progress, Segmented, Switch, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -20,9 +21,8 @@ import { Card, Page } from "../../kit/Page";
 type Broadcast = AdminSchemas["Broadcast"];
 type Audience = "ALL" | "USER" | "TAG";
 
-/** A message's languages: Simplified Chinese required, Traditional (G7b) and English optional. */
-type Locale = "zh-CN" | "zh-TW" | "en";
-const LOCALES: Locale[] = ["zh-CN", "zh-TW", "en"];
+// A message's languages are the sites' (core's LOCALES, A99): Simplified
+// Chinese required, Traditional (G7b) and English optional.
 const LANGUAGE: Record<Locale, string> = { "zh-CN": "admin.content.zh", "zh-TW": "admin.content.zhTW", en: "admin.content.en" };
 const LEGEND: Record<Locale, string> = { "zh-CN": "admin.broadcasts.chinese", "zh-TW": "admin.broadcasts.traditional", en: "admin.broadcasts.english" };
 

@@ -21,7 +21,7 @@ func (w Wallet) Fees(ctx context.Context, q ports.FeeQuery) (json.RawMessage, er
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
 	}
-	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/custody/fees?"+v.Encode(), nil, nil)
+	return w.list(ctx, w.Base+"/internal/wallet/custody/fees", v, q.ByKind)
 }
 
 // BookFee books a held fee from GAS_SUPPLY, as reported or as found charged.

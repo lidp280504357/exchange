@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge } from "../../kit/enums";
 import { IdText, Num, TimeText } from "../../kit/format";
+import { kindParam, KindSelect, KindsNarrowed } from "../../kit/kinds";
 import { ListTable, pageSize, RowActions, useCursorList } from "../../kit/lists";
 
 type Fee = AdminSchemas["CustodyFee"];
@@ -30,10 +31,12 @@ const waitsForGas = (f: Fee) => f.status === "BOOKABLE" && !f.journal_id;
 export function CustodyFees({ admin, provider }: { admin: Admin; provider: "UDUN" | "UDUNMOCK" }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<Status | "ALL">("HELD");
-  const list = useCursorList<Fee>(["admin", "custody", "fees", provider, status], async (cursor) =>
+  // The withdrawals' accounts' kind (L1): "" the humans'.
+  const [kind, setKind] = useState("");
+  const list = useCursorList<Fee>(["admin", "custody", "fees", provider, status, kind], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/custody/fees", {
-        params: { query: { provider, status: status === "ALL" ? undefined : status, cursor, limit: pageSize() } },
+        params: { query: { provider, status: status === "ALL" ? undefined : status, kind: kindParam(kind) as never, cursor, limit: pageSize() } },
       }),
     ),
   );
@@ -119,15 +122,19 @@ export function CustodyFees({ admin, provider }: { admin: Admin; provider: "UDUN
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-fg-3">{t("admin.custodyFees.help")}</p>
-      <Segmented
-        aria-label={t("admin.common.status")}
-        value={status}
-        onValueChange={(v) => setStatus(v as Status | "ALL")}
-        items={[
-          ...STATUSES.map((s) => ({ value: s, label: t(`admin.enum.feeStatus.${s}`) })),
-          { value: "ALL", label: t("admin.custodyFees.all") },
-        ]}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Segmented
+          aria-label={t("admin.common.status")}
+          value={status}
+          onValueChange={(v) => setStatus(v as Status | "ALL")}
+          items={[
+            ...STATUSES.map((s) => ({ value: s, label: t(`admin.enum.feeStatus.${s}`) })),
+            { value: "ALL", label: t("admin.custodyFees.all") },
+          ]}
+        />
+        <KindSelect value={kind} onValueChange={setKind} />
+      </div>
+      <KindsNarrowed narrowed={list.narrowed} kind={kind} />
       <ListTable
         list={list}
         columns={columns}

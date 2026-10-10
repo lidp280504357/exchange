@@ -23,6 +23,8 @@ type PositionsPage struct {
 	// HouseUserID is HOUSE's account on the contracts; nil when not
 	// configured.
 	HouseUserID *string `json:"house_user_id"`
+	// KindsNarrowed says the kind filter was cut to MaxKindIDs (L1).
+	KindsNarrowed bool `json:"kinds_narrowed,omitempty"`
 }
 
 // positionsLimit bounds the positions listed; beyond it the page says so.
@@ -43,6 +45,11 @@ func (s *Service) OpenPositions(ctx context.Context, p Principal, q ports.Positi
 	if q.Limit <= 0 || q.Limit > positionsLimit {
 		q.Limit = positionsLimit
 	}
+	// The humans' by default (L1): HOUSE's are SYSTEM's.
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, true); err != nil {
+		return PositionsPage{}, err
+	}
 	raw, err := s.Derivatives.OpenPositions(ctx, q)
 	if err != nil {
 		return PositionsPage{}, err
@@ -51,6 +58,7 @@ func (s *Service) OpenPositions(ctx context.Context, p Principal, q ports.Positi
 	if err := json.Unmarshal(raw, &page); err != nil || page.Positions == nil {
 		return PositionsPage{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "derivatives-service answered badly")
 	}
+	page.KindsNarrowed = q.ByKind.Narrowed
 	if s.HouseBook.User != "" {
 		house := s.HouseBook.User
 		page.HouseUserID = &house

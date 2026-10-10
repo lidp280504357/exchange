@@ -159,6 +159,10 @@ export const usersZh = {
       all: "全部",
       others: "另有{{list}}",
       count: "{{kind}} {{n}}",
+      narrowed: {
+        humans: "其他类型的账户超过 {{max}} 个：这里只排除了机器人与系统账户，测试账户的记录也在其中",
+        kept: "该类型的账户超过 {{max}} 个：只列出其中 {{max}} 个账户的记录",
+      },
     },
   },
 };
@@ -322,6 +326,10 @@ export const usersEn = {
       all: "All",
       others: "besides: {{list}}",
       count: "{{kind}} {{n}}",
+      narrowed: {
+        humans: "More than {{max}} accounts of the other kinds: only the bots and system accounts are left out here, so test accounts' records show too",
+        kept: "More than {{max}} accounts of this kind: the records of {{max}} of them are listed",
+      },
     },
   },
 };

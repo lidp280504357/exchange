@@ -11,6 +11,7 @@ import { SuspendedBadge, useSuspended } from "./suspensions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { Fields } from "../../kit/fields";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
+import { kindParam } from "../../kit/kinds";
 import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 import { clean } from "../records/tables";
 
@@ -25,18 +26,23 @@ export type WithdrawalQuery = {
   min_value_usdt?: string;
   max_value_usdt?: string;
   min_risk?: string;
+  /** The accounts' kind (L1): none, the humans; BOT, TEST, SYSTEM or ALL. */
+  kind?: string;
 };
 
 const right: DataColumnMeta = { align: "right" };
 
 export function useWithdrawals(q: WithdrawalQuery) {
   return useCursorList<Withdrawal>(["admin", "withdrawals", q], async (cursor) => {
-    const { held, min_risk, ...rest } = clean(q);
+    const { held, min_risk, kind, ...rest } = clean(q);
     const risk = min_risk && /^\d+$/.test(min_risk) ? Number(min_risk) : undefined;
     return adminData(
       await adminApi.GET("/admin/v1/withdrawals", {
         params: {
-          query: { ...rest, held: held === "true" || held === "false" ? held : undefined, min_risk: risk, cursor, limit: pageSize() },
+          query: {
+            ...rest, held: held === "true" || held === "false" ? held : undefined, min_risk: risk, kind: kindParam(kind) as never, cursor,
+            limit: pageSize(),
+          },
         },
       }),
     );

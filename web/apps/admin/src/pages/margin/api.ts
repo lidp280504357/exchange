@@ -1,5 +1,6 @@
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
 import { useQuery } from "@tanstack/react-query";
+import { kindParam } from "../../kit/kinds";
 import type { Page } from "../../kit/lists";
 
 // The margin pages' data (design 2026-10-06 §8, E5): admin-service's
@@ -37,13 +38,15 @@ export function useMarginSettings() {
   return useQuery({ queryKey: [...marginKey, "settings"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/margin/settings")) });
 }
 
-export type AccountQuery = { account?: MarginAccount["account"]; symbol?: string; user_id?: string };
+/** kind is the accounts' (L1): none, the humans'; BOT, TEST, SYSTEM or ALL. */
+export type AccountQuery = { account?: MarginAccount["account"]; symbol?: string; user_id?: string; kind?: string };
 
 /** useMarginAccounts asks the server for the accounts of a scope, riskiest first (the status tabs filter what comes back). */
 export function useMarginAccounts(q: AccountQuery) {
   return useQuery({
     queryKey: [...marginKey, "accounts", q],
-    queryFn: async () => adminData(await adminApi.GET("/admin/v1/margin/accounts", { params: { query: q } })),
+    queryFn: async () =>
+      adminData(await adminApi.GET("/admin/v1/margin/accounts", { params: { query: { ...q, kind: kindParam(q.kind) as never } } })),
   });
 }
 

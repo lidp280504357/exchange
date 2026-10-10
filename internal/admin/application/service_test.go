@@ -622,6 +622,8 @@ type fakeDerivatives struct {
 	closes   []string
 	canceled []string
 	queries  []ports.PositionQuery
+	// risk are the kind filters the risk list was asked with.
+	risk []ports.KindFilter
 	// impactDown makes TierImpact fail; tiers records what it measured;
 	// unmeasured and more are positions it cannot measure and liquidates
 	// beyond the 3 it does.
@@ -712,7 +714,8 @@ func (d *fakeDerivatives) LiftReduceOnly(_ context.Context, symbol, actor string
 	return json.RawMessage(`{"symbol":"` + symbol + `","lifted":true}`), nil
 }
 
-func (d *fakeDerivatives) Risk(context.Context) (json.RawMessage, error) {
+func (d *fakeDerivatives) Risk(_ context.Context, f ports.KindFilter) (json.RawMessage, error) {
+	d.risk = append(d.risk, f)
 	return json.RawMessage(`{"positions":[]}`), nil
 }
 
@@ -763,9 +766,12 @@ type fakeWallet struct {
 	provider, callbacks, feesOf string
 	fees                        []string
 	held                        map[string][2]string
+	// lists are the kind filters of the withdrawals and fees asked for.
+	lists []ports.KindFilter
 }
 
-func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
+func (w *fakeWallet) List(_ context.Context, q ports.WithdrawalQuery) (json.RawMessage, error) {
+	w.lists = append(w.lists, q.ByKind)
 	if w.err != nil {
 		return nil, w.err
 	}
@@ -788,6 +794,7 @@ func (w *fakeWallet) Callbacks(_ context.Context, q ports.CallbackQuery) (json.R
 
 func (w *fakeWallet) Fees(_ context.Context, q ports.FeeQuery) (json.RawMessage, error) {
 	w.feesOf = q.Provider
+	w.lists = append(w.lists, q.ByKind)
 	items := []string{}
 	if q.Status == "" || q.Status == "HELD" {
 		for id, f := range w.held {
@@ -893,9 +900,12 @@ type fakeDeposits struct {
 	probes     map[string]bool
 	assigned   map[string]string
 	loseAnswer bool
+	// lists are the kind filters of the lists asked for.
+	lists []ports.KindFilter
 }
 
 func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json.RawMessage, error) {
+	d.lists = append(d.lists, q.ByKind)
 	n := 0
 	if q.Attention {
 		n = d.attention

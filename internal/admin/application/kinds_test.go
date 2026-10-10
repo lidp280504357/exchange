@@ -2,11 +2,14 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
 )
 
@@ -83,4 +86,101 @@ func TestKindFilter(t *testing.T) {
 	if f, err := h.svc.kindFilter(ctx, nil, "", false); err != nil || f.On() {
 		t.Fatalf("no kinds: %+v %v", f, err)
 	}
+}
+
+// The lists services serve (L1 over L2/L3's POST .../list): the humans'
+// by default, another kind's when asked, a user's whatever its kind; the
+// badges count the humans'; a filter cut to MaxKindIDs is said in the
+// answer (kinds_narrowed).
+func TestServiceListsByKind(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	m := newFakeMargin()
+	h.svc.Margin = m
+	h.svc.KindIDs = &fakeKindIDs{of: map[string][]string{"BOT": {"b1"}, "TEST": {"t1"}, "SYSTEM": {"s1"}}}
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	boss := h.login(t, "boss@example.com")
+	humans := ports.KindFilter{Except: []string{"b1", "t1", "s1"}}
+	bots := ports.KindFilter{Only: []string{"b1"}}
+	same := func(what string, got []ports.KindFilter, want ...ports.KindFilter) {
+		t.Helper()
+		if !slices.EqualFunc(got, want, func(a, b ports.KindFilter) bool {
+			return slices.Equal(a.Only, b.Only) && slices.Equal(a.Except, b.Except) && (a.Only == nil) == (b.Only == nil) && a.Narrowed == b.Narrowed
+		}) {
+			t.Fatalf("%s: %+v, want %+v", what, got, want)
+		}
+	}
+
+	for _, q := range []ports.WithdrawalQuery{{}, {Kinds: []string{"BOT"}}, {Kinds: []string{"BOT"}, UserID: someUser}} {
+		if raw, err := h.svc.Withdrawals(ctx, boss, q); err != nil || strings.Contains(string(raw), "kinds_narrowed") {
+			t.Fatalf("withdrawals %+v: %s %v", q, raw, err)
+		}
+	}
+	same("withdrawals", h.wallet.lists, humans, bots, ports.KindFilter{})
+	for _, q := range []ports.DepositReviewQuery{{Attention: true}, {Kinds: []string{"ALL"}}} {
+		if _, err := h.svc.DepositsForReview(ctx, boss, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	same("deposits to handle", h.deposits.lists, humans, ports.KindFilter{})
+	if _, err := h.svc.CustodyFees(ctx, boss, ports.FeeQuery{Kinds: []string{"bot"}}); err != nil {
+		t.Fatal(err)
+	}
+	same("custody fees", h.wallet.lists[3:], bots)
+	if _, err := h.svc.OpenPositions(ctx, boss, ports.PositionQuery{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.DerivativesRisk(ctx, boss, []string{"BOT"}); err != nil {
+		t.Fatal(err)
+	}
+	same("positions", []ports.KindFilter{h.derivatives.queries[0].ByKind}, humans)
+	same("contract risk", h.derivatives.risk, bots)
+	if _, err := h.svc.MarginAccounts(ctx, boss, MarginAccountQuery{}); err != nil {
+		t.Fatal(err)
+	}
+	same("margin accounts", m.lists, humans)
+	if _, err := h.svc.Withdrawals(ctx, boss, ports.WithdrawalQuery{Kinds: []string{"ROBOT"}}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an unknown kind: %v", err)
+	}
+
+	// The badges count the humans' withdrawals and deposits.
+	h.wallet.lists, h.deposits.lists = nil, nil
+	if _, err := h.svc.Todo(ctx, boss); err != nil {
+		t.Fatal(err)
+	}
+	same("the withdrawals badge", h.wallet.lists, humans)
+	same("the deposits badge", h.deposits.lists, humans)
+
+	// Past MaxKindIDs test accounts: the humans' leave out the bots and
+	// HOUSE only, and the answers say so.
+	many := make([]string, MaxKindIDs+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("t%d", i)
+	}
+	h.svc.KindIDs = &fakeKindIDs{of: map[string][]string{"BOT": {"b1"}, "TEST": many, "SYSTEM": {"s1"}}}
+	narrowed := ports.KindFilter{Except: []string{"b1", "s1"}, Narrowed: true}
+	h.wallet.lists = nil
+	for name, list := range map[string]func() (json.RawMessage, error){
+		"withdrawals":        func() (json.RawMessage, error) { return h.svc.Withdrawals(ctx, boss, ports.WithdrawalQuery{}) },
+		"deposits to handle": func() (json.RawMessage, error) { return h.svc.DepositsForReview(ctx, boss, ports.DepositReviewQuery{}) },
+		"custody fees":       func() (json.RawMessage, error) { return h.svc.CustodyFees(ctx, boss, ports.FeeQuery{}) },
+		"contract risk":      func() (json.RawMessage, error) { return h.svc.DerivativesRisk(ctx, boss, nil) },
+		"margin accounts":    func() (json.RawMessage, error) { return h.svc.MarginAccounts(ctx, boss, MarginAccountQuery{}) },
+		"positions": func() (json.RawMessage, error) {
+			page, err := h.svc.OpenPositions(ctx, boss, ports.PositionQuery{})
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(page)
+		},
+	} {
+		raw, err := list()
+		var page struct {
+			Narrowed bool `json:"kinds_narrowed"`
+		}
+		if err != nil || json.Unmarshal(raw, &page) != nil || !page.Narrowed {
+			t.Fatalf("%s: %s %v", name, raw, err)
+		}
+	}
+	same("the withdrawals and fees narrowed", h.wallet.lists, narrowed, narrowed)
 }

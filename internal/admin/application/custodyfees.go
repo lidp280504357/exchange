@@ -46,7 +46,15 @@ func (s *Service) CustodyFees(ctx context.Context, p Principal, q ports.FeeQuery
 	default:
 		return nil, apperr.Invalid("status is HELD, BOOKABLE or WRITTEN_OFF")
 	}
-	return s.Wallet.Fees(ctx, q)
+	// The humans' withdrawals' by default (L1).
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, "", true); err != nil {
+		return nil, err
+	}
+	raw, err := s.Wallet.Fees(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return withNarrowed(raw, q.ByKind)
 }
 
 // BookCustodyFee books a custodian's fee held for a person from

@@ -395,6 +395,20 @@ func restError(resp *http.Response, body []byte) error {
 	return err
 }
 
+// list reads a list a service serves: GET path?query, or with a kind
+// filter (L1) POST path/list?query with the accounts in its body (L2, L3:
+// user_ids keeps them, exclude_user_ids leaves them out).
+func (r REST) list(ctx context.Context, path string, v url.Values, f ports.KindFilter) (json.RawMessage, error) {
+	if !f.On() {
+		return r.do(ctx, http.MethodGet, path+"?"+v.Encode(), nil, nil)
+	}
+	body := map[string][]string{"exclude_user_ids": f.Except}
+	if f.Only != nil {
+		body = map[string][]string{"user_ids": f.Only}
+	}
+	return r.do(ctx, http.MethodPost, path+"/list?"+v.Encode(), body, nil)
+}
+
 func (r REST) do(ctx context.Context, method, url string, body any, header map[string]string) (json.RawMessage, error) {
 	var payload io.Reader
 	if body != nil {
@@ -452,7 +466,7 @@ func (w Wallet) List(ctx context.Context, q ports.WithdrawalQuery) (json.RawMess
 	if q.MinRisk > 0 {
 		v.Set("min_risk", strconv.Itoa(q.MinRisk))
 	}
-	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/withdrawals?"+v.Encode(), nil, nil)
+	return w.list(ctx, w.Base+"/internal/wallet/withdrawals", v, q.ByKind)
 }
 
 // Market implements ports.Market over market-data-service's internal API.
@@ -557,8 +571,8 @@ func (d Derivatives) LiftReduceOnly(ctx context.Context, symbol, actor string) (
 }
 
 // Risk returns the positions warned, taken over or close to it.
-func (d Derivatives) Risk(ctx context.Context) (json.RawMessage, error) {
-	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/risk", nil, nil)
+func (d Derivatives) Risk(ctx context.Context, f ports.KindFilter) (json.RawMessage, error) {
+	return d.list(ctx, d.Base+"/internal/derivatives/risk", url.Values{}, f)
 }
 
 // OpenPositions lists every user's open positions, riskiest first.
@@ -574,7 +588,7 @@ func (d Derivatives) OpenPositions(ctx context.Context, q ports.PositionQuery) (
 		v.Set("watch", "true")
 	}
 	v.Set("limit", strconv.Itoa(q.Limit))
-	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/positions?"+v.Encode(), nil, nil)
+	return d.list(ctx, d.Base+"/internal/derivatives/positions", v, q.ByKind)
 }
 
 // TierImpact measures a contract's new risk ladder against its open

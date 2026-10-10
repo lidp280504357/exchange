@@ -1,4 +1,4 @@
-import { formatDecimal } from "@exchange/core";
+import { formatDecimal, LANGUAGES } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, ErrorState, FormField, IconButton, Input, KeyTag, Segmented, Select, ShortList, Skeleton, SummaryRow, SummaryTable, Switch } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -145,13 +145,14 @@ function ProfileForm({ profile, edit }: { profile: Profile; edit: boolean }) {
             <ColorField label={t("admin.platform.themeColor")} value={d.theme_color} disabled={off} onChange={(v) => set({ theme_color: v })} />
             <ColorField label={t("admin.platform.brandColor")} value={d.brand_color} disabled={off} onChange={(v) => set({ brand_color: v })} />
           </div>
-          <FormField label={t("admin.platform.defaultLocale")}>
+          {/* The sites follow the visitor's browser; this is the language when it asks for none of theirs (F30, A96). */}
+          <FormField label={t("admin.platform.defaultLocale")} hint={t("admin.platform.defaultLocaleHint")}>
             <Segmented
               size="sm"
               value={d.default_locale}
               disabled={off}
               onValueChange={(v) => set({ default_locale: v as Draft["default_locale"] })}
-              items={[{ value: "zh-CN", label: "简体中文" }, { value: "zh-TW", label: "繁體中文" }, { value: "en", label: "English" }]}
+              items={LANGUAGES.map((l) => ({ value: l.locale, label: l.name }))}
             />
           </FormField>
         </fieldset>

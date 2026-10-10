@@ -12,6 +12,7 @@ import { Fields } from "../../kit/fields";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { useFlagCheck } from "../../kit/flags";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
+import { KindsNarrowed, useKindFilter } from "../../kit/kinds";
 import { Page } from "../../kit/Page";
 import { keyOf, marginKey, useMarginAccount, useMarginAccounts, type AccountQuery, type MarginAccount, type MarginAccountDetail } from "./api";
 import { Level, lineText, Rate } from "./common";
@@ -31,11 +32,13 @@ const STATUSES = ["WARNED", "LIQUIDATING", "FROZEN"];
 export default function Accounts({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
-  const filters = useFilters(["status", "account", "symbol", "user_id"]);
+  const filters = useFilters(["status", "account", "symbol", "user_id", "kind"]);
+  const kind = useKindFilter();
   const f = filters.values;
   const status = STATUSES.includes(f.status ?? "") ? f.status : undefined;
   const scope = useMarginAccounts({
     account: (f.account || undefined) as AccountQuery["account"], symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined,
+    kind: f.kind || undefined,
   });
   const [open, setOpen] = useState<MarginAccount | null>(null);
   const columns = useMemo<ColumnDef<MarginAccount, unknown>[]>(
@@ -93,8 +96,10 @@ export default function Accounts({ admin }: { admin: Admin }) {
           },
           { key: "symbol", label: t("admin.common.symbol"), kind: "text", placeholder: "BTC-USDT", width: 140 },
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
+          kind,
         ]}
       />
+      <KindsNarrowed narrowed={scope.data?.kinds_narrowed} kind={f.kind} />
       {scope.data?.truncated && <p className="text-sm text-warn-strong">{t("admin.margin.accounts.truncated", { n: rows.length })}</p>}
       {scope.isError ? (
         <ErrorState message={String(scope.error)} onRetry={() => void scope.refetch()} />

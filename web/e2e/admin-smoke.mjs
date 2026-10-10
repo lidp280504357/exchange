@@ -368,8 +368,10 @@ try {
   await go("/withdrawals?held=false&min_risk=0");
   await sleep(1500);
   await noError("withdrawals");
-  // A withdrawal's detail: its address book record and the user's others.
-  await go("/withdrawals?status=ALL");
+  // A withdrawal's detail: its address book record and the user's others
+  // (the test server's withdrawals are the end-to-end scripts' accounts':
+  // 类型 测试, L1).
+  await go("/withdrawals?status=ALL&kind=TEST");
   await rows(1);
   await openRow("main tbody tr");
   await waitText("地址簿");
@@ -523,8 +525,8 @@ try {
   if (await page.$("[data-testid=house-caps-request]")) {
     await page.click("[data-testid=house-caps-request]");
     await page.waitForSelector('[role=dialog] input[aria-label="safety"]');
-    // The ten-times step covers the leverage too (review R18 ①).
-    await page.waitForFunction(() => /10 → 100 → 125/.test(document.querySelector("[data-testid=house-caps-step-hint]")?.textContent ?? ""), { timeout: 10000 });
+    // The ten-times step covers the leverage too (review R18 ①), up to the contracts' highest (A97).
+    await page.waitForFunction(() => /10 → 100 → \d+/.test(document.querySelector("[data-testid=house-caps-step-hint]")?.textContent ?? ""), { timeout: 10000 });
     const safety = await page.$eval('[role=dialog] input[aria-label="safety"]', (el) => el.value);
     await page.$eval('[role=dialog] input[aria-label="safety"]', (el) => el.select());
     await page.type('[role=dialog] input[aria-label="safety"]', String(Number(safety) + 1));

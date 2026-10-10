@@ -194,6 +194,7 @@ func (h *Handler) marginAccounts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw, err := h.Svc.MarginAccounts(r.Context(), principal(r), application.MarginAccountQuery{
 		Status: q.Get("status"), Account: q.Get("account"), Symbol: q.Get("symbol"), UserID: q.Get("user_id"), Limit: intParam(q, "limit"),
+		Kinds: kindsParam(q),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
