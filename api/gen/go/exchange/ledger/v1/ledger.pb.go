@@ -1268,8 +1268,8 @@ func (x *GetSystemBalancesResponse) GetBalances() []*Balance {
 type ListHoldersRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Asset string                 `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
-	// How many of the largest holders to list: 0 lists 100, at most 1,000
-	// (B201).
+	// How many of the largest holders to list, at most 1,000 (B201); 0
+	// lists all of them, as before B201 (B202).
 	Limit int32 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
 	// Users summed apart (at most 1,000 IDs); they are listed among the
 	// largest holders as any other.
@@ -1442,7 +1442,8 @@ type ListHoldersResponse struct {
 	// The largest holders, largest first, at most limit; the users holding
 	// nothing are left out.
 	Holders []*Holder `protobuf:"bytes,1,rep,name=holders,proto3" json:"holders,omitempty"`
-	// The users not apart, and those apart.
+	// The users not apart, and those apart; of the same moment as the
+	// holders (one statement, B202).
 	Others        *HolderSum `protobuf:"bytes,2,opt,name=others,proto3" json:"others,omitempty"`
 	Apart         *HolderSum `protobuf:"bytes,3,opt,name=apart,proto3" json:"apart,omitempty"`
 	unknownFields protoimpl.UnknownFields

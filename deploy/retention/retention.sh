@@ -59,6 +59,13 @@ wait "$child"
 child=$!
 wait "$child"
 child=""
+# A dry run deletes nothing: it does not count as the day's run.
+for a in "$@"; do
+  if [[ $a == --dry-run ]]; then
+    echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) done (dry run: the success metric left as it was)"
+    exit 0
+  fi
+done
 printf '# HELP exchange_retention_last_success_timestamp_seconds When the history retention and the ledger reconcile after it last finished without a failure.\n# TYPE exchange_retention_last_success_timestamp_seconds gauge\nexchange_retention_last_success_timestamp_seconds %s\n' \
   "$(date +%s)" >"$METRICS_DIR/exchange_retention.prom.tmp"
 mv "$METRICS_DIR/exchange_retention.prom.tmp" "$METRICS_DIR/exchange_retention.prom"

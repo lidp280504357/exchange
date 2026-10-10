@@ -119,6 +119,7 @@ func TestRetentionKeeps(t *testing.T) {
 	add("wallet", "fee booked before the window", false, fee, feeCheck, "0xfee-booked", "SWEEP", "s", id(), old, old, "BOOKABLE", "", nil)
 	add("wallet", "fee written off before the window", false, fee, feeCheck, "0xfee-off", "SWEEP", "s", nil, nil, old, "WRITTEN_OFF", "x", old)
 	add("wallet", "fee held for a person", true, fee, feeCheck, "0xfee-held", "WITHDRAWAL", held, nil, nil, ancient, "HELD", "x", nil)
+	add("wallet", "fee not booked yet", true, fee, feeCheck, "0xfee-unbooked", "SWEEP", "s", nil, nil, old, "BOOKABLE", "", nil)
 	check := `INSERT INTO chain_checks (id, network, asset, chain, ledger, unbooked, shortfall, addresses, checked_at)
 		VALUES ($1, 'TRON', 'USDT', 1, 1, 0, 0, 1, $2)`
 	checkCheck := `SELECT count(*) FROM chain_checks WHERE id = $1`
@@ -148,6 +149,7 @@ func TestRetentionKeeps(t *testing.T) {
 	add("marketsim", "event ended before the window", false, simEvent, simEventCheck, id(), old, "DONE", old)
 	add("marketsim", "event made before the window, ended within it", true, simEvent, simEventCheck, id(), old, "DONE", recent)
 	add("marketsim", "event scheduled long ago, not run", true, simEvent, simEventCheck, id(), old, "SCHEDULED", nil)
+	add("marketsim", "event still running", true, simEvent, simEventCheck, id(), old, "RUNNING", nil)
 	params := `INSERT INTO param_changes (version, at, actor) VALUES ($1, $2, 'test')`
 	paramsCheck := `SELECT count(*) FROM param_changes WHERE version = $1`
 	add("marketsim", "parameters changed before the window", false, params, paramsCheck, 1_000_000, old)

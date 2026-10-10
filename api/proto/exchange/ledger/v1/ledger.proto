@@ -272,8 +272,8 @@ message GetSystemBalancesResponse {
 
 message ListHoldersRequest {
   string asset = 1;
-  // How many of the largest holders to list: 0 lists 100, at most 1,000
-  // (B201).
+  // How many of the largest holders to list, at most 1,000 (B201); 0
+  // lists all of them, as before B201 (B202).
   int32 limit = 2;
   // Users summed apart (at most 1,000 IDs); they are listed among the
   // largest holders as any other.
@@ -298,7 +298,8 @@ message ListHoldersResponse {
   // The largest holders, largest first, at most limit; the users holding
   // nothing are left out.
   repeated Holder holders = 1;
-  // The users not apart, and those apart.
+  // The users not apart, and those apart; of the same moment as the
+  // holders (one statement, B202).
   HolderSum others = 2;
   HolderSum apart = 3;
 }

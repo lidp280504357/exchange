@@ -12,7 +12,7 @@ scripts/ops/retention.sh --only trading,auth  # 只跑这几个库（clickhouse 
 
 即 `exchangectl retention run [--dry-run] [--days 15] [--key-days 90] [--batch 5000] [--pause 100ms] [--only SCHEMA,...] [--force]`，在服务镜像的一次性容器里（`docker compose run --rm --no-deps user-service`，与服务同样的设置，不占 user-service 自己的容器）：按库打开连接（`application_name` 为 `exchangectl-retention`）、逐条规则分批删除（每批 5,000 行、各自短事务、批间暂停 100 ms，按条件生成的批次 `FOR UPDATE SKIP LOCKED`，被别的事务锁着的行留到下次），打印每表的行数、估算腾出的大小（行数占表的份额，估算）与表现有大小；真删后对删过行的表 ANALYZE。一个库失败不挡后面的库：失败的列在最后，整次运行以非零退出。ClickHouse 那一步在各库之后、自己连接（30 分钟读超时，等轻量删除的变更做完）：ClickHouse 不可用只让这一步失败；没有 `CLICKHOUSE_ADDR` 时这一步写 `SKIPPED`、不算失败（B201）。被停止（SIGTERM）的一次运行做完手头那个库就结束、以非零退出。`--days` 少于 7 要加 `--force`；`--key-days` 不得小于 `--days`。
 
-容器有名字（定时任务的叫 `exchange-retention`，`scripts/ops/retention.sh` 的每次一个 `exchange-retention-ops-<时间>`）：`docker compose run` 自己被停时只断开、容器照跑（B201），所以停止单元（`sudo systemctl stop exchange-retention.service`，`KillMode=mixed`）时脚本先 `docker stop` 这个容器（exchangectl 收到 SIGTERM，取消手头的语句；已提交的批次与它们的检查点、快照、键都留着，下次接着删），等它退出再退出；`scripts/ops/retention.sh` 里 Ctrl-C 同样经 ssh 停掉服务器上的容器。
+容器有名字（定时任务的叫 `exchange-retention`，`scripts/ops/retention.sh` 的每次一个 `exchange-retention-ops-<时间>`）：`docker compose run` 自己被停时只断开、容器照跑（B201），所以停止单元（`sudo systemctl stop exchange-retention.service`，`KillMode=mixed`）时脚本先 `docker stop` 这个容器（exchangectl 收到 SIGTERM，取消手头的语句；已提交的批次与它们的检查点、快照、键都留着，下次接着删）、删掉它再退出——每一步都在后台跑、脚本等它，信号随到随处理（2026-10-10 测试服实测：删除中途停止 1 秒结束、不留容器）；停在之后的对账时，对账在 ledger-service 里自己跑完（只读）；`scripts/ops/retention.sh` 里 Ctrl-C 同样经 ssh 停掉服务器上的容器。
 
 每日定时：systemd 的 `exchange-retention.timer`，每日 04:10 UTC（03:30 的备份之后；错过的一次开机后补跑）触发 `exchange-retention.service`（`TimeoutStartSec=3h`），即 `infra/retention/retention.sh`。部署（`server-update.sh`）同步脚本并安装两个单元文件，**只装不启用**；启用（协调会话 2026-10-10 的顺序：测试服 `--dry-run` 证明工具与策略、审查 LK/LL/LM 的待修上线之后）：
 
@@ -20,7 +20,7 @@ scripts/ops/retention.sh --only trading,auth  # 只跑这几个库（clickhouse 
 ssh exchange sudo systemctl enable --now exchange-retention.timer
 ```
 
-看状态与下次触发：`ssh exchange systemctl list-timers exchange-retention.timer`；输出：`ssh exchange journalctl -u exchange-retention`，同时追加在 `/opt/exchange/logs/retention.log`（超过 10 MB 轮转一份；日志目录与下面的指标目录由部署建好，脚本也会自建，`/opt/exchange` 属 ubuntu）。脚本拿服务器上的同一把运维锁（与部署、端到端、演练轮流，最多等一小时），跑完再跑一次 `exchangectl ledger reconcile`；**保留与对账都成功**（对账 13 项全 0）才把完成时间写进 `infra/metrics/exchange_retention.prom`——对账有差异时这次不算成功，两天后同样告警，差异本身另有 `ledger_reconcile_mismatches` 的告警。这个目录是 node exporter 的 textfile 目录：node exporter 要带 `--collector.textfile.directory=/opt/exchange/infra/metrics`（采集端与 node exporter 都还没部署，参数写在 `deploy/observability/prometheus.yml` 的 node 任务旁，见 [observability.md](observability.md)）。两天没成功告警 `RetentionRunStale`；完全没有这个指标 26 小时告警 `RetentionMetricAbsent`（node exporter 没读这个目录，或定时器没启用、从没跑成过）。
+看状态与下次触发：`ssh exchange systemctl list-timers exchange-retention.timer`；输出：`ssh exchange journalctl -u exchange-retention`，同时追加在 `/opt/exchange/logs/retention.log`（超过 10 MB 轮转一份；日志目录与下面的指标目录由部署建好，脚本也会自建，`/opt/exchange` 属 ubuntu）。脚本拿服务器上的同一把运维锁（与部署、端到端、演练轮流，最多等一小时），跑完再跑一次 `exchangectl ledger reconcile`；**保留与对账都成功**（对账 13 项全 0）才把完成时间写进 `infra/metrics/exchange_retention.prom`——对账有差异时这次不算成功，两天后同样告警，差异本身另有 `ledger_reconcile_mismatches` 的告警；`--dry-run` 不删，不写这个时间（不算当天那次）。这个目录是 node exporter 的 textfile 目录：node exporter 要带 `--collector.textfile.directory=/opt/exchange/infra/metrics`（采集端与 node exporter 都还没部署，参数写在 `deploy/observability/prometheus.yml` 的 node 任务旁，见 [observability.md](observability.md)）。两天没成功告警 `RetentionRunStale`；完全没有这个指标 26 小时告警 `RetentionMetricAbsent`（node exporter 没读这个目录，或定时器没启用、从没跑成过）。测试服眼下没有采集端，这两条告警不会响：每天看 `journalctl -u exchange-retention` 或 `retention.log` 的最后一次（`== … done` 一行）。
 
 ## 删什么、留什么
 
@@ -60,7 +60,7 @@ outbox、inbox、HTTP 幂等键不在这里：各服务的 janitor 已按 7 天�
 
 读模型同样只留 15 天（clickhouse 00013 的 TTL，按时间自动删除）：events、event_ingest_log、ledger_entries、orders、order_updates、derivatives_fills、derivatives_funding、derivatives_liquidations、margin_interest。后台报表要加总"本期之前"的，不删：注册事件（用户报表的"此前注册"）、账本里的杠杆利息行（利息报表结转的"欠息"）与现货成交表 trades（HOUSE 报表本期之前的持仓与资金，约 1 MB/天）；审计日志 audit_logs 是后台唯一的审计记录、量小，不删（clickhouse 00014，协调会话的决定）。不设 TTL：orders_state（订单当前状态，后台按交易对数挂单读它；按状态设 TTL 会删掉一个订单的最新版本、让旧版本回来）——由保留工具（`--only clickhouse`，或整次运行）每天按 order_id 轻量删除 15 天前已终态、且最后一次变更也在 15 天前的订单的全部行（挂了很久、最近才撤的单照样留 15 天，B201；dry-run 数的是这些行）；按 ID 的持仓/充值/提现/杠杆强平状态表（同理）、K 线（candles_1m，图表要历史）；futures_liquidations 保持 7 天。后台报表选超过 15 天的区间只看得到最近 15 天（上面几项"本期之前"的合计除外）；15 天前的状态读模型也不能再从 events 重建（它们已过期）。
 
-后台「谁持有」卡（各资产的持有人与系统账户）不再从 ledger_entries 加总：ledger-service 的 `ListHolders` 读账户当前余额（B199，后台会话改读，A123）——列出最大的 `limit` 个持有人（默认 100、最多 1,000），另给 `apart_user_ids`（后台按类型传机器人与 HOUSE，最多 1,000 个）与其余用户各自的合计与持有人数（B201）；系统账户照旧读 `GetSystemBalances`。
+后台「谁持有」卡（各资产的持有人与系统账户）不再从 ledger_entries 加总：ledger-service 的 `ListHolders` 读账户当前余额（B199，后台会话改读，A123）——列出最大的 `limit` 个持有人（最多 1,000；0 或不传为全部，与 B201 之前一样，B202），另给 `apart_user_ids`（后台按类型传机器人、系统与测试账户，最多 1,000 个）与其余用户各自的合计与持有人数（B201）；前 N 与两个合计出自同一条语句、同一时刻（B202）。系统账户照旧读 `GetSystemBalances`。
 
 ## 排查
 

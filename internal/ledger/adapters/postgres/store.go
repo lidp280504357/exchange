@@ -108,43 +108,44 @@ func (r accounts) MarginDebts(ctx context.Context) ([]domain.Account, error) {
 		'MARGIN_ISOLATED_DEBT', 'MARGIN_ISOLATED_INTEREST') AND available <> 0 ORDER BY owner_id, account_type, scope, asset`)
 }
 
-// holdings is what each user holds of the asset $1, the users holding
-// nothing left out.
-const holdings = `SELECT owner_id, sum(available + frozen) AS amount FROM accounts
-	WHERE owner_type = 'USER' AND asset = $1 GROUP BY owner_id HAVING sum(available + frozen) <> 0`
+// holders is who holds the asset $1 - each user's accounts of it summed,
+// the users holding nothing left out - in one statement, so the largest
+// and the sums are of one moment (B202): part 0 the $2 largest (NULL: all
+// of them), largest first; part 1 the sum of the users not among $3 and
+// part 2 of those among them, with how many hold more than zero.
+const holders = `WITH h AS (
+		SELECT owner_id, sum(available + frozen) AS amount FROM accounts
+		WHERE owner_type = 'USER' AND asset = $1 GROUP BY owner_id HAVING sum(available + frozen) <> 0)
+	SELECT 0 AS part, owner_id, amount, 0::bigint AS holders FROM (SELECT owner_id, amount FROM h ORDER BY amount DESC, owner_id LIMIT $2) top
+	UNION ALL
+	SELECT CASE WHEN owner_id = ANY($3) THEN 2 ELSE 1 END, '', coalesce(sum(amount), 0), count(*) FILTER (WHERE amount > 0) FROM h GROUP BY 1
+	ORDER BY 1, 3 DESC, 2`
 
 func (r accounts) Holders(ctx context.Context, asset string, limit int, apart []string) (domain.Holders, error) {
 	out := domain.Holders{Top: []domain.Holding{}}
-	rows, err := r.q.Query(ctx, holdings+` ORDER BY amount DESC, owner_id LIMIT $2`, asset, limit)
+	var lim any // NULL: no limit
+	if limit > 0 {
+		lim = limit
+	}
+	rows, err := r.q.Query(ctx, holders, asset, lim, apart)
 	if err != nil {
 		return out, fmt.Errorf("list holders: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
+		var part int
 		var h domain.Holding
-		if err := rows.Scan(&h.UserID, &h.Amount); err != nil {
+		var n int64
+		if err := rows.Scan(&part, &h.UserID, &h.Amount, &n); err != nil {
 			return out, fmt.Errorf("list holders: %w", err)
 		}
-		out.Top = append(out.Top, h)
-	}
-	if err := rows.Err(); err != nil {
-		return out, fmt.Errorf("list holders: %w", err)
-	}
-	if rows, err = r.q.Query(ctx, `SELECT owner_id = ANY($2) AS apart, coalesce(sum(amount), 0), count(*) FILTER (WHERE amount > 0)
-		FROM (`+holdings+`) h GROUP BY 1`, asset, apart); err != nil {
-		return out, fmt.Errorf("sum holders: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var isApart bool
-		var sum domain.HoldingSum
-		if err := rows.Scan(&isApart, &sum.Amount, &sum.Holders); err != nil {
-			return out, fmt.Errorf("sum holders: %w", err)
-		}
-		if isApart {
-			out.Apart = sum
-		} else {
-			out.Others = sum
+		switch part {
+		case 0:
+			out.Top = append(out.Top, h)
+		case 1:
+			out.Others = domain.HoldingSum{Amount: h.Amount, Holders: n}
+		default:
+			out.Apart = domain.HoldingSum{Amount: h.Amount, Holders: n}
 		}
 	}
 	return out, rows.Err()

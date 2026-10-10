@@ -48,8 +48,8 @@ type AccountRepo interface {
 	// something.
 	MarginDebts(ctx context.Context) ([]domain.Account, error)
 	// Holders lists the limit largest holders of asset (the users whose
-	// sum is not zero, largest first) and sums the users apart and the
-	// others.
+	// sum is not zero, largest first; 0 all) and sums the users apart and
+	// the others, all of one moment.
 	Holders(ctx context.Context, asset string, limit int, apart []string) (domain.Holders, error)
 }
 

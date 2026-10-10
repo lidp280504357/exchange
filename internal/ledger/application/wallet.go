@@ -188,28 +188,25 @@ func (s *Service) FundSystemAccount(ctx context.Context, key, accountType, asset
 	}, asset)
 }
 
-// Holders' limits (B201): how many of the largest holders a call lists by
-// default and at most, and how many users it sums apart.
+// Holders' limits (B201): how many of the largest holders a call may ask
+// for, and how many users it sums apart.
 const (
-	DefaultHolders = 100
-	MaxHolders     = 1000
-	MaxApart       = 1000
+	MaxHolders = 1000
+	MaxApart   = 1000
 )
 
-// Holders lists who holds an asset now - the limit largest holders, the
-// sums of the users apart and of the others: the console's holders card
-// (B199), which the ledger lines in ClickHouse no longer add up once they
-// expire (ADR-0022).
+// Holders lists who holds an asset now - the limit largest holders (0:
+// all of them, the answer before B201; B202), the sums of the users apart
+// and of the others: the console's holders card (B199), which the ledger
+// lines in ClickHouse no longer add up once they expire (ADR-0022).
 func (s *Service) Holders(ctx context.Context, asset string, limit int, apart []string) (domain.Holders, error) {
 	switch {
 	case strings.TrimSpace(asset) == "":
 		return domain.Holders{}, apperr.Invalid("asset is required")
 	case limit < 0 || limit > MaxHolders:
-		return domain.Holders{}, apperr.Invalid(fmt.Sprintf("limit must be 0 to %d", MaxHolders))
+		return domain.Holders{}, apperr.Invalid(fmt.Sprintf("limit must be 0 (all) to %d", MaxHolders))
 	case len(apart) > MaxApart:
 		return domain.Holders{}, apperr.Invalid(fmt.Sprintf("at most %d users apart", MaxApart))
-	case limit == 0:
-		limit = DefaultHolders
 	}
 	for _, id := range apart {
 		if _, err := uuid.Parse(id); err != nil {

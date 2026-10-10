@@ -13,8 +13,8 @@ import (
 // Holders: what each user holds of an asset now - available and frozen of
 // all its accounts - largest first, a user holding nothing left out (B199:
 // the console's holders card, which the ClickHouse lines no longer add up
-// once they expire); at most the limit listed, the users apart summed
-// apart from the others (B201).
+// once they expire); at most the limit listed (0: all, B202), the users
+// apart summed apart from the others (B201).
 func TestHolders(t *testing.T) {
 	svc, _, _ := setup(t)
 	ctx := context.Background()
