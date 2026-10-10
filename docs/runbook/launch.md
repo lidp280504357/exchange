@@ -16,7 +16,7 @@
 | 2 | 密钥全部重新生成 | `OTP_HMAC_KEY`、`JWT_SIGNING_KEY`/`JWT_KEY_ID`、`TOTP_SECRET_KEY`、`ADMIN_SECRET_KEY`、`SIM_API_SECRET`、`SIM_ADMIN_API_SECRET`、Postgres/Redis/ClickHouse 口令；**`CAPTCHA_BYPASS_TOKEN` 留空**（正式环境不得有绕过）。变量名清单见 `.env.example`；值只进服务器 `apps.env`/`.env` |
 | 3 | 第三方账号 | Turnstile 正式站点密钥与允许主机名（`turnstile.md`）；邮件服务密钥与已验证的发件域（`MAIL_FROM`）；优盾正式商户（`UDUN_*`，见步 6）；Alchemy 只服务 Sepolia 测试网，正式环境**不配** |
 | 4 | 参考数据 | 复制 `deploy/instruments/test.json` 为正式版：去掉 `ETH-SEPOLIA` 网络、去掉隐藏资产 `TUSD` 与 `UDUNMOCK` 托管方（它们只为端到端存在）、`provider_coin` 按优盾正式商户的 `support-coins` 核对（`custody.md`「直接问网关」）、费率与最小充提额按运营口径；`exchangectl instruments apply` |
-| 5 | 开关（`exchangectl flags`，见 `feature-flags.md`） | `admin.login_without_totp` **关**；`wallet.test_assets` **关**（并删掉地区规则）；`admin.two_person_approval` 开；`risk.enforce` 开；`market.house_liquidity` 开；`market.flat_minutes` 对 ASTRA 现货与永续开；`sim.enabled`/`sim.events`/`sim.perp` **开**（平台币的做市与控价必须有机器人交易，用户 2026-10-09 叮嘱；机器人账户见步 12）；`ledger.welcome_credit` 可保留开（数额由后台配 0 即不发）；`wallet.withdraw` 在步 6 完成前**关** |
+| 5 | 开关（`exchangectl flags`，见 `feature-flags.md`） | 后台登录需验证码已不再是开关，改在后台「设置」页打开（N1，见步 8）；`wallet.test_assets` **关**（并删掉地区规则）；`admin.two_person_approval` 开；`risk.enforce` 开；`market.house_liquidity` 开；`market.flat_minutes` 对 ASTRA 现货与永续开；`sim.enabled`/`sim.events`/`sim.perp` **开**（平台币的做市与控价必须有机器人交易，用户 2026-10-09 叮嘱；机器人账户见步 12）；`ledger.welcome_credit` 可保留开（数额由后台配 0 即不发）；`wallet.withdraw` 在步 6 完成前**关** |
 | 6 | 托管方切换与主网小额测试 | 按 `custody.md`「真网关联调」步骤 4、5（账本基线、退役替身地址、`apps.env` 并入 `UDUN_*`、只重启 wallet-service、核对；用户 TRC20 充值 ≥ 12 USDT、提现 10 USDT、确认手续费单位、收紧回调来源 IP）；正式环境没有 `udun-mock` 容器，compose 里去掉它 |
 | 7 | HOUSE 库存与上限 | HOUSE 的 USDT/BTC/ETH 是"背书资产"，正式环境必须是托管方真实持有的资金：先向商户钱包充入库存，再 `scripts/ops/house.sh seed` 到相应水平、`exchangectl wallet reconcile` 无短缺；HOUSE 的六项额度（每档、单资产、总、单合约、安全边际、合约杠杆）存在 market-maker 的库里、运行时可改（`market-maker.md`「运行时额度」有每项的用途与改动影响；compose 的 `HOUSE_*` 只是首次默认），正式环境按真实库存与风险承受设（测试服的 500,000,000 是放大过的，只为让市价单整单成交） |
 | 8 | 构建时的品牌 | `web/apps/{pc,m}/index.html` 的 `<title>` 与 `description`（供爬虫与分享卡片）在构建时写死，运行时注入只改脚本执行后的页面——上线前把这两个文件里的名称与描述改成正式值再部署（已知限制，见 §4） |
@@ -36,7 +36,7 @@
 5. **注册赠送**：全部配 **0**（降低与清零单人即可；以后要提高须第二位 ADMIN 并有硬上限）。
 6. **测试模式**：关（检查清单项 `test_mode`）。横幅与「测试模式」徽标随之消失，公告与各稿件的测试段落随之隐藏、正式段落显示（第 4 步）；切换后约 1 分钟内三端一致。
 7. **注册方式**：开放（或按运营节奏先关闭）。
-8. **管理员**：至少两名**真实**、已启用验证器的 ADMIN（端到端与演练创建的临时管理员会在结束时停用，不算数；检查清单的「管理员」项只在两名以上时为绿）；停用端到端留下的临时管理员；`admin.login_without_totp` 已在部署侧关掉。
+8. **管理员**：至少两名**真实**、已启用验证器的 ADMIN（端到端与演练创建的临时管理员会在结束时停用，不算数；检查清单的「管理员」项只在两名以上时为绿）；停用端到端留下的临时管理员；在后台「设置」页打开「登录需验证码」（N1，取代开关 `admin.login_without_totp`；只有已绑定的在职 ADMIN 能打开，开着时登录一律要验证码，紧急时只能用 admin-service 容器里的 CLI 关掉）。
 9. **交易参数**：要开盘的交易对与合约置 `TRADING`，其余 `HALT`/`PREPARE`；费率、风险阶梯、杠杆按运营口径；提现限额与审批限额、延迟。
 10. **上线检查清单**：全部绿（含「HOUSE 报价与资金」）；红的按链接去改。清单只看后台能改的项，部署侧以 §1 为准。第 19 项「App 下载」只作信息：显示两站当前提供的 Android/iOS 安装方式（外部链接或上传的包），未配置也算 OK，不影响"可上线"；在 系统 → App 下载 配置（App 下载页设计 2026-10-07，H4）。
 11. **开放提现**：步 6 完成且清单全绿后 `wallet.withdraw` 开。
