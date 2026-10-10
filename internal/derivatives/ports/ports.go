@@ -211,7 +211,8 @@ type RunRepo interface {
 
 // FillRepo stores each side of the trades.
 type FillRepo interface {
-	// Has reports whether the side of the trade is recorded.
+	// Has reports whether the side of the trade is recorded, or was: the
+	// retention keeps the keys of the fills it deleted (M1).
 	Has(ctx context.Context, tradeID string, side domain.Side) (bool, error)
 	Insert(ctx context.Context, f domain.Fill) error
 	// SetSettled marks a parked fill settled.

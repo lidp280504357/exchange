@@ -121,6 +121,25 @@ margin-service 的结果记在 `margin.reconciliation_runs`，指标 `margin_rec
 
 告警（`deploy/observability/alerts.yml`）：`MarginReconciliationMismatch`（任一检查有差异，critical）、`MarginInterestStalled`（2 小时没有完成的整点，warning：账本不可用，或某资产有借还卡在 `PENDING`——看 `margin.borrows`/`repays` 里 `PENDING` 的行与恢复循环的日志）。
 
+## 数据保留（M1）
+
+用户 2026-10-10 决定 Postgres 只留半个月：`exchangectl retention run [--dry-run] [--days 15]`（编码会话的工具，运维锁下跑，首轮人工、之后每日定时）按库调用各服务的 `Retention`，本服务的是 `internal/margin/adapters/postgres/retention.go`，每批 5,000 行、各自短事务：
+
+| 表 | 删除条件 |
+|---|---|
+| `interest_charges` | `DONE`、`created_at` 早于 15 天 |
+| `hourly_rates` | `hour` 早于 15 天 |
+| `interest_runs` | `DONE`、`hour` 早于 15 天，最新一条 `DONE` 永远留（计息从它往后补） |
+| `reconciliation_runs` | `started_at` 早于 15 天 |
+| `liquidation_orders`、`liquidations` | 强平 `COMPLETED`、`completed_at` 早于 15 天（先删其订单，外键） |
+| `borrows`、`repays`、`transfers` | 键记录：非 `PENDING`、`created_at` 早于 90 天 |
+| `order_reservations` | 键记录：`created_at` 早于 90 天 |
+
+不删（当前状态）：`accounts`、`loans`、`pools`、三张条款表，进行中（`STARTED`/`SHORTFALL`）的强平与其订单，`PENDING` 的借、还、划转与计息，`RUNNING` 的整点。
+
+- 借、还、划转与订单预留就是各自幂等键（客户端的 Idempotency-Key、订单的 `order:<id>`、自动还款的 `trade-repay:…`、清理的 `settle:<uuid>`）的记录，行很小，整行留 90 天；自动还款按 `repays` 的键去重，`ledger.events` 只留 7 天，够用。
+- 对账不受影响：不变量 7 与池子检查只读 `loans`、账本负债、`pools` 与 `PENDING` 借币，不读流水；真删之后跑一次 `exchangectl margin reconcile` 核对（不变量 8、9 在账本，编码会话做检查点）。
+
 ## 后台内部接口（C5）
 
 admin-service 经 margin-service 的 HTTP 端口调 `/internal/margin/*`（协调会话 2026-10-06 03:24 决定 ⑤⑥）：只在 compose 网络里，网关不转发 `/internal`，经网关来的请求（带 `X-User-Id`）一律 404；不签名，写操作带 `X-Admin-Id`（管理员邮箱，记为 `updated_by` / `frozen_by`）。审批与审计在 admin-service，margin-service 只照发来的内容按读到的版本改，并做自己的校验。字段名用本服务的列名。

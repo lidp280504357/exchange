@@ -322,7 +322,8 @@ export interface paths {
          *     shares of all accounts and of the top traders' accounts and
          *     positions, the takers' buy and sell volume, the basis and the
          *     settled funding rates; a series keeps the 500 latest points, none
-         *     older than 30 days. The latest limit points, oldest first, each
+         *     older than 15 days (the history Postgres keeps, M1). The latest
+         *     limit points, oldest first, each
          *     with the values of its metric (FuturesDataPoint). A contract the
          *     reference market does not trade (the platform coin's) is 404
          *     MARKET_NO_FUTURES_DATA (coordinator 2026-10-06 20:45; until the

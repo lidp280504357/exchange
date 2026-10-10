@@ -642,9 +642,10 @@ func TestFuturesStatsSpreadsTheLongPeriods(t *testing.T) {
 func TestFuturesStatsPurgesByPeriod(t *testing.T) {
 	s, _, repo, _ := newTestFutures(t)
 	s.Purge(context.Background())
+	// 501 periods, at most the 15 days Postgres keeps (M1).
 	want := map[string]time.Duration{
-		"5m": 501 * 5 * time.Minute, "15m": 501 * 15 * time.Minute, "1h": 501 * time.Hour, "4h": 30 * 24 * time.Hour,
-		"1d": 30 * 24 * time.Hour, "": 30 * 24 * time.Hour,
+		"5m": 501 * 5 * time.Minute, "15m": 501 * 15 * time.Minute, "1h": 15 * 24 * time.Hour, "4h": 15 * 24 * time.Hour,
+		"1d": 15 * 24 * time.Hour, "": 15 * 24 * time.Hour,
 	}
 	for period, kept := range want {
 		if got := repo.purged[period]; !got.Equal(futuresT0.Add(-kept)) {

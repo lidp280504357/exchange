@@ -332,9 +332,12 @@ type fills repos
 const fillColumns = `trade_id, side, order_id, user_id, symbol, position_side, maker, price, quantity, closed_quantity, fee,
 	fee_waived, realized_pnl, insurance, liquidation, sequence, executed_at, settled`
 
+// Has looks in fill_keys too: the retention keeps the keys of the fills
+// it deleted there (M1), and their trades may come again.
 func (r fills) Has(ctx context.Context, tradeID string, side domain.Side) (bool, error) {
 	var ok bool
-	err := r.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM fills WHERE trade_id = $1 AND side = $2)`, tradeID, side).Scan(&ok)
+	err := r.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM fills WHERE trade_id = $1 AND side = $2)
+		OR EXISTS (SELECT 1 FROM fill_keys WHERE trade_id = $1 AND side = $2)`, tradeID, side).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("look up fill: %w", err)
 	}

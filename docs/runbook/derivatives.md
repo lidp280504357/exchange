@@ -167,6 +167,27 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 
 手工：`exchangectl derivatives reconcile`（直接读两边的库，成交在途时可能有瞬时差异）。账本侧另有 `FUNDING_BATCHES_BALANCED`、`PNL_CLEARING_ONLY_PNL`（见 [ledger.md](ledger.md#对账)）。
 
+## 数据保留（M1）
+
+用户 2026-10-10 决定 Postgres 只留半个月：`exchangectl retention run [--dry-run] [--days 15]`（编码会话的工具，运维锁下跑，首轮人工、之后每日定时）按库调用各服务的 `Retention`，本服务的是 `internal/derivatives/adapters/postgres/retention.go`，每批 5,000 行、各自短事务：
+
+| 表 | 删除条件（cutoff = 现在 − 15 天） |
+|---|---|
+| `orders` | 已终态，且已解冻（或没冻结过），成交都已记到仓位（`consumed_quantity ≥ filled_quantity`），没有成交在等账本，`updated_at` 早于 cutoff |
+| `fills` | 已记账（`settled`）、不在 `pending_settlements`、`executed_at` 早于 cutoff；同一语句把 `(trade_id, side)` 搬进 `fill_keys`（迁移 derivatives 00009） |
+| `fill_keys` | `executed_at` 早于 90 天 |
+| `funding_payments`、`funding_rounds` | 轮次已结算或跳过、资金费时刻早于 cutoff（先删付款，外键） |
+| `conditional_orders` | 已结束（非 `ACTIVE`）、`updated_at` 早于 cutoff |
+| `cross_liquidations` | `DONE`、`done_at` 早于 cutoff |
+| `reconciliation_runs` | `started_at` 早于 cutoff |
+
+不删（当前状态）：`positions`（含平仓的行）、`settings`、`contract_states`、`cross_accounts`、`pending_settlements`，以及上面条件之外的行（生效中的止盈止损、未结束的订单、未结算的资金费轮次、进行中的全仓清算）。
+
+- 重投去重：引擎的成交在 topic 上留 30 天，删掉成交后靠 `fill_keys` 识别重投——`Fills().Has` 两张表都查，HOUSE 那一侧没有订单可查，不留键会重复记仓位。已删订单的订单事件只记一条日志后忽略（`engine update for an unknown contract order`）。
+- `client_order_id` 只在订单保留期内唯一（15 天，远超平台幂等键的 24 小时；协调会话 2026-10-10 19:0x 决定不另设键表），之后可以再用（同币安"未结订单内唯一"）。
+- 对账不受影响：不变量 6 只读当前仓位合计、账本 `PNL_CLEARING` 余额与等账本的结算，不读流水；真删之后跑一次 `exchangectl derivatives reconcile` 核对。
+- 用户能查到的订单、成交、资金费历史也只剩 15 天。
+
 ## 接口
 
 REST（经网关 `/v1/derivatives/*`，需登录）：

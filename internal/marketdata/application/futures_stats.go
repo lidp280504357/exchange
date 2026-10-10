@@ -46,9 +46,10 @@ const (
 	FuturesPoints = 500
 	// LiquidationsShown is the most recent liquidations served.
 	LiquidationsShown = 100
-	// futuresKept is the oldest a point may be (the source keeps 30
-	// days), liquidationsKept the oldest liquidation.
-	futuresKept      = 30 * 24 * time.Hour
+	// futuresKept is the oldest a point may be (Postgres keeps 15 days of
+	// history, the user's decision M1; the source keeps 30),
+	// liquidationsKept the oldest liquidation.
+	futuresKept      = 15 * 24 * time.Hour
 	liquidationsKept = 24 * time.Hour
 	// futuresListing is how often the contracts are read, and
 	// futuresPerpetuals the source's perpetuals (USDⓈ-M's exchangeInfo
