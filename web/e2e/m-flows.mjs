@@ -16,6 +16,7 @@ import {
   api, budgetBuy, cancelOrders, code, coinMarginCleared, colorsOf, contrastIssues, decimalIssues, flows, fmtTime, inboxCount, listDecimals, longAnimations, overflowX,
   PHONE_ANDROID, PHONE_IOS, phone, register, scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, textAligned, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
+import { pickLanguage } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.astras.vip" : APP);
@@ -719,10 +720,11 @@ for (const [name, device] of [["iPhone", PHONE_IOS], ["Android", PHONE_ANDROID]]
         // one now would only meet the resend cooldown). Closed, nothing is saved.
         await W.page.waitForFunction(() => [...document.querySelectorAll("[role=dialog] button")].some((b) => b.innerText.trim() === "发送验证码"), { timeout: 10000 });
         await W.page.keyboard.press("Escape");
+        // The language is a dropdown of each language's own name (F30).
         await nav(W, "/account/settings");
-        await W.clickButton("English");
+        await pickLanguage(W.page, "语言", "English");
         await W.waitText("Time zone", 10000);
-        await W.clickButton("简体中文");
+        await pickLanguage(W.page, "Language", "简体中文");
         await W.waitText("时区", 10000);
       } finally {
         await W.close();
