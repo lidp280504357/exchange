@@ -12,7 +12,7 @@
 
 | 步 | 做什么 | 说明 |
 |---|---|---|
-| 1 | 新服务器与域名 | 按 `server-deploy.md` 从零部署；`PUBLIC_DOMAIN` 设为正式域名；Cloudflare DNS 三个主机名（PC、`m.`、`admin.`）与源站证书按 `cloudflare-nginx-tls.md`；nginx 三个 server 块的 `server_name` 改为正式域名（配置文件在仓库，按域名出一份正式版）；Cloudflare 该域名的 IPv6 Compatibility 关掉（登录记录优先 IPv4，`cloudflare-nginx-tls.md` 第一节） |
+| 1 | 新服务器与域名 | 按 `server-deploy.md` 从零部署；`PUBLIC_DOMAIN` 设为正式域名；Cloudflare DNS 三个主机名（PC、`m.`、`admin.`）与源站证书按 `cloudflare-nginx-tls.md`；nginx 三个 server 块的 `server_name` 改为正式域名（配置文件在仓库，按域名出一份正式版）；Cloudflare 的 IPv6 Compatibility 保持默认开启（用户 2026-10-10 决定不关，登录记录里双栈客户端显示 IPv6；关闭的做法只在 `cloudflare-nginx-tls.md` 第一节备忘） |
 | 2 | 密钥全部重新生成 | `OTP_HMAC_KEY`、`JWT_SIGNING_KEY`/`JWT_KEY_ID`、`TOTP_SECRET_KEY`、`ADMIN_SECRET_KEY`、`SIM_API_SECRET`、`SIM_ADMIN_API_SECRET`、Postgres/Redis/ClickHouse 口令；**`CAPTCHA_BYPASS_TOKEN` 留空**（正式环境不得有绕过）。变量名清单见 `.env.example`；值只进服务器 `apps.env`/`.env` |
 | 3 | 第三方账号 | Turnstile 正式站点密钥与允许主机名（`turnstile.md`）；邮件服务密钥与已验证的发件域（`MAIL_FROM`）；优盾正式商户（`UDUN_*`，见步 6）；Alchemy 只服务 Sepolia 测试网，正式环境**不配** |
 | 4 | 参考数据 | 复制 `deploy/instruments/test.json` 为正式版：去掉 `ETH-SEPOLIA` 网络、去掉隐藏资产 `TUSD` 与 `UDUNMOCK` 托管方（它们只为端到端存在）、`provider_coin` 按优盾正式商户的 `support-coins` 核对（`custody.md`「直接问网关」）、费率与最小充提额按运营口径；`exchangectl instruments apply` |
