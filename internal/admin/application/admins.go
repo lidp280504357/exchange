@@ -167,9 +167,11 @@ func (s *Service) changeAdmin(ctx context.Context, p Principal, id, reason, acti
 var ErrLastBoundAdmin = apperr.New(apperr.KindConflict, "ADMIN_LAST_BOUND_ADMIN",
 	"sign-in asks for the authenticator code: at least one active ADMIN must keep a bound authenticator")
 
-// keepsBoundAdmin checks the roster with changed in it while the code
-// switch sw (locked) is on: an active ADMIN with a bound authenticator
-// must remain.
+// keepsBoundAdmin checks the roster before and with changed in it (its
+// row still as it was) while the code switch sw (locked) is on: a change
+// that takes away the last active ADMIN with a bound authenticator is
+// refused. With none left already (exchangectl's disable can do that), the
+// changes that take none away go on (A126).
 func keepsBoundAdmin(ctx context.Context, r ports.Repos, sw *domain.ConsoleAccess, changed domain.Admin) error {
 	if sw == nil || !sw.RequireTOTP {
 		return nil
@@ -178,12 +180,13 @@ func keepsBoundAdmin(ctx context.Context, r ports.Repos, sw *domain.ConsoleAcces
 	if err != nil {
 		return err
 	}
+	before := boundAdmins(list)
 	for i := range list {
 		if list[i].ID == changed.ID {
 			list[i] = changed
 		}
 	}
-	if boundAdmins(list) == 0 {
+	if before > 0 && boundAdmins(list) == 0 {
 		return ErrLastBoundAdmin
 	}
 	return nil

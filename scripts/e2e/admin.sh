@@ -247,6 +247,31 @@ else
     expect 200 - "the password and the code sign in"
     as AUDITOR GET /admin/v1/me ""
     expect 200 - "a session open before stays open"
+    # The last bound ADMIN stays (A124, A126 ③): while the code is asked
+    # for and this run's ADMIN is the only active ADMIN with an
+    # authenticator bound, another ADMIN (FINANCE for the while) neither
+    # resets it nor disables or demotes it.
+    as ADMIN GET /admin/v1/settings/access ""
+    if [[ $STATUS != 200 || $(jq -r .bound_admins <<<"$BODY") != 1 ]]; then
+      echo "skip the last bound ADMIN: another active ADMIN has one bound here ($STATUS)"
+    else
+      as ADMIN GET /admin/v1/me ""
+      ME_ID=$(jq -r .id <<<"$BODY")
+      as FINANCE GET /admin/v1/me ""
+      FIN_ID=$(jq -r .id <<<"$BODY")
+      as ADMIN POST "/admin/v1/admins/$FIN_ID/role" '{"role":"ADMIN","reason":"e2e: a second ADMIN for the while"}'
+      expect 200 - "FINANCE an ADMIN for the while, none bound with it"
+      as FINANCE POST "/admin/v1/admins/$ME_ID/totp-reset" '{"reason":"e2e: the last bound authenticator"}'
+      expect 409 ADMIN_LAST_BOUND_ADMIN "the last bound ADMIN's authenticator is not reset while the code is asked for"
+      as FINANCE POST "/admin/v1/admins/$ME_ID/status" '{"enabled":false,"reason":"e2e: the last bound ADMIN"}'
+      expect 409 ADMIN_LAST_BOUND_ADMIN "nor is it disabled"
+      as FINANCE POST "/admin/v1/admins/$ME_ID/role" '{"role":"AUDITOR","reason":"e2e: the last bound ADMIN"}'
+      expect 409 ADMIN_LAST_BOUND_ADMIN "nor demoted"
+      as ADMIN GET /admin/v1/me ""
+      check '.role == "ADMIN" and .totp_bound == true' "this run's ADMIN as it was"
+      as ADMIN POST "/admin/v1/admins/$FIN_ID/role" '{"role":"FINANCE","reason":"e2e: back to its job"}'
+      expect 200 - "FINANCE back to FINANCE"
+    fi
     as ADMIN PUT /admin/v1/settings/access/totp '{"enabled":false,"reason":"e2e: back to the password alone"}'
     expect 200 - "and switches it off again"
     check '.require_totp == false and .updated_by == "'"$EMAIL_ADMIN"'"' "off, by this run's ADMIN"

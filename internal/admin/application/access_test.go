@@ -341,8 +341,65 @@ func TestTheLastBoundAdminStays(t *testing.T) {
 	}
 	// A second bound ADMIN: the reset goes through.
 	h.admin(t, "second@example.com", domain.RoleAdmin)
-	h.login(t, "second@example.com") // the code checked at sign-in binds it
+	second := h.login(t, "second@example.com") // the code checked at sign-in binds it
 	if _, err := h.svc.ResetAdminTOTP(ctx, early, id, "lost the phone"); err != nil {
 		t.Fatalf("with another bound ADMIN: %v", err)
+	}
+	// The switch stored off: the only bound ADMIN's authenticator is reset (A126 ②).
+	if _, err := h.svc.SetRequireTOTP(ctx, second, false, testIP, "the password alone"); err != nil {
+		t.Fatal(err)
+	}
+	if h.store.access == nil || h.store.access.RequireTOTP {
+		t.Fatalf("stored %+v", h.store.access)
+	}
+	if _, err := h.svc.ResetAdminTOTP(ctx, early, h.idOf("second@example.com"), "a new phone"); err != nil {
+		t.Fatalf("the code switched off: %v", err)
+	}
+}
+
+// With no active ADMIN's authenticator bound while the code is asked for
+// (exchangectl's disable, past the console's checks, can leave it so), the
+// changes that take none away go on - a password reset, ending sessions, a
+// role or a status changed, an account enabled; one taking away a bound
+// ADMIN that came back is refused again (A126 ①).
+func TestNoBoundAdminLeftBlocksNothingElse(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "early@example.com", domain.RoleAdmin)
+	h.admin(t, "bound@example.com", domain.RoleAdmin)
+	h.admin(t, "staff@example.com", domain.RoleOperator)
+	h.store.access = &domain.ConsoleAccess{RequireTOTP: false}
+	if err := h.svc.LoadAccess(ctx); err != nil {
+		t.Fatal(err)
+	}
+	early, bound := h.login(t, "early@example.com"), h.login(t, "bound@example.com")
+	bind(t, h, bound, "bound@example.com")
+	if _, err := h.svc.SetRequireTOTP(ctx, bound, true, testIP, "the launch"); err != nil {
+		t.Fatal(err)
+	}
+	id, staff := h.idOf("bound@example.com"), h.idOf("staff@example.com")
+	a := h.store.admins[id]
+	a.Status = domain.StatusDisabled // exchangectl admin disable
+	h.store.admins[id] = a
+	if _, err := h.svc.ResetAdminPassword(ctx, early, staff, "forgot it"); err != nil {
+		t.Fatalf("a password reset: %v", err)
+	}
+	if err := h.svc.RevokeAdminSessions(ctx, early, staff, "ends them"); err != nil {
+		t.Fatalf("its sessions ended: %v", err)
+	}
+	if _, err := h.svc.SetAdminRole(ctx, early, staff, domain.RoleAuditor, "reads only"); err != nil {
+		t.Fatalf("an OPERATOR made an AUDITOR: %v", err)
+	}
+	if _, err := h.svc.SetAdminStatus(ctx, early, staff, false, "left"); err != nil {
+		t.Fatalf("disabled: %v", err)
+	}
+	if _, err := h.svc.SetAdminStatus(ctx, early, staff, true, "back"); err != nil {
+		t.Fatalf("an unbound account enabled: %v", err)
+	}
+	if _, err := h.svc.SetAdminStatus(ctx, early, id, true, "back"); err != nil {
+		t.Fatalf("the bound ADMIN enabled: %v", err)
+	}
+	if _, err := h.svc.SetAdminStatus(ctx, early, id, false, "left again"); code(err) != "ADMIN_LAST_BOUND_ADMIN" {
+		t.Fatalf("the last bound ADMIN again: %v", err)
 	}
 }
