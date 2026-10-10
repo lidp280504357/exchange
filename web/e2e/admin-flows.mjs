@@ -192,7 +192,9 @@ await f.step("3", "text contrast at least 4.5:1 (3:1 for large text), in the lig
     await A.page.reload({ waitUntil: "domcontentloaded" });
     await A.settled();
     await A.page.waitForFunction((th) => document.documentElement.dataset.theme === th, { timeout: 10000 }, theme);
-    for (const p of ["/", "/users", "/withdrawals?status=ALL", "/audit", "/launch"]) {
+    // The lists by account list the humans by default (L1); the test
+    // server's withdrawals are the scripts' accounts' (TEST): every kind.
+    for (const p of ["/", "/users", "/withdrawals?status=ALL&kind=ALL", "/audit", "/launch"]) {
       await nav(A, p);
       for (const g of await contrastIssues(A.page)) {
         const key = `${theme}: ${g.pair}`;
@@ -243,7 +245,7 @@ await f.step(
   "6",
   "offline shows 网络不可用 at once; a list asked for offline loads by itself back online, without a reload",
   async () => {
-    const O = await signedInAs(AU, { name: "offline", device: desktop(1280) }, "/users");
+    const O = await signedInAs(AU, { name: "offline", device: desktop(1280) }, "/users?kind=ALL");
     try {
       await rows(O);
       await O.page.evaluate(() => {
@@ -253,10 +255,10 @@ await f.step(
       await O.page.waitForFunction(() => [...document.querySelectorAll("[role=status]")].some((el) => el.innerText.includes("网络不可用")), { timeout: 10000 });
       // A list asked for while offline waits, and is read as soon as the network is back.
       await O.page.evaluate(() => {
-        history.pushState({}, "", "/users?status=ACTIVE");
+        history.pushState({}, "", "/users?kind=ALL&status=ACTIVE");
         dispatchEvent(new PopStateEvent("popstate"));
       });
-      await O.page.waitForFunction(() => location.search === "?status=ACTIVE", { timeout: 10000 });
+      await O.page.waitForFunction(() => location.search === "?kind=ALL&status=ACTIVE", { timeout: 10000 });
       const read = O.page.waitForResponse((r) => r.url().includes("/admin/v1/users?") && r.url().includes("status=ACTIVE") && r.ok(), { timeout: 30000 });
       await O.page.setOfflineMode(false);
       await read;
@@ -299,7 +301,7 @@ await f.step("10", "text cut short in the lists (IDs, emails, addresses) can be 
   const N = await signedInAs(AU, { name: "narrow", device: desktop(1024) });
   try {
     const found = [];
-    for (const p of ["/users", "/audit", "/withdrawals?status=ALL", "/orders", "/deposits"]) {
+    for (const p of ["/users?kind=ALL", "/audit", "/withdrawals?status=ALL&kind=ALL", "/orders?kind=ALL", "/deposits?kind=ALL"]) {
       await nav(N, p);
       await rows(N).catch(() => {});
       for (const x of await truncatedWithoutHint(N.page)) found.push(`${p}: ${x}`);
@@ -314,7 +316,8 @@ await f.step("10", "text cut short in the lists (IDs, emails, addresses) can be 
 
 await f.step("12", "amounts, prices and quantities right-aligned in tabular digits", async () => {
   const problems = [];
-  for (const [p, headers] of [["/orders", ["价格", "数量"]], ["/withdrawals?status=ALL", ["金额", "折合"]]]) {
+  // Every kind's (L1: the humans' by default, A116): the test server's withdrawals are the scripts' accounts'.
+  for (const [p, headers] of [["/orders?kind=ALL", ["价格", "数量"]], ["/withdrawals?status=ALL&kind=ALL", ["金额", "折合"]]]) {
     await nav(AU, p);
     await rows(AU).catch(() => {});
     const cells = await AU.page.evaluate((hs) => {
@@ -343,8 +346,8 @@ await f.step("12", "amounts, prices and quantities right-aligned in tabular digi
 // --- A1: lists ---------------------------------------------------------------------------------------
 
 await f.step("A1", "lists: filters live in the address and survive a reload; the next page loads on scroll; sortable columns sort", async () => {
-  // A filter.
-  await nav(AU, "/users");
+  // A filter (on every kind's accounts: the humans may be few).
+  await nav(AU, "/users?kind=ALL");
   await rows(AU);
   await AU.page.click('button[role=combobox][aria-label="状态"]');
   const option = await AU.page.waitForFunction(() => [...document.querySelectorAll("[role=option]")].find((o) => o.innerText.trim() === "正常") ?? null, { timeout: 5000 });
@@ -384,8 +387,8 @@ await f.step("A1", "lists: filters live in the address and survive a reload; the
 // --- A2: every dangerous action asks first, and nothing is written ------------------------------------------
 
 await f.step("A2", "every dangerous action opens a confirmation with a reason and a word (all canceled); the audit trail holds nothing of it", async () => {
-  // A user to act on: the first of the list.
-  await nav(A, "/users");
+  // A user to act on: the first test account of the list (every dialog is canceled all the same).
+  await nav(A, "/users?kind=TEST");
   await rows(A);
   const userId = await A.page.$eval("main tbody tr[data-row-id]", (r) => r.dataset.rowId);
   await nav(A, `/users/${userId}`);
@@ -414,8 +417,8 @@ await f.step("A2", "every dangerous action opens a confirmation with a reason an
   await rows(A);
   await menuItem(A, "main tbody tr[data-row-id]", "改为");
   await confirmation(A, "a pair's status");
-  // A withdrawal waiting for review, when there is one.
-  await nav(A, "/withdrawals");
+  // A withdrawal waiting for review, when there is one, of any kind of account.
+  await nav(A, "/withdrawals?kind=ALL");
   await A.settled();
   const pending = await A.page.$("main tbody tr[data-row-id]");
   if (pending) {
@@ -455,12 +458,12 @@ await f.step("A2", "every dangerous action opens a confirmation with a reason an
 await f.step("A3", "for an AUDITOR, actions are hidden, or disabled with the permission they need named", async () => {
   const problems = [];
   // Hidden.
-  await nav(AU, "/users");
+  await nav(AU, "/users?kind=ALL");
   await rows(AU);
   const userId = await AU.page.$eval("main tbody tr[data-row-id]", (r) => r.dataset.rowId);
   for (const [p, labels] of [
     [`/users/${userId}`, ["修改状态", "撤销全部挂单"]],
-    ["/withdrawals", ["批量批准", "批量拒绝"]],
+    ["/withdrawals?kind=ALL", ["批量批准", "批量拒绝"]],
     ["/announcements", ["新建公告"]],
     ["/help-articles", ["新建帮助文章"]],
     ["/sim/token", ["编辑"]],
