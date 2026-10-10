@@ -2,6 +2,8 @@ package retention_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +47,30 @@ func TestEstimatedBytes(t *testing.T) {
 	} {
 		if got := c.r.EstimatedBytes(); got != c.want {
 			t.Fatalf("%+v: %d, want %d", c.r, got, c.want)
+		}
+	}
+}
+
+// Apply refuses a window or a rule it cannot run before it reads anything
+// (B197): no batch (a LIMIT 0 that never ends), no cutoff, no statements.
+func TestApplyRefuses(t *testing.T) {
+	ctx := context.Background()
+	w := retention.Window{Now: time.Now(), Days: 15, KeyDays: 90, Batch: 10}
+	rule := retention.Rule{Table: "notes", Name: "old", Cutoff: w.History(), Where: "created_at < $1"}
+	noBatch := w
+	noBatch.Batch = 0
+	noCutoff := rule
+	noCutoff.Cutoff = time.Time{}
+	for name, c := range map[string]struct {
+		w retention.Window
+		r retention.Rule
+	}{
+		"no batch":      {noBatch, rule},
+		"no cutoff":     {w, noCutoff},
+		"no statements": {w, retention.Rule{Table: "notes", Name: "nothing", Cutoff: w.History()}},
+	} {
+		if _, err := retention.Apply(ctx, nil, c.w, c.r); err == nil {
+			t.Fatalf("%s: run", name)
 		}
 	}
 }
@@ -105,7 +131,25 @@ func TestApply(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM notes`).Scan(&left); err != nil || left != 7 {
 		t.Fatalf("%d rows left, want 7 (%v)", left, err)
 	}
-	if _, err := retention.Apply(ctx, db, w, retention.Rule{Table: "notes", Name: "nothing"}); err == nil {
+	if _, err := retention.Apply(ctx, db, w, retention.Rule{Table: "notes", Name: "nothing", Cutoff: w.History()}); err == nil {
 		t.Fatal("a rule with neither a condition nor statements was run")
+	}
+
+	// A run cut short between batches says where it stopped (B197).
+	if _, err := db.Exec(ctx, `INSERT INTO notes SELECT i, now() - interval '30 days' FROM generate_series(201, 203) i`); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	w.Batch, w.Pause = 1, time.Hour
+	res, err = retention.Apply(short, db, w, rule)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "notes (older than 15 days) stopped after 1 rows") || res.Rows != 1 {
+		t.Fatalf("cut short: %+v %v", res, err)
+	}
+	// A statement that fails names its table and rule.
+	bad := retention.Rule{Table: "notes", Name: "broken", Cutoff: w.History(), Where: "no_such_column < $1"}
+	w.Pause = 0
+	if _, err := retention.Apply(ctx, db, w, bad); err == nil || !strings.Contains(err.Error(), "notes (broken)") {
+		t.Fatalf("a failing statement: %v", err)
 	}
 }

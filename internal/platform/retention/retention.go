@@ -7,6 +7,12 @@
 // Only history is deleted, never current state; idempotency keys outlive
 // the rows they guarded (KeyDays), so a replay after the history is gone
 // is still told apart from a new request.
+//
+// A rule deletes by ctid, a batch at a time, the rows another transaction
+// holds skipped (SKIP LOCKED) rather than waited for: they go in the next
+// run. Each batch scans for its rows, so a large table wants an index its
+// condition can use, or rows laid down in the order they age (the table's
+// insert order), which a scan meets first.
 package retention
 
 import (
@@ -28,6 +34,7 @@ const (
 
 // Window is what a run keeps and how it deletes.
 type Window struct {
+	// Now, in UTC.
 	Now time.Time
 	// Days of history kept: rows older than Now - Days are deleted.
 	Days int
@@ -123,7 +130,7 @@ func (r Rule) statements() (count, del string) {
 			count = "SELECT count(*) FROM " + t + " WHERE " + r.Where
 		}
 		if del == "" {
-			del = "DELETE FROM " + t + " WHERE ctid IN (SELECT ctid FROM " + t + " WHERE " + r.Where + " LIMIT $2)"
+			del = "DELETE FROM " + t + " WHERE ctid IN (SELECT ctid FROM " + t + " WHERE " + r.Where + " LIMIT $2 FOR UPDATE SKIP LOCKED)"
 		}
 	}
 	return count, del
@@ -147,9 +154,15 @@ func ApplyAll(ctx context.Context, db *pg.DB, w Window, rules []Rule) ([]Result,
 // until a batch comes back short.
 func Apply(ctx context.Context, db *pg.DB, w Window, r Rule) (Result, error) {
 	res := Result{Table: r.Table, Rule: r.Name}
+	if err := w.Validate(); err != nil {
+		return res, err
+	}
 	count, del := r.statements()
-	if count == "" || del == "" {
+	switch {
+	case count == "" || del == "":
 		return res, fmt.Errorf("retention: the rule %q of %s has neither a condition nor statements", r.Name, r.Table)
+	case r.Cutoff.IsZero():
+		return res, fmt.Errorf("retention: the rule %q of %s has no cutoff", r.Name, r.Table)
 	}
 	var err error
 	if res.Total, res.Bytes, err = Stats(ctx, db, r.Table); err != nil {
@@ -170,11 +183,20 @@ func Apply(ctx context.Context, db *pg.DB, w Window, r Rule) (Result, error) {
 		if tag.RowsAffected() < int64(w.Batch) {
 			return res, nil
 		}
-		select {
-		case <-ctx.Done():
-			return res, ctx.Err()
-		case <-time.After(w.Pause):
+		if err := Wait(ctx, w.Pause); err != nil {
+			return res, fmt.Errorf("retention: %s (%s) stopped after %d rows: %w", r.Table, r.Name, res.Rows, err)
 		}
+	}
+}
+
+// Wait sleeps between batches, or returns the context's error once it is
+// done.
+func Wait(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
 }
 
