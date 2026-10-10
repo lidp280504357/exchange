@@ -101,11 +101,19 @@ ok "API reference at /docs/ ($(jq '.paths | length' <<<"$spec") paths)"
 curl -s "$BASE/storybook/index.json" | jq -e '.entries | length > 20' >/dev/null || fail "/storybook/ has no stories"
 ok "design system catalogue at /storybook/ ($(curl -s "$BASE/storybook/index.json" | jq '.entries | length') stories)"
 
+# The browser smokes name their accounts for this run (E2E_RUN, F38): the
+# exit hook marks them TEST and clears them out with the run's others, also
+# when a smoke fails before this script signs up its own.
+if [[ -z $MARKS_TEST_ACCOUNTS ]]; then
+  MARKS_TEST_ACCOUNTS=1
+  at_exit mark_test_accounts
+fi
+
 echo "== PC site in the browser"
-CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" node "$(dirname "$0")/../../web/e2e/pc-smoke.mjs"
+CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" E2E_RUN="$RUN" node "$(dirname "$0")/../../web/e2e/pc-smoke.mjs"
 
 echo "== mobile site in the browser"
-CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$M_BASE" node "$(dirname "$0")/../../web/e2e/m-smoke.mjs"
+CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$M_BASE" E2E_RUN="$RUN" node "$(dirname "$0")/../../web/e2e/m-smoke.mjs"
 
 echo "== a margin account for the console"
 # The console's smoke opens a margin account's detail (margin design §8,

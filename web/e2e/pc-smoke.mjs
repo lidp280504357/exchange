@@ -33,7 +33,10 @@ import {
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
 
-const run = Date.now();
+// The run's name: web.sh's or webflows.sh's RUN (E2E_RUN), so their exit hook
+// marks the accounts named for it TEST and clears them out (F38); run by
+// hand, the time.
+const run = process.env.E2E_RUN || Date.now();
 const email = `e2e-pc-${run}@example.com`;
 const password = `e2e pc site ${run}`;
 

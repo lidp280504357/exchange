@@ -57,16 +57,21 @@ make_admin() {
   at_exit "remote \"sudo docker compose \$COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $MADE_EMAIL --reason 'e2e flows over'\" >/dev/null"
 }
 
+# The checklists name their accounts for this run (E2E_RUN, F38): the exit
+# hook marks them TEST and clears them out.
+MARKS_TEST_ACCOUNTS=1
+at_exit mark_test_accounts
+
 failed=()
 for site in "${sites[@]}"; do
   case $site in
     pc)
       echo "== PC site's checklist ($BASE)"
-      APP="$BASE" node "$FLOWS/pc-flows.mjs" || failed+=(pc)
+      APP="$BASE" E2E_RUN="$RUN" node "$FLOWS/pc-flows.mjs" || failed+=(pc)
       ;;
     m)
       echo "== mobile site's checklist ($M_BASE)"
-      APP="$M_BASE" node "$FLOWS/m-flows.mjs" || failed+=(m)
+      APP="$M_BASE" E2E_RUN="$RUN" node "$FLOWS/m-flows.mjs" || failed+=(m)
       ;;
     admin)
       echo "== admin console's checklist ($ADMIN_BASE)"

@@ -22,7 +22,10 @@ const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://m.
 const PC_APP = APP.startsWith("http://localhost") ? APP.replace(/:\d+$/, ":5173") : APP.replace("://m.", "://");
 
 const f = await flows({ site: "m", app: APP, api: API });
-const run = Date.now();
+// The run's name: web.sh's or webflows.sh's RUN (E2E_RUN), so their exit hook
+// marks the accounts named for it TEST and clears them out (F38); run by
+// hand, the time.
+const run = process.env.E2E_RUN || Date.now();
 const user = { email: `e2e-mflows-${run}@example.com`, password: `e2e mobile flows ${run}` };
 const WIDTHS = [360, 390, 430];
 const PUBLIC = ["/", "/markets", "/trade/BTC-USDT", "/futures/BTC-USDT-PERP", "/me", "/coin/BTC", "/announcements", "/help", "/legal/terms", "/account/settings"];
