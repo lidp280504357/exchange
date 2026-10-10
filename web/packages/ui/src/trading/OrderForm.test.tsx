@@ -265,10 +265,11 @@ describe("OrderForm", () => {
     // still - the arrival's effect plays on, the 100% mark is reached and
     // its label lit.
     expect(field("Amount").value).toBe("0.5321");
-    expect(Number(container.querySelector("[role=slider]")?.getAttribute("aria-valuenow"))).toBeLessThan(100);
+    expect(Number(container.querySelector("[role=slider]")?.getAttribute("aria-valuenow"))).toBeCloseTo(99.98, 2);
     expect(container.querySelector(".slider-fx:not(.slider-thumb-halo)")).not.toBeNull();
-    expect(hundred.className).toContain("text-fg-1");
+    // By class token: the label's own hover:text-fg-1 holds the text too (B193).
+    expect(hundred.classList.contains("text-fg-1")).toBe(true);
     const dots = [...container.querySelectorAll<HTMLElement>("span.rotate-45")];
-    expect(dots.at(-1)?.className).toContain("bg-down");
+    expect(dots.at(-1)?.classList.contains("bg-down")).toBe(true);
   });
 });
