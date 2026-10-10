@@ -263,7 +263,7 @@ export default {
       type: "類型",
       allTypes: "全部類型",
       range: "時間",
-      ranges: { all: "全部", "7d": "近 7 天", "30d": "近 30 天", "90d": "近 90 天", custom: "自定義" },
+      ranges: { all: "全部", "7d": "近 7 天", "15d": "近 15 天", custom: "自定義" },
       from: "開始日期",
       to: "結束日期",
       reset: "重設篩選",

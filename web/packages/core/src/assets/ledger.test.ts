@@ -25,7 +25,7 @@ describe("time ranges", () => {
 
   it("rolls presets back from now", () => {
     expect(presetRange("7d", now)).toEqual({ from: Date.parse("2026-09-23T12:00:00Z"), to: null });
-    expect(presetRange("90d", now).from).toBe(Date.parse("2026-07-02T12:00:00Z"));
+    expect(presetRange("15d", now).from).toBe(Date.parse("2026-09-15T12:00:00Z"));
     expect(presetRange("all", now)).toEqual({ from: null, to: null });
   });
 

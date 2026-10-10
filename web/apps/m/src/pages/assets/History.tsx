@@ -18,7 +18,7 @@ import { PullToRefresh } from "../../components/PullToRefresh";
 type Preset = RangePreset | "custom";
 type Filters = { asset: string; type: string; preset: Preset; fromDate: string; toDate: string };
 
-const PRESETS: Preset[] = ["all", "7d", "30d", "90d", "custom"];
+const PRESETS: Preset[] = ["all", "7d", "15d", "custom"];
 /** Pages fetched on their own while the time range still shows almost nothing (entries newer than it). */
 const AUTO_PAGES = 20;
 /** Fewer rows than this do not fill a phone screen. */

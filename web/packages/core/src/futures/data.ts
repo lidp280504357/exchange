@@ -44,7 +44,7 @@ export function isFuturesPeriod(v: string | null | undefined): v is FuturesPerio
   return (FUTURES_PERIODS as readonly string[]).includes(v ?? "");
 }
 
-/** Points a chart shows: as many as the reference market's own pages (30 days of 1d). */
+/** Points a chart asks for: as many as the reference market's own pages show; the service keeps 15 days of a series (M1), so a 1d chart has 15. */
 export const FUTURES_POINTS = 30;
 
 /** How long after a period ends its point is in: the service reads the reference market about 70 seconds after (G3b). */

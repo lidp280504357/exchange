@@ -67,7 +67,7 @@ describe("assets page strings", () => {
       ...["risk", "review", "sign", "broadcast", "confirm", "custody", "done"].map((s) => `mAssets.withdraw.steps.${s}`),
       ...["ADDRESS_FORMAT", "ADDRESS_CHECKSUM", "ADDRESS_NETWORK", "MEMO_REQUIRED", "ADDRESS_OWN", "ADDRESS_RETIRED"].map((r) => `mAssets.withdraw.reasons.${r}`),
       ...["NEW_ACCOUNT", "NEW_DEVICE", "SECURITY_CHANGE", "NEW_ADDRESS", "LARGE_AMOUNT", "DAILY_SHARE"].map((r) => `mAssets.withdraw.risk.${r}`),
-      ...["all", "7d", "30d", "90d", "custom"].map((p) => `mAssets.history.ranges.${p}`),
+      ...["all", "7d", "15d", "custom"].map((p) => `mAssets.history.ranges.${p}`),
       ...["available", "frozen"].map((k) => `mAssets.overview.${k}`),
     ];
     for (const k of dynamic) {

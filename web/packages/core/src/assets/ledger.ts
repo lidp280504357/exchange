@@ -70,7 +70,8 @@ export function ledgerRelation(entryType: string, accountType = "SPOT"): LedgerR
 /** A time range as epoch milliseconds: from inclusive, to exclusive; null is open. */
 export type TimeRange = { from: number | null; to: number | null };
 
-export type RangePreset = "all" | "7d" | "30d" | "90d";
+/** The rolling windows offered: the server keeps the last 15 days of entries (M1, user 2026-10-10), so none reaches further. */
+export type RangePreset = "all" | "7d" | "15d";
 
 const DAY = 86_400_000;
 
@@ -79,10 +80,8 @@ export function presetRange(preset: RangePreset, now: number = Date.now()): Time
   switch (preset) {
     case "7d":
       return { from: now - 7 * DAY, to: null };
-    case "30d":
-      return { from: now - 30 * DAY, to: null };
-    case "90d":
-      return { from: now - 90 * DAY, to: null };
+    case "15d":
+      return { from: now - 15 * DAY, to: null };
     default:
       return { from: null, to: null };
   }

@@ -306,7 +306,7 @@ function Filters({
           value={preset}
           onValueChange={(v) => onPreset(v as Preset)}
           aria-label={t("pcAssets.history.range")}
-          items={(["all", "7d", "30d", "90d", "custom"] as const).map((p) => ({ value: p, label: t(`pcAssets.history.ranges.${p}`) }))}
+          items={(["all", "7d", "15d", "custom"] as const).map((p) => ({ value: p, label: t(`pcAssets.history.ranges.${p}`) }))}
         />
       </FormField>
       {preset === "custom" && (
