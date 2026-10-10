@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadContracts } from "./contract.mjs";
-import { noteRegistered, start } from "./lib.mjs";
+import { noteRegistered, noteSignUp, start } from "./lib.mjs";
 
 /** OUT is the run's output directory: failure screenshots and logs. */
 export const OUT = process.env.FLOWS_OUT ?? join(homedir(), ".cache", "exchange-e2e", "flows", new Date().toISOString().replace(/[:.]/g, "-"));
@@ -241,6 +241,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
       } catch {
         return; // navigated away
       }
+      noteSignUp(r, body);
       const problem = contracts.check(req.method(), path, r.status(), body);
       if (problem) violations.add(problem);
     });
@@ -669,7 +670,7 @@ export async function register(base, bypass, email, password) {
     terms_version: terms.body.terms_version, risk_disclosure_version: terms.body.risk_disclosure_version, device_id: device,
   });
   if (done.status !== 201) throw new Error(`register/complete: ${done.status} ${JSON.stringify(done.body)}`);
-  noteRegistered(done.body.user_id);
+  noteRegistered(done.body?.user_id);
   return { email, password, accessToken: done.body.access_token };
 }
 

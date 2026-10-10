@@ -106,11 +106,8 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
     } catch {
       return; // body unavailable (navigated away)
     }
-    if (typeof body?.user_id === "string" && typeof body?.access_token === "string") {
-      userId = body.user_id;
-      // A sign-up, not a sign-in: the run's exit hook clears the account out (F38).
-      if (r.status() === 201 && new URL(r.url()).pathname === "/v1/auth/register/complete") noteRegistered(body.user_id);
-    }
+    if (typeof body?.user_id === "string" && typeof body?.access_token === "string") userId = body.user_id;
+    noteSignUp(r, body);
     const path = new URL(r.url()).pathname;
     if (!path.startsWith(apiPrefix) || path.startsWith("/v1/dev/") || path === "/v1/ws") return;
     const problem = contracts.check(r.request().method(), path, r.status(), body);
@@ -518,7 +515,17 @@ export function indicatorsAway(page, scope) {
  */
 export function noteRegistered(userId) {
   const file = process.env.E2E_REGISTERED;
-  if (file && userId) appendFileSync(file, `${userId}\n`);
+  if (file && typeof userId === "string" && userId) appendFileSync(file, `${userId}\n`);
+}
+
+/**
+ * noteSignUp notes the account a page's sign-up made (a 201 from
+ * register/complete) for the exit hook: the smokes' pages (start) and the
+ * flows' tabs (flows-lib.mjs, the phone walk's) sign up through the form
+ * as well as over the API (F38, F45).
+ */
+export function noteSignUp(r, body) {
+  if (r.status() === 201 && new URL(r.url()).pathname === "/v1/auth/register/complete") noteRegistered(body?.user_id);
 }
 
 /** note prints what a run could not check here, without failing it. */
