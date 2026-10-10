@@ -153,6 +153,9 @@ func (r journals) Payee(ctx context.Context, journalID string) (string, error) {
 	return user, nil
 }
 
+// ByIdemKey finds the journal posted with key, or the key of one the
+// retention run deleted (ADR-0022): its lines are gone, its key, hash and
+// ID are what a replay needs.
 func (r journals) ByIdemKey(ctx context.Context, key string) (*domain.Journal, error) {
 	var j domain.Journal
 	var id uuid.UUID
@@ -160,7 +163,7 @@ func (r journals) ByIdemKey(ctx context.Context, key string) (*domain.Journal, e
 	err := r.q.QueryRow(ctx, `SELECT id, seq, idem_key, request_hash, entry_type, source_event_id, trace_id, memo, posted_at
 		FROM journals WHERE idem_key = $1`, key).Scan(&id, &j.Seq, &j.IdemKey, &j.RequestHash, &j.EntryType, &source, &j.TraceID, &j.Memo, &j.PostedAt)
 	if pg.IsNoRows(err) {
-		return nil, nil
+		return r.deletedKey(ctx, key)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load journal: %w", err)
@@ -169,6 +172,23 @@ func (r journals) ByIdemKey(ctx context.Context, key string) (*domain.Journal, e
 	if source != nil {
 		j.SourceEventID = source.String()
 	}
+	return &j, nil
+}
+
+// deletedKey is the journal of a key the retention run kept, nil when
+// there is none.
+func (r journals) deletedKey(ctx context.Context, key string) (*domain.Journal, error) {
+	var j domain.Journal
+	var id uuid.UUID
+	err := r.q.QueryRow(ctx, `SELECT journal_id, seq, idem_key, request_hash, entry_type, posted_at FROM journal_keys WHERE idem_key = $1`,
+		key).Scan(&id, &j.Seq, &j.IdemKey, &j.RequestHash, &j.EntryType, &j.PostedAt)
+	if pg.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load a deleted journal's key: %w", err)
+	}
+	j.ID = id.String()
 	return &j, nil
 }
 

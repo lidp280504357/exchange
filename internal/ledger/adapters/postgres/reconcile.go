@@ -72,6 +72,10 @@ type CheckResult struct {
 	Mismatches []Mismatch
 }
 
+// The checks that add up the history count what the retention run deleted
+// of it as its checkpoints (ADR-0022): an account's balance is its
+// checkpoint and its lines left, the trades and their settlement journals
+// each their checkpoint and what is left.
 var checks = []struct {
 	name string
 	sql  string
@@ -79,12 +83,17 @@ var checks = []struct {
 	{CheckJournalBalanced, `SELECT journal_id::text || '/' || asset, 'sum ' || sum(amount)::text FROM journal_lines
 		GROUP BY journal_id, asset HAVING sum(amount) <> 0 LIMIT 100`},
 	{CheckAccountMatchesLines, `SELECT a.id::text, format('available %s vs lines %s, frozen %s vs lines %s',
-		a.available, COALESCE(s.available, 0), a.frozen, COALESCE(s.frozen, 0))
+		a.available, COALESCE(s.available, 0) + COALESCE(c.available, 0), a.frozen, COALESCE(s.frozen, 0) + COALESCE(c.frozen, 0))
 		FROM accounts a LEFT JOIN (
 			SELECT account_id, sum(amount) FILTER (WHERE balance_kind = 'AVAILABLE') AS available,
 				sum(amount) FILTER (WHERE balance_kind = 'FROZEN') AS frozen
 			FROM journal_lines GROUP BY account_id) s ON s.account_id = a.id
-		WHERE a.available <> COALESCE(s.available, 0) OR a.frozen <> COALESCE(s.frozen, 0) LIMIT 100`},
+		LEFT JOIN (
+			SELECT key AS account_id, sum(amount) FILTER (WHERE name = 'ACCOUNT_AVAILABLE') AS available,
+				sum(amount) FILTER (WHERE name = 'ACCOUNT_FROZEN') AS frozen
+			FROM checkpoints WHERE name IN ('ACCOUNT_AVAILABLE', 'ACCOUNT_FROZEN') GROUP BY key) c ON c.account_id = a.id::text
+		WHERE a.available <> COALESCE(s.available, 0) + COALESCE(c.available, 0)
+			OR a.frozen <> COALESCE(s.frozen, 0) + COALESCE(c.frozen, 0) LIMIT 100`},
 	{CheckSnapshotMatchesAccnt, `SELECT a.id::text, format('account %s/%s v%s, last line %s/%s v%s',
 		a.available, a.frozen, a.version, l.available_after, l.frozen_after, l.account_version)
 		FROM accounts a JOIN LATERAL (
@@ -93,17 +102,24 @@ var checks = []struct {
 		WHERE a.available <> l.available_after OR a.frozen <> l.frozen_after OR a.version <> l.account_version LIMIT 100`},
 	{CheckTradesSettled, `SELECT trade_id::text, error_code || ': ' || error FROM trades WHERE status = 'FAILED'
 		ORDER BY recorded_at LIMIT 100`},
-	{CheckTradesNumbered, `SELECT symbol, format('%s trades recorded, numbered up to %s', count(*), max(trade_number))
-		FROM trades GROUP BY symbol HAVING max(trade_number) > 0 AND count(*) <> max(trade_number) LIMIT 100`},
+	{CheckTradesNumbered, `SELECT t.symbol, format('%s trades recorded, numbered up to %s', count(*) + COALESCE(max(c.count), 0), max(t.trade_number))
+		FROM trades t LEFT JOIN checkpoints c ON c.name = 'TRADES' AND c.key = t.symbol
+		GROUP BY t.symbol HAVING max(t.trade_number) > 0 AND count(*) + COALESCE(max(c.count), 0) <> max(t.trade_number) LIMIT 100`},
 	{CheckTradeSettleMatches, `WITH expected AS (
 			SELECT asset, sum(amount) AS amount FROM (
 				SELECT base_asset AS asset, quantity AS amount FROM trades WHERE status = 'SETTLED'
 				UNION ALL
-				SELECT quote_asset, quote_quantity FROM trades WHERE status = 'SETTLED') t
+				SELECT quote_asset, quote_quantity FROM trades WHERE status = 'SETTLED'
+				UNION ALL
+				SELECT key, amount FROM checkpoints WHERE name = 'TRADE_SETTLE_EXPECTED') t
 			GROUP BY asset),
 		booked AS (
-			SELECT l.asset, sum(l.amount) AS amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
-			WHERE j.entry_type IN ('TRADE_SETTLE', 'HOUSE_TRADE_SETTLE', 'MARGIN_TRADE_SETTLE') AND l.amount > 0 GROUP BY l.asset)
+			SELECT asset, sum(amount) AS amount FROM (
+				SELECT l.asset, l.amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+				WHERE j.entry_type IN ('TRADE_SETTLE', 'HOUSE_TRADE_SETTLE', 'MARGIN_TRADE_SETTLE') AND l.amount > 0
+				UNION ALL
+				SELECT key, amount FROM checkpoints WHERE name = 'TRADE_SETTLE_BOOKED') b
+			GROUP BY asset)
 		SELECT COALESCE(e.asset, b.asset), format('trades %s, TRADE_SETTLE %s', COALESCE(e.amount, 0), COALESCE(b.amount, 0))
 		FROM expected e FULL JOIN booked b ON b.asset = e.asset
 		WHERE COALESCE(e.amount, 0) <> COALESCE(b.amount, 0) LIMIT 100`},
@@ -111,13 +127,18 @@ var checks = []struct {
 			SELECT asset, sum(amount) AS amount FROM (
 				SELECT base_asset AS asset, buyer_fee AS amount FROM trades WHERE status = 'SETTLED'
 				UNION ALL
-				SELECT quote_asset, seller_fee FROM trades WHERE status = 'SETTLED') t
+				SELECT quote_asset, seller_fee FROM trades WHERE status = 'SETTLED'
+				UNION ALL
+				SELECT key, amount FROM checkpoints WHERE name = 'TRADE_FEE_EXPECTED') t
 			GROUP BY asset),
 		booked AS (
-			SELECT l.asset, sum(l.amount) AS amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
-			JOIN accounts a ON a.id = l.account_id
-			WHERE j.entry_type = 'TRADE_FEE' AND a.account_type = 'FEE_REVENUE' AND j.idem_key NOT LIKE 'futures:%'
-			GROUP BY l.asset)
+			SELECT asset, sum(amount) AS amount FROM (
+				SELECT l.asset, l.amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+				JOIN accounts a ON a.id = l.account_id
+				WHERE j.entry_type = 'TRADE_FEE' AND a.account_type = 'FEE_REVENUE' AND j.idem_key NOT LIKE 'futures:%'
+				UNION ALL
+				SELECT key, amount FROM checkpoints WHERE name = 'TRADE_FEE_BOOKED') b
+			GROUP BY asset)
 		SELECT COALESCE(e.asset, b.asset), format('trades %s, TRADE_FEE %s', COALESCE(e.amount, 0), COALESCE(b.amount, 0))
 		FROM expected e FULL JOIN booked b ON b.asset = e.asset
 		WHERE COALESCE(e.amount, 0) <> COALESCE(b.amount, 0) LIMIT 100`},
