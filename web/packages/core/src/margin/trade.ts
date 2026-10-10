@@ -6,7 +6,7 @@ import { accountKeys } from "../assets/hooks";
 import { useTerminalPrefs } from "../trading/prefs";
 import * as dec from "../format/decimal";
 import { selectSignedIn, useSession } from "../session/store";
-import { retryServerErrors } from "../wallet/hooks";
+import { retryServerErrors } from "../api/errors";
 import { accountOf } from "./form";
 import { marginKeys, useMarginAccounts, useMarginAssets, useMarginOpen, useMarginPairs } from "./hooks";
 import { balanceOf, type MarginAccount, type MarginAsset, type MarginPair } from "./math";

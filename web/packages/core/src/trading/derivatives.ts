@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { derivativesApi, marketApi, unwrap } from "../api/client";
+import { retryServerErrors } from "../api/errors";
 import type { components } from "../api/gen/derivatives";
 import type { components as MarketComponents } from "../api/gen/market";
 import { useChannel } from "../market/hooks";
@@ -67,14 +68,19 @@ function useSignedIn() {
 
 /**
  * useFuturesAccount is the caller's FUTURES account of a settlement asset
- * at the mark prices: USDT's, or the coin's of a coin-margined contract.
+ * at the mark prices (margin balance, unrealized PnL, transferable, a
+ * cross liquidation in progress): USDT's, or the coin's of a
+ * coin-margined contract. The terminals and the assets pages share it
+ * (F42); enabled holds the read back (a transfer page not moving out of
+ * FUTURES).
  */
-export function useFuturesAccount(asset = "USDT") {
+export function useFuturesAccount(asset = "USDT", { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: dk.account(asset),
     queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account", { params: { query: { asset: asset === "USDT" ? undefined : asset } } })),
-    enabled: useSignedIn() && asset !== "",
-    staleTime: 30_000,
+    enabled: useSignedIn() && enabled && asset !== "",
+    staleTime: 10_000,
+    retry: retryServerErrors,
   });
 }
 

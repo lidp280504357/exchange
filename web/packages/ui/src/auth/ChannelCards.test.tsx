@@ -44,6 +44,12 @@ describe("ChannelCards", () => {
     expect(onChange).toHaveBeenCalledWith("SMS");
   });
 
+  it("holds the cards' places while the identities load", () => {
+    render(<ChannelCards options={[]} value="EMAIL" onValueChange={() => {}} loading />);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.getByTestId("otp-channel-loading").getAttribute("aria-busy")).toBe("true");
+  });
+
   it("says where the code goes, without a choice, for a single channel", () => {
     render(<ChannelCards options={[{ channel: "SMS", target: "+86138****1234", bound: true }]} value="SMS" onValueChange={() => {}} />);
     expect(screen.queryByRole("radiogroup")).toBeNull();

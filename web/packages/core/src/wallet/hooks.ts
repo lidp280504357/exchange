@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { unwrap, walletApi } from "../api/client";
-import { ApiError } from "../api/errors";
+import { retryServerErrors } from "../api/errors";
 import { stepUpHeaders } from "../auth/stepup";
 import { useChannel } from "../market/hooks";
 import { qk } from "../query/keys";
@@ -26,14 +26,8 @@ export const walletKeys = {
   limits: qk.withdrawLimits,
 };
 
-/**
- * retryServerErrors retries a failed query once when the server or the
- * network failed; a refusal (4xx: not eligible, unknown network) is final.
- */
-export function retryServerErrors(failures: number, error: unknown): boolean {
-  if (error instanceof ApiError && error.status < 500) return false;
-  return failures < 1;
-}
+// retryServerErrors lives beside ApiError; its importers here still find it.
+export { retryServerErrors };
 
 /** useDebounced returns value once it has stopped changing for `ms`. */
 export function useDebounced<T>(value: T, ms = 400): T {

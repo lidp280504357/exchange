@@ -2,6 +2,7 @@ import type { OtpChannel } from "@exchange/core/auth/otp";
 import { Check, Mail, Smartphone } from "lucide-react";
 import { RadioGroup as RRadio } from "radix-ui";
 import { useTranslation } from "react-i18next";
+import { Skeleton } from "../components/Skeleton";
 import { cn } from "../lib/cn";
 
 /** A way a code can go: its channel, the masked email or phone when known, and whether the account has it. */
@@ -13,6 +14,8 @@ export type ChannelCardsProps = {
   onValueChange: (channel: OtpChannel) => void;
   /** lg: the phone's taller cards. */
   size?: "md" | "lg";
+  /** While the account's identities load: two cards' places, the same size (F41). */
+  loading?: boolean;
   className?: string;
 };
 
@@ -26,9 +29,21 @@ const ICONS = { EMAIL: Mail, SMS: Smartphone } as const;
  * single channel there is nothing to pick: one line says where the code
  * goes. Arrow keys move between the cards (a radio group).
  */
-export function ChannelCards({ options, value, onValueChange, size = "md", className }: ChannelCardsProps) {
+export function ChannelCards({ options, value, onValueChange, size = "md", loading, className }: ChannelCardsProps) {
   const { t } = useTranslation();
   const where = (o: ChannelOption) => o.target ?? t(`ui.otpChannel.yours.${o.channel}`);
+  if (loading) {
+    return (
+      <div aria-busy="true" data-testid="otp-channel-loading" className={cn("grid auto-cols-fr grid-flow-col gap-2", className)}>
+        {[0, 1].map((i) => (
+          <div key={i} className={cn("flex flex-col gap-1 rounded-2 border border-line-1 bg-bg-2 px-3", size === "lg" ? "py-3" : "py-2.5")}>
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-4 w-full" />
+          </div>
+        ))}
+      </div>
+    );
+  }
   if (options.length === 1) {
     const [only] = options as [ChannelOption];
     const Icon = ICONS[only.channel];

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { marketApi, unwrap } from "../api/client";
-import { ApiError } from "../api/errors";
+import { ApiError, retryServerErrors } from "../api/errors";
 import type { components } from "../api/gen/market";
 import { useChannel, useWs } from "../market/hooks";
 import { onReconnected } from "../query/private";
@@ -106,12 +106,6 @@ export function noFuturesData(err: unknown): boolean {
 /** hasFuturesData: whether a contract has the reference market's statistics (it follows one). */
 export function hasFuturesData(c: Pick<ContractSpec, "reference_symbol"> | undefined): boolean {
   return Boolean(c?.reference_symbol);
-}
-
-// A client error (a 404 above all) is an answer, not a hiccup: no retry.
-function retryServerErrors(failures: number, error: unknown): boolean {
-  if (error instanceof ApiError && error.status < 500) return false;
-  return failures < 1;
 }
 
 /** useFuturesOverview follows every contract's mark, funding, open interest and day, read again every 30 seconds. */

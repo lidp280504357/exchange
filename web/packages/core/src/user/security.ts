@@ -97,13 +97,16 @@ export type StepUpChannel = { channel: OtpChannel; target?: string; bound: boole
  * stepUpChannels lists the two ways a step-up code can go (F32) from the
  * identities the page knows: a kind it has not seen is not bound. Knowing
  * none (the reads failed), it offers both without targets and leaves a
- * channel that is not bound to the server to refuse.
+ * channel that is not bound to the server to refuse. A kind known bound
+ * without its mask (markBound's UNKNOWN_MASK) has no target either: the
+ * card names it ("your bound email", F41), not "••••".
  */
 export function stepUpChannels(bound: BoundIdentities | undefined): StepUpChannel[] {
   const known = Boolean(bound?.EMAIL || bound?.PHONE);
+  const target = (mask: string | undefined) => (mask && mask !== UNKNOWN_MASK ? mask : undefined);
   return [
-    { channel: "EMAIL", target: bound?.EMAIL, bound: !known || Boolean(bound?.EMAIL) },
-    { channel: "SMS", target: bound?.PHONE, bound: !known || Boolean(bound?.PHONE) },
+    { channel: "EMAIL", target: target(bound?.EMAIL), bound: !known || Boolean(bound?.EMAIL) },
+    { channel: "SMS", target: target(bound?.PHONE), bound: !known || Boolean(bound?.PHONE) },
   ];
 }
 

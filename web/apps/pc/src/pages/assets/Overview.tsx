@@ -577,7 +577,7 @@ function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
 
 function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }) {
   const { t } = useTranslation();
-  const account = useFuturesAccount(true, asset);
+  const account = useFuturesAccount(asset);
   const trade = useTradeLinks().futures(asset);
   const a = account.data;
   return (

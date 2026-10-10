@@ -442,7 +442,7 @@ function FuturesSummaries({ held, meta }: { held: string[]; meta: AssetMeta }) {
 function FuturesSummary({ asset, decimals }: { asset: string; decimals: number }) {
   const { t } = useTranslation();
   const trade = useTradeLinks().futures(asset);
-  const query = useFuturesAccount(true, asset);
+  const query = useFuturesAccount(asset);
   const a = query.data;
   return (
     <div data-testid={asset === "USDT" ? "futures-summary" : `futures-summary-${asset}`} className="rounded-2 bg-bg-2 p-3">

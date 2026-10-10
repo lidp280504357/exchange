@@ -35,3 +35,13 @@ export async function toApiError(res: Response): Promise<ApiError> {
   }
   return errorFrom(res.status, res.statusText, body);
 }
+
+/**
+ * retryServerErrors retries a failed query once when the server or the
+ * network failed; a refusal (4xx: not eligible, unknown network, a 404) is
+ * an answer, final.
+ */
+export function retryServerErrors(failures: number, error: unknown): boolean {
+  if (error instanceof ApiError && error.status < 500) return false;
+  return failures < 1;
+}

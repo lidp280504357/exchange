@@ -4,7 +4,7 @@ import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
 import { useEligibility } from "../assets/hooks";
 import { useOpenProducts } from "../platform/products";
-import { retryServerErrors } from "../wallet/hooks";
+import { retryServerErrors } from "../api/errors";
 import { isEmpty, type MarginAccountType, type MarginLoan, type MarginPair, type MarginTransfer } from "./math";
 
 // Margin data for the margin pages of both sites (margin design 2026-10-06

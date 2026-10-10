@@ -75,7 +75,7 @@ function StepUpBody({ onToken }: { onToken: (token: string) => void }) {
   };
 
   const withApp = totp.data?.enabled === true;
-  if (totp.isPending || (!withApp && ids.isLoading)) return <Skeleton className="h-24 w-full" />;
+  if (totp.isPending) return <Skeleton className="h-24 w-full" />;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void redeem({ totpCode: code });
@@ -104,13 +104,18 @@ function StepUpBody({ onToken }: { onToken: (token: string) => void }) {
       ) : (
         <>
           <p className="text-sm text-fg-2">{t("pcAuth.stepUpOtpHint")}</p>
-          <ChannelCards options={channels} value={channel} onValueChange={setPicked} />
-          <OtpStep
-            key={channel}
-            target={{ scene: "STEP_UP", channel }}
-            sentTo={channels.find((c) => c.channel === channel)?.target}
-            onTicket={(ticket) => void redeem({ otpTicket: ticket })}
-          />
+          {/* The identities still loading (a cold cache): the cards' places, then the code step (F41). */}
+          <ChannelCards options={channels} value={channel} onValueChange={setPicked} loading={ids.isLoading} />
+          {ids.isLoading ? (
+            <Skeleton className="h-9 w-full rounded-2" />
+          ) : (
+            <OtpStep
+              key={channel}
+              target={{ scene: "STEP_UP", channel }}
+              sentTo={channels.find((c) => c.channel === channel)?.target}
+              onTicket={(ticket) => void redeem({ otpTicket: ticket })}
+            />
+          )}
         </>
       )}
       {error != null && (

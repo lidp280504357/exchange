@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { accountApi, derivativesApi, marginApi, marketApi, unwrap, userApi } from "../api/client";
+import { accountApi, marginApi, marketApi, unwrap, userApi } from "../api/client";
 import { ApiError } from "../api/errors";
 import type { components as AccountSchemas } from "../api/gen/account";
 import type { components as DerivativesSchemas } from "../api/gen/derivatives";
@@ -8,7 +8,7 @@ import { useMarket, useTickers } from "../market/hooks";
 import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
 import { prependItem, type Page } from "../wallet/push";
-import { retryServerErrors } from "../wallet/hooks";
+import { retryServerErrors } from "../api/errors";
 import type { AccountType } from "./transfer";
 import type { MarginAccount } from "../margin/math";
 import { convertValue, dayChange, referenceChange, referencePrice, valuePortfolio } from "./valuation";
@@ -29,7 +29,6 @@ export const accountKeys = {
   balances: qk.balances,
   ledger: (asset: string, type: string) => [...qk.ledger, asset, type] as const,
   transfers: qk.transfers,
-  futuresAccount: (asset = "USDT") => ["derivatives", "account", asset] as const,
   eligibility: (feature: Feature, asset: string) => ["user", "eligibility", feature, asset] as const,
 };
 
@@ -167,21 +166,9 @@ export function useTransferAction() {
   };
 }
 
-/**
- * useFuturesAccount returns a settlement asset's FUTURES account at the
- * mark prices (margin balance, unrealized PnL, transferable): USDT's, or
- * the coin's of a coin-margined contract.
- */
-export function useFuturesAccount(enabled = true, asset = "USDT") {
-  const signedIn = useSession(selectSignedIn);
-  return useQuery({
-    queryKey: accountKeys.futuresAccount(asset),
-    queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account", { params: { query: { asset: asset === "USDT" ? undefined : asset } } })),
-    enabled: signedIn && enabled && asset !== "",
-    staleTime: 10_000,
-    retry: retryServerErrors,
-  });
-}
+// The FUTURES account of a settlement asset: one hook for the terminals and
+// these pages (F42).
+export { useFuturesAccount } from "../trading/derivatives";
 
 /**
  * useEligibility asks whether the caller may use a feature now (account

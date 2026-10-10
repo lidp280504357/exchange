@@ -63,7 +63,7 @@ export default function Transfer() {
   // What may leave FUTURES is bounded by the account of the asset's own
   // contracts: USDT's, or a coin-margined contract's coin (design 2026-10-06 §2.6).
   const settles = useSettleAssets();
-  const futures = useFuturesAccount(from === "FUTURES" && settles.includes(asset), asset);
+  const futures = useFuturesAccount(asset, { enabled: from === "FUTURES" && settles.includes(asset) });
   const decimals = meta.decimals(asset);
   const available = availableOf(list, from, asset);
   const transferable = from === "FUTURES" && futures.data?.asset === asset ? futures.data.transferable : null;

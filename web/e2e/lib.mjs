@@ -378,17 +378,22 @@ export async function pickLanguage(page, label, name) {
  * F33: negotiated from the browser's languages, else the platform's
  * fallback language). A first screen in one language that turns into
  * another once the platform's profile is in comes back as "en then
- * zh-CN" (the flash F33 removed). A first screen that waited for the
+ * zh-CN" (the flash F33 removed): the settled language is read 500 ms
+ * after the profile's answer, which must come within 30 s of the first
+ * screen (else the visit throws). A first screen that waited for the
  * profile and went on without it (core awaitFallbackLocale's marks) had no
- * fallback language to draw in, so it says nothing either way. Its 1.5 s
- * ran out ("timeout") while the profile came later: a slow server, so it
- * tries again, three times in all, then returns {locale: null, gaveUp:
- * [how each ended]} for the caller to note (F34). The read failed
- * ("failed"), or no answer came within 10 s ("unanswered": the page did
- * not ask, or the server did not answer): a fault, returned at once with
+ * fallback language to draw in, so it says nothing either way, and how it
+ * went on decides: its 1.5 s ran out, and the answer then came within 10 s
+ * (counted from the first screen, each window on its own timer, cleared
+ * once it ends): a 2xx one is a slow server ("timeout"), so it tries
+ * again, three times in all, then returns {locale: null, gaveUp: [how
+ * each ended]} for the caller to note (F34, F37); an error is a failed
+ * read ("failed"), and so is the page's own read failing; no answer at
+ * all is "unanswered" (the page did not ask, or the server did not
+ * answer). A failed or unanswered read is a fault, returned at once with
  * gaveUp ending in it for the caller to fail (F35, F36). A page that did
- * not wait at all comes back as "en then …" when the fallback language
- * is not English (with English as the fallback its first screen is right).
+ * not wait at all comes back as "en then …" when the fallback language is
+ * not English (with English as the fallback its first screen is right).
  */
 export async function firstVisitLocale(page, app, path, tags, device = {}) {
   const gaveUp = [];

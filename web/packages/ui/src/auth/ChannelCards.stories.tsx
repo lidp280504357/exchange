@@ -59,3 +59,12 @@ export const OneUnbound: Story = {
 export const SingleChannel: Story = {
   render: () => <Picker options={[{ channel: "SMS", target: "+86138****1234", bound: true }]} />,
 };
+
+/** While the account's identities load (a cold cache, F41): the two cards' places, the same size. */
+export const Loading: Story = {
+  render: () => (
+    <div className="w-[336px]">
+      <ChannelCards options={[]} value="EMAIL" onValueChange={() => {}} loading />
+    </div>
+  ),
+};

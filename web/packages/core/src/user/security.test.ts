@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveIdentities, firstChannel, groupSecret, securitySummary, stepUpChannels, stepUpMethodFor } from "./security";
+import { deriveIdentities, firstChannel, groupSecret, securitySummary, stepUpChannels, stepUpMethodFor, UNKNOWN_MASK } from "./security";
 
 const login = (identity: string, at: string) => ({ identity, created_at: at });
 const changed = (channel: string, mask: string, at: string, old?: string) => {
@@ -66,6 +66,12 @@ describe("the step-up's channels (F32)", () => {
     ]);
     expect(firstChannel(phoneOnly)).toBe("SMS");
     expect(firstChannel(stepUpChannels({ EMAIL: "a***@example.com" }))).toBe("EMAIL");
+  });
+  it("names a kind known bound without its mask instead of showing ••••", () => {
+    expect(stepUpChannels({ EMAIL: "a***@example.com", PHONE: UNKNOWN_MASK })).toEqual([
+      { channel: "EMAIL", target: "a***@example.com", bound: true },
+      { channel: "SMS", target: undefined, bound: true },
+    ]);
   });
   it("offers both without targets when it knows neither", () => {
     for (const none of [undefined, {}]) {
