@@ -90,10 +90,12 @@ paths:
         sold.
 
         Calling it again cancels and repays what is open by then: once all
-        is done, 0, [], [] and complete. A user without margin accounts gets
-        the same answer: user-service is not asked whether it knows the
-        user (a purge calls this for every test account; a 404 would read
-        like a wrong path), so there is no 404 for an unknown user. A cancel
+        is done, canceled_orders 0, cancel_refused, repaid and
+        remaining_debt [] and complete true. A user without margin
+        accounts gets the same answer: user-service is not asked whether it
+        knows the user (a purge calls this for every test account; a 404
+        would read like a wrong path), so there is no 404 for an unknown
+        user. A cancel
         the trading service refuses (4xx) is named in cancel_refused and the
         rest goes on: those orders may still rest there (complete speaks of
         debts only), what they hold stays locked and its debt in
