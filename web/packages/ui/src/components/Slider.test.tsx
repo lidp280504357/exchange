@@ -89,6 +89,17 @@ describe("Slider at its maximum (B176, B183)", () => {
     expect(halo(container)).toBeNull();
   });
 
+  it("does not come back when cut short by disabled at max (B192)", () => {
+    const { container, rerender } = render(<Form start={75} />);
+    fireEvent.keyDown(thumb(container), { key: "End" });
+    expect(effect(container)).not.toBeNull();
+    rerender(<Form start={75} disabled />);
+    expect(effect(container)).toBeNull();
+    rerender(<Form start={75} />);
+    expect(effect(container)).toBeNull();
+    expect(halo(container)).toBeNull();
+  });
+
   it("is gone once played, and turning it off and on at max does not play it again (③ ④)", () => {
     const { container, rerender } = render(<Form start={75} />);
     fireEvent.keyDown(thumb(container), { key: "End" });

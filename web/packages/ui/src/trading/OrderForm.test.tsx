@@ -256,4 +256,19 @@ describe("OrderForm", () => {
     expect(field("Amount").value).toBe("0.133");
     expect(field("Total").value).toBe("6650");
   });
+
+  it("keeps 100% of a balance that is no whole number of lots at its maximum (B183, B192)", () => {
+    const { container } = render(<Harness onSubmit={() => {}} initialSide="SELL" />);
+    const hundred = screen.getByRole("button", { name: "100%" });
+    fireEvent.click(hundred);
+    // 0.53219 BTC sells 0.5321: the slider settles at 99.98%, its maximum
+    // still - the arrival's effect plays on, the 100% mark is reached and
+    // its label lit.
+    expect(field("Amount").value).toBe("0.5321");
+    expect(Number(container.querySelector("[role=slider]")?.getAttribute("aria-valuenow"))).toBeLessThan(100);
+    expect(container.querySelector(".slider-fx:not(.slider-thumb-halo)")).not.toBeNull();
+    expect(hundred.className).toContain("text-fg-1");
+    const dots = [...container.querySelectorAll<HTMLElement>("span.rotate-45")];
+    expect(dots.at(-1)?.className).toContain("bg-down");
+  });
 });

@@ -94,14 +94,19 @@ export function Slider({
   // number of lots settles at 99.99% once a drag to 100% ends (①). Only an
   // arrival the user made plays - a drag, a key, a mark's label - not one
   // a live price or balance brings (②).
-  const atMax = value >= max - step / 2;
+  const reached = (m: number) => value >= m - step / 2;
+  const atMax = reached(max);
   const wasAtMax = useRef(atMax);
   const touched = useRef(false);
   const [peaks, setPeaks] = useState(0);
   const [played, setPlayed] = useState(0);
-  // After every render: a touch counts for the render it caused only.
+  // After every render: a touch counts for the render it caused only; an
+  // arrival whose effect is not showing - cut short by disabled, by
+  // pulseAtMax off or by leaving max - counts as played, so it does not
+  // come back with them (B192).
   useEffect(() => {
     if (atMax && !wasAtMax.current && touched.current && pulseAtMax && !disabled) setPeaks((n) => n + 1);
+    else if (peaks > played && !(atMax && pulseAtMax && !disabled)) setPlayed(peaks);
     wasAtMax.current = atMax;
     touched.current = false;
   });
@@ -133,7 +138,7 @@ export function Slider({
             aria-hidden
             className={cn(
               "pointer-events-none absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border",
-              value >= m ? c.dot : "border-line-2 bg-bg-1",
+              reached(m) ? c.dot : "border-line-2 bg-bg-1",
             )}
             style={{ left: `${pct(m)}%` }}
           />
@@ -241,7 +246,7 @@ export function Slider({
                 className={cn(
                   "absolute top-0 text-xs whitespace-nowrap text-fg-3 hover:text-fg-1",
                   first ? "translate-x-0" : last ? "-translate-x-full" : "-translate-x-1/2",
-                  value === m && "text-fg-1",
+                  Math.abs(value - m) < step / 2 && "text-fg-1",
                 )}
                 style={{ left: first ? `calc(${pct(m)}% - 0.5rem)` : last ? `calc(${pct(m)}% + 0.5rem)` : `${pct(m)}%` }}
               >
