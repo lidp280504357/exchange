@@ -65,6 +65,16 @@ for entry in "${services[@]}"; do
   read -r svc port families <<<"$entry"
   out=$(compose "exec -T $svc sh -c 'wget -qO- http://127.0.0.1:$port/healthz >/dev/null && wget -qO- http://127.0.0.1:$port/readyz >/dev/null && wget -qO- http://127.0.0.1:$port/metrics'") ||
     { echo "FAIL $svc: liveness, readiness or metrics endpoint failed" >&2; exit 1; }
+  # The ledger's reconciliation gauges appear once its first run is done:
+  # a minute after the start, then about two over the whole ledger. Right
+  # after a deploy, wait for it (3 minutes at most).
+  if [[ $svc == ledger-service ]]; then
+    for _ in $(seq 1 36); do
+      grep -q '^ledger_reconcile_mismatches' <<<"$out" && break
+      sleep 5
+      out=$(compose "exec -T $svc sh -c 'wget -qO- http://127.0.0.1:$port/metrics'") || true
+    done
+  fi
   for f in exchange_build_info go_goroutines $families; do
     grep -q "^$f" <<<"$out" || { echo "FAIL $svc does not export $f" >&2; exit 1; }
   done
