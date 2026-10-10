@@ -96,34 +96,73 @@ type Policy interface {
 	Run(ctx context.Context, db *pg.DB, w Window) ([]Result, error)
 }
 
-// Rule is one deletion: Count counts the rows it deletes, Delete deletes at
-// most a batch of them. Both get the cutoff as $1; Delete gets the batch
-// size as $2 and must report the rows it deleted as its command tag (a
-// DELETE, or an INSERT of the keys a DELETE ... RETURNING moved).
+// Rule is one deletion of rows of Table, the cutoff bound as $1.
+//
+// Where is the condition of the rows (e.g. "created_at < $1 AND status =
+// 'DONE'"): Apply counts them for a dry run and deletes them by ctid, a
+// batch at a time. Count and Delete replace the statements made from it
+// (Delete must be given when there is no Where): Delete gets the batch
+// size as $2 and reports the rows it deleted as its command tag - a
+// DELETE, or the INSERT of a WITH d AS (DELETE ... RETURNING ...) that
+// moves the rows' keys into a key table.
 type Rule struct {
 	Table  string
 	Name   string
 	Cutoff time.Time
+	Where  string
 	Count  string
 	Delete string
+}
+
+// statements returns the rule's count and batch statements.
+func (r Rule) statements() (count, del string) {
+	count, del = r.Count, r.Delete
+	if r.Where != "" {
+		t := pgx.Identifier{r.Table}.Sanitize()
+		if count == "" {
+			count = "SELECT count(*) FROM " + t + " WHERE " + r.Where
+		}
+		if del == "" {
+			del = "DELETE FROM " + t + " WHERE ctid IN (SELECT ctid FROM " + t + " WHERE " + r.Where + " LIMIT $2)"
+		}
+	}
+	return count, del
+}
+
+// ApplyAll runs the rules in order, as Apply does, and stops at the first
+// that fails (its partial result last).
+func ApplyAll(ctx context.Context, db *pg.DB, w Window, rules []Rule) ([]Result, error) {
+	out := make([]Result, 0, len(rules))
+	for _, r := range rules {
+		res, err := Apply(ctx, db, w, r)
+		out = append(out, res)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
 }
 
 // Apply runs one rule: counts with DryRun, otherwise deletes in batches
 // until a batch comes back short.
 func Apply(ctx context.Context, db *pg.DB, w Window, r Rule) (Result, error) {
 	res := Result{Table: r.Table, Rule: r.Name}
+	count, del := r.statements()
+	if count == "" || del == "" {
+		return res, fmt.Errorf("retention: the rule %q of %s has neither a condition nor statements", r.Name, r.Table)
+	}
 	var err error
 	if res.Total, res.Bytes, err = Stats(ctx, db, r.Table); err != nil {
 		return res, err
 	}
 	if w.DryRun {
-		if err := db.QueryRow(ctx, r.Count, r.Cutoff).Scan(&res.Rows); err != nil {
+		if err := db.QueryRow(ctx, count, r.Cutoff).Scan(&res.Rows); err != nil {
 			return res, fmt.Errorf("retention: count %s (%s): %w", r.Table, r.Name, err)
 		}
 		return res, nil
 	}
 	for {
-		tag, err := db.Exec(ctx, r.Delete, r.Cutoff, w.Batch)
+		tag, err := db.Exec(ctx, del, r.Cutoff, w.Batch)
 		if err != nil {
 			return res, fmt.Errorf("retention: delete from %s (%s) after %d rows: %w", r.Table, r.Name, res.Rows, err)
 		}

@@ -84,4 +84,28 @@ func TestApply(t *testing.T) {
 	if res, err = retention.Apply(ctx, db, w, rule); err != nil || res.Rows != 0 {
 		t.Fatalf("again: %+v %v", res, err)
 	}
+
+	// A rule by its condition alone: the statements are made from it.
+	if _, err := db.Exec(ctx, `INSERT INTO notes SELECT i, now() - interval '30 days' FROM generate_series(101, 112) i`); err != nil {
+		t.Fatal(err)
+	}
+	byWhere := []retention.Rule{
+		{Table: "notes", Name: "older than 15 days, even ids", Cutoff: w.History(), Where: "created_at < $1 AND id % 2 = 0"},
+		{Table: "notes", Name: "older than 15 days", Cutoff: w.History(), Where: "created_at < $1"},
+	}
+	w.DryRun = true
+	all, err := retention.ApplyAll(ctx, db, w, byWhere)
+	if err != nil || len(all) != 2 || all[0].Rows != 6 || all[1].Rows != 12 {
+		t.Fatalf("dry run by condition: %+v %v", all, err)
+	}
+	w.DryRun = false
+	if all, err = retention.ApplyAll(ctx, db, w, byWhere); err != nil || all[0].Rows != 6 || all[1].Rows != 6 {
+		t.Fatalf("run by condition: %+v %v", all, err)
+	}
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM notes`).Scan(&left); err != nil || left != 7 {
+		t.Fatalf("%d rows left, want 7 (%v)", left, err)
+	}
+	if _, err := retention.Apply(ctx, db, w, retention.Rule{Table: "notes", Name: "nothing"}); err == nil {
+		t.Fatal("a rule with neither a condition nor statements was run")
+	}
 }
