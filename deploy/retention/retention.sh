@@ -16,7 +16,18 @@ if [[ -f $LOG && $(stat -c %s "$LOG") -gt 10485760 ]]; then
   mv "$LOG" "$LOG.1"
 fi
 exec > >(tee -a "$LOG") 2>&1
+tee_pid=$!
 COMPOSE=(sudo docker compose -f "$INFRA_DIR/docker-compose.yml" -f "$INFRA_DIR/docker-compose.apps.yml")
+# On the way out: the lock's owner line cleared once the lock was ours, and
+# tee given its last lines before the unit ends (systemd kills what is left
+# of it at once, and the last line went missing).
+owner=""
+finish() {
+  if [[ -n $owner ]]; then : >"$INFRA_DIR/ops.lock.owner"; fi
+  exec >&- 2>&-
+  wait "$tee_pid" 2>/dev/null || true
+}
+trap finish EXIT
 
 echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) retention $*"
 # The same lock scripts/ops/lock.sh takes from a laptop.
@@ -26,7 +37,7 @@ if ! flock -w 3600 9; then
   exit 1
 fi
 printf 'cron retention.sh (server) since %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$INFRA_DIR/ops.lock.owner"
-trap ': >"$INFRA_DIR/ops.lock.owner"' EXIT
+owner=1
 
 # docker compose run only lets go of its container when signalled (B201):
 # a stop of the unit (SIGTERM to this script, KillMode=mixed) stops the
@@ -47,6 +58,15 @@ stop_run() {
   exit 143
 }
 trap stop_run TERM INT
+# The database's and the disk's size before and after: a deletion's record
+# (the space stays the tables' for reuse; only VACUUM FULL gives it back).
+sizes() {
+  local db
+  db=$("${COMPOSE[@]}" exec -T postgres sh -c \
+    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT pg_size_pretty(pg_database_size(current_database()))"' 2>/dev/null) || db="?"
+  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) $1: database $db, disk $(df -h --output=used,size,pcent / | awk 'NR == 2 {print $1 " of " $2 " (" $3 ")"}')"
+}
+sizes before
 # A container left from a run killed outright (the unit's SIGKILL).
 sudo docker rm "$NAME" >/dev/null 2>&1 || true
 # A container of its own (the services' image and settings), not one inside
@@ -55,6 +75,7 @@ sudo docker rm "$NAME" >/dev/null 2>&1 || true
   user-service /app/exchangectl retention run "$@" &
 child=$!
 wait "$child"
+sizes after
 "${COMPOSE[@]}" exec -T ledger-service /app/exchangectl ledger reconcile &
 child=$!
 wait "$child"
