@@ -464,6 +464,29 @@ async function openFirstVisit(page, app, path, tags, device) {
   }
 }
 
+/**
+ * indicatorsAway lists the sliding indicators under scope (a Segmented's
+ * thumb, a Tabs' underline or pill: motion layoutId spans) that are not on
+ * their item: a thumb or pill covers it, an underline lies along its foot.
+ * Read right after something is put in above them, it is empty only when
+ * they move with their items instead of sliding after them (F40).
+ */
+export function indicatorsAway(page, scope) {
+  return page.evaluate((scope) => {
+    const away = [];
+    for (const span of document.querySelectorAll(`${scope} span[aria-hidden].-z-10`)) {
+      const item = span.parentElement;
+      const r = span.getBoundingClientRect();
+      const p = item.getBoundingClientRect();
+      if (!p.width) continue;
+      const dx = Math.round(r.left - p.left);
+      const dy = Math.round(r.height <= 3 ? r.bottom - p.bottom : r.top - p.top);
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) away.push(`${item.innerText.trim().split("\n")[0]}: ${dx} px across, ${dy} px down`);
+    }
+    return away;
+  }, scope);
+}
+
 /** note prints what a run could not check here, without failing it. */
 export const note = (what) => console.log("note " + what);
 

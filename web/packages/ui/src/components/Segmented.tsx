@@ -46,7 +46,8 @@ export const thumbSpring = { type: "spring", stiffness: 520, damping: 42 } as co
 /**
  * Segmented is a single choice among a few (limit/market, buy/sell, chart
  * views) on Radix ToggleGroup: a pill track with a thumb that slides to the
- * active item (motion layoutId). A choice cannot be cleared.
+ * active item (motion layoutId, measured only when the choice changes). A
+ * choice cannot be cleared.
  */
 export function Segmented({ value, onValueChange, items, size = "sm", block, square, disabled, className, "aria-label": ariaLabel }: SegmentedProps) {
   const id = useId();
@@ -80,6 +81,9 @@ export function Segmented({ value, onValueChange, items, size = "sm", block, squ
             {active && (
               <motion.span
                 layoutId={`${id}-thumb`}
+                // Slides only when the choice changes; when the track moves
+                // (something put in above it), the thumb moves with it (F40).
+                layoutDependency={value}
                 aria-hidden
                 transition={reduced ? { duration: 0 } : thumbSpring}
                 className={cn("pointer-events-none absolute inset-0 -z-10 bg-bg-3 shadow-pop", square ? "rounded-1" : "rounded-full", it.thumbClassName)}

@@ -26,7 +26,7 @@
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
 import {
-  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, firstVisitLocale, legendClear, menuOnTop, note, ok, pickLanguage, sleep,
+  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, decodeQr, firstVisitLocale, indicatorsAway, legendClear, menuOnTop, note, ok, pickLanguage, sleep,
   start, withApps, withFuturesAccount, withProducts,
 } from "./lib.mjs";
 
@@ -407,6 +407,12 @@ try {
       });
     const spotInsets = await insets();
     await clickButton("全仓", '[data-testid="margin-bar"]');
+    // The margin bar's rows come in above the order form: its buy/sell thumb
+    // and its tab underline move with their items at once, not sliding after
+    // them (F40).
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="margin-bar"] button').length > 4, { timeout: 10000, polling: "mutation" });
+    const away = await indicatorsAway(page, "#order-form form");
+    if (away.length) throw new Error(`the order form's sliding indicators lag behind their items when the margin bar grows: ${away.join("; ")}`);
     await page.waitForSelector('#order-form [data-testid="margin-info"] [data-testid="margin-level"]', { visible: true, timeout: 10000 });
     await page.waitForSelector('#order-form [data-testid="margin-info"] [data-testid="margin-borrowable"]', { visible: true, timeout: 10000 });
     const crossInsets = await insets();
@@ -420,7 +426,7 @@ try {
         }
       }
     }
-    ok(`the spot terminal switches its order form to the cross margin account and back, ${spotInsets.padding} px from both edges in each, the margin level and borrowable amount under the form`);
+    ok(`the spot terminal switches its order form to the cross margin account and back, ${spotInsets.padding} px from both edges in each, the margin level and borrowable amount under the form, its sliding indicators on their items as the margin bar grows`);
   }
   await shot("5b-margin");
 

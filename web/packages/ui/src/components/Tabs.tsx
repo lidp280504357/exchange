@@ -43,7 +43,8 @@ const sizes = {
 /**
  * Tabs in one of the site's two looks: "underline" (panels, terminals) or
  * "pill" (categories, filters). The indicator slides between tabs with
- * motion layoutId; Radix Tabs gives the roles and arrow-key navigation.
+ * motion layoutId, measured only when the tab changes; Radix Tabs gives the
+ * roles and arrow-key navigation.
  */
 export function Tabs({
   items, value, defaultValue, onValueChange, variant = "underline", size = "md", block, extra, children, className, listClassName,
@@ -82,6 +83,9 @@ export function Tabs({
                 {on && (
                   <motion.span
                     layoutId={`${id}-indicator`}
+                    // Slides only when the tab changes; when the list moves
+                    // (something put in above it), the indicator moves with it (F40).
+                    layoutDependency={active}
                     aria-hidden
                     transition={reduced ? { duration: 0 } : thumbSpring}
                     className={cn(

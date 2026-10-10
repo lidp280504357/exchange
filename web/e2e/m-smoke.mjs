@@ -21,7 +21,7 @@
 // the step-up's channel cards, the language switch, a first visit's language and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
 import {
-  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, firstVisitLocale, legendClear, note, ok, pickLanguage, sleep, start, withApps,
+  ACCOUNT_LIQUIDATING, APPS_HIDDEN, APPS_OFFERED, PRODUCTS_PAUSED, choosePicture, firstVisitLocale, indicatorsAway, legendClear, note, ok, pickLanguage, sleep, start, withApps,
   withFuturesAccount, withProducts,
 } from "./lib.mjs";
 
@@ -234,12 +234,17 @@ try {
     await sheetOpen();
     await page.waitForSelector('[role=dialog] [data-testid="margin-bar"]', { visible: true, timeout: 20000 });
     await clickButton("全仓", '[role=dialog] [data-testid="margin-bar"]');
+    // The margin bar's rows come in above the form: its buy/sell thumb and
+    // tab underline move with their items at once (F40).
+    await page.waitForFunction(() => document.querySelectorAll('[role=dialog] [data-testid="margin-bar"] button').length > 4, { timeout: 10000, polling: "mutation" });
+    const away = await indicatorsAway(page, "[role=dialog] form");
+    if (away.length) throw new Error(`the order sheet's sliding indicators lag behind their items when the margin bar grows: ${away.join("; ")}`);
     await page.waitForSelector('[role=dialog] [data-testid="margin-info"] [data-testid="margin-borrowable"]', { visible: true, timeout: 10000 });
     await clickButton("现货", '[role=dialog] [data-testid="margin-bar"]');
     await page.waitForSelector('[role=dialog] [data-testid="margin-info"]', { hidden: true, timeout: 10000 });
     await page.keyboard.press("Escape");
     await page.waitForSelector("[role=dialog]", { hidden: true });
-    ok("the order sheet switches to the cross margin account, showing what it may borrow, and back");
+    ok("the order sheet switches to the cross margin account, showing what it may borrow, its sliding indicators on their items as the margin bar grows, and back");
   }
   await shot("5b-margin");
 

@@ -67,6 +67,8 @@ export function PillBar({ items, value, onValueChange, block, className, "aria-l
               {on && (
                 <motion.span
                   layoutId={`${id}-thumb`}
+                  // Slides only when the choice changes, not when the bar moves (F40).
+                  layoutDependency={value}
                   aria-hidden
                   transition={reduced ? { duration: 0 } : thumbSpring}
                   className="absolute inset-0 -z-10 rounded-full bg-brand-soft"

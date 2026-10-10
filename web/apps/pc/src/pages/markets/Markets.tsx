@@ -484,6 +484,8 @@ function CategoryRail({ rows, loading, category, onChange, favorites, now, tags 
         {active && (
           <motion.span
             layoutId="markets-rail-active"
+            // Slides only when the category changes, not when the rail moves (F40).
+            layoutDependency={category}
             aria-hidden
             className="absolute inset-0 -z-0 rounded-2 bg-bg-2"
             transition={{ type: "spring", stiffness: 520, damping: 42 }}
