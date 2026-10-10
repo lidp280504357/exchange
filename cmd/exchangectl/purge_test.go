@@ -410,8 +410,14 @@ func TestTheL4bAnswers(t *testing.T) {
 	}
 	end, err = settledEnd([]byte(`{"canceled_orders":0,"cancel_refused":[{"account":"MARGIN_CROSS","symbol":null,"code":"COMMON_INVALID_ARGUMENT"}],` +
 		`"repaid":[],"remaining_debt":[],"complete":true}`))
-	if err != nil || end.complete {
+	if err != nil || end.complete || end.refused != 1 {
 		t.Fatalf("no debt, a refused cancel: not done: %+v %v", end, err)
+	}
+	// Skipped as such, not as a debt (B190).
+	var o purgeOutcome
+	if done, err := (&purger{}).ended(&o, end, nil, skipDebt); done || err != nil || o.skip != skipRefused ||
+		o.detail != "MARGIN_CROSS: cancel refused, COMMON_INVALID_ARGUMENT" {
+		t.Fatalf("the skip: %v %v %+v", done, err, o)
 	}
 	if end, err := settledEnd([]byte(`{"canceled_orders":0,"cancel_refused":[],"repaid":[],"remaining_debt":[],"complete":true}`)); err != nil || !end.complete {
 		t.Fatalf("done: %+v %v", end, err)

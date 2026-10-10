@@ -50,6 +50,7 @@ const (
 	skipExempt      = "exempt from the purge"
 	skipNotFlat     = "contract positions or orders left open"
 	skipDebt        = "a margin debt left"
+	skipRefused     = "margin orders whose cancel was refused"
 	skipLiquidating = "a liquidation under way"
 	skipWithdrawal  = "a withdrawal in flight"
 	skipOrders      = "spot orders not canceled in time"
@@ -126,9 +127,11 @@ func (s purgeState) contracts() bool {
 type purgeEnd struct {
 	complete bool
 	// left describes what is still open; debts are a settle's remaining
-	// debts.
-	left  []string
-	debts []purgeDebt
+	// debts; refused counts the accounts whose cancel the trading service
+	// refused (C80).
+	left    []string
+	debts   []purgeDebt
+	refused int
 }
 
 // purgeDebt is a margin debt settle could not repay from the account.
@@ -235,8 +238,9 @@ func usersPurge(ctx context.Context, cfg settings, db *pg.DB, svc *application.S
 	p := &purger{
 		data: sqlPurgeData{db: db},
 		act: livePurgeActions{
-			// flatten may take some 40 seconds (L4b): a minute and more.
-			users: svc, ledger: ledger, client: &http.Client{Timeout: 90 * time.Second},
+			// flatten and settle may take their handlers' 2 minutes: past
+			// them (B190).
+			users: svc, ledger: ledger, client: &http.Client{Timeout: 150 * time.Second},
 			trading: strings.TrimRight(cfg.TradingURL, "/"), margin: strings.TrimRight(cfg.MarginURL, "/"),
 			derivatives: strings.TrimRight(cfg.DerivativesURL, "/"),
 		},
@@ -523,6 +527,9 @@ func (p *purger) ended(o *purgeOutcome, end purgeEnd, err error, left string) (b
 		return false, err
 	case !end.complete:
 		o.skip, o.detail = left, strings.Join(end.left, "; ")
+		if end.refused > 0 && len(end.debts) == 0 {
+			o.skip = skipRefused // no debt left, orders still resting (B190)
+		}
 		return false, nil
 	}
 	return true, nil
@@ -746,7 +753,7 @@ func settledEnd(raw []byte) (purgeEnd, error) {
 	if err := json.Unmarshal(raw, &answer); err != nil {
 		return purgeEnd{}, fmt.Errorf("settle's answer: %w", err)
 	}
-	end := purgeEnd{complete: answer.Complete && len(answer.CancelRefused) == 0}
+	end := purgeEnd{complete: answer.Complete && len(answer.CancelRefused) == 0, refused: len(answer.CancelRefused)}
 	for _, r := range answer.CancelRefused {
 		left := r.Account
 		if r.Symbol != nil {

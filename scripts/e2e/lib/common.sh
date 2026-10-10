@@ -207,9 +207,6 @@ export E2E_REGISTERED="$WORK/registered"
 # scripts), and clears out only the ones listed (B187). A failure only
 # warns.
 E2E_MARK_RUN=""
-# Set for scripts that armed the hook themselves before B187: they see it
-# armed.
-MARKS_TEST_ACCOUNTS=1
 mark_test_accounts() {
   local out name ctl ids
   ids=$(sort -u "$E2E_REGISTERED" 2>/dev/null | grep -E '^[0-9a-f-]{36}$' | paste -sd, - || true)
