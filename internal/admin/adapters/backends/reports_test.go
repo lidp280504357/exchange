@@ -35,7 +35,7 @@ func TestReports(t *testing.T) {
 	for _, q := range []string{
 		`INSERT INTO trades (trade_id, symbol, price, quantity, quote_quantity, sequence, executed_at) VALUES
 			(generateUUIDv4(), 'ETH-BTC', 0.03, 1, 0.03, 1, now64(3)), (generateUUIDv4(), 'ETH-BTC', 0.032, 2, 0.064, 2, now64(3)),
-			(generateUUIDv4(), 'ETH-BTC', 0.02, 5, 0.1, 0, now64(3) - INTERVAL 30 DAY)`,
+			(generateUUIDv4(), 'ETH-BTC', 0.02, 5, 0.1, 0, now64(3) - INTERVAL 10 DAY)`, // before the week, within the 15 days kept (M1)
 		`INSERT INTO order_updates (order_id, symbol, sequence, status, event_id, occurred_at) VALUES
 			(generateUUIDv4(), 'ETH-BTC', 0, 'NEW', generateUUIDv4(), now64(3)),
 			(generateUUIDv4(), 'BTC-USDT', 0, 'REJECTED', generateUUIDv4(), now64(3))`,
@@ -211,13 +211,13 @@ func TestUsersAndHouseReports(t *testing.T) {
 	)
 	for _, q := range []string{
 		// u1 registers and signs in twice today, the bot registers; u2
-		// registered 30 days ago.
+		// registered 10 days ago (the read models keep 15 days, M1).
 		`INSERT INTO events (event_id, event_type, topic, aggregate_type, aggregate_id, occurred_at, payload) VALUES
 			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + u1 + `', now64(3), '{}'),
 			(generateUUIDv4(), 'auth.LoginSucceeded', 'auth.events', 'user', '` + u1 + `', now64(3), '{}'),
 			(generateUUIDv4(), 'auth.LoginSucceeded', 'auth.events', 'user', '` + u1 + `', now64(3), '{}'),
 			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + bot + `', now64(3), '{}'),
-			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + u2 + `', now64(3) - INTERVAL 30 DAY, '{}')`,
+			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + u2 + `', now64(3) - INTERVAL 10 DAY, '{}')`,
 		// HOUSE bought 1 BTC from u1 at 50,000 two days ago and sold u2 0.5
 		// at 51,000 today; the bot traded with itself at 52,000 last.
 		`INSERT INTO trades (trade_id, symbol, price, quantity, quote_quantity, sequence, buyer_user_id, seller_user_id, house_side,
