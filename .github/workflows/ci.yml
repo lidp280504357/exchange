@@ -168,17 +168,22 @@ jobs:
           build() { docker build -f deploy/docker/Dockerfile --build-arg VERSION=${GITHUB_SHA::7} "$@" -t exchange-app:ci .; }
           build --build-arg GO_IMAGE=mirror.gcr.io/library/golang:1.27-alpine --build-arg RUNTIME_IMAGE=mirror.gcr.io/library/alpine:3.22 ||
             { echo "::warning title=app image build::mirror.gcr.io failed, building from public.ecr.aws"; build; }
-      # The server's nginx image from the first registry that serves it: on
-      # 2026-10-10 Docker Hub's answered docker run with exit 125 twice in a
-      # row while mirror.gcr.io failed the app image build too.
+      # The server's nginx image from the first registry that serves it,
+      # mirror.gcr.io, then ECR Public, then Docker Hub: on 2026-10-10 docker
+      # run answered exit 125 twice in a row (Docker Hub did not serve the
+      # image) while mirror.gcr.io failed the app image build too. A pull
+      # that hangs gives way to the next registry after 3 minutes.
       - name: nginx config test
+        timeout-minutes: 12
         run: |
           tmp=$(mktemp -d)
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=astras.vip -keyout "$tmp/origin.key" -out "$tmp/origin.pem" >/dev/null 2>&1
           img=""
           for i in mirror.gcr.io/library/nginx:1.29-alpine public.ecr.aws/docker/library/nginx:1.29-alpine nginx:1.29-alpine; do
-            if docker pull -q "$i" >/dev/null; then img=$i; break; fi
-            echo "::warning title=nginx config test::$i could not be pulled"
+            if out=$(timeout 180 docker pull -q "$i" 2>&1); then img=$i; break; fi
+            out=${out//'%'/'%25'}
+            out=${out//$'\r'/}
+            echo "::warning title=nginx config test::$i could not be pulled: ${out//$'\n'/ | }"
           done
           [ -n "$img" ] || { echo "::error title=nginx config test::no registry served nginx:1.29-alpine"; exit 1; }
           docker run --rm \

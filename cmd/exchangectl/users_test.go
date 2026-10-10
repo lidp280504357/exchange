@@ -87,6 +87,11 @@ func TestUsersKind(t *testing.T) {
 	if out, err := run("kind", "--user", both, "--kind", "BOT", "--reason", "again"); err != nil || !strings.Contains(out, "2 accounts, 0 changed") {
 		t.Fatalf("again: %v\n%s", err, out)
 	}
+	// An account user-service does not know: astra.sh mark tells it from
+	// any other failure by this code (B177, B182).
+	if out, err := run("kind", "--user", uuid.NewString(), "--kind", "SYSTEM", "--reason", "HOUSE"); err == nil || !strings.Contains(err.Error(), "COMMON_NOT_FOUND") {
+		t.Fatalf("an unknown account: %v\n%s", err, out)
+	}
 	for _, args := range [][]string{
 		{"kind", "--user", both, "--kind", "ROBOT", "--reason", "x"},
 		{"kind", "--user", both, "--kind", "BOT"},

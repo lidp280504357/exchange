@@ -27,6 +27,9 @@
 #                                 bots' zero fees stay MARKET_MAKER_USER_IDS'
 #                                 - and no status changes. Idempotent;
 #                                 accounts there before are marked too.
+#                                 HOUSE without an account in user-service
+#                                 is noted and passed over; any other
+#                                 failure to mark it fails the command.
 #   scripts/ops/astra.sh mint AMOUNT [ASSET]
 #                                 more for the bots (ASTRA by default), spread
 #                                 evenly, audited (ledger adjustments).
@@ -177,7 +180,7 @@ mark() {
       if grep -q 'COMMON_NOT_FOUND' <<<"$out"; then
         echo "note: HOUSE ($house) has no account in user-service: nothing to mark" >&2
       else
-        printf 'astra.sh mark: HOUSE (%s) was not marked SYSTEM:\n%s\n' "$house" "$out" >&2
+        printf 'astra.sh mark: HOUSE (%s) was not marked SYSTEM: %s\n' "$house" "$(tail -1 <<<"$out")" >&2
         return 1
       fi
     else

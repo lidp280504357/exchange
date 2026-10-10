@@ -17,6 +17,7 @@
 
 - main 上每次推送的运行都跑完、不取消：`concurrency` 的组按提交分（`ci-<提交号>`），每次推送各跑各的（B91，2026-10-06）。组按分支时即使不取消进行中的运行，排队的也只留最新一个、其余被顶掉；取消进行中的运行则让三个会话几分钟推一次时 main 一个小时没有绿的运行（B89）。pull request 仍按分支分组、新推送取消旧运行。只改 `docs/` 与顶层 Markdown 的推送不触发 CI（`paths-ignore`）；部署前判断代码是否通过时，看最后一个改了 CI 检查内容的提交的运行（由包含它的那次推送跑，运行页面按推送的最后一个提交列出）。仓库里没有自动等 CI 变绿再部署的东西：`task deploy` 直接部署，等绿是部署的人（会话）自己的步骤。`deploy config` 任务的镜像构建先从 `mirror.gcr.io` 拉基础镜像、失败才退回 `public.ecr.aws`。
 
+- `deploy config` 任务的 nginx 配置检查（`nginx -t`）依次从 `mirror.gcr.io`、ECR Public（`public.ecr.aws/docker/library`）、Docker Hub 拉同一个 `nginx:1.29-alpine`，用第一个拉到的；每个源最多等 3 分钟，拉不到的写一条带拉取错误原文的警告注解，全都拉不到才失败（2026-10-10 曾因镜像源连续两次以 exit 125 失败；B182）。
 - `go` 任务比本机 `task ci` 多跑集成测试：CI 设了 `TEST_*`，`task ci` 没设，所以集成测试只在 CI 里失败的情况是有的。
   - 改迁移或表约束时，提交前至少跑相关包与 `./migrations/` 的集成测试。B6 删了充值地址的 0x 约束，却没改 `TestWalletSchema`，CI 因此连红了五次。
 - 模块路径是 `github.com/skill/exchange`（2026-10-04 起不带 GitHub 账号）。`scripts/ci/module-path.sh` 在代码、配置与文档里见到别的 `github.com/<账号>/exchange` 就失败，网页地址不算；CI 的 `module path` 步骤与 `task ci` 的 `modpath:check` 都跑它。
