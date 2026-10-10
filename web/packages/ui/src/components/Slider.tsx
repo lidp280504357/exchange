@@ -39,12 +39,14 @@ const tones: Record<SliderTone, { text: string; thumb: string; dot: string }> = 
 };
 
 // The arrival at max (B176, the user 2026-10-10: an energy bar's glow, as
-// in Blade & Soul, in place of B173's sparks): about 1.4 s of soft light,
-// transform and opacity only, never in the pointer's way. The layers, their
+// in Blade & Soul, in place of B173's sparks; B194: bigger and brighter,
+// white-hot cores in a glow of the tone): about 1.5 s of light, transform
+// and opacity only, never in the pointer's way. The layers, their
 // keyframes and what plays when are in styles/theme.css; the timings that
 // depend on the marks are set here.
+const LEAD = 120; // the track's flash, white cooling to the tone, before the charge
 const CHARGE = 200; // the glow reaches the end, which flares
-const RUN = 760; // the bands' run back to the start, done by about 1000 ms
+const RUN = 760; // the bands' run back to the start, done by about 1100 ms
 const MARK_GLOW = 480; // a mark's glow, brightest at 35% as the first band passes
 // The second band follows the first a little smaller and fainter, rising
 // where the first falls.
@@ -52,19 +54,20 @@ const BANDS = [
   { wave: "a", lag: 0, scale: "1", opacity: 1 },
   { wave: "b", lag: 90, scale: "0.8", opacity: 0.75 },
 ] as const;
-// Sparks: flung off the flare at the end (x 100%) or shed by the first band
-// halfway (x 50%), to (dx, dy) px; size px, duration and delay ms.
+// Sparks: flung off the flare at the end (x 100%), never further past it
+// than the clip, or shed by the first band halfway (x 50%), to (dx, dy)
+// px; size px, duration and delay ms after the flash.
 const SPARKS = [
-  { x: 100, dx: -26, dy: -12, size: 10, dur: 520, delay: 185 },
-  { x: 100, dx: -14, dy: -18, size: 8, dur: 460, delay: 195 },
-  { x: 100, dx: 7, dy: -15, size: 8, dur: 420, delay: 190 },
-  { x: 100, dx: -36, dy: -3, size: 12, dur: 600, delay: 200 },
-  { x: 100, dx: -30, dy: 9, size: 10, dur: 560, delay: 192 },
-  { x: 100, dx: -12, dy: 17, size: 8, dur: 480, delay: 205 },
-  { x: 100, dx: 8, dy: 14, size: 8, dur: 430, delay: 198 },
-  { x: 100, dx: -22, dy: 2, size: 10, dur: 650, delay: 230 },
-  { x: 50, dx: -6, dy: -11, size: 8, dur: 520, delay: CHARGE + RUN / 2 },
-  { x: 50, dx: 5, dy: 10, size: 8, dur: 520, delay: CHARGE + RUN / 2 + 40 },
+  { x: 100, dx: -34, dy: -18, size: 12, dur: 560, delay: 185 },
+  { x: 100, dx: -18, dy: -27, size: 10, dur: 500, delay: 195 },
+  { x: 100, dx: 5, dy: -22, size: 10, dur: 460, delay: 190 },
+  { x: 100, dx: -48, dy: -4, size: 14, dur: 640, delay: 200 },
+  { x: 100, dx: -40, dy: 14, size: 12, dur: 600, delay: 192 },
+  { x: 100, dx: -16, dy: 25, size: 10, dur: 520, delay: 205 },
+  { x: 100, dx: 5, dy: 20, size: 10, dur: 470, delay: 198 },
+  { x: 100, dx: -28, dy: 3, size: 12, dur: 700, delay: 230 },
+  { x: 50, dx: -8, dy: -16, size: 10, dur: 560, delay: CHARGE + RUN / 2 },
+  { x: 50, dx: 6, dy: 15, size: 10, dur: 560, delay: CHARGE + RUN / 2 + 40 },
 ];
 const ms = (n: number) => `${Math.round(n)}ms`;
 
@@ -160,6 +163,8 @@ export function Slider({
               <span className="slider-thumb-halo" />
               <span className="slider-glow-1" />
               <span className="slider-fx-motion">
+                <span className="slider-flash-glow" />
+                <span className="slider-flash" />
                 {marks
                   .filter((m) => m < max)
                   .map((m) => (
@@ -168,7 +173,7 @@ export function Slider({
                       className="slider-mark-glow"
                       style={{
                         left: `${pct(m)}%`,
-                        animation: `slider-mark-glow ${ms(MARK_GLOW)} ease-out ${ms(CHARGE + RUN * (1 - pct(m) / 100) - MARK_GLOW * 0.35)} both`,
+                        animation: `slider-mark-glow ${ms(MARK_GLOW)} ease-out ${ms(LEAD + CHARGE + RUN * (1 - pct(m) / 100) - MARK_GLOW * 0.35)} both`,
                       }}
                     />
                   ))}
@@ -178,12 +183,12 @@ export function Slider({
                       key={b.wave}
                       className="slider-band"
                       style={{
-                        animation: `slider-band-x ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both, slider-band-fade ${ms(RUN)} linear ${ms(CHARGE + b.lag)} both`,
+                        animation: `slider-band-x ${ms(RUN)} linear ${ms(LEAD + CHARGE + b.lag)} both, slider-band-fade ${ms(RUN)} linear ${ms(LEAD + CHARGE + b.lag)} both`,
                       }}
                     >
                       <span
                         className="absolute top-0 left-0"
-                        style={{ scale: b.scale, opacity: b.opacity, animation: `slider-wave-${b.wave} ${ms(RUN)} ease-in-out ${ms(CHARGE + b.lag)} both` }}
+                        style={{ scale: b.scale, opacity: b.opacity, animation: `slider-wave-${b.wave} ${ms(RUN)} ease-in-out ${ms(LEAD + CHARGE + b.lag)} both` }}
                       >
                         <span className="slider-band-trail" />
                         <span className="slider-band-head" />
@@ -191,6 +196,9 @@ export function Slider({
                     </span>
                   ))}
                 </span>
+                <span className="slider-burst-bloom" />
+                <span className="slider-burst-streak" />
+                <span className="slider-burst-ray" />
                 <span className="slider-burst" />
                 {SPARKS.map((p, i) => (
                   <span
@@ -204,7 +212,7 @@ export function Slider({
                         margin: `${-p.size / 2}px 0 0 ${-p.size / 2}px`,
                         "--dx": `${p.dx}px`,
                         "--dy": `${p.dy}px`,
-                        animation: `slider-spark-fly ${ms(p.dur)} cubic-bezier(0.15, 0.75, 0.35, 1) ${ms(p.delay)} both`,
+                        animation: `slider-spark-fly ${ms(p.dur)} cubic-bezier(0.15, 0.75, 0.35, 1) ${ms(LEAD + p.delay)} both`,
                       } as CSSProperties
                     }
                   />
@@ -228,7 +236,10 @@ export function Slider({
               peaking && "slider-dot-burst",
               c.thumb,
             )}
-          />
+          >
+            {/* The dot is drawn over the effect: it flares white-hot itself, the flare's core (B194). */}
+            {peaking && <span key={peaks} className={cn("slider-dot-flash", c.text)} />}
+          </span>
         </RSlider.Thumb>
       </RSlider.Root>
       {markLabels && marks.length > 0 && (

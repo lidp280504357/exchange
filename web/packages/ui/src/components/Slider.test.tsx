@@ -48,33 +48,38 @@ describe("Slider at its maximum (B176, B183)", () => {
     const first = halo(container);
     expect(first).not.toBeNull();
     expect(container.querySelector("[role=slider] > span:last-child")?.classList.contains("slider-dot-burst")).toBe(true);
-    // Nothing of it is drawn outside the clip box (B194): the thumb holds
-    // its dot alone, and the clip box's one child is the effect.
+    // Nothing of it is drawn outside the clip box (B194) but the dot's own
+    // flare inside the dot: the thumb holds its dot alone, and the clip
+    // box's one child is the effect.
     expect(thumb(container).children).toHaveLength(1);
+    expect(thumb(container).querySelector(":scope > span > .slider-dot-flash")).not.toBeNull();
     expect(container.querySelectorAll(".slider-fx-clip")).toHaveLength(1);
     expect(container.querySelector(".slider-fx-clip")?.children).toHaveLength(1);
     // Two glow layers; under reduced motion (the stylesheet) only the outer
     // one stays, fading in and out: the moving parts are in slider-fx-motion
-    // - a soft glow for each mark below the end, timed to the first band's
-    // passing, the two bands, the flare and ten sparks.
+    // - the track's flash and its glow, a soft glow for each mark below the
+    // end, timed to the first band's passing, the two bands, the flare's
+    // four parts (B194) and ten sparks.
     const fx = effect(container) as HTMLElement;
     expect(fx.querySelectorAll(".slider-glow-1, .slider-glow-2")).toHaveLength(2);
     const moving = fx.querySelector(".slider-fx-motion") as HTMLElement;
+    expect(moving.querySelectorAll(".slider-flash, .slider-flash-glow")).toHaveLength(2);
     const glows = [...moving.querySelectorAll<HTMLElement>(".slider-mark-glow")];
     expect(glows.map((g) => g.style.left)).toEqual(["0%", "25%", "50%", "75%"]);
-    // The band runs back from the end in 760 ms after the 200 ms charge:
-    // the mark at 75% is lit 190 ms in, at 0% 760 ms in (less 35% of the
-    // glow's 480 ms, its brightest).
-    expect(glows.map((g) => g.style.animation.match(/ (\d+)ms both/)?.[1])).toEqual(["792", "602", "412", "222"]);
+    // The band runs back from the end in 760 ms after the 120 ms flash and
+    // the 200 ms charge: the mark at 75% is lit 190 ms into the run, at 0%
+    // 760 ms in (less 35% of the glow's 480 ms, its brightest).
+    expect(glows.map((g) => g.style.animation.match(/ (\d+)ms both/)?.[1])).toEqual(["912", "722", "532", "342"]);
     expect(moving.querySelectorAll(".slider-band")).toHaveLength(2);
     expect(moving.querySelectorAll(".slider-band-head, .slider-band-trail")).toHaveLength(4);
-    expect(moving.querySelectorAll(".slider-burst")).toHaveLength(1);
+    expect(moving.querySelectorAll(".slider-burst, .slider-burst-ray, .slider-burst-streak, .slider-burst-bloom")).toHaveLength(4);
     expect(moving.querySelectorAll(".slider-spark")).toHaveLength(10);
     rerender(<Form start={100} />);
     expect(halo(container)).toBe(first);
     fireEvent.keyDown(thumb(container), { key: "PageDown" });
     expect(halo(container)).toBeNull();
     expect(effect(container)).toBeNull();
+    expect(container.querySelector(".slider-dot-flash")).toBeNull();
     // A mark's label is the user's too.
     fireEvent.click(label(container, "100%"));
     expect(halo(container)).not.toBeNull();

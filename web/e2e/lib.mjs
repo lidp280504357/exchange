@@ -511,9 +511,11 @@ export function indicatorsAway(page, scope) {
  * arrival's effect plays for the user's own moves only (B183) - pauses
  * the effect as soon as its layers are in the page and steps it through
  * every 20 ms of its run, measuring the scroll containers around the
- * slider and the page each time: none may get wider inside than it was
- * (B194: the light, drawn past the track's ends, widened the order panels,
- * which scrolled sideways while it played). Returns what it measured.
+ * slider and the page each time: none may be wider inside than out
+ * (scrollWidth <= clientWidth), before the click or at any moment of the
+ * effect (B194, B196: the light, drawn past the track's ends, widened the
+ * order panels, which scrolled sideways while it played). Returns what it
+ * measured, with a summary for the log.
  */
 export async function arrivalStaysInside(page, scope) {
   const hundred = await page.waitForFunction(
@@ -560,7 +562,7 @@ export async function arrivalStaysInside(page, scope) {
     for (let t = 0; t <= end + 20; t += 20, steps++) {
       for (const a of anims) a.currentTime = t;
       boxes.forEach((b, i) => {
-        const by = wider(b) - Math.max(0, before[i]);
+        const by = wider(b);
         if (by > worst[i].by) worst[i] = { by, at: t };
       });
     }
@@ -572,10 +574,12 @@ export async function arrivalStaysInside(page, scope) {
   }, scope);
   if (!m.played) throw new Error(`${scope}: clicking 100% under the slider played no arrival effect`);
   if (!m.attached) throw new Error(`${scope}: the arrival's effect was gone before it could be measured (the slider left 100%)`);
-  const over = m.boxes.filter((b) => b.by > 0);
+  const over = m.boxes.filter((b) => b.by > 0 || b.before > 0);
   if (over.length) {
-    throw new Error(`${scope}: the arrival's light scrolls ${over.map((b) => `${b.name} ${b.by} px sideways at ${b.at} ms`).join(", ")}`);
+    const what = (b) => (b.by > 0 ? `${b.name} is ${b.by} px wider inside than out at ${b.at} ms` : `${b.name} was ${b.before} px wider inside than out before the click`);
+    throw new Error(`${scope}: ${over.map(what).join(", ")}: it scrolls sideways`);
   }
+  m.summary = `${m.end} ms in ${m.steps} steps; ${m.boxes.map((b) => `${b.name}: ${b.before} px before, at most ${b.by} px`).join("; ")}`;
   return m;
 }
 

@@ -129,23 +129,32 @@ export const ArrivalSlowMotion: Story = {
   },
 };
 
-/** One frame of the arrival: a slider that reached 100%, paused at `at` ms. */
+/** A slider of a frame, moved to 100% by the frame. */
+function FrameSlider({ tone, at }: { tone: "brand" | "up" | "down"; at: number }) {
+  const [v, setV] = useState(75);
+  return (
+    <div className="w-56">
+      <Slider value={v} onValueChange={setV} tone={tone} marks={marks} aria-label={`${tone} ${at} ms`} />
+    </div>
+  );
+}
+
+/** One frame of the arrival: the three tones' sliders that reached 100%, paused at `at` ms. */
 function ArrivalFrame({ at }: { at: number }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [v, setV] = useState(75);
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
-    // Paused at `at` as soon as the layers are in the page: an observer,
-    // not animation frames, which a hidden tab does not run (the effect
-    // would play through and be gone).
+    // Paused at `at` as soon as every slider's layers are in the page: an
+    // observer, not animation frames, which a hidden tab does not run (the
+    // effect would play through and be gone).
     const seek = () => {
-      const all = root.getAnimations({ subtree: true });
-      for (const a of all) {
+      if (root.querySelectorAll(".slider-fx-clip").length < root.querySelectorAll("[role=slider]").length) return false;
+      for (const a of root.getAnimations({ subtree: true })) {
         a.pause();
         a.currentTime = at;
       }
-      return all.length > 0;
+      return true;
     };
     const watch = new MutationObserver(() => seek() && watch.disconnect());
     watch.observe(root, { childList: true, subtree: true });
@@ -155,18 +164,20 @@ function ArrivalFrame({ at }: { at: number }) {
   return (
     <div className="flex items-center gap-4">
       <span className="w-16 shrink-0 text-right font-mono text-xs text-fg-3">{at} ms</span>
-      <div ref={ref} className="w-72">
-        <Slider value={v} onValueChange={setV} marks={marks} aria-label={`${at} ms`} />
+      <div ref={ref} className="flex gap-8">
+        {(["brand", "up", "down"] as const).map((tone) => (
+          <FrameSlider key={tone} tone={tone} at={at} />
+        ))}
       </div>
     </div>
   );
 }
 
-/** The arrival frame by frame, every 50 ms from 0 to 1,400 (B176): the review's filmstrip. */
+/** The arrival frame by frame, every 50 ms from 0 to 1,550 (B176, B194): the review's filmstrip. */
 export const ArrivalFrames: Story = {
   render: () => (
-    <div className="flex flex-col gap-2">
-      {Array.from({ length: 29 }, (_, i) => i * 50).map((at) => (
+    <div className="flex flex-col gap-12 py-8">
+      {Array.from({ length: 32 }, (_, i) => i * 50).map((at) => (
         <ArrivalFrame key={at} at={at} />
       ))}
     </div>

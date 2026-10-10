@@ -334,7 +334,7 @@ try {
   // 4b. The slider's arrival at 100% (B176, B194): its light, drawn past the
   // track's ends, made the order panel scroll sideways while it played.
   const spotArrival = await arrivalStaysInside(page, "#order-form");
-  ok(`the spot order form's slider at 100%: its arrival (${spotArrival.end} ms, measured every 20 ms) leaves the order panel and the page as wide as they were`);
+  ok(`the spot order form's slider at 100%: neither the order panel nor the page gets wider inside than out while its arrival plays (${spotArrival.summary})`);
 
   // 5. A transfer to futures, then its ledger entry.
   await go("/assets/transfer");
@@ -452,11 +452,11 @@ try {
   await waitText("资金费率");
   ok("the futures terminal shows the mark price and the funding countdown");
   // The futures order forms' sliders at 100% (B194), USDⓈ-M and coin-margined.
-  await arrivalStaysInside(page, "#order-form");
+  const usdtArrival = await arrivalStaysInside(page, "#order-form");
   await go("/futures/BTC-USD-PERP");
   await waitText("标记价格");
-  await arrivalStaysInside(page, "#order-form");
-  ok("the futures order forms' sliders at 100% (BTC-USDT-PERP, BTC-USD-PERP): their arrival leaves the order panel and the page as wide as they were");
+  const coinArrival = await arrivalStaysInside(page, "#order-form");
+  ok(`the futures order forms' sliders at 100%: neither the order panel nor the page gets wider inside than out while their arrival plays (BTC-USDT-PERP ${usdtArrival.summary}; BTC-USD-PERP ${coinArrival.summary})`);
   await go("/futures/BTC-USDT-PERP");
   await waitText("标记价格");
   // The candle charts start below their legends (B116: the legend sits over
