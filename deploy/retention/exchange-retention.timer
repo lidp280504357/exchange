@@ -1,0 +1,11 @@
+# 每日 04:10 UTC（03:30 的备份之后）；错过的一次在开机后补跑。部署只装不启用，启用见 docs/runbook/retention.md。
+[Unit]
+Description=Daily exchange history retention
+
+[Timer]
+OnCalendar=*-*-* 04:10:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

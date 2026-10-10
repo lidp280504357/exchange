@@ -34,6 +34,7 @@
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //	exchangectl sim status | call POST /internal/sim/events '{"type":"JUMP",...}'
 //	exchangectl house caps | changes | call PUT /internal/house/caps '{"level":"...","version":1,...}'
+//	exchangectl retention run [--dry-run] [--days 15] [--key-days 90] [--only trading,auth]
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -209,6 +210,11 @@ commands:
   house call METHOD PATH [JSON]
                               a request to market-maker's internal API, its changes signed with
                               HOUSE_CAPS_API_SECRET (run in the market-maker container); as sim call
+  retention run [--dry-run] [--days 15] [--key-days 90] [--batch 5000] [--pause 100ms] [--only SCHEMA,...]
+                              delete the history older than --days of every schema (M1: ended orders,
+                              sign-ins, notifications, ...), never current state; idempotency keys stay
+                              --key-days; prints each table's rows and size (--dry-run: deletes nothing);
+                              run it under the ops lock (scripts/ops/retention.sh)
 `
 
 func main() {
@@ -276,6 +282,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return simCmd(ctx, cfg, args[1:], out)
 	case "house":
 		return houseCmd(ctx, cfg, args[1:], out)
+	case "retention":
+		return retentionCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

@@ -1,0 +1,10 @@
+# 历史数据保留（M1，ADR-0022）：exchange-retention.timer 每日触发一次，见 docs/runbook/retention.md。
+[Unit]
+Description=Exchange history retention (exchangectl retention run under the ops lock)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/bin/bash /opt/exchange/infra/retention/retention.sh

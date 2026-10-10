@@ -38,6 +38,7 @@
 | [wallet.md](wallet.md) | 充值、signer 与 keystore、归集、提现审批与签名、链上对账，`exchangectl wallet` |
 | [custody.md](custody.md) | 托管钱包（优盾，ADR-0011）：接口映射、回调、`SUBMITTED` 状态、托管方对账、测试服模拟网关 `udun-mock`、换成真网关 |
 | [analytics.md](analytics.md) | ClickHouse：事件、审计、分录与订单/成交/钱包/K 线读模型，回填、常用查询与核对 |
+| [retention.md](retention.md) | 历史数据只留 15 天（ADR-0022）：`exchangectl retention run`、各库删什么留什么、账本的检查点与键表、每日 cron、空间、ClickHouse TTL |
 | [launch.md](launch.md) | 上线手册：一套部署、后台改配置即上线——部署侧步骤（域名、密钥、第三方、参考数据、开关、托管方切换、HOUSE 库存）与后台侧顺序（平台设置、固定页面、公告、注册赠送 0、横幅、检查清单） |
 | [admin.md](admin.md) | 管理后台（`/admin/`）：管理员与 TOTP、角色、提现审批、用户处置、交易对与开关、双人调账、审计查询，`exchangectl admin` |
 | [grafana-cloud.md](grafana-cloud.md) | Grafana Cloud 接入（暂缓） |
