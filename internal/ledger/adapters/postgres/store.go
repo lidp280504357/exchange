@@ -108,21 +108,44 @@ func (r accounts) MarginDebts(ctx context.Context) ([]domain.Account, error) {
 		'MARGIN_ISOLATED_DEBT', 'MARGIN_ISOLATED_INTEREST') AND available <> 0 ORDER BY owner_id, account_type, scope, asset`)
 }
 
-func (r accounts) Holders(ctx context.Context, asset string) ([]domain.Holding, error) {
-	rows, err := r.q.Query(ctx, `SELECT owner_id, sum(available + frozen) AS amount FROM accounts
-		WHERE owner_type = 'USER' AND asset = $1 GROUP BY owner_id HAVING sum(available + frozen) <> 0
-		ORDER BY amount DESC, owner_id`, asset)
+// holdings is what each user holds of the asset $1, the users holding
+// nothing left out.
+const holdings = `SELECT owner_id, sum(available + frozen) AS amount FROM accounts
+	WHERE owner_type = 'USER' AND asset = $1 GROUP BY owner_id HAVING sum(available + frozen) <> 0`
+
+func (r accounts) Holders(ctx context.Context, asset string, limit int, apart []string) (domain.Holders, error) {
+	out := domain.Holders{Top: []domain.Holding{}}
+	rows, err := r.q.Query(ctx, holdings+` ORDER BY amount DESC, owner_id LIMIT $2`, asset, limit)
 	if err != nil {
-		return nil, fmt.Errorf("list holders: %w", err)
+		return out, fmt.Errorf("list holders: %w", err)
 	}
 	defer rows.Close()
-	out := []domain.Holding{}
 	for rows.Next() {
 		var h domain.Holding
 		if err := rows.Scan(&h.UserID, &h.Amount); err != nil {
-			return nil, fmt.Errorf("list holders: %w", err)
+			return out, fmt.Errorf("list holders: %w", err)
 		}
-		out = append(out, h)
+		out.Top = append(out.Top, h)
+	}
+	if err := rows.Err(); err != nil {
+		return out, fmt.Errorf("list holders: %w", err)
+	}
+	if rows, err = r.q.Query(ctx, `SELECT owner_id = ANY($2) AS apart, coalesce(sum(amount), 0), count(*) FILTER (WHERE amount > 0)
+		FROM (`+holdings+`) h GROUP BY 1`, asset, apart); err != nil {
+		return out, fmt.Errorf("sum holders: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var isApart bool
+		var sum domain.HoldingSum
+		if err := rows.Scan(&isApart, &sum.Amount, &sum.Holders); err != nil {
+			return out, fmt.Errorf("sum holders: %w", err)
+		}
+		if isApart {
+			out.Apart = sum
+		} else {
+			out.Others = sum
+		}
 	}
 	return out, rows.Err()
 }

@@ -676,8 +676,9 @@ groups:
           runbook: docs/runbook/otp.md
 
   # The daily history retention (M1, ADR-0022): exchange-retention.timer's
-  # script writes the time it last finished without a failure into the node
-  # exporter's textfile directory (/opt/exchange/infra/metrics).
+  # script writes the time it and the ledger reconcile after it last
+  # finished without a failure into the node exporter's textfile directory
+  # (/opt/exchange/infra/metrics, --collector.textfile.directory).
   - name: retention
     rules:
       - alert: RetentionRunStale
@@ -685,5 +686,17 @@ groups:
         for: 30m
         labels: {severity: warning}
         annotations:
-          summary: "the daily history retention has not finished without a failure for two days: the history grows, or a schema's rule fails"
+          summary: "the daily history retention and the ledger reconcile after it have not finished without a failure for two days: the history grows, a schema's rule fails or the ledger does not reconcile"
+          runbook: docs/runbook/retention.md
+
+      # No such metric at all (B201): the node exporter is not running or
+      # does not read the textfile directory, or the retention has never
+      # finished (the timer not enabled). A day and some, so that the first
+      # run after the timer is enabled comes first.
+      - alert: RetentionMetricAbsent
+        expr: absent(exchange_retention_last_success_timestamp_seconds)
+        for: 26h
+        labels: {severity: warning}
+        annotations:
+          summary: "no exchange_retention_last_success_timestamp_seconds: the node exporter does not read /opt/exchange/infra/metrics, or the daily history retention has never finished"
           runbook: docs/runbook/retention.md

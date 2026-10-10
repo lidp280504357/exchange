@@ -82,7 +82,7 @@ tasks:
   scripts:check:
     desc: 部署脚本语法检查
     cmds:
-      - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
+      - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh deploy/retention/retention.sh deploy/backup/pg-backup.sh
       - for f in scripts/*.sh scripts/ci/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh scripts/ops/*.sh; do bash -n "$f"; done
 
   dev:

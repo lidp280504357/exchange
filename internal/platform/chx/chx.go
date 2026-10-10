@@ -24,6 +24,9 @@ type Config struct {
 	User string `koanf:"clickhouse_user"`
 	// Password (CLICKHOUSE_PASSWORD).
 	Password string `koanf:"clickhouse_password"`
+	// ReadTimeout overrides the 60 seconds a statement's answer may take
+	// (the retention run's lightweight delete waits for its mutation; B201).
+	ReadTimeout time.Duration `koanf:"-"`
 }
 
 // Validate reports missing settings.
@@ -39,11 +42,15 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) options() *clickhouse.Options {
+	read := 60 * time.Second
+	if c.ReadTimeout > 0 {
+		read = c.ReadTimeout
+	}
 	return &clickhouse.Options{
 		Addr:        []string{c.Addr},
 		Auth:        clickhouse.Auth{Database: c.Database, Username: c.User, Password: c.Password},
 		DialTimeout: 10 * time.Second,
-		ReadTimeout: 60 * time.Second,
+		ReadTimeout: read,
 		Compression: &clickhouse.Compression{Method: clickhouse.CompressionLZ4},
 	}
 }

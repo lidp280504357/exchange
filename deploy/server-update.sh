@@ -213,6 +213,8 @@ sync_infra() {
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
   # 历史数据保留（M1，ADR-0022）：脚本与每日的 systemd 定时器；只装不启用，启用按 docs/runbook/retention.md
   mkdir -p "$INFRA/retention" && cp deploy/retention/retention.sh "$INFRA/retention/retention.sh"
+  # 它的日志目录与写成功时间的 node exporter textfile 目录（/opt/exchange 属 ubuntu；B201）
+  mkdir -p /opt/exchange/logs "$INFRA/metrics"
   if ! cmp -s deploy/retention/exchange-retention.service /etc/systemd/system/exchange-retention.service ||
     ! cmp -s deploy/retention/exchange-retention.timer /etc/systemd/system/exchange-retention.timer; then
     sudo install -m 644 deploy/retention/exchange-retention.service deploy/retention/exchange-retention.timer /etc/systemd/system/

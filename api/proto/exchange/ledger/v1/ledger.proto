@@ -37,12 +37,13 @@ service LedgerService {
   rpc FundSystemAccount(FundSystemAccountRequest) returns (FundSystemAccountResponse);
   // GetSystemBalances returns the platform's system accounts in an asset.
   rpc GetSystemBalances(GetSystemBalancesRequest) returns (GetSystemBalancesResponse);
-  // ListHolders returns what each user holds of an asset now: the
-  // available and frozen of all its accounts of the asset summed, margin
-  // debts included, for the users whose sum is not zero, largest first.
-  // The console's holders card reads it (B199): the ledger lines it summed
-  // in ClickHouse expire after 15 days (ADR-0022). The system accounts are
-  // GetSystemBalances'.
+  // ListHolders returns what the users hold of an asset now - the
+  // available and frozen of all a user's accounts of the asset summed,
+  // margin debts included: the largest holders, and the sums of the users
+  // asked apart (the console's bots and HOUSE, by their kind) and of the
+  // others. The console's holders card reads it (B199): the ledger lines
+  // it summed in ClickHouse expire after 15 days (ADR-0022). The system
+  // accounts are GetSystemBalances'.
   rpc ListHolders(ListHoldersRequest) returns (ListHoldersResponse);
   // Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
   // against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
@@ -271,6 +272,12 @@ message GetSystemBalancesResponse {
 
 message ListHoldersRequest {
   string asset = 1;
+  // How many of the largest holders to list: 0 lists 100, at most 1,000
+  // (B201).
+  int32 limit = 2;
+  // Users summed apart (at most 1,000 IDs); they are listed among the
+  // largest holders as any other.
+  repeated string apart_user_ids = 3;
 }
 
 message Holder {
@@ -279,8 +286,21 @@ message Holder {
   string amount = 2;
 }
 
+// HolderSum sums what some users hold of an asset.
+message HolderSum {
+  // Decimal string; the users who owe count in.
+  string amount = 1;
+  // How many of them hold more than zero.
+  int64 holders = 2;
+}
+
 message ListHoldersResponse {
+  // The largest holders, largest first, at most limit; the users holding
+  // nothing are left out.
   repeated Holder holders = 1;
+  // The users not apart, and those apart.
+  HolderSum others = 2;
+  HolderSum apart = 3;
 }
 
 message AdjustRequest {

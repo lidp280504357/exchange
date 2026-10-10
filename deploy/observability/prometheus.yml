@@ -49,6 +49,10 @@ scrape_configs:
   - job_name: margin-service
     static_configs: [{targets: ["margin-service:9099"]}]
   # The host itself (disk, memory): a node exporter beside the agent, not
-  # on the compose network (HostDiskLow, HostDiskCritical; review C56).
+  # on the compose network (HostDiskLow, HostDiskCritical; review C56),
+  # run with --collector.textfile.directory=/opt/exchange/infra/metrics:
+  # the daily retention writes its last success there (RetentionRunStale,
+  # RetentionMetricAbsent; B201; the deploy makes the directory). Not
+  # running yet, as the agent.
   - job_name: node
     static_configs: [{targets: ["host.docker.internal:9100"]}]

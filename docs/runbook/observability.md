@@ -2,7 +2,7 @@
 
 实施计划 §9.2 要求每阶段交付"指标与告警清单、日志字段说明、trace 查询方法和回滚步骤"；需求 §12.2。现状：
 
-- **指标**：每个服务在运维端口（[server-deploy.md](server-deploy.md) 的 90xx）暴露 Prometheus `/metrics`。还没有采集端（Grafana Cloud 暂缓，[grafana-cloud.md](grafana-cloud.md)）；采集配置与告警规则已写好：`deploy/observability/prometheus.yml`（每个服务一个 job，告警按 `job` 区分服务）、`alerts.yml`（49 条），CI 用 promtool 校验语法并跑规则单测 `alerts_test.yml`。
+- **指标**：每个服务在运维端口（[server-deploy.md](server-deploy.md) 的 90xx）暴露 Prometheus `/metrics`。还没有采集端（Grafana Cloud 暂缓，[grafana-cloud.md](grafana-cloud.md)）；采集配置与告警规则已写好：`deploy/observability/prometheus.yml`（每个服务一个 job，告警按 `job` 区分服务）、`alerts.yml`（84 条），CI 用 promtool 校验语法并跑规则单测 `alerts_test.yml`。主机指标（`node` 任务）要 node exporter 与采集端一起部署，带 `--collector.textfile.directory=/opt/exchange/infra/metrics`（每日历史数据保留在那里写成功时间，[retention.md](retention.md)）。
 - **日志**：结构化，写 stdout，容器日志驱动 json-file（每容器 20 MB × 5 个文件）；测试服为 JSON，本机默认文本（`LOG_FORMAT` 可改）。
 - **追踪**：HTTP、gRPC、事件（信封里的 `traceparent`）全链路传递 W3C trace context，span 暂不导出；trace ID 出现在响应头 `X-Trace-Id`、错误体 `trace_id`、每条日志的 `trace_id`、ClickHouse `events.correlation_id`。
 
@@ -58,7 +58,8 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | OutboxBacklog | warning | 待发事件 > 100 持续 5 分钟 | Redpanda 可用性 |
 | OutboxPublishFailing | critical | 5 分钟内持续发送失败 | Redpanda 是否宕机（恢复后自动补发） |
 | LedgerReconciliationMismatch | critical | 对账不一致 > 0 | [ledger.md](ledger.md)，冻结相关账户，按分录排查 |
-| RetentionRunStale | warning | 每日历史数据保留两天没有成功跑完（node exporter 的 textfile 指标 `exchange_retention_last_success_timestamp_seconds`） | [retention.md](retention.md#排查)：`journalctl -u exchange-retention` 看最后一次输出，修好后补跑 |
+| RetentionRunStale | warning | 每日历史数据保留与之后的账本对账两天没有都成功（node exporter 的 textfile 指标 `exchange_retention_last_success_timestamp_seconds`） | [retention.md](retention.md#排查)：`journalctl -u exchange-retention` 看最后一次输出，修好后补跑 |
+| RetentionMetricAbsent | warning | 26 小时没有上面那个指标：node exporter 没读 textfile 目录，或保留从没成功跑过（定时器没启用） | [retention.md](retention.md#排查)：看定时器与 `/opt/exchange/infra/metrics`，再看 node exporter 的参数 |
 | LedgerReconciliationStopped | warning | 3 小时无完成的对账 | ledger-service 日志 |
 | WalletScanLagging | warning | 充值扫描落后链头 50 块以上持续 10 分钟 | [wallet.md](wallet.md)：节点可用性、租约、数据库 |
 | WalletScanStalled | warning | 10 分钟没有完成一轮扫描 | 同上；wallet-service 日志里的 `deposit scan failed` |

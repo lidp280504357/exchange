@@ -206,6 +206,20 @@ type Holding struct {
 	Amount decimal.Decimal
 }
 
+// Holders is who holds an asset: the largest holders, and the sums of
+// the users asked apart and of the others.
+type Holders struct {
+	Top           []Holding
+	Others, Apart HoldingSum
+}
+
+// HoldingSum sums what some users hold: the amount, those who owe
+// included, and how many hold more than zero.
+type HoldingSum struct {
+	Amount  decimal.Decimal
+	Holders int64
+}
+
 // Account is a balance holder.
 type Account struct {
 	ID        string

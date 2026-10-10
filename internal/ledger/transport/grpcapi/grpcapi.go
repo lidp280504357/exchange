@@ -181,15 +181,20 @@ func (s *Server) GetSystemBalances(ctx context.Context, req *ledgerv1.GetSystemB
 	return resp, nil
 }
 
-// ListHolders lists what each user holds of an asset, largest first.
+// ListHolders lists the largest holders of an asset and sums the users
+// apart and the others.
 func (s *Server) ListHolders(ctx context.Context, req *ledgerv1.ListHoldersRequest) (*ledgerv1.ListHoldersResponse, error) {
-	list, err := s.svc.Holders(ctx, req.GetAsset())
+	h, err := s.svc.Holders(ctx, req.GetAsset(), int(req.GetLimit()), req.GetApartUserIds())
 	if err != nil {
 		return nil, err
 	}
-	resp := &ledgerv1.ListHoldersResponse{Holders: make([]*ledgerv1.Holder, 0, len(list))}
-	for _, h := range list {
-		resp.Holders = append(resp.Holders, &ledgerv1.Holder{UserId: h.UserID, Amount: h.Amount.String()})
+	resp := &ledgerv1.ListHoldersResponse{
+		Holders: make([]*ledgerv1.Holder, 0, len(h.Top)),
+		Others:  &ledgerv1.HolderSum{Amount: h.Others.Amount.String(), Holders: h.Others.Holders},
+		Apart:   &ledgerv1.HolderSum{Amount: h.Apart.Amount.String(), Holders: h.Apart.Holders},
+	}
+	for _, t := range h.Top {
+		resp.Holders = append(resp.Holders, &ledgerv1.Holder{UserId: t.UserID, Amount: t.Amount.String()})
 	}
 	return resp, nil
 }

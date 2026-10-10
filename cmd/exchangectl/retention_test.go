@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
 
 	"github.com/skill/exchange/internal/platform/migrate"
@@ -85,8 +86,8 @@ func TestRetentionPoliciesRun(t *testing.T) {
 // sessions go with their tokens, idle ones once their tokens are gone;
 // each flag keeps its latest 50 changes; withdrawals stay the keys'
 // window, callbacks that matched nothing too, applied ones go; each
-// instrument key keeps its latest change. A dry run counts the same and
-// deletes nothing.
+// instrument key keeps its latest change and its latest edit. A dry run
+// counts the same and deletes nothing.
 func TestRetentionRun(t *testing.T) {
 	ctx := context.Background()
 	dbs := map[string]*pg.DB{}
@@ -175,6 +176,14 @@ func TestRetentionRun(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A status change after the console's edit: the edit stays - instruments
+	// apply reads it (LastEdit; B201) - the file's before it goes.
+	for i, source := range []string{"FILE", "CONSOLE", "STATUS"} {
+		if _, err := instrument.Exec(ctx, `INSERT INTO config_history (entity, key, version, value, actor, reason, created_at, source)
+			VALUES ('TRADING_PAIR', 'SOL-USDT', $1, '{}', 'test', 'test', $2, $3)`, i+1, old, source); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	config := dbs["config"]
 	for i := range 60 {
@@ -194,7 +203,7 @@ func TestRetentionRun(t *testing.T) {
 	if err := runRetention(ctx, policies, own, nil, w, &out); err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out.String())
 	}
-	for _, want := range []string{"dry run, nothing deleted", "would delete 21 rows"} {
+	for _, want := range []string{"dry run, nothing deleted", "would delete 22 rows"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("dry run: no %q in\n%s", want, out.String())
 		}
@@ -216,12 +225,12 @@ func TestRetentionRun(t *testing.T) {
 	if err := runRetention(ctx, policies, own, nil, w, &out); err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "deleted 21 rows") {
+	if !strings.Contains(out.String(), "deleted 22 rows") {
 		t.Fatalf("run:\n%s", out.String())
 	}
 	// 2 orders and their fills; a revoked session and its token, an idle
 	// one; 10 flag changes; a withdrawal past the keys' window, an applied
-	// callback; 2 of a pair's 3 changes.
+	// callback; 2 of a pair's 3 changes, another's file edit.
 	for id, want := range map[string]int{gone: 0, refused: 0, unreleased: 1, open: 1, fresh: 1} {
 		if n := count(trading, `SELECT count(*) FROM orders WHERE id = $1`, id); n != want {
 			t.Fatalf("order %s: %d, want %d", id, n, want)
@@ -249,6 +258,10 @@ func TestRetentionRun(t *testing.T) {
 		count(instrument, `SELECT count(*) FROM config_history WHERE key = 'ETH-USDT'`) != 1 {
 		t.Fatal("each pair's latest change should stay")
 	}
+	if n := count(instrument, `SELECT count(*) FROM config_history WHERE key = 'SOL-USDT' AND source IN ('CONSOLE', 'STATUS')`); n != 2 ||
+		count(instrument, `SELECT count(*) FROM config_history WHERE key = 'SOL-USDT'`) != 2 {
+		t.Fatal("the console's edit should stay beside the later status change, the file's go")
+	}
 	// The migrations' own changes of other flags are recent and stay.
 	if n := count(config, `SELECT count(*) FROM flag_changes WHERE key = 'spot.trading'`); n != 50 {
 		t.Fatalf("flag changes left: %d, want the latest 50", n)
@@ -272,16 +285,41 @@ func (f fakePolicy) Run(context.Context, *pg.DB, retention.Window) ([]retention.
 }
 
 // A schema that fails does not stop the next; the run fails naming it
-// (B199). Fewer than 7 days need --force.
+// (B199). ClickHouse down fails the read models' step alone, after the
+// schemas; without its address the step is skipped, saying so; a run
+// stopped ends after the schema it was in (B201). Fewer than 7 days need
+// --force.
 func TestRetentionGoesOn(t *testing.T) {
 	ctx := context.Background()
 	w := retention.Window{Now: time.Now(), Days: 15, KeyDays: 90, Batch: 10, DryRun: true}
 	none := func(string) (*pg.DB, func(), error) { return nil, func() {}, nil }
+	two := []retention.Policy{fakePolicy{"first", 1, errors.New("boom")}, fakePolicy{"second", 2, nil}}
 	var out bytes.Buffer
-	err := runRetention(ctx, []retention.Policy{fakePolicy{"first", 1, errors.New("boom")}, fakePolicy{"second", 2, nil}}, none, nil, w, &out)
+	err := runRetention(ctx, two, none, nil, w, &out)
 	if err == nil || !strings.Contains(err.Error(), "first: boom") || !strings.Contains(out.String(), "second.t") ||
 		!strings.Contains(out.String(), "FAILED") || !strings.Contains(out.String(), "would delete 3 rows") {
 		t.Fatalf("%v\n%s", err, out.String())
+	}
+
+	out.Reset()
+	down := func(context.Context) (driver.Conn, error) { return nil, errors.New("connection refused") }
+	err = runRetention(ctx, two[1:], none, down, w, &out)
+	if err == nil || !strings.Contains(err.Error(), "clickhouse: connection refused") || !strings.Contains(out.String(), "second.t") ||
+		!strings.Contains(out.String(), "would delete 2 rows") {
+		t.Fatalf("ClickHouse down: %v\n%s", err, out.String())
+	}
+	out.Reset()
+	if err := runRetention(ctx, two[1:], none, func(context.Context) (driver.Conn, error) { return nil, errNoClickHouse }, w, &out); err != nil ||
+		!strings.Contains(out.String(), "SKIPPED") || !strings.Contains(out.String(), "no CLICKHOUSE_ADDR") {
+		t.Fatalf("no ClickHouse address: %v\n%s", err, out.String())
+	}
+
+	out.Reset()
+	stopped, stop := context.WithCancel(ctx)
+	stop()
+	if err := runRetention(stopped, two[1:], none, nil, w, &out); err == nil || !strings.Contains(err.Error(), "stopped before the end") ||
+		strings.Contains(out.String(), "second.t") {
+		t.Fatalf("stopped: %v\n%s", err, out.String())
 	}
 	out.Reset()
 	if err := retentionCmd(ctx, settings{}, []string{"run", "--days", "3"}, &out); err == nil || !strings.Contains(err.Error(), "--force") {

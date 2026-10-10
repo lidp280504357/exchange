@@ -22,5 +22,9 @@ if [[ -z ${OPS_LOCK_HELD:-} && -z $dry ]]; then
 fi
 printf -v args ' %q' "$@"
 # A one-off container of the services' image and settings (as the server's
-# daily run), not one inside user-service.
-ssh exchange "cd $INFRA && $COMPOSE run --rm --no-deps -T -e EXCHANGECTL_ACTOR=${EXCHANGECTL_ACTOR:-ops-retention} user-service /app/exchangectl retention run$args" </dev/null
+# daily run), not one inside user-service; named, so that a stop here
+# (Ctrl-C) stops it there too - docker compose run alone lets it run on
+# (B201) - and a dry run beside the daily run does not take its name.
+name="exchange-retention-ops-$(date +%s)"
+trap 'ssh exchange "sudo docker stop -t 60 $name >/dev/null 2>&1" </dev/null || true' INT TERM
+ssh exchange "cd $INFRA && $COMPOSE run --rm --no-deps -T --name $name -e EXCHANGECTL_ACTOR=${EXCHANGECTL_ACTOR:-ops-retention} user-service /app/exchangectl retention run$args" </dev/null

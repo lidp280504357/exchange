@@ -10,3 +10,7 @@ User=ubuntu
 ExecStart=/usr/bin/bash /opt/exchange/infra/retention/retention.sh
 # The lock may take an hour to come, the first large run some more (B199).
 TimeoutStartSec=3h
+# A stop signals the script alone, which stops the run's container and
+# waits for it (docker stop -t 60); the rest is killed after (B201).
+KillMode=mixed
+TimeoutStopSec=2min

@@ -85,12 +85,13 @@ type LedgerServiceClient interface {
 	FundSystemAccount(ctx context.Context, in *FundSystemAccountRequest, opts ...grpc.CallOption) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(ctx context.Context, in *GetSystemBalancesRequest, opts ...grpc.CallOption) (*GetSystemBalancesResponse, error)
-	// ListHolders returns what each user holds of an asset now: the
-	// available and frozen of all its accounts of the asset summed, margin
-	// debts included, for the users whose sum is not zero, largest first.
-	// The console's holders card reads it (B199): the ledger lines it summed
-	// in ClickHouse expire after 15 days (ADR-0022). The system accounts are
-	// GetSystemBalances'.
+	// ListHolders returns what the users hold of an asset now - the
+	// available and frozen of all a user's accounts of the asset summed,
+	// margin debts included: the largest holders, and the sums of the users
+	// asked apart (the console's bots and HOUSE, by their kind) and of the
+	// others. The console's holders card reads it (B199): the ledger lines
+	// it summed in ClickHouse expire after 15 days (ADR-0022). The system
+	// accounts are GetSystemBalances'.
 	ListHolders(ctx context.Context, in *ListHoldersRequest, opts ...grpc.CallOption) (*ListHoldersResponse, error)
 	// Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
 	// against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
@@ -471,12 +472,13 @@ type LedgerServiceServer interface {
 	FundSystemAccount(context.Context, *FundSystemAccountRequest) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error)
-	// ListHolders returns what each user holds of an asset now: the
-	// available and frozen of all its accounts of the asset summed, margin
-	// debts included, for the users whose sum is not zero, largest first.
-	// The console's holders card reads it (B199): the ledger lines it summed
-	// in ClickHouse expire after 15 days (ADR-0022). The system accounts are
-	// GetSystemBalances'.
+	// ListHolders returns what the users hold of an asset now - the
+	// available and frozen of all a user's accounts of the asset summed,
+	// margin debts included: the largest holders, and the sums of the users
+	// asked apart (the console's bots and HOUSE, by their kind) and of the
+	// others. The console's holders card reads it (B199): the ledger lines
+	// it summed in ClickHouse expire after 15 days (ADR-0022). The system
+	// accounts are GetSystemBalances'.
 	ListHolders(context.Context, *ListHoldersRequest) (*ListHoldersResponse, error)
 	// Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
 	// against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
