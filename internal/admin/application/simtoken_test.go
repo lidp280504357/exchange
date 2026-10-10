@@ -267,6 +267,21 @@ func TestWhoHoldsTheCoin(t *testing.T) {
 		tok.Test != nil || !slices.Equal(tok.Partial, []string{"kinds"}) || len(tok.Top) != 6 || tok.Top[1].UserID != house {
 		t.Fatalf("the kinds unknown %+v %v", tok.Holdings, err)
 	}
+	// HOUSE's account from the configuration (A128): user-service down, the
+	// test accounts among the users, HOUSE not; HOUSE not marked SYSTEM, the
+	// same without a note.
+	svc.HouseBook.User, svc.Log = house, slog.New(slog.DiscardHandler)
+	svc.KindIDs = &fakeKindIDs{err: errors.New("user-service down")}
+	if tok, err := svc.SimTokenHoldings(context.Background(), reader); err != nil || tok.Users.String() != "69.3" || tok.UserHolders != 3 ||
+		tok.System["HOUSE"].String() != "500" || tok.Test != nil || !slices.Equal(tok.Partial, []string{"kinds"}) ||
+		len(tok.Top) != 5 || tok.Top[2].UserID != test {
+		t.Fatalf("the kinds unknown, HOUSE known %+v %v", tok.Holdings, err)
+	}
+	svc.KindIDs = &fakeKindIDs{of: map[string][]string{"TEST": {test, testOwing}}}
+	if tok, err := svc.SimTokenHoldings(context.Background(), reader); err != nil || tok.Users.String() != "19.3" ||
+		tok.System["HOUSE"].String() != "500" || tok.Test == nil || len(tok.Partial) != 0 || len(tok.Top) != 4 {
+		t.Fatalf("HOUSE not marked SYSTEM %+v %v", tok.Holdings, err)
+	}
 	// The list cut at its limit: the test accounts stay among the users, told so.
 	m, err := svc.coinBalances(context.Background(), "ASTRA", []string{botA, botB}, []string{house})
 	if err != nil || m.limit != 1000 || len(m.all.Top) != 8 {
@@ -276,6 +291,51 @@ func TestWhoHoldsTheCoin(t *testing.T) {
 	cut, err := holdingsOf(m, holderKinds{system: []string{house}, test: map[string]bool{test: true, testOwing: true}}, 20)
 	if err != nil || cut.Test != nil || !slices.Equal(cut.Partial, []string{"test"}) || cut.Users.String() != "69.3" || cut.UserHolders != 3 {
 		t.Fatalf("too many to tell %+v %v", cut, err)
+	}
+}
+
+// countingLedger counts the reads of the coin's holders and the users
+// asked apart.
+type countingLedger struct {
+	coinLedger
+	reads []int
+}
+
+func (l *countingLedger) Holders(ctx context.Context, asset string, limit int, apart []string) (ports.HolderPage, error) {
+	l.reads = append(l.reads, limit)
+	return l.coinLedger.Holders(ctx, asset, limit, apart)
+}
+
+// More holders than are listed (A128): HOUSE's sum is read on its own, the
+// test accounts stay among the users; every holder listed, HOUSE's comes
+// from the same read as the sums.
+func TestTheCoinWithMoreHoldersThanListed(t *testing.T) {
+	const house, test = "0192a000-0000-7000-8000-0000000000aa", "0192a000-0000-7000-8000-0000000000e2"
+	holders := []ports.Holder{
+		{UserID: botA, Amount: decimal.NewFromInt(600)},
+		{UserID: house, Amount: decimal.NewFromInt(500)},
+		{UserID: test, Amount: decimal.NewFromInt(50)},
+	}
+	for i := range simHolderLimit {
+		holders = append(holders, ports.Holder{UserID: fmt.Sprintf("0192a000-0000-7000-8000-%012d", i), Amount: decimal.NewFromInt(1)})
+	}
+	led := &countingLedger{coinLedger: coinLedger{&fakeLedger{holders: map[string][]ports.Holder{"ASTRA": holders}}}}
+	kinds := &fakeKindIDs{of: map[string][]string{"SYSTEM": {house}, "TEST": {test}}}
+	svc := &Service{Sim: &stateSim{}, Ledger: led, KindIDs: kinds, Now: time.Now}
+	tok, err := svc.SimTokenHoldings(context.Background(), reader)
+	if err != nil || !slices.Equal(led.reads, []int{simHolderLimit, simHolderLimit, 1}) {
+		t.Fatalf("read %v: %v", led.reads, err)
+	}
+	if tok.Bots.String() != "600" || tok.BotHolders != 1 || tok.System["HOUSE"].String() != "500" || tok.Test != nil ||
+		!slices.Equal(tok.Partial, []string{"test"}) || tok.Users.String() != "1050" || tok.UserHolders != 1001 ||
+		len(tok.Top) != 20 || tok.Top[0].UserID != botA || tok.Top[1].UserID != "0192a000-0000-7000-8000-000000000000" {
+		t.Fatalf("more than listed, the test account known all the same %+v", tok.Holdings)
+	}
+	// Every holder listed: no read of its own.
+	led.holders["ASTRA"], led.reads = holders[:3], nil
+	if tok, err := svc.SimTokenHoldings(context.Background(), reader); err != nil || !slices.Equal(led.reads, []int{simHolderLimit, simHolderLimit}) ||
+		tok.System["HOUSE"].String() != "500" || tok.Test == nil || tok.Test.Amount.String() != "50" {
+		t.Fatalf("all listed, read %v: %+v %v", led.reads, tok.Holdings, err)
 	}
 }
 

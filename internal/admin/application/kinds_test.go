@@ -17,10 +17,15 @@ import (
 type fakeKindIDs struct {
 	of    map[string][]string
 	asked []string
+	// err is user-service not answering.
+	err error
 }
 
 func (f *fakeKindIDs) IDs(_ context.Context, kinds []string) ([]string, error) {
 	f.asked = append(f.asked, strings.Join(kinds, ","))
+	if f.err != nil {
+		return nil, f.err
+	}
 	var out []string
 	for _, k := range kinds {
 		out = append(out, f.of[k]...)

@@ -85,7 +85,7 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 		bots = append(bots, b.UserID)
 	}
 	kinds := s.holderKinds(ctx)
-	// Up to ten reads of ledger-service, bounded together (A125).
+	// Up to eight reads of ledger-service, bounded together (A125).
 	read, cancel := context.WithTimeout(ctx, coinReadTimeout)
 	defer cancel()
 	m, err := s.coinBalances(read, st.coin(), bots, kinds.system)
@@ -125,25 +125,36 @@ type holderKinds struct {
 	partial bool
 }
 
+// holderKinds reads the system users and the test accounts from
+// user-service; HOUSE's account (HOUSE_USER_ID) is a system user whatever
+// it answers, so that user-service down, or HOUSE not marked SYSTEM, leaves
+// only the test accounts among the users (A128).
 func (s *Service) holderKinds(ctx context.Context) holderKinds {
+	out := s.readKinds(ctx)
+	if house := s.HouseBook.User; house != "" && !slices.Contains(out.system, house) {
+		out.system = append(out.system, house)
+	}
+	return out
+}
+
+func (s *Service) readKinds(ctx context.Context) holderKinds {
 	if s.KindIDs == nil {
 		return holderKinds{partial: true}
 	}
 	system, err := s.KindIDs.IDs(ctx, []string{KindSystem})
-	if err != nil {
-		s.Log.WarnContext(ctx, "the coin's holders: the accounts' kinds unknown", "error", err)
-		return holderKinds{partial: true}
+	if err == nil {
+		var test []string
+		if test, err = s.KindIDs.IDs(ctx, []string{KindTest}); err == nil {
+			// A copy: the IDs are KindIDs' kept answer, and HOUSE's may be added.
+			out := holderKinds{system: slices.Clone(system), test: make(map[string]bool, len(test))}
+			for _, id := range test {
+				out.test[id] = true
+			}
+			return out
+		}
 	}
-	test, err := s.KindIDs.IDs(ctx, []string{KindTest})
-	if err != nil {
-		s.Log.WarnContext(ctx, "the coin's holders: the accounts' kinds unknown", "error", err)
-		return holderKinds{partial: true}
-	}
-	out := holderKinds{system: system, test: make(map[string]bool, len(test))}
-	for _, id := range test {
-		out.test[id] = true
-	}
-	return out
+	s.Log.WarnContext(ctx, "the coin's holders: the accounts' kinds unknown", "error", err)
+	return holderKinds{partial: true}
 }
 
 // coinMoment is the coin as one read of the ledger saw it: the holders
@@ -158,9 +169,12 @@ type coinMoment struct {
 }
 
 // coinBalances reads the coin's holders and system accounts as one moment:
-// the holders again after the others, until what they hold together held
-// still (a trade's fee moves the coin to FEE_REVENUE between two reads);
-// three tries, then the last read stands.
+// the holders again after the system accounts, until what all users hold
+// held still (a trade's fee moves the coin to FEE_REVENUE between two
+// reads); three tries, then the last read stands. The system users' sum
+// comes from that last read's list when it lists every holder - the same
+// statement as the sums, so a settlement between HOUSE and a bot cannot
+// fall between them - and from a read of its own when it was cut (A128).
 func (s *Service) coinBalances(ctx context.Context, asset string, bots, system []string) (coinMoment, error) {
 	apart := append(slices.Clone(bots), system...)
 	read := func() (ports.HolderPage, error) { return s.Ledger.Holders(ctx, asset, simHolderLimit, apart) }
@@ -176,13 +190,6 @@ func (s *Service) coinBalances(ctx context.Context, asset string, bots, system [
 		if m.system, err = s.Ledger.SystemBalances(ctx, asset); err != nil {
 			return coinMoment{}, err
 		}
-		if len(system) > 0 {
-			house, err := s.Ledger.Holders(ctx, asset, 1, system)
-			if err != nil {
-				return coinMoment{}, err
-			}
-			m.systemUsers = house.Apart
-		}
 		again, err := read()
 		if err != nil {
 			return coinMoment{}, err
@@ -194,6 +201,24 @@ func (s *Service) coinBalances(ctx context.Context, asset string, bots, system [
 		}
 	}
 	m.all = all
+	switch {
+	case len(system) == 0:
+	case len(all.Top) < m.limit:
+		for _, h := range all.Top {
+			if m.houseApart[h.UserID] {
+				m.systemUsers.Amount = m.systemUsers.Amount.Add(h.Amount)
+				if h.Amount.IsPositive() {
+					m.systemUsers.Holders++
+				}
+			}
+		}
+	default:
+		house, err := s.Ledger.Holders(ctx, asset, 1, system)
+		if err != nil {
+			return coinMoment{}, err
+		}
+		m.systemUsers = house.Apart
+	}
 	return m, nil
 }
 

@@ -5008,7 +5008,7 @@ export interface components {
             }[];
             /** @description What manual adjustments issued (the ADJUSTMENT account's debit); the bots, users and platform hold it all. */
             issued: components["schemas"]["Decimal"];
-            /** @description What could not be told apart: kinds (the accounts' kinds unknown: HOUSE and the test accounts among users and top), test (1,000 or more accounts hold or owe the coin: the test accounts among users). */
+            /** @description What could not be told apart: kinds (the accounts' kinds unknown: the test accounts among users and top; HOUSE known from HOUSE_USER_ID all the same), test (1,000 or more accounts hold or owe the coin: the test accounts among users). */
             partial: ("kinds" | "test")[];
             /** @description The largest holders, largest first (20 at most), neither HOUSE nor a test account. */
             top: {

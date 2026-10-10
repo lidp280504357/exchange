@@ -7967,8 +7967,9 @@ components:
             type: string
             enum: [kinds, test]
           description: >-
-            What could not be told apart: kinds (the accounts' kinds unknown: HOUSE and the test accounts among users and
-            top), test (1,000 or more accounts hold or owe the coin: the test accounts among users).
+            What could not be told apart: kinds (the accounts' kinds unknown: the test accounts among users and top; HOUSE
+            known from HOUSE_USER_ID all the same), test (1,000 or more accounts hold or owe the coin: the test accounts
+            among users).
         top:
           type: array
           description: The largest holders, largest first (20 at most), neither HOUSE nor a test account.

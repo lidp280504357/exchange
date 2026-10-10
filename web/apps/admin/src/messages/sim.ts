@@ -110,7 +110,7 @@ export const simZh = {
       issued: "发行总量", asOf: "截至", marketValue: "市值（按最近成交价）", botsHold: "机器人持有", usersHold: "用户持有", platformHold: "平台账户",
       testHold: "测试账户持有",
       partial: {
-        kinds: "读不到账户类型：HOUSE 与测试账户算在「用户持有」与最大的持有者里",
+        kinds: "读不到账户类型：测试账户算在「用户持有」与最大的持有者里（HOUSE 按配置认出）",
         test: "持有或欠这个币的账户达到 1,000 个：测试账户算在「用户持有」里",
       },
       holders: "{{n}} 个账户持有", distribution: "持有分布", topHolders: "最大的持有者", noHolders: "还没有持有者", profile: "代币资料",
@@ -237,7 +237,7 @@ export const simEn = {
       issued: "Issued", asOf: "As of", marketValue: "Market value (last price)", botsHold: "Bots hold", usersHold: "Users hold", platformHold: "Platform accounts",
       testHold: "Test accounts hold",
       partial: {
-        kinds: "The accounts' kinds are unknown: HOUSE and the test accounts count among the users and the largest holders",
+        kinds: "The accounts' kinds are unknown: the test accounts count among the users and the largest holders (HOUSE known from the configuration)",
         test: "1,000 or more accounts hold or owe the coin: the test accounts count among the users",
       },
       holders: "{{n}} accounts hold some", distribution: "Holders", topHolders: "Largest holders", noHolders: "No holders yet", profile: "The coin's profile",
