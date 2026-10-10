@@ -686,6 +686,16 @@ func (a livePurgeActions) cancelOrders(ctx context.Context, user string) error {
 // flatten has derivatives-service end the user's contract accounts (L4b):
 // it may take some 40 seconds when the engine does not answer.
 func (a livePurgeActions) flatten(ctx context.Context, user, actor, reason string) (purgeEnd, error) {
+	var raw json.RawMessage
+	if err := a.internal(ctx, a.derivatives+"/internal/derivatives/users/"+user+"/flatten", actor, reason, &raw); err != nil {
+		return purgeEnd{}, err
+	}
+	return flattenedEnd(raw)
+}
+
+// flattenedEnd reads flatten's answer: done, or the positions left with
+// their reasons.
+func flattenedEnd(raw []byte) (purgeEnd, error) {
 	var answer struct {
 		Remaining []struct {
 			Symbol   string `json:"symbol"`
@@ -695,17 +705,36 @@ func (a livePurgeActions) flatten(ctx context.Context, user, actor, reason strin
 		} `json:"remaining"`
 		Complete bool `json:"complete"`
 	}
-	err := a.internal(ctx, a.derivatives+"/internal/derivatives/users/"+user+"/flatten", actor, reason, &answer)
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return purgeEnd{}, fmt.Errorf("flatten's answer: %w", err)
+	}
 	end := purgeEnd{complete: answer.Complete}
 	for _, r := range answer.Remaining {
 		end.left = append(end.left, strings.Join([]string{r.Symbol, r.Side, r.Quantity, r.Reason}, " "))
 	}
-	return end, err
+	return end, nil
 }
 
 // settleMargin has margin-service repay the user's margin debts (L4b).
 func (a livePurgeActions) settleMargin(ctx context.Context, user, actor, reason string) (purgeEnd, error) {
+	var raw json.RawMessage
+	if err := a.internal(ctx, a.margin+"/internal/margin/users/"+user+"/settle", actor, reason, &raw); err != nil {
+		return purgeEnd{}, err
+	}
+	return settledEnd(raw)
+}
+
+// settledEnd reads settle's answer: the debts left, and the accounts whose
+// cancel the trading service refused (C80) - their orders still rest and
+// hold what they hold, so the user is not done then, whatever complete
+// says of the debts (B189).
+func settledEnd(raw []byte) (purgeEnd, error) {
 	var answer struct {
+		CancelRefused []struct {
+			Account string  `json:"account"`
+			Symbol  *string `json:"symbol"`
+			Code    string  `json:"code"`
+		} `json:"cancel_refused"`
 		RemainingDebt []struct {
 			Account string          `json:"account"`
 			Symbol  *string         `json:"symbol"`
@@ -714,8 +743,17 @@ func (a livePurgeActions) settleMargin(ctx context.Context, user, actor, reason 
 		} `json:"remaining_debt"`
 		Complete bool `json:"complete"`
 	}
-	err := a.internal(ctx, a.margin+"/internal/margin/users/"+user+"/settle", actor, reason, &answer)
-	end := purgeEnd{complete: answer.Complete}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return purgeEnd{}, fmt.Errorf("settle's answer: %w", err)
+	}
+	end := purgeEnd{complete: answer.Complete && len(answer.CancelRefused) == 0}
+	for _, r := range answer.CancelRefused {
+		left := r.Account
+		if r.Symbol != nil {
+			left += " " + *r.Symbol
+		}
+		end.left = append(end.left, left+": cancel refused, "+r.Code)
+	}
 	for _, d := range answer.RemainingDebt {
 		debt := purgeDebt{account: d.Account, asset: d.Asset, amount: d.Amount}
 		if d.Symbol != nil {
@@ -724,7 +762,7 @@ func (a livePurgeActions) settleMargin(ctx context.Context, user, actor, reason 
 		end.debts = append(end.debts, debt)
 		end.left = append(end.left, debt.String())
 	}
-	return end, err
+	return end, nil
 }
 
 func (a livePurgeActions) marginIn(ctx context.Context, user string, d purgeDebt, key string) error {

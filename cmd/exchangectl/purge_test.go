@@ -391,3 +391,32 @@ func TestPurgeRunsAgain(t *testing.T) {
 		t.Fatalf("a third run: %v\n%s", err, out)
 	}
 }
+
+// The L4b answers as the services write them (api/internal): flatten's
+// remaining positions; settle's remaining debts and, since C80, the
+// accounts whose cancel was refused, which leave the user not done even
+// with no debt (B189).
+func TestTheL4bAnswers(t *testing.T) {
+	end, err := flattenedEnd([]byte(`{"canceled_orders":1,"canceled_conditionals":0,"closed":[],` +
+		`"remaining":[{"symbol":"BTC-USDT-PERP","side":"LONG","quantity":"0.001","reason":"NOT_FILLED"}],"complete":false}`))
+	if err != nil || end.complete || !slices.Equal(end.left, []string{"BTC-USDT-PERP LONG 0.001 NOT_FILLED"}) {
+		t.Fatalf("flatten: %+v %v", end, err)
+	}
+	end, err = settledEnd([]byte(`{"canceled_orders":0,"cancel_refused":[{"account":"MARGIN_ISOLATED","symbol":"ETH-USDT","code":"PRODUCT_CLOSED"}],` +
+		`"repaid":[],"remaining_debt":[{"account":"MARGIN_CROSS","symbol":null,"asset":"USDT","amount":"2.5"}],"complete":false}`))
+	if err != nil || end.complete || len(end.debts) != 1 || !end.debts[0].amount.Equal(decimal.RequireFromString("2.5")) ||
+		!slices.Equal(end.left, []string{"MARGIN_ISOLATED ETH-USDT: cancel refused, PRODUCT_CLOSED", "MARGIN_CROSS USDT 2.5"}) {
+		t.Fatalf("settle: %+v %v", end, err)
+	}
+	end, err = settledEnd([]byte(`{"canceled_orders":0,"cancel_refused":[{"account":"MARGIN_CROSS","symbol":null,"code":"COMMON_INVALID_ARGUMENT"}],` +
+		`"repaid":[],"remaining_debt":[],"complete":true}`))
+	if err != nil || end.complete {
+		t.Fatalf("no debt, a refused cancel: not done: %+v %v", end, err)
+	}
+	if end, err := settledEnd([]byte(`{"canceled_orders":0,"cancel_refused":[],"repaid":[],"remaining_debt":[],"complete":true}`)); err != nil || !end.complete {
+		t.Fatalf("done: %+v %v", end, err)
+	}
+	if _, err := settledEnd([]byte(`{"complete":"yes"}`)); err == nil {
+		t.Fatal("an answer that is not the contract's")
+	}
+}
