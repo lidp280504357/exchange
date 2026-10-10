@@ -154,6 +154,17 @@ func healthTargets(list []string) ([]backends.HealthTarget, error) {
 	return out, nil
 }
 
+// houseUser is HOUSE_USER_ID written as the ledger writes user IDs (lower
+// case, A129), so that HOUSE is found in its lists; empty when it is not
+// configured (Validate refuses anything but a user ID).
+func houseUser(id string) string {
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return ""
+	}
+	return u.String()
+}
+
 func (s *settings) Validate() error {
 	var errs []error
 	if _, err := secretbox.New(s.SecretKey); err != nil {
@@ -183,9 +194,7 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
-	if cfg.HouseUser != "" {
-		cfg.HouseUser = uuid.MustParse(cfg.HouseUser).String() // checked by Validate; written as the ledger writes it
-	}
+	cfg.HouseUser = houseUser(cfg.HouseUser)
 	targets, err := healthTargets(cfg.HealthTargets)
 	if err != nil {
 		return err
