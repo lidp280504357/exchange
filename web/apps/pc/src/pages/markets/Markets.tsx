@@ -39,13 +39,14 @@ import {
   cn,
   createColumnHelper,
   listItem,
+  thumbSpring,
   toneOf,
   useNow,
   type ColumnDef,
   type SortingState,
 } from "@exchange/ui";
 import { ChevronRight, Flame, Hash, Info, Layers, LayoutGrid, Search, Sparkles, Star, TrendingDown, TrendingUp, TriangleAlert, Wallet } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -460,6 +461,7 @@ type RailProps = {
 function CategoryRail({ rows, loading, category, onChange, favorites, now, tags }: RailProps) {
   const { t } = useTranslation();
   const products = useOpenProducts();
+  const reduced = useReducedMotion();
   const every: { id: MarketCategory; label: string; icon: ReactNode }[] = [
     { id: "all", label: t("common.all"), icon: <LayoutGrid size={16} /> },
     { id: "favorites", label: t("market.favorites"), icon: <Star size={16} /> },
@@ -488,7 +490,7 @@ function CategoryRail({ rows, loading, category, onChange, favorites, now, tags 
             layoutDependency={category}
             aria-hidden
             className="absolute inset-0 -z-0 rounded-2 bg-bg-2"
-            transition={{ type: "spring", stiffness: 520, damping: 42 }}
+            transition={reduced ? { duration: 0 } : thumbSpring}
           />
         )}
         {active && <span aria-hidden className="absolute left-0 top-2 bottom-2 z-10 w-0.5 rounded-full bg-brand" />}
