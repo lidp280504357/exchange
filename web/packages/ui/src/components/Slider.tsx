@@ -88,16 +88,30 @@ export function Slider({
   const span = max - min || 1;
   const pct = (v: number) => ((Math.min(max, Math.max(min, v)) - min) / span) * 100;
   // Counts the arrivals at max: the effect is mounted afresh on each and
-  // unmounted on leaving, so it plays once per arrival; a value already at
-  // max when shown plays nothing.
-  const atMax = value >= max;
+  // unmounted when it has played (or on leaving), so it plays once per
+  // arrival; a value already at max when shown plays nothing (B183).
+  // Within half a step of max is max: a form whose balance is no whole
+  // number of lots settles at 99.99% once a drag to 100% ends (①). Only an
+  // arrival the user made plays - a drag, a key, a mark's label - not one
+  // a live price or balance brings (②).
+  const atMax = value >= max - step / 2;
   const wasAtMax = useRef(atMax);
+  const touched = useRef(false);
   const [peaks, setPeaks] = useState(0);
+  const [played, setPlayed] = useState(0);
+  // After every render: a touch counts for the render it caused only.
   useEffect(() => {
-    if (atMax && !wasAtMax.current && pulseAtMax && !disabled) setPeaks((n) => n + 1);
+    if (atMax && !wasAtMax.current && touched.current && pulseAtMax && !disabled) setPeaks((n) => n + 1);
     wasAtMax.current = atMax;
-  }, [atMax, pulseAtMax, disabled]);
-  const peaking = atMax && peaks > 0 && pulseAtMax && !disabled;
+    touched.current = false;
+  });
+  const change = (v: number) => {
+    touched.current = true;
+    onValueChange(v);
+  };
+  // Once played it is gone (④), so turning disabled or pulseAtMax off and
+  // on at max does not play it again (③).
+  const peaking = atMax && peaks > played && pulseAtMax && !disabled;
   return (
     <div className={cn("w-full select-none", className)}>
       <RSlider.Root
@@ -106,7 +120,7 @@ export function Slider({
         max={max}
         step={step}
         disabled={disabled}
-        onValueChange={(v) => onValueChange(v[0] ?? min)}
+        onValueChange={(v) => change(v[0] ?? min)}
         onValueCommit={(v) => onValueCommit?.(v[0] ?? min)}
         className={cn("relative mx-2 flex h-5 touch-none items-center", disabled && "opacity-50")}
       >
@@ -125,7 +139,15 @@ export function Slider({
           />
         ))}
         {peaking && (
-          <span key={peaks} aria-hidden className={cn("slider-fx pointer-events-none absolute inset-0", c.text)}>
+          <span
+            key={peaks}
+            aria-hidden
+            className={cn("slider-fx pointer-events-none absolute inset-0", c.text)}
+            onAnimationEnd={(e) => {
+              // The outer glow ends last (its soft fade under reduced motion).
+              if (e.animationName === "slider-glow-outer" || e.animationName === "slider-soft-glow") setPlayed(peaks);
+            }}
+          >
             <span className="slider-glow-2" />
             <span className="slider-glow-1" />
             <span className="slider-fx-motion">
@@ -213,7 +235,7 @@ export function Slider({
                 type="button"
                 disabled={disabled}
                 onClick={() => {
-                  onValueChange(m);
+                  change(m);
                   onValueCommit?.(m);
                 }}
                 className={cn(

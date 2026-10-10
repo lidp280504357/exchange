@@ -1,5 +1,6 @@
 import "../test/setup";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { Slider } from "./Slider";
 
@@ -7,15 +8,42 @@ import { Slider } from "./Slider";
 const halo = (container: HTMLElement) => container.querySelector("[role=slider] > .slider-thumb-halo");
 const effect = (container: HTMLElement) => container.querySelector<HTMLElement>(".slider-fx:not(.slider-thumb-halo)");
 
-describe("Slider at its maximum (B176)", () => {
-  it("plays once on arriving, not on showing at it or staying there", () => {
-    const marks = [0, 25, 50, 75, 100];
-    const at = (v: number) => <Slider value={v} onValueChange={() => {}} marks={marks} aria-label="p" />;
-    const { container, rerender } = render(at(100));
+// A form's slider: the value the user moves it to, or settle(value) once
+// the form has worked out what it means (a lot-rounded share of a
+// balance: 99.99 for 100); outside is a value the page sets without the
+// user (a live price, a balance).
+function Form({ start, settle = (v: number) => v, outside, ...props }: {
+  start: number;
+  settle?: (v: number) => number;
+  outside?: number;
+  pulseAtMax?: boolean;
+  disabled?: boolean;
+}) {
+  const [v, setV] = useState(start);
+  return (
+    <Slider
+      value={outside ?? v}
+      onValueChange={(x) => setV(x)}
+      onValueCommit={(x) => setV(settle(x))}
+      marks={[0, 25, 50, 75, 100]}
+      markLabels
+      formatMark={(m) => `${m}%`}
+      aria-label="p"
+      {...props}
+    />
+  );
+}
+
+const thumb = (container: HTMLElement) => container.querySelector("[role=slider]") as HTMLElement;
+const label = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent === text) as HTMLElement;
+
+describe("Slider at its maximum (B176, B183)", () => {
+  it("plays once on the user's arrival, not on showing at it or staying there", () => {
+    const { container, rerender } = render(<Form start={100} />);
     expect(halo(container)).toBeNull();
     expect(effect(container)).toBeNull();
-    rerender(at(75));
-    rerender(at(100));
+    fireEvent.keyDown(thumb(container), { key: "Home" });
+    fireEvent.keyDown(thumb(container), { key: "End" });
     const first = halo(container);
     expect(first).not.toBeNull();
     expect(container.querySelector("[role=slider] > span:last-child")?.className).toContain("slider-dot-burst");
@@ -36,13 +64,43 @@ describe("Slider at its maximum (B176)", () => {
     expect(moving.querySelectorAll(".slider-band-head, .slider-band-trail")).toHaveLength(4);
     expect(moving.querySelectorAll(".slider-burst")).toHaveLength(1);
     expect(moving.querySelectorAll(".slider-spark")).toHaveLength(10);
-    rerender(at(100));
+    rerender(<Form start={100} />);
     expect(halo(container)).toBe(first);
-    rerender(at(60));
+    fireEvent.keyDown(thumb(container), { key: "PageDown" });
     expect(halo(container)).toBeNull();
     expect(effect(container)).toBeNull();
-    rerender(at(100));
+    // A mark's label is the user's too.
+    fireEvent.click(label(container, "100%"));
+    expect(halo(container)).not.toBeNull();
     expect(halo(container)).not.toBe(first);
+  });
+
+  it("takes half a step below max for max: a form settling at 99.99% keeps it playing (①)", () => {
+    const { container } = render(<Form start={50} settle={(v) => (v === 100 ? 99.99 : v)} />);
+    fireEvent.click(label(container, "100%"));
+    expect(effect(container)).not.toBeNull();
+    expect(thumb(container).getAttribute("aria-valuenow")).toBe("99.99");
+  });
+
+  it("plays only for the user: a live value crossing max does not (②)", () => {
+    const { container, rerender } = render(<Form start={50} outside={90} />);
+    rerender(<Form start={50} outside={100} />);
+    expect(effect(container)).toBeNull();
+    expect(halo(container)).toBeNull();
+  });
+
+  it("is gone once played, and turning it off and on at max does not play it again (③ ④)", () => {
+    const { container, rerender } = render(<Form start={75} />);
+    fireEvent.keyDown(thumb(container), { key: "End" });
+    const fx = effect(container) as HTMLElement;
+    fireEvent.animationEnd(fx.querySelector(".slider-band") as HTMLElement, { animationName: "slider-band-x" });
+    expect(effect(container)).not.toBeNull();
+    fireEvent.animationEnd(fx.querySelector(".slider-glow-2") as HTMLElement, { animationName: "slider-glow-outer" });
+    expect(effect(container)).toBeNull();
+    expect(halo(container)).toBeNull();
+    rerender(<Form start={75} disabled />);
+    rerender(<Form start={75} />);
+    expect(effect(container)).toBeNull();
   });
 
   it("lights the fill from above, in the tone", () => {
@@ -52,12 +110,13 @@ describe("Slider at its maximum (B176)", () => {
   });
 
   it("does not pulse when turned off or disabled", () => {
-    for (const props of [{ pulseAtMax: false }, { disabled: true }]) {
-      const { container, rerender } = render(<Slider value={50} onValueChange={() => {}} aria-label="p" {...props} />);
-      rerender(<Slider value={100} onValueChange={() => {}} aria-label="p" {...props} />);
-      expect(halo(container)).toBeNull();
-      expect(effect(container)).toBeNull();
-    }
+    const { container } = render(<Form start={50} pulseAtMax={false} />);
+    fireEvent.keyDown(thumb(container), { key: "End" });
+    expect(halo(container)).toBeNull();
+    expect(effect(container)).toBeNull();
+    const off = render(<Form start={50} disabled />);
+    fireEvent.click(label(off.container, "100%"));
+    expect(effect(off.container)).toBeNull();
   });
 
   it("puts the thumb's centre on the value: a zero-size thumb Radix cannot shift", () => {
