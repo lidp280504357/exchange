@@ -2,7 +2,9 @@ package backends_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -103,4 +105,57 @@ func TestHoldingsAndTheBotsInLists(t *testing.T) {
 			t.Fatalf("the bot's order %+v", orders)
 		}
 	}
+
+	// The accounts' kinds (L1): the humans leave the other kinds' accounts
+	// out, a trade only when both its sides are; a kind keeps its own
+	// accounts, a trade when one side is; a kind without accounts keeps
+	// nothing. A deposit nobody has claimed is no other kind's.
+	if err := conn.Exec(ctx, `INSERT INTO wallet_deposits (deposit_id, user_id, asset, amount, status, unclaimed, updated_at, version) VALUES
+		(generateUUIDv7(), '`+b1+`', 'ETH', 1, 'CREDITED', false, now64(3), 1), (generateUUIDv7(), '`+u1+`', 'ETH', 2, 'CREDITED', false, now64(3), 1),
+		(generateUUIDv7(), '', 'ETH', 3, 'CONFIRMED', true, now64(3), 1)`); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		f                ports.KindFilter
+		trades           int
+		orders, deposits []string
+	}{
+		"the humans":     {ports.KindFilter{Except: []string{b1, b2}}, 1, []string{u1}, []string{"", u1}},
+		"the bots":       {ports.KindFilter{Only: []string{b1, b2}}, 2, []string{b1}, []string{b1}},
+		"a kind of none": {ports.KindFilter{Only: []string{}}, 0, nil, nil},
+		"every kind":     {ports.KindFilter{}, 2, []string{b1, u1}, []string{"", b1, u1}},
+	} {
+		trades, _, err := records.Trades(ctx, ports.TradeQuery{From: day.From, To: day.To, Limit: 10, ByKind: c.f})
+		if err != nil || len(trades) != c.trades {
+			t.Fatalf("%s: trades %+v %v", name, trades, err)
+		}
+		orders, _, err := records.Orders(ctx, ports.OrderQuery{From: day.From, To: day.To, Limit: 10, ByKind: c.f})
+		if got := usersOf(orders, func(o ports.Order) string { return o.UserID }); err != nil || !slices.Equal(got, c.orders) {
+			t.Fatalf("%s: orders of %q %v", name, got, err)
+		}
+		deposits, _, err := records.Deposits(ctx, ports.DepositQuery{Limit: 10, ByKind: c.f})
+		if got := usersOf(deposits, func(d ports.Deposit) string { return d.UserID }); err != nil || !slices.Equal(got, c.deposits) {
+			t.Fatalf("%s: deposits of %q %v", name, got, err)
+		}
+	}
+	// However many accounts a filter carries (past ClickHouse's 256 KiB of
+	// query by default).
+	many := []string{b1, b2}
+	for i := range 8000 {
+		many = append(many, fmt.Sprintf("0192a000-0000-7000-8000-%012x", 0x100000+i))
+	}
+	trades, _, err := records.Trades(ctx, ports.TradeQuery{From: day.From, To: day.To, Limit: 10, ByKind: ports.KindFilter{Except: many}})
+	if err != nil || len(trades) != 1 || trades[0].BuyerUserID != u1 {
+		t.Fatalf("a long filter: %+v %v", trades, err)
+	}
+}
+
+// usersOf is the accounts of a list's rows, sorted.
+func usersOf[T any](rows []T, user func(T) string) []string {
+	var out []string
+	for _, r := range rows {
+		out = append(out, user(r))
+	}
+	slices.Sort(out)
+	return out
 }

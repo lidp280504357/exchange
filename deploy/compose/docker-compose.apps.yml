@@ -426,6 +426,9 @@ services:
       MARGIN_SERVICE_URL: http://margin-service:8099
       # HOUSE's caps at run time (/internal/house/caps, C45; A69).
       MARKET_MAKER_URL: http://market-maker:8091
+      # The accounts of each kind (/internal/users/ids, L0) the lists keep
+      # or leave out (L1).
+      USER_SERVICE_URL: http://user-service:8082
       # The test server only: the e2e's changes of trading parameters wait
       # a minute; without it an ADMIN cannot set less than 10 minutes.
       ADMIN_CHANGE_DELAY_FLOOR: 60s

@@ -7,13 +7,14 @@ import { EnumBadge, useEnum } from "../../kit/enums";
 import { Fields } from "../../kit/fields";
 import { FilterBar, options, useFilters } from "../../kit/filters";
 import { Num, TimeText, UserCell } from "../../kit/format";
+import { useKindFilter } from "../../kit/kinds";
 import { Page } from "../../kit/Page";
 import { useTodo } from "../../live";
 import { DepositsTable, useDeposits, type Deposit } from "../records/tables";
 import { BackfillDrawer } from "./Backfill";
 import { ReviewDepositDrawer, ReviewDepositsTable, useReviewDeposits, type ReviewDeposit, type ReviewView } from "./depositReview";
 
-const KEYS = ["view", "user_id", "asset", "network", "status", "tx_hash"] as const;
+const KEYS = ["view", "user_id", "asset", "network", "status", "tx_hash", "kind"] as const;
 const VIEWS = ["all", "attention", "manual"] as const;
 type View = (typeof VIEWS)[number];
 
@@ -67,8 +68,11 @@ type Filters = ReturnType<typeof useFilters>;
 function AllDeposits({ filters }: { filters: Filters }) {
   const { t } = useTranslation();
   const label = useEnum();
+  const kind = useKindFilter();
   const f = filters.values;
-  const list = useDeposits({ user_id: f.user_id, asset: f.asset?.toUpperCase(), network: f.network?.toUpperCase(), status: f.status, tx_hash: f.tx_hash });
+  const list = useDeposits({
+    user_id: f.user_id, asset: f.asset?.toUpperCase(), network: f.network?.toUpperCase(), status: f.status, tx_hash: f.tx_hash, kind: f.kind,
+  });
   const [open, setOpen] = useState<Deposit | null>(null);
   return (
     <>
@@ -86,6 +90,7 @@ function AllDeposits({ filters }: { filters: Filters }) {
             options: options(t("admin.common.all"), ["DETECTED", "CONFIRMING", "CONFIRMED", "CREDITED", "ORPHANED", "REJECTED"], (c) => label("depositStatus", c)),
           },
           { key: "tx_hash", label: t("admin.deposits.txFilter"), kind: "text", width: 280 },
+          kind,
         ]}
       />
       <DepositsTable list={list} onRowClick={setOpen} />

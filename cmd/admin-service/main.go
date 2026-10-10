@@ -85,6 +85,10 @@ type settings struct {
 	// trading's terms and accounts under /internal/margin, on the compose
 	// network only (margin design 2026-10-06 §8, E5).
 	MarginURL string `koanf:"margin_service_url"`
+	// UserURL is user-service's HTTP API (USER_SERVICE_URL): the accounts
+	// of each kind, GET /internal/users/ids (L0), that the user-dimension
+	// lists keep or leave out (L1); on the compose network only.
+	UserURL string `koanf:"user_service_url"`
 	// MarketMakerURL is market-maker's internal API (MARKET_MAKER_URL):
 	// HOUSE's caps at run time (review C45, A69), on the compose network
 	// only.
@@ -166,7 +170,8 @@ func setup(ctx context.Context, a *app.App) error {
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
 		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098", InstrumentURL: "http://localhost:8084",
-		LedgerURL: "http://localhost:8085", MarginURL: "http://localhost:8099", MarketMakerURL: "http://localhost:8091", PasswordHashConcurrency: 2,
+		LedgerURL: "http://localhost:8085", MarginURL: "http://localhost:8099", MarketMakerURL: "http://localhost:8091",
+		UserURL: "http://localhost:8082", PasswordHashConcurrency: 2,
 		AppDownloadsDir: "/srv/downloads", AppUploadsDir: "/srv/app-uploads",
 		HealthTargets: defaultHealthTargets,
 	}
@@ -286,6 +291,7 @@ func setup(ctx context.Context, a *app.App) error {
 		MarketMaker:      marketMaker,
 		MarginReports:    backends.Reports{Conn: ch},
 		ProductLines:     productLines,
+		KindIDs:          backends.NewKindIDs(rest, cfg.UserURL),
 		Log:              a.Logger(),
 		Now:              time.Now,
 	}

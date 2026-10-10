@@ -1282,6 +1282,57 @@ check '(.items | length) <= 3 and all(.items[]; .symbol == "ETH-BTC" and (.price
 as AUDITOR GET "/admin/v1/deposits?limit=5" ""
 expect 200 - "deposits"
 check '.items | type == "array" and length <= 5' "a page"
+# The accounts' kinds in the read models' lists (L1): the humans' by
+# default (this run's account is a human until the run ends), another
+# kind's by kind - a trade goes with a kind when one of its sides is of
+# it; one account's list is its own, whatever its kind.
+as AUDITOR GET "/admin/v1/orders?kind=ROBOT" ""
+if [[ $STATUS == 200 ]]; then
+  echo "skip the kinds in the orders, trades and deposits: this admin-service is from before L1's lists"
+else
+  expect 400 COMMON_INVALID_ARGUMENT "the orders of an unknown kind"
+  as AUDITOR GET "/admin/v1/users?kind=BOT&limit=200" ""
+  expect 200 - "the bots"
+  BOT_IDS=$(jq -c '[.items[].id]' <<<"$BODY")
+  as AUDITOR GET "/admin/v1/users?kind=BOT,SYSTEM&limit=200" ""
+  expect 200 - "the bots and HOUSE"
+  NOT_HUMAN_IDS=$(jq -c '[.items[].id]' <<<"$BODY")
+  as AUDITOR GET "/admin/v1/orders?limit=100" ""
+  expect 200 - "the orders without a kind"
+  check "all(.items[]; .user_id as \$u | $NOT_HUMAN_IDS | index(\$u) == null) and any(.items[]; .user_id == \"$USER_ID\")" \
+    "are the humans' (this run's among them), none a bot's or HOUSE's"
+  as AUDITOR GET "/admin/v1/orders?kind=BOT&limit=50" ""
+  expect 200 - "the orders of kind BOT"
+  check "(.items | length) >= 1 and all(.items[]; .user_id as \$u | $BOT_IDS | index(\$u) != null)" "are the bots' only"
+  as AUDITOR GET "/admin/v1/orders?user_id=$(jq -r '.items[0].user_id' <<<"$BODY")&limit=5" ""
+  expect 200 - "a bot's orders by its account"
+  check '(.items | length) >= 1' "are listed without its kind"
+  as AUDITOR GET "/admin/v1/orders?kind=ALL&symbol=$SIM_PAIR&limit=20" ""
+  expect 200 - "the orders of every kind on $SIM_PAIR"
+  check "any(.items[]; .user_id as \$u | $BOT_IDS | index(\$u) != null)" "have the bots'"
+  as AUDITOR GET "/admin/v1/trades?symbol=$SIM_PAIR&kind=BOT&limit=50" ""
+  expect 200 - "the trades of kind BOT"
+  check "(.items | length) >= 1 and all(.items[]; [.buyer_user_id, .seller_user_id] | any(.[]; . as \$u | $BOT_IDS | index(\$u) != null))" \
+    "have a bot on a side"
+  as AUDITOR GET "/admin/v1/trades?limit=100" ""
+  expect 200 - "the trades without a kind"
+  check "all(.items[]; [.buyer_user_id, .seller_user_id] | any(.[]; . as \$u | $NOT_HUMAN_IDS | index(\$u) == null))" \
+    "have someone besides the bots and HOUSE on a side"
+  as AUDITOR GET "/admin/v1/deposits?kind=TEST&limit=3" ""
+  expect 200 - "the deposits of kind TEST"
+  for depositor in $(jq -r '.items[].user_id' <<<"$BODY"); do
+    as AUDITOR GET "/admin/v1/users/$depositor" ""
+    expect 200 - "their depositor"
+    check '.kind == "TEST"' "is a test account"
+  done
+  as AUDITOR GET "/admin/v1/deposits?limit=3" ""
+  expect 200 - "the deposits without a kind"
+  for depositor in $(jq -r '.items[].user_id | select(. != "")' <<<"$BODY"); do
+    as AUDITOR GET "/admin/v1/users/$depositor" ""
+    expect 200 - "their depositor"
+    check '.kind == "HUMAN"' "is a human"
+  done
+fi
 as FINANCE GET "/admin/v1/withdrawals?status=ALL&limit=1" ""
 expect 200 - "withdrawals of every status"
 check '(.items | length) <= 1 and has("next_cursor")' "a page with its cursor"

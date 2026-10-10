@@ -97,8 +97,12 @@ type Service struct {
 	// 2026-10-07, product switches): what closing one touches, and the
 	// cancels of a closed line's open orders.
 	ProductLines ports.ProductLines
-	Log          *slog.Logger
-	Now          func() time.Time
+	// KindIDs are the accounts of each kind (user-service, L0), which the
+	// user-dimension lists keep or leave out (L1); nil, the lists are not
+	// narrowed by kind.
+	KindIDs ports.KindIDs
+	Log     *slog.Logger
+	Now     func() time.Time
 	// CloseWait is the pause between attempts to close a position while
 	// its closing orders are being canceled (700 ms when zero).
 	CloseWait time.Duration

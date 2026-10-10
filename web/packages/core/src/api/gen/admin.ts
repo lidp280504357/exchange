@@ -495,7 +495,7 @@ export interface paths {
         };
         /**
          * Spot orders in their latest state, newest first
-         * @description From the read model orders_current. Needs reports.read.
+         * @description From the read model orders_current. The accounts' kinds (kind, L1) narrow it - the humans' orders by default - unless user_id or accounts is given. Needs reports.read.
          */
         get: operations["listOrders"];
         put?: never;
@@ -515,7 +515,7 @@ export interface paths {
         };
         /**
          * Spot trades, newest first
-         * @description From the read model trades; user_id matches either side. With accounts=bots only the trades between two bots, with accounts=users those with anyone else on a side (a user's trade with a bot is the users'). Needs reports.read.
+         * @description From the read model trades; user_id matches either side. With accounts=bots only the trades between two bots, with accounts=users those with anyone else on a side (a user's trade with a bot is the users'). Otherwise the accounts' kinds (kind, L1) keep a trade when one of its sides is of them - by default, the trades with a human on a side (HOUSE is the other side of nearly every one) - unless user_id is given. Needs reports.read.
          */
         get: operations["listTrades"];
         put?: never;
@@ -535,7 +535,7 @@ export interface paths {
         };
         /**
          * Deposits in their latest state, newest first
-         * @description From the read model wallet_deposits. Needs withdrawals.read.
+         * @description From the read model wallet_deposits. The accounts' kinds (kind, L1) narrow it - the humans' deposits by default - unless user_id is given. Needs withdrawals.read.
          */
         get: operations["listDeposits"];
         put?: never;
@@ -7176,7 +7176,7 @@ export interface components {
         /** @description Before this time (RFC 3339). */
         To: string;
         UserFilter: string;
-        /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. */
+        /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. Given, kind is not read; the console filters by kind (L1) instead. */
         Accounts: "bots" | "users";
         /** @description Days back, today included. */
         Days: number;
@@ -7849,8 +7849,15 @@ export interface operations {
                 symbol?: string;
                 status?: "NEW" | "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" | "REJECTED";
                 side?: "BUY" | "SELL";
-                /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. */
+                /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. Given, kind is not read; the console filters by kind (L1) instead. */
                 accounts?: components["parameters"]["Accounts"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */
@@ -7885,8 +7892,15 @@ export interface operations {
             query?: {
                 user_id?: components["parameters"]["UserFilter"];
                 symbol?: string;
-                /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. */
+                /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. Given, kind is not read; the console filters by kind (L1) instead. */
                 accounts?: components["parameters"]["Accounts"];
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */
@@ -7925,6 +7939,13 @@ export interface operations {
                 status?: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
                 /** @description The deposits of one transaction, any letter case (the console's search). */
                 tx_hash?: string;
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];

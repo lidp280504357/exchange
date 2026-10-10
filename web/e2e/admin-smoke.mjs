@@ -344,7 +344,12 @@ try {
   // 6. Deposits (every one, those to handle, the backfills waiting for
   // their callback, the backfill form up to its check) and the withdrawal
   // queue with its filters.
+  // The humans' by default (L1); the test server's deposits are mostly the
+  // end-to-end scripts' accounts', listed by kind.
   await go("/deposits");
+  await page.waitForFunction(() => document.querySelector('main button[role=combobox][aria-label="类型"]')?.innerText.trim() === "真人", { timeout: 20000 });
+  await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+  await go("/deposits?kind=TEST");
   await rows(1);
   await go("/deposits?view=attention");
   await waitText("待处理充值");
@@ -842,7 +847,7 @@ try {
   await page.waitForSelector("[data-testid=asset-profile]");
   await rows(1);
   await t.shot("4g-sim-token");
-  await go("/orders?accounts=bots");
+  await go("/orders?kind=BOT");
   await rows(1);
   await waitText("机器人");
   await noError("the bots' orders");

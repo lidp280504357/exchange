@@ -796,7 +796,9 @@ paths:
     get:
       operationId: listOrders
       summary: Spot orders in their latest state, newest first
-      description: From the read model orders_current. Needs reports.read.
+      description: >-
+        From the read model orders_current. The accounts' kinds (kind, L1) narrow it - the humans' orders by default -
+        unless user_id or accounts is given. Needs reports.read.
       tags: [users]
       parameters:
         - $ref: '#/components/parameters/UserFilter'
@@ -821,6 +823,7 @@ paths:
             type: string
             enum: [BUY, SELL]
         - $ref: '#/components/parameters/Accounts'
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Cursor'
@@ -848,8 +851,9 @@ paths:
       summary: Spot trades, newest first
       description: >-
         From the read model trades; user_id matches either side. With accounts=bots only the trades between two bots,
-        with accounts=users those with anyone else on a side (a user's trade with a bot is the users'). Needs
-        reports.read.
+        with accounts=users those with anyone else on a side (a user's trade with a bot is the users'). Otherwise the
+        accounts' kinds (kind, L1) keep a trade when one of its sides is of them - by default, the trades with a
+        human on a side (HOUSE is the other side of nearly every one) - unless user_id is given. Needs reports.read.
       tags: [users]
       parameters:
         - $ref: '#/components/parameters/UserFilter'
@@ -858,6 +862,7 @@ paths:
           schema:
             type: string
         - $ref: '#/components/parameters/Accounts'
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Cursor'
@@ -883,7 +888,9 @@ paths:
     get:
       operationId: listDeposits
       summary: Deposits in their latest state, newest first
-      description: From the read model wallet_deposits. Needs withdrawals.read.
+      description: >-
+        From the read model wallet_deposits. The accounts' kinds (kind, L1) narrow it - the humans' deposits by
+        default - unless user_id is given. Needs withdrawals.read.
       tags: [withdrawals]
       parameters:
         - $ref: '#/components/parameters/UserFilter'
@@ -905,6 +912,7 @@ paths:
           description: The deposits of one transaction, any letter case (the console's search).
           schema:
             type: string
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -6449,7 +6457,7 @@ components:
       description: >-
         Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of
         bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while
-        market-sim does not answer.
+        market-sim does not answer. Given, kind is not read; the console filters by kind (L1) instead.
       schema:
         type: string
         enum: [bots, users]

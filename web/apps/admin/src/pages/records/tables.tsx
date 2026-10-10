@@ -5,6 +5,7 @@ import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
+import { kindParam } from "../../kit/kinds";
 import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 import { coinMargined, useQuantityUnit } from "../../kit/settle";
 
@@ -22,6 +23,8 @@ export type OrderQuery = {
   user_id?: string; order_id?: string; symbol?: string; status?: string; side?: string; from?: string; to?: string;
   /** The simulated market's bots ("bots") or everyone else ("users"). */
   accounts?: string;
+  /** The accounts' kind (L1): none, the humans; BOT, TEST, SYSTEM or ALL. */
+  kind?: string;
 };
 
 export function useOrders(q: OrderQuery) {
@@ -34,6 +37,7 @@ export function useOrders(q: OrderQuery) {
             status: (q.status || undefined) as Order["status"] as never,
             side: (q.side || undefined) as never,
             accounts: (q.accounts || undefined) as never,
+            kind: kindParam(q.kind) as never,
             cursor,
             limit: pageSize(),
           },
@@ -113,13 +117,13 @@ export function OrdersTable({
   return <ListTable list={list} columns={columns} getRowId={(o) => o.order_id} onRowClick={onRowClick} aria-label="orders" />;
 }
 
-export type TradeQuery = { user_id?: string; symbol?: string; from?: string; to?: string; accounts?: string };
+export type TradeQuery = { user_id?: string; symbol?: string; from?: string; to?: string; accounts?: string; kind?: string };
 
 export function useTrades(q: TradeQuery) {
   return useCursorList<Trade>(["admin", "trades", q], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/trades", {
-        params: { query: { ...clean(q), accounts: (q.accounts || undefined) as never, cursor, limit: pageSize() } },
+        params: { query: { ...clean(q), accounts: (q.accounts || undefined) as never, kind: kindParam(q.kind) as never, cursor, limit: pageSize() } },
       }),
     ),
   );
@@ -161,13 +165,13 @@ function Party({ trade, side }: { trade: Trade; side: "BUY" | "SELL" }) {
   );
 }
 
-export type DepositQuery = { user_id?: string; asset?: string; network?: string; status?: string; tx_hash?: string };
+export type DepositQuery = { user_id?: string; asset?: string; network?: string; status?: string; tx_hash?: string; kind?: string };
 
 export function useDeposits(q: DepositQuery) {
   return useCursorList<Deposit>(["admin", "deposits", q], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/deposits", {
-        params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: pageSize() } },
+        params: { query: { ...clean(q), status: (q.status || undefined) as never, kind: kindParam(q.kind) as never, cursor, limit: pageSize() } },
       }),
     ),
   );

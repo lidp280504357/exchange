@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/shopspring/decimal"
 
@@ -18,6 +19,36 @@ type Records struct{ Conn driver.Conn }
 // botList is the bots' user IDs as an array argument: never empty, as an
 // empty array literal has no element type.
 func botList(bots []string) []string { return append([]string{""}, bots...) }
+
+// idSet is accounts as the right side of IN: never empty (an empty array
+// literal has no element type), led by a value that is no user ID, nor
+// the empty one of a deposit nobody has claimed.
+func idSet(ids []string) []string { return append([]string{"-"}, ids...) }
+
+// kindArgs are a kind filter's arguments (L1) for the condition
+// `(NOT ? OR id IN ?) AND (NOT ? OR id NOT IN ?)`: keep the Only
+// accounts, leave out the Except ones. IN makes a set of them once; has()
+// would go through the array for each row (on the test server's 1.2
+// million orders and 1,710 accounts of the other kinds, 3.7 s against
+// 0.7 s).
+func kindArgs(f ports.KindFilter) []any {
+	return []any{f.Only != nil, idSet(f.Only), f.Except != nil, idSet(f.Except)}
+}
+
+// kindQuerySize is how long a query with a kind filter may be: the
+// accounts go in as text, about 40 bytes each, and ClickHouse parses 256
+// KiB at most by default - 6,500 accounts, half that for a trade's two
+// sides.
+const kindQuerySize = 16 << 20
+
+// kindCtx is the context of a query that carries a kind filter's accounts,
+// however many.
+func kindCtx(ctx context.Context, f ports.KindFilter) context.Context {
+	if !f.On() {
+		return ctx
+	}
+	return clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"max_query_size": kindQuerySize}))
+}
 
 func decimalPtr(d *decimal.Decimal) *string {
 	if d == nil {
@@ -44,15 +75,17 @@ func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order,
 		return nil, "", err
 	}
 	from, to := timeRange(q.From, q.To)
-	rows, err := r.Conn.Query(ctx, `SELECT toString(order_id), client_order_id, toString(user_id), symbol, side, type, time_in_force,
+	args := []any{q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, q.OrderID, q.OrderID, q.Accounts, botList(q.Bots), q.Accounts}
+	args = append(args, kindArgs(q.ByKind)...)
+	args = append(args, from, to, from-orderKeyLead.Milliseconds(), to, pc.on, pc.at.UnixMilli(), pc.id, pc.at.UnixMilli(), pc.limit+1)
+	rows, err := r.Conn.Query(kindCtx(ctx, q.ByKind), `SELECT toString(order_id), client_order_id, toString(user_id), symbol, side, type, time_in_force,
 		price, quantity, quote_amount, status, filled_quantity, filled_quote, reason, created_at, updated_at FROM orders_current
 		WHERE (? = '' OR toString(user_id) = ?) AND (? = '' OR symbol = ?) AND (? = '' OR status = ?) AND (? = '' OR side = ?)
 		AND (? = '' OR toString(order_id) = ?) AND (? = '' OR has(?, toString(user_id)) = (? = 'bots'))
+		AND (NOT ? OR toString(user_id) IN ?) AND (NOT ? OR toString(user_id) NOT IN ?)
 		AND created_at >= `+ms+` AND created_at < `+ms+` AND created_key >= `+ms+` AND created_key < `+ms+`
 		AND (NOT ? OR ((created_at, toString(order_id)) < (`+ms+`, ?) AND created_key <= `+ms+`))
-		ORDER BY created_at DESC, toString(order_id) DESC LIMIT ?`,
-		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, q.OrderID, q.OrderID, q.Accounts, botList(q.Bots), q.Accounts,
-		from, to, from-orderKeyLead.Milliseconds(), to, pc.on, pc.at.UnixMilli(), pc.id, pc.at.UnixMilli(), pc.limit+1)
+		ORDER BY created_at DESC, toString(order_id) DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
@@ -95,14 +128,20 @@ func (r Records) Trades(ctx context.Context, q ports.TradeQuery) ([]ports.Trade,
 		return nil, "", err
 	}
 	from, to := timeRange(q.From, q.To)
-	rows, err := r.Conn.Query(ctx, `SELECT toString(trade_id), symbol, trade_number, price, quantity, quote_quantity, taker_side,
+	// A kind keeps a trade when one of its sides is of it: a side kept
+	// (Only), or a side not left out (Except).
+	only, except := q.ByKind.Only, q.ByKind.Except
+	rows, err := r.Conn.Query(kindCtx(ctx, q.ByKind), `SELECT toString(trade_id), symbol, trade_number, price, quantity, quote_quantity, taker_side,
 		toString(buyer_user_id), toString(buyer_order_id), toString(seller_user_id), toString(seller_order_id), buyer_is_maker,
 		buyer_fee, seller_fee, executed_at, house_side, settle_asset FROM trades FINAL
 		WHERE (? = '' OR symbol = ?) AND (? = '' OR toString(buyer_user_id) = ? OR toString(seller_user_id) = ?)
 		AND (? = '' OR (has(?, toString(buyer_user_id)) AND has(?, toString(seller_user_id))) = (? = 'bots'))
+		AND (NOT ? OR toString(buyer_user_id) IN ? OR toString(seller_user_id) IN ?)
+		AND (NOT ? OR NOT (toString(buyer_user_id) IN ? AND toString(seller_user_id) IN ?))
 		AND executed_at >= `+ms+` AND executed_at < `+ms+` AND (NOT ? OR (executed_at, toString(trade_id)) < (`+ms+`, ?))
 		ORDER BY executed_at DESC, toString(trade_id) DESC LIMIT ?`,
 		q.Symbol, q.Symbol, q.UserID, q.UserID, q.UserID, q.Accounts, botList(q.Bots), botList(q.Bots), q.Accounts,
+		only != nil, idSet(only), idSet(only), except != nil, idSet(except), idSet(except),
 		from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
@@ -133,12 +172,15 @@ func (r Records) Deposits(ctx context.Context, q ports.DepositQuery) ([]ports.De
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := r.Conn.Query(ctx, `SELECT toString(deposit_id), user_id, asset, network, kind, address, tx_hash, amount, status, unclaimed,
+	args := []any{q.UserID, q.UserID, q.Asset, q.Asset, q.Network, q.Network, q.Status, q.Status, q.TxHash, q.TxHash}
+	args = append(args, kindArgs(q.ByKind)...)
+	args = append(args, pc.on, pc.id, pc.limit+1)
+	rows, err := r.Conn.Query(kindCtx(ctx, q.ByKind), `SELECT toString(deposit_id), user_id, asset, network, kind, address, tx_hash, amount, status, unclaimed,
 		reason, confirmations, required_confirmations, updated_at FROM wallet_deposits FINAL
 		WHERE (? = '' OR user_id = ?) AND (? = '' OR asset = ?) AND (? = '' OR network = ?) AND (? = '' OR status = ?)
-		AND (? = '' OR lower(tx_hash) = lower(?)) AND (NOT ? OR toString(deposit_id) < ?)
-		ORDER BY toString(deposit_id) DESC LIMIT ?`,
-		q.UserID, q.UserID, q.Asset, q.Asset, q.Network, q.Network, q.Status, q.Status, q.TxHash, q.TxHash, pc.on, pc.id, pc.limit+1)
+		AND (? = '' OR lower(tx_hash) = lower(?)) AND (NOT ? OR user_id IN ?) AND (NOT ? OR user_id NOT IN ?)
+		AND (NOT ? OR toString(deposit_id) < ?)
+		ORDER BY toString(deposit_id) DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}

@@ -232,6 +232,27 @@ type KindCount struct {
 	CreatedSince int64
 }
 
+// KindIDs answers the accounts of some kinds (user-service's GET
+// /internal/users/ids, L0), which the user-dimension lists keep or leave
+// out (L1); a minute old at most.
+type KindIDs interface {
+	IDs(ctx context.Context, kinds []string) ([]string, error)
+}
+
+// KindFilter narrows a user-dimension list by its accounts' kinds (L1):
+// Only keeps these accounts (none: nothing), Except leaves these out;
+// both nil, every account. Narrowed says the humans' filter leaves out
+// the bots and HOUSE only, the test accounts being too many for the
+// list's service.
+type KindFilter struct {
+	Only     []string
+	Except   []string
+	Narrowed bool
+}
+
+// On is whether the filter narrows anything.
+func (f KindFilter) On() bool { return f.Only != nil || f.Except != nil }
+
 // Users reads and changes accounts (auth-, user- and ledger-service).
 type Users interface {
 	// Find returns the user of an email address, a phone number or a
@@ -1287,8 +1308,12 @@ type OrderQuery struct {
 	// else (AccountsUsers); "" keeps all.
 	Accounts string
 	Bots     []string
-	Cursor   string
-	Limit    int
+	// Kinds are the kinds asked for (L1), ByKind their accounts (the
+	// application's).
+	Kinds  []string
+	ByKind KindFilter
+	Cursor string
+	Limit  int
 }
 
 // Order is a spot order in its latest state (ClickHouse orders_current).
@@ -1324,8 +1349,12 @@ type TradeQuery struct {
 	// those with anyone else on a side (AccountsUsers); "" keeps all.
 	Accounts string
 	Bots     []string
-	Cursor   string
-	Limit    int
+	// Kinds are the kinds asked for (L1), ByKind their accounts: a trade
+	// is kept when one of its sides is.
+	Kinds  []string
+	ByKind KindFilter
+	Cursor string
+	Limit  int
 }
 
 // Trade is a spot trade (ClickHouse trades).
@@ -1363,8 +1392,11 @@ type DepositQuery struct {
 	Network string
 	Status  string
 	TxHash  string
-	Cursor  string
-	Limit   int
+	// Kinds are the kinds asked for (L1), ByKind their accounts.
+	Kinds  []string
+	ByKind KindFilter
+	Cursor string
+	Limit  int
 }
 
 // Deposit is a deposit in its latest state (ClickHouse wallet_deposits).

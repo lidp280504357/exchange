@@ -140,6 +140,13 @@ func (s *Service) OrderList(ctx context.Context, p Principal, q ports.OrderQuery
 		return nil, "", err
 	}
 	q.Bots = slices.Collect(maps.Keys(bots))
+	// The accounts' kinds (L1), the humans by default - but for the
+	// simulated market's accounts filter (accounts), which says whose.
+	if q.Accounts == "" {
+		if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, false); err != nil {
+			return nil, "", err
+		}
+	}
 	list, next, err := s.Records.Orders(ctx, q)
 	for i := range list {
 		list[i].Bot = bots[list[i].UserID]
@@ -163,6 +170,13 @@ func (s *Service) TradeList(ctx context.Context, p Principal, q ports.TradeQuery
 		return nil, "", err
 	}
 	q.Bots = slices.Collect(maps.Keys(bots))
+	// As the orders (L1): a trade is kept when one of its sides is of the
+	// kinds; HOUSE (SYSTEM) is the other side of nearly every one.
+	if q.Accounts == "" {
+		if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, false); err != nil {
+			return nil, "", err
+		}
+	}
 	list, next, err := s.Records.Trades(ctx, q)
 	for i := range list {
 		list[i].BuyerBot, list[i].SellerBot = bots[list[i].BuyerUserID], bots[list[i].SellerUserID]
@@ -219,6 +233,10 @@ func (s *Service) DepositList(ctx context.Context, p Principal, q ports.DepositQ
 	}
 	q.Asset, q.Network, q.Status = strings.ToUpper(q.Asset), strings.ToUpper(q.Network), strings.ToUpper(q.Status)
 	q.Limit = pageLimit(q.Limit)
+	var err error
+	if q.ByKind, err = s.kindFilter(ctx, q.Kinds, q.UserID, false); err != nil {
+		return nil, "", err
+	}
 	return s.Records.Deposits(ctx, q)
 }
 
