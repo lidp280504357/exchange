@@ -24,9 +24,10 @@ import (
 // after it stopped.
 const spotClosureGrace = time.Minute
 
-// spotHistory is how many of spot's latest switches are read for its last
-// closure.
-const spotHistory = 50
+// spotHistory is how many of spot's latest changes are read for its last
+// closure: enough that edits of the flag's rules or note, each a row with
+// the switch as it was, do not hide it (A107).
+const spotHistory = 500
 
 // ReducedContract is a contract under reduce-only: why and since when.
 type ReducedContract struct {
@@ -93,7 +94,10 @@ func (s *Service) LiftSpotReduceOnly(ctx context.Context, p Principal, reason st
 				Lifted bool `json:"lifted"`
 			}
 			if err := json.Unmarshal(raw, &answer); err != nil {
-				return out, fmt.Errorf("derivatives: lift %s: %w", c.Symbol, err)
+				// Asked and maybe done: audited as a failure like the others,
+				// and the next contract asked all the same (A107).
+				lift.Error = apperr.CodeUnavailable + ": derivatives-service answered in another shape"
+				s.Log.WarnContext(ctx, "spot closure: a lift's answer not read", "symbol", c.Symbol, "error", err)
 			}
 			lift.Lifted = answer.Lifted
 		}
@@ -122,9 +126,12 @@ func (s *Service) auditLift(ctx context.Context, p Principal, closure SpotClosur
 	}
 }
 
-// spotClosure finds spot's last closure in its flag's history - the
-// latest run of openings and the closing before it - and the contracts
-// that went reduce-only between them (or within spotClosureGrace after).
+// spotClosure finds spot's last closure in its flag's history (newest
+// first) - where it last went from on to off and from off to on again: the
+// earliest of the latest run of changes on and the earliest of the run off
+// before it, as a change of the flag's rules or note writes a row with the
+// switch as it was (A107) - and the contracts that went reduce-only
+// between them (or within spotClosureGrace after).
 func (s *Service) spotClosure(ctx context.Context) (SpotClosure, error) {
 	out := SpotClosure{Contracts: []ReducedContract{}}
 	changes, err := s.Flags.History(ctx, productFlag("spot"), spotHistory)
@@ -137,9 +144,12 @@ func (s *Service) spotClosure(ctx context.Context) (SpotClosure, error) {
 		opened = changes[i].At // the earliest of the latest openings
 	}
 	if i == 0 || i == len(changes) {
-		return out, nil // closed now, never switched, or never closed
+		return out, nil // closed now, never switched, or never closed as far as read
 	}
 	closed := changes[i].At
+	for j := i + 1; j < len(changes) && !changes[j].Enabled; j++ {
+		closed = changes[j].At // the earliest of the closings before it
+	}
 	out.ClosedAt, out.OpenedAt = &closed, &opened
 	raw, err := s.Derivatives.Contracts(ctx)
 	if err != nil {

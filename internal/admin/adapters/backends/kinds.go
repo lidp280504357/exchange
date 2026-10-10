@@ -22,10 +22,16 @@ import (
 // keeping them another minute.
 const kindIDsFresh = time.Minute
 
+// kindIDsAsk bounds a request for them, which runs apart from the list
+// that started it: the lists waiting for it are not failed by that one
+// going away (A114).
+const kindIDsAsk = 10 * time.Second
+
 // KindIDs implements ports.KindIDs over user-service's GET
 // /internal/users/ids (L0): the accounts of some kinds, kept a minute by
 // the kinds asked, revalidated with their ETag; the lists asking at once
-// once it is stale share one request (A111). While user-service does not
+// once it is stale share one request (A111), which runs apart from them
+// (A114). While user-service does not
 // answer, the accounts last read go on (an account's kind seldom
 // changes); without them, the lists that need them are unavailable.
 type KindIDs struct {
@@ -68,24 +74,27 @@ func (k *KindIDs) IDs(ctx context.Context, kinds []string) ([]string, error) {
 		k.mu.Unlock()
 		return e.ids, nil
 	}
-	if c := k.calls[key]; c != nil {
-		k.mu.Unlock()
-		select {
-		case <-c.done:
-			return c.ids, c.err
-		case <-ctx.Done():
-			return nil, kindsUnavailable(ctx.Err())
-		}
+	c := k.calls[key]
+	if c == nil {
+		c = &kindIDsCall{done: make(chan struct{})}
+		k.calls[key] = c
+		go func() {
+			ask, cancel := context.WithTimeout(context.WithoutCancel(ctx), kindIDsAsk)
+			defer cancel()
+			c.ids, c.err = k.refresh(ask, key, e, ok)
+			k.mu.Lock()
+			delete(k.calls, key)
+			k.mu.Unlock()
+			close(c.done)
+		}()
 	}
-	c := &kindIDsCall{done: make(chan struct{})}
-	k.calls[key] = c
 	k.mu.Unlock()
-	c.ids, c.err = k.refresh(ctx, key, e, ok)
-	k.mu.Lock()
-	delete(k.calls, key)
-	k.mu.Unlock()
-	close(c.done)
-	return c.ids, c.err
+	select {
+	case <-c.done:
+		return c.ids, c.err
+	case <-ctx.Done():
+		return nil, kindsUnavailable(ctx.Err())
+	}
 }
 
 // refresh asks user-service for the accounts of key's kinds again and

@@ -467,10 +467,15 @@ func userJSON(u ports.User) map[string]any {
 	if kind == "" {
 		kind = application.KindHuman // a user-service before L0: every account a person's
 	}
+	// A test account cleared out (L4): when, else null.
+	var purged any
+	if u.PurgedAt != nil {
+		purged = httpx.FormatTime(*u.PurgedAt)
+	}
 	return map[string]any{
 		"id": u.ID, "username": u.Username, "avatar_url": optional(u.AvatarURL), "avatar_thumb_url": optional(u.AvatarThumbURL),
 		"status": u.Status, "region": u.Region, "language": u.Language, "timezone": u.Timezone, "kyc_level": u.KYCLevel,
-		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags, "kind": kind,
+		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags, "kind": kind, "purged_at": purged,
 	}
 }
 
@@ -597,7 +602,7 @@ func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
 	}
 	list, next, err := h.Svc.ListUsers(r.Context(), principal(r), ports.UserQuery{
 		Status: q.Get("status"), Region: q.Get("region"), Q: q.Get("q"), Kinds: kindsParam(q), CreatedFrom: from, CreatedBefore: to,
-		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		IncludePurged: q.Get("include_purged") == "true", Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

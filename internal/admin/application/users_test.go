@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -148,5 +149,51 @@ func TestUserKinds(t *testing.T) {
 	}
 	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Kinds: []string{"ROBOT"}}); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("an unknown kind: %v", err)
+	}
+}
+
+// The test accounts cleared out (L4) are listed when asked for; their
+// money is left alone: an adjustment or a deposit credited to one is
+// refused, and one requested before it was cleared out is not approved
+// (only rejected).
+func TestPurgedAccounts(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	h.admin(t, "second@example.com", domain.RoleAdmin)
+	auditor, boss, second := h.login(t, "audit@example.com"), h.login(t, "boss@example.com"), h.login(t, "second@example.com")
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Kinds: []string{"TEST"}, IncludePurged: true}); err != nil ||
+		!h.users.listed.IncludePurged {
+		t.Fatalf("asked for the accounts cleared out: listed %+v (%v)", h.users.listed, err)
+	}
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{}); err != nil || h.users.listed.IncludePurged {
+		t.Fatalf("by default: listed %+v (%v)", h.users.listed, err)
+	}
+
+	asked, err := h.svc.RequestAdjustment(ctx, boss, Adjustment{UserID: someUser, Asset: "USDT", Amount: usdt(1), Reason: "before"})
+	if err != nil || asked.Status != domain.ApprovalPending {
+		t.Fatalf("an account user-service does not know is the ledger's to judge: %+v %v", asked, err)
+	}
+	at := h.now.Add(-time.Hour)
+	h.users.known[someUser] = ports.User{ID: someUser, Kind: "TEST", Status: "CLOSED", PurgedAt: &at}
+	var e *apperr.Error
+	_, err = h.svc.RequestAdjustment(ctx, boss, Adjustment{UserID: someUser, Asset: "USDT", Amount: usdt(1), Reason: "after"})
+	if !errors.As(err, &e) || e.Code != "ADMIN_USER_PURGED" || e.Details["purged_at"] != at.UTC().Format(time.RFC3339) {
+		t.Fatalf("an adjustment of an account cleared out: %v", err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, second, asked.ID, true, "approve"); code(err) != "ADMIN_USER_PURGED" {
+		t.Fatalf("approving one asked for before: %v", err)
+	}
+	if a := h.store.approvals[asked.ID]; a.Status != domain.ApprovalPending || !a.AttemptedAt.IsZero() || len(h.ledger.calls) != 0 {
+		t.Fatalf("left as it was, unbooked: %+v, %d ledger calls", a, len(h.ledger.calls))
+	}
+	if r, err := h.svc.DecideApproval(ctx, second, asked.ID, false, "cleared out"); err != nil || r.Status != domain.ApprovalRejected {
+		t.Fatalf("rejected: %+v %v", r, err)
+	}
+	if _, err := h.svc.SubmitFunds(ctx, boss, FundRequest{
+		Kind: domain.KindDepositAssign, DepositID: someUser, UserID: someUser, Reason: "credit it",
+	}); code(err) != "ADMIN_USER_PURGED" {
+		t.Fatalf("a deposit credited to an account cleared out: %v", err)
 	}
 }

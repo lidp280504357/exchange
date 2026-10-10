@@ -694,7 +694,8 @@ export interface paths {
          *     ADMIN_DEPOSIT_NOT_UNOWNED; while another request for the deposit
          *     waits or once one was carried out, ADMIN_DEPOSIT_ASSIGN_OPEN (one
          *     live request per deposit); a user who may not take deposits is
-         *     refused by wallet-service. The same request under its
+         *     refused by wallet-service, a test account cleared out (L4) here
+         *     (409 ADMIN_USER_PURGED). The same request under its
          *     Idempotency-Key returns the operation, finishing one whose outcome
          *     was unknown. Needs deposits.review.
          */
@@ -885,7 +886,10 @@ export interface paths {
          *     administrator with the reason in `escalation`. When the ledger does
          *     not answer the call fails with COMMON_UNAVAILABLE and the detail
          *     `approval_id` names the operation, left PENDING for its requester
-         *     to finish (decide). Needs ledger.adjust.request.
+         *     to finish (decide). A test account cleared out (L4: purged_at set)
+         *     is refused, 409 ADMIN_USER_PURGED with the detail purged_at; an
+         *     account user-service does not know is the ledger's to judge.
+         *     Needs ledger.adjust.request.
          */
         post: operations["adjustUserBalance"];
         delete?: never;
@@ -2866,7 +2870,9 @@ export interface paths {
          *     to carry it out at once, which works as POST
          *     /admin/v1/users/{id}/adjustments. A positive amount credits the
          *     user's SPOT (or FUTURES) account against the ADJUSTMENT system
-         *     account, a negative one debits it. Needs ledger.adjust.request.
+         *     account, a negative one debits it. A test account cleared out
+         *     (L4) is refused, 409 ADMIN_USER_PURGED. Needs
+         *     ledger.adjust.request.
          */
         post: operations["requestAdjustment"];
         delete?: never;
@@ -2945,7 +2951,10 @@ export interface paths {
          *     ledger cannot be reached it stays PENDING with how the attempt
          *     ended in result, the error's details name it (approval_id), and it
          *     can be approved again but no longer rejected
-         *     (ADMIN_APPROVAL_ATTEMPTED). Needs ledger.adjust.approve;
+         *     (ADMIN_APPROVAL_ATTEMPTED). An adjustment or a deposit's credit
+         *     whose account was cleared out (L4) since it was requested, not yet
+         *     attempted, is not approved (409 ADMIN_USER_PURGED): reject it.
+         *     Needs ledger.adjust.approve;
          *     a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
          *     sim.control instead, and approving one that lapsed (a day after it
          *     was asked for, or when its event was to start) fails it, result
@@ -4270,6 +4279,11 @@ export interface components {
         NextCursor: string | null;
         UserSummary: {
             kind: components["schemas"]["UserKind"];
+            /**
+             * Format: date-time
+             * @description L4: when a test account was cleared out (its orders canceled, positions flattened, debts settled and balances moved to ADJUSTMENT) and closed for good; null for every other account. Its money is left alone: the console offers no money operations on it, and adjustments and deposit credits to it are refused (ADMIN_USER_PURGED).
+             */
+            purged_at: string | null;
             /** Format: uuid */
             id: string;
             /** @description The user's username (design 2026-10-07, avatars and usernames); read-only here but for the reset. */
@@ -7863,6 +7877,8 @@ export interface operations {
                  *     400.
                  */
                 kind?: components["parameters"]["Kind"];
+                /** @description true lists the test accounts cleared out too (L4); user-service leaves them out otherwise. */
+                include_purged?: "true";
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */

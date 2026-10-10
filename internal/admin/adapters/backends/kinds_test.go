@@ -101,21 +101,30 @@ func TestKindIDsAskOnceAtATime(t *testing.T) {
 	}))
 	defer srv.Close()
 	k := backends.NewKindIDs(backends.REST{Client: srv.Client()}, srv.URL)
-	ctx := context.Background()
 	var wg sync.WaitGroup
 	errs := make(chan error, 5)
-	ask := func() {
+	ask := func(ctx context.Context) {
 		defer wg.Done()
 		if ids, err := k.IDs(ctx, []string{"BOT"}); err != nil || !slices.Equal(ids, []string{a}) {
 			errs <- fmt.Errorf("%v: %w", ids, err)
 		}
 	}
-	wg.Add(1)
-	go ask()
+	// The list that asks first goes away while the request runs: the
+	// others still get its answer (A114).
+	first, gone := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := k.IDs(first, []string{"BOT"})
+		firstDone <- err
+	}()
 	<-started
 	for range 4 {
 		wg.Add(1)
-		go ask()
+		go ask(context.Background())
+	}
+	gone()
+	if err := <-firstDone; apperr.From(err).Kind != apperr.KindUnavailable {
+		t.Fatalf("the list gone: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
 	close(release)

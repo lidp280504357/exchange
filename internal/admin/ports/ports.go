@@ -185,6 +185,9 @@ type User struct {
 	// Kind is HUMAN, BOT, TEST or SYSTEM (L0): what the console shows and
 	// filters by.
 	Kind string
+	// PurgedAt is when a test account was cleared out and closed for good
+	// (L4); nil for the others.
+	PurgedAt *time.Time
 	// Tags are the console's tags on it (filled by the console).
 	Tags []string
 }
@@ -207,7 +210,10 @@ type UserQuery struct {
 	Q       string
 	UserIDs []string
 	// Kinds keeps the accounts of these kinds (L1); empty, all of them.
-	Kinds         []string
+	Kinds []string
+	// IncludePurged lists the test accounts cleared out too (L4), which
+	// user-service leaves out by default.
+	IncludePurged bool
 	CreatedFrom   time.Time
 	CreatedBefore time.Time
 	Cursor        string

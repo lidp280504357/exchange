@@ -11,8 +11,12 @@ export const usersZh = {
       keywordHint: "用户名、邮箱或手机号里含有它的账户（不分大小写）",
       keywordLength: "没有完全匹配的账户；按关键字筛选需 2–64 个字符",
       keywordUnused: "关键字需 2–64 个字符、不含不可见字符，列表没有按它筛选",
+      // The test accounts cleared out (L4): out of the list unless asked.
+      purged: { filter: "已清理", without: "不含", with: "包含", badge: "已清理" },
     },
     user: {
+      purged: "已清理 {{time}}",
+      purgedHint: "测试账户已结清并关闭（撤单、平仓、还清借款、余额划回系统），资金操作不可用",
       back: "用户列表",
       title: "用户详情",
       summary: "账户",
@@ -179,8 +183,11 @@ export const usersEn = {
       keywordHint: "Accounts whose username, email or phone contains it (any case)",
       keywordLength: "No account matches it exactly; a keyword to filter by has 2 to 64 characters",
       keywordUnused: "A keyword has 2 to 64 characters and no invisible ones: the list is not filtered by it",
+      purged: { filter: "Cleared out", without: "Without", with: "With", badge: "Cleared out" },
     },
     user: {
+      purged: "Cleared out {{time}}",
+      purgedHint: "A test account settled and closed for good (orders canceled, positions closed, debts repaid, balances moved back): no money operations",
       back: "Users",
       title: "User",
       summary: "Account",

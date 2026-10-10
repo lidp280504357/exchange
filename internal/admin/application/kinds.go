@@ -62,7 +62,15 @@ func (s *Service) kindFilter(ctx context.Context, raw []string, userID string, c
 		if except, err = s.KindIDs.IDs(ctx, fewer); err != nil {
 			return ports.KindFilter{}, err
 		}
-		return ports.KindFilter{Except: nonNil(except)[:min(len(except), MaxKindIDs)], Narrowed: true}, nil
+		if len(except) > MaxKindIDs {
+			// More bots and system accounts than a list takes (two dozen
+			// today): the first MaxKindIDs of them are left out, the rest
+			// listed though the console's note says only the test accounts
+			// are (A114).
+			s.Log.WarnContext(ctx, "kinds: more bots and system accounts than a list takes", "accounts", len(except), "max", MaxKindIDs)
+			except = except[:MaxKindIDs]
+		}
+		return ports.KindFilter{Except: nonNil(except), Narrowed: true}, nil
 	}
 	only, err := s.KindIDs.IDs(ctx, kinds)
 	if err != nil {

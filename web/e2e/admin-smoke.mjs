@@ -155,12 +155,21 @@ try {
   const health = await page.evaluate(() => document.body.innerText.match(/\d+ 个服务(全部就绪|未就绪)/)?.[0]);
   await waitText("库存估值");
   await page.waitForSelector("main svg[role=img]");
-  // The figures are the humans' (L1): the trend says so, the bots trading in small print.
+  // The figures are the humans' (L1): the trend says so, the bots trading in
+  // small print - while the simulated market runs and they traded in the
+  // last 24 hours (A113).
   await page.waitForSelector("[data-testid=trend-kinds]");
-  const tradersNote = await page
-    .waitForSelector("[data-testid=stat-note-traders24h]", { timeout: 20000 })
-    .then((el) => el.evaluate((e) => e.textContent.trim()));
-  if (!/机器人/.test(tradersNote)) throw new Error(`the traders' small print names no bots: ${tradersNote}`);
+  const botsTrading = await page.evaluate(async () => {
+    const r = await fetch("/admin/v1/dashboard?days=7");
+    return r.ok ? ((await r.json()).trading.other_traders_24h ?? []).some((k) => k.kind === "BOT" && k.count > 0) : false;
+  });
+  let tradersNote = "no bot traded in the last 24 hours";
+  if (botsTrading) {
+    tradersNote = await page
+      .waitForSelector("[data-testid=stat-note-traders24h]", { timeout: 20000 })
+      .then((el) => el.evaluate((e) => e.textContent.trim()));
+    if (!/机器人/.test(tradersNote)) throw new Error(`the traders' small print names no bots: ${tradersNote}`);
+  }
   await t.shot("1-overview");
   ok(`the overview: figures (the humans', ${tradersNote}), trend chart, ${health}, HOUSE`);
 
@@ -268,6 +277,25 @@ try {
   await rows(3);
   const every = new Set(await kinds());
   ok(`users: the humans by default (${humans.length}), the bots by kind (${bots.length}), every kind (${[...every].join(", ")})`);
+  // The test accounts cleared out (L4) are listed only when asked, marked
+  // (the end-to-end scripts clear theirs out when they end).
+  await go("/users?kind=TEST&include_purged=true");
+  await page.waitForSelector("main tbody [data-testid=user-purged]", { timeout: 20000 });
+  // One's page says when and offers no money operation: no adjustment,
+  // whatever the role (the ADMIN here may adjust any other).
+  await pressRow("main tbody tr:has([data-testid=user-purged])", (timeout) =>
+    page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }),
+  );
+  const purgedAt = await page.waitForSelector("aside [data-testid=user-purged]", { timeout: 20000 }).then((el) => el.evaluate((e) => e.textContent.trim()));
+  await go(`${new URL(page.url()).pathname}?tab=balances`);
+  await waitText("总估值");
+  await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+  if (await page.evaluate(() => [...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim() === "调整余额"))) {
+    throw new Error("an account cleared out offers an adjustment");
+  }
+  ok(`users: the test accounts cleared out, when asked for, marked; one's page says "${purgedAt}" and offers no adjustment`);
+  await go("/users?kind=ALL");
+  await rows(3);
   // The search box and the region filter (A93): a keyword that names no
   // account filters the list by it, kept in the address; the region
   // applies as it is typed, without Enter. The reset clears both (and the
@@ -858,9 +886,10 @@ try {
   await page.waitForSelector("[data-testid=asset-profile]");
   await rows(1);
   await t.shot("4g-sim-token");
-  await go("/orders?kind=BOT");
+  // The bots' orders by kind; a kind from the address in any letter case (A107).
+  await go("/orders?kind=bot");
+  await page.waitForFunction(() => document.querySelector('main button[role=combobox][aria-label="类型"]')?.innerText.trim() === "机器人", { timeout: 10000 });
   await rows(1);
-  await waitText("机器人");
   await noError("the bots' orders");
   ok("the simulated market: overview, price control with an event's impact (not started), a target's preview and a price event on any pair (its leverage hint, confirmation closed), events, bots, the coin's holders; the bots' orders");
 

@@ -1,13 +1,13 @@
 import { ApiError } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
-import { Input, toast, type ColumnDef } from "@exchange/ui";
+import { Badge, Input, toast, type ColumnDef } from "@exchange/ui";
 
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { errorToast } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
-import { dayEnd, dayStart, FilterBar, options, useFilters } from "../../kit/filters";
+import { ALL, dayEnd, dayStart, FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, TimeText, useOpenUser } from "../../kit/format";
 import { kindParam, useKindFilter } from "../../kit/kinds";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
@@ -17,7 +17,7 @@ import { UserIdentity } from "./identity";
 import { TagChips } from "./NotesTags";
 
 type UserSummary = AdminSchemas["UserSummary"];
-const KEYS = ["status", "region", "from", "to", "q", "kind"] as const;
+const KEYS = ["status", "region", "from", "to", "q", "kind", "include_purged"] as const;
 
 /**
  * Users (design §10.3): find one by ID, email, phone or username, or browse the accounts by a keyword and filters
@@ -33,15 +33,21 @@ export default function Users() {
   // refuse filters nothing, and the box says so.
   const keyword = f.q?.trim() ?? "";
   const keywordOk = keyword === "" || usableKeyword(keyword);
-  // The humans by default; 类型 lists the others (L1).
+  // The humans by default; 类型 lists the others (L1); the test accounts cleared out only when asked (L4).
   const q = {
     status: f.status, region: f.region?.toUpperCase(), q: keywordOk ? keyword : "", kind: f.kind, from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? ""),
+    include_purged: f.include_purged === "true" ? "true" : "",
   };
   const kindDef = useKindFilter();
   const list = useCursorList<UserSummary>(["admin", "users", q], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/users", {
-        params: { query: { ...clean({ ...q, kind: undefined }), kind: kindParam(q.kind) as never, status: (q.status || undefined) as never, cursor, limit: pageSize() } },
+        params: {
+          query: {
+            ...clean({ ...q, kind: undefined, include_purged: undefined }), kind: kindParam(q.kind) as never, status: (q.status || undefined) as never,
+            include_purged: (q.include_purged || undefined) as never, cursor, limit: pageSize(),
+          },
+        },
       }),
     ),
   );
@@ -49,7 +55,20 @@ export default function Users() {
     () => [
       { id: "user", header: t("admin.users.username"), cell: ({ row }) => <UserIdentity user={row.original} /> },
       { id: "id", header: t("admin.users.id"), cell: ({ row }) => <IdText value={row.original.id} chars={13} /> },
-      { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="userStatus" code={row.original.status} /> },
+      {
+        id: "status",
+        header: t("admin.common.status"),
+        cell: ({ row }) => (
+          <span className="inline-flex items-center gap-1.5">
+            <EnumBadge group="userStatus" code={row.original.status} />
+            {row.original.purged_at && (
+              <span data-testid="user-purged" title={row.original.purged_at}>
+                <Badge tone="neutral">{t("admin.users.purged.badge")}</Badge>
+              </span>
+            )}
+          </span>
+        ),
+      },
       { id: "kind", header: t("admin.kinds.label"), cell: ({ row }) => <EnumBadge group="userKind" code={row.original.kind} /> },
       { accessorKey: "region", header: t("admin.users.region") },
       { accessorKey: "language", header: t("admin.users.language") },
@@ -72,6 +91,10 @@ export default function Users() {
           { key: "region", label: t("admin.users.filterRegion"), kind: "text", placeholder: t("admin.users.regionHint"), width: 100 },
           { key: "from", label: t("admin.users.filterFrom"), kind: "date" },
           { key: "to", label: t("admin.users.filterTo"), kind: "date" },
+          {
+            key: "include_purged", label: t("admin.users.purged.filter"), kind: "select", width: 100,
+            options: [{ value: ALL, label: t("admin.users.purged.without") }, { value: "true", label: t("admin.users.purged.with") }],
+          },
         ]}
       />
       <ListTable list={list} columns={columns} getRowId={(u) => u.id} onRowClick={(u) => open(u.id)} aria-label={t("admin.nav.users")} />

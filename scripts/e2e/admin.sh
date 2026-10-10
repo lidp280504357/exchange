@@ -268,32 +268,55 @@ fi
 # The accounts' kinds (L1): the list has the humans by default, the others
 # by kind (the simulated market's bots BOT, HOUSE SYSTEM, the scripts'
 # accounts TEST - this run's are marked when it ends); an account's page
-# says its kind.
-as AUDITOR GET "/admin/v1/users?kind=BOT&limit=200" ""
-if [[ $STATUS == 200 && $(jq -r '.items[0].kind // ""' <<<"$BODY") == "" ]]; then
+# says its kind. An admin-service from before L1 takes any kind (A107: a
+# probe, not the first bot's kind - there may be no bot).
+as AUDITOR GET "/admin/v1/users?kind=ROBOT" ""
+if [[ $STATUS == 200 ]]; then
   echo "skip the accounts' kinds: this admin-service is from before L1"
 else
+  expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
+  as AUDITOR GET "/admin/v1/users?kind=BOT&limit=200" ""
   expect 200 - "the bots, by kind"
-  check '(.items | length) >= 1 and all(.items[]; .kind == "BOT")' "only bots"
-  BOT_ID=$(jq -r '.items[0].id' <<<"$BODY")
+  check 'all(.items[]; .kind == "BOT")' "only bots"
+  BOT_ID=$(jq -r '.items[0].id // ""' <<<"$BODY")
+  [[ -n $BOT_ID ]] || echo "note: no bot account here (astra.sh seed has not run): the bots' own checks are skipped"
   as AUDITOR GET "/admin/v1/users?limit=200" ""
   expect 200 - "the list without a kind"
   check "all(.items[]; .kind == \"HUMAN\") and all(.items[]; .id != \"$BOT_ID\")" "has the humans only"
   as AUDITOR GET "/admin/v1/users?kind=bot,system&limit=200" ""
   expect 200 - "two kinds, any case"
-  check '(.items | length) >= 1 and all(.items[]; .kind == "BOT" or .kind == "SYSTEM")' "bots and HOUSE"
+  check 'all(.items[]; .kind == "BOT" or .kind == "SYSTEM")' "bots and HOUSE"
   as AUDITOR GET "/admin/v1/users?kind=ALL&limit=200" ""
   expect 200 - "every kind"
   check "any(.items[]; .id == \"$USER_ID\")" "this run's account among them (the newest)"
-  as AUDITOR GET "/admin/v1/users?kind=ROBOT" ""
-  expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
-  as AUDITOR GET "/admin/v1/users/$BOT_ID" ""
-  expect 200 - "a bot's page"
-  check '.kind == "BOT"' "says it is a bot"
+  # The test accounts cleared out (L4: the runs clear theirs out as they
+  # end) are left out unless asked for, then listed with when; their money
+  # is left alone. An admin-service from before says no purged_at at all.
+  as AUDITOR GET "/admin/v1/users?kind=TEST&limit=200" ""
+  expect 200 - "the test accounts"
+  check 'all(.items[]; .purged_at == null)' "without those cleared out"
+  as AUDITOR GET "/admin/v1/users?kind=TEST&include_purged=true&limit=200" ""
+  expect 200 - "and with them, when asked for"
+  PURGED_ID=$(jq -r '[.items[] | select(.purged_at != null)][0].id // ""' <<<"$BODY")
+  if [[ -z $PURGED_ID ]]; then
+    echo "note: no test account cleared out among the newest 200: the checks of one are skipped"
+  else
+    check 'all(.items[]; .kind == "TEST")' "test accounts only, some cleared out"
+    as AUDITOR GET "/admin/v1/users/$PURGED_ID" ""
+    expect 200 - "the page of one cleared out"
+    check '.purged_at != null and .status == "CLOSED"' "says when, closed"
+    as FINANCE POST /admin/v1/ledger/adjustments "{\"user_id\":\"$PURGED_ID\",\"asset\":\"USDT\",\"amount\":\"1\",\"reason\":\"e2e: an account cleared out\"}"
+    expect 409 ADMIN_USER_PURGED "an adjustment of its balance is refused"
+  fi
+  if [[ -n $BOT_ID ]]; then
+    as AUDITOR GET "/admin/v1/users/$BOT_ID" ""
+    expect 200 - "a bot's page"
+    check '.kind == "BOT"' "says it is a bot"
+  fi
   as AUDITOR GET "/admin/v1/dashboard?days=7" ""
   expect 200 - "the overview"
   check '([.users.by_kind[].kind] == ["HUMAN", "BOT", "TEST", "SYSTEM"]) and .users.total == (.users.by_kind[] | select(.kind == "HUMAN") | .total)
-    and .users.new_24h == (.users.by_kind[] | select(.kind == "HUMAN") | .new_24h) and (.users.by_kind[] | select(.kind == "BOT") | .total) >= 1' \
+    and .users.new_24h == (.users.by_kind[] | select(.kind == "HUMAN") | .new_24h)' \
     "counts the humans, each other kind beside them"
 fi
 
@@ -1415,8 +1438,11 @@ else
   HUMAN_TRADES=$(report_sum "/admin/v1/reports/trading?days=7" trades)
   ALL_TRADES=$(report_sum "/admin/v1/reports/trading?days=7&kind=ALL" trades)
   BOT_TRADES=$(report_sum "/admin/v1/reports/trading?days=1&kind=BOT" trades)
-  [[ $HUMAN_TRADES -le $ALL_TRADES && $BOT_TRADES -ge 1 ]] || fail "spot trades: humans $HUMAN_TRADES, all $ALL_TRADES, bots today $BOT_TRADES"
+  [[ $HUMAN_TRADES -le $ALL_TRADES ]] || fail "spot trades: humans $HUMAN_TRADES, all $ALL_TRADES"
   echo "ok   spot trades of the week: the humans' $HUMAN_TRADES of $ALL_TRADES; the bots' today $BOT_TRADES"
+  # The bots trade while the simulated market runs (sim.enabled); without
+  # their trades today, what counts them is skipped (A113).
+  [[ $BOT_TRADES -ge 1 ]] || echo "note: no bot traded today (sim.enabled off?): the overview's count of them is not checked"
   HUMAN_SIGNUPS=$(report_sum "/admin/v1/reports/users?days=7" registered)
   ALL_SIGNUPS=$(report_sum "/admin/v1/reports/users?days=7&kind=ALL" registered)
   [[ $HUMAN_SIGNUPS -le $ALL_SIGNUPS ]] || fail "sign-ups: humans $HUMAN_SIGNUPS, all $ALL_SIGNUPS"
@@ -1439,8 +1465,11 @@ else
   expect 200 - "every kind's margin interest"
   as AUDITOR GET "/admin/v1/dashboard?days=7" ""
   expect 200 - "the overview"
-  check '(.trading.other_traders_24h | map(select(.kind == "BOT")) | .[0].count // 0) >= 1 and (.trading.other_trades_24h | type) == "array"
-    and (.partial | index("kinds")) == null' "the humans' trading, the bots trading counted apart"
+  check '(.trading.other_traders_24h | type) == "array" and (.trading.other_trades_24h | type) == "array" and (.partial | index("kinds")) == null' \
+    "the humans' trading, the other kinds apart"
+  if [[ $BOT_TRADES -ge 1 ]]; then
+    check '(.trading.other_traders_24h | map(select(.kind == "BOT")) | .[0].count // 0) >= 1' "the bots trading among them"
+  fi
 fi
 as FINANCE GET "/admin/v1/withdrawals?status=ALL&limit=1" ""
 expect 200 - "withdrawals of every status"

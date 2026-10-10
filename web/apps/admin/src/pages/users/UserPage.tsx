@@ -1,13 +1,13 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Avatar, ErrorState, Skeleton, Tabs } from "@exchange/ui";
+import { Avatar, Badge, ErrorState, Skeleton, Tabs } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams, useSearchParams } from "react-router";
 import { EnumBadge } from "../../kit/enums";
 import { Fields } from "../../kit/fields";
-import { IdText, TimeText } from "../../kit/format";
+import { IdText, TimeText, useTimeText } from "../../kit/format";
 import { stagger } from "../../kit/motion";
 import { Card } from "../../kit/Page";
 import { AuditTable, DepositsTable, TradesTable, useAudit, useDeposits, useTrades } from "../records/tables";
@@ -21,6 +21,14 @@ import { RiskTab, Score } from "./risk";
 import { SecurityTab } from "./security";
 
 type UserSummary = AdminSchemas["UserSummary"];
+
+/** The permissions that move an account's money, orders or positions. */
+const MONEY: readonly string[] = ["ledger.adjust.request", "ledger.hold", "orders.cancel", "derivatives.write"];
+
+/** withoutMoney is the administrator as they act on a test account cleared out (L4): all but what moves its money. */
+function withoutMoney(admin: Admin): Admin {
+  return { ...admin, permissions: admin.permissions.filter((p) => !MONEY.includes(p)) };
+}
 
 /**
  * UserPage is a user's page (design 2026-10-02 §4.1): the account at the
@@ -54,6 +62,9 @@ export default function UserPage({ admin }: { admin: Admin }) {
     );
   if (detail.isError) return <ErrorState message={errorText(detail.error)} onRetry={() => void detail.refetch()} />;
   const u = detail.data;
+  // A test account cleared out (L4) is closed and empty for good: its money,
+  // orders and positions are left alone (L1); notes and tags stay.
+  const acting = u?.purged_at ? withoutMoney(admin) : admin;
   return (
     <div className="flex flex-col gap-4">
       <Link to="/users" className="inline-flex w-fit items-center gap-1 text-sm text-fg-3 hover:text-fg-1">
@@ -63,9 +74,9 @@ export default function UserPage({ admin }: { admin: Admin }) {
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-4">
           <Card className="stagger">{u ? <Summary admin={admin} user={u} /> : <Skeleton className="h-48 w-full" />}</Card>
-          {u && (can(admin, "users.status") || can(admin, "orders.cancel")) && (
+          {u && (can(acting, "users.status") || can(acting, "orders.cancel")) && (
             <Card title={t("admin.user.actions")} className="stagger" style={stagger(1)}>
-              <UserActions admin={admin} user={u} />
+              <UserActions admin={acting} user={u} />
             </Card>
           )}
         </aside>
@@ -74,9 +85,9 @@ export default function UserPage({ admin }: { admin: Admin }) {
           <div key={tab} className="mt-4 animate-rise">
             {tab === "profile" && (u ? <ProfileTab admin={admin} user={u} /> : <Skeleton className="h-32 w-full" />)}
             {tab === "security" && <SecurityTab admin={admin} userId={id} />}
-            {tab === "balances" && <BalancesTab admin={admin} userId={id} />}
-            {tab === "orders" && <OrdersTab admin={admin} userId={id} />}
-            {tab === "positions" && <PositionsTab admin={admin} userId={id} />}
+            {tab === "balances" && <BalancesTab admin={acting} userId={id} />}
+            {tab === "orders" && <OrdersTab admin={acting} userId={id} />}
+            {tab === "positions" && <PositionsTab admin={acting} userId={id} />}
             {tab === "trades" && <UserTrades userId={id} />}
             {tab === "deposits" && <UserDeposits userId={id} />}
             {tab === "withdrawals" && <UserWithdrawals userId={id} />}
@@ -104,6 +115,7 @@ export default function UserPage({ admin }: { admin: Admin }) {
 /** Summary is the account at a glance: who, its contacts (masked until revealed), status, tags, last sign-in and risk. */
 function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
   const { t } = useTranslation();
+  const timeText = useTimeText();
   const sec = useSecurity(user.id);
   const risk = useRisk(user.id);
   const latest = risk.data?.[0];
@@ -126,6 +138,12 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
         <span data-testid="user-kind" data-kind={user.kind}>
           <EnumBadge group="userKind" code={user.kind} />
         </span>
+        {/* A test account cleared out (L4): when, and why its money is left alone. */}
+        {user.purged_at && (
+          <span data-testid="user-purged" title={t("admin.user.purgedHint")}>
+            <Badge tone="neutral">{t("admin.user.purged", { time: timeText(user.purged_at) })}</Badge>
+          </span>
+        )}
         <TagChips tags={user.tags} />
       </div>
       <Fields

@@ -131,13 +131,22 @@ export function FilterBar({ page, defs, filters, extra, extraKeys = [] }: Filter
   );
 }
 
+/**
+ * chosen is a select's option for a value from the address: the same in
+ * another letter case too (?kind=bot is BOT: the server takes either, A107).
+ */
+export function chosen(options: { value: string }[], value: string): string {
+  if (!value || options.some((o) => o.value === value)) return value || ALL;
+  return options.find((o) => o.value.toLowerCase() === value.toLowerCase())?.value ?? value;
+}
+
 function Field({ def, value, onChange }: { def: FilterDef; value: string; onChange: (v: string) => void }) {
   const width = def.width ?? (def.kind === "select" ? 140 : def.kind === "date" ? 150 : 220);
   return (
     <label className="flex flex-col gap-1 text-xs text-fg-3" style={{ width }}>
       {def.label}
       {def.kind === "select" ? (
-        <Select size="sm" value={value || ALL} onValueChange={onChange} options={def.options} aria-label={def.label} />
+        <Select size="sm" value={chosen(def.options, value)} onValueChange={onChange} options={def.options} aria-label={def.label} />
       ) : def.kind === "date" ? (
         <Input size="sm" type="date" value={value} onValueChange={onChange} aria-label={def.label} />
       ) : (

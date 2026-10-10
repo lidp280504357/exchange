@@ -81,6 +81,10 @@ func userOf(p *userv1.User) ports.User {
 	if t := p.GetCreatedAt(); t != nil {
 		out.CreatedAt = t.AsTime()
 	}
+	if t := p.GetPurgedAt(); t != nil {
+		at := t.AsTime()
+		out.PurgedAt = &at
+	}
 	return out
 }
 
@@ -127,7 +131,8 @@ func (u Users) ChangeStatus(ctx context.Context, userID, to, reason, actor, note
 // List pages through accounts newest first.
 func (u Users) List(ctx context.Context, q ports.UserQuery) ([]ports.User, string, error) {
 	req := &userv1.ListUsersRequest{
-		Status: q.Status, Region: q.Region, Q: q.Q, UserIds: q.UserIDs, Kinds: q.Kinds, Cursor: q.Cursor, Limit: int32(min(q.Limit, 200)), //nolint:gosec // bounded
+		Status: q.Status, Region: q.Region, Q: q.Q, UserIds: q.UserIDs, Kinds: q.Kinds, IncludePurged: q.IncludePurged, Cursor: q.Cursor,
+		Limit: int32(min(q.Limit, 200)), //nolint:gosec // bounded
 	}
 	if !q.CreatedFrom.IsZero() {
 		req.CreatedFrom = timestamppb.New(q.CreatedFrom)

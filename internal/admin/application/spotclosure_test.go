@@ -13,11 +13,12 @@ import (
 )
 
 // closureDerivatives answers the contracts' reduce-only states as given,
-// and fails the lift of one.
+// fails the lift of one and garbles the answer of another.
 type closureDerivatives struct {
 	fakeDerivatives
-	states string
-	fail   string
+	states  string
+	fail    string
+	garbled string
 }
 
 func (d *closureDerivatives) Contracts(context.Context) (json.RawMessage, error) {
@@ -27,6 +28,10 @@ func (d *closureDerivatives) Contracts(context.Context) (json.RawMessage, error)
 func (d *closureDerivatives) LiftReduceOnly(ctx context.Context, symbol, actor string) (json.RawMessage, error) {
 	if symbol == d.fail {
 		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "derivatives down")
+	}
+	if symbol == d.garbled {
+		_, _ = d.fakeDerivatives.LiftReduceOnly(ctx, symbol, actor)
+		return json.RawMessage(`<html>`), nil
 	}
 	return d.fakeDerivatives.LiftReduceOnly(ctx, symbol, actor)
 }
@@ -60,6 +65,12 @@ func TestSpotClosure(t *testing.T) {
 	}
 	if c, err := h.svc.SpotReduceOnly(ctx, aud); err != nil || c.ClosedAt != nil {
 		t.Fatalf("closed now %+v %v", c, err)
+	}
+	// An edit of the closed flag's rules or note (a row off again at -6m)
+	// does not move when it closed (A107).
+	now = h.now.Add(-6 * time.Minute)
+	if _, err := h.svc.Flags.Switch(ctx, "product.spot", false, "boss@example.com", "a note"); err != nil {
+		t.Fatal(err)
 	}
 
 	// Opened at -2m (and once more at -1m): the contracts that went
@@ -121,5 +132,17 @@ func TestSpotClosure(t *testing.T) {
 	}
 	if !strings.Contains(audits[0].GetDetails(), `"error":"COMMON_UNAVAILABLE: derivatives down"`) || !strings.Contains(audits[1].GetDetails(), `"lifted":true`) {
 		t.Fatalf("the audits' details %s / %s", audits[0].GetDetails(), audits[1].GetDetails())
+	}
+
+	// An answer not understood (the lift asked, maybe done) is audited as
+	// a failure and the next contract still asked (A107).
+	d.fail, d.garbled = "", "ASTRA-USD-PERP"
+	before = len(h.store.audits)
+	if lifts, err = h.svc.LiftSpotReduceOnly(ctx, boss, "once more"); err != nil || len(lifts) != 2 {
+		t.Fatalf("lifted again %+v %v", lifts, err)
+	}
+	if lifts[0].Lifted || !strings.Contains(lifts[0].Error, "another shape") || !lifts[1].Lifted || len(h.store.audits)-before != 2 ||
+		!strings.Contains(h.store.audits[before].GetDetails(), "another shape") {
+		t.Fatalf("a garbled answer: %+v, audited %d", lifts, len(h.store.audits)-before)
 	}
 }

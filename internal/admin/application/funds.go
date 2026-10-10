@@ -301,6 +301,11 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 			return s.again(ctx, p, *a)
 		}
 	}
+	if userFund(in.Kind) {
+		if err := s.notPurged(ctx, in.UserID); err != nil {
+			return domain.Approval{}, err
+		}
+	}
 	var check ports.ManualCheck
 	if in.Kind == domain.KindDepositBackfill {
 		in.Backfill.Actor = p.Admin.Email
@@ -643,6 +648,9 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		return domain.Approval{}, apperr.NotFound("no such request")
 	}
 	if approve {
+		if err := s.approvesPurged(ctx, id); err != nil {
+			return domain.Approval{}, err
+		}
 		if err := s.beginAttempt(ctx, p, id); err != nil {
 			return domain.Approval{}, err
 		}
@@ -744,6 +752,43 @@ func (s *Service) beginAttempt(ctx context.Context, p Principal, id string) erro
 		}
 		return r.Approvals().MarkAttempted(ctx, id, s.Now(), "")
 	})
+}
+
+// ErrUserPurged refuses to move the money of a test account cleared out
+// (L4): closed and emptied for good, it is left alone (L1).
+var ErrUserPurged = apperr.New(apperr.KindConflict, "ADMIN_USER_PURGED",
+	"the account was cleared out (a closed test account): its money is left alone")
+
+// userFund reports whether a fund operation books to a user's account.
+func userFund(kind string) bool {
+	return kind == domain.KindLedgerAdjustment || kind == domain.KindDepositAssign
+}
+
+// notPurged refuses a fund operation on an account cleared out (L4). An
+// account user-service does not know is the ledger's to judge, as before.
+func (s *Service) notPurged(ctx context.Context, userID string) error {
+	u, err := s.Users.Get(ctx, userID)
+	if err != nil {
+		if apperr.From(err).Kind == apperr.KindNotFound {
+			return nil
+		}
+		return err
+	}
+	if u.PurgedAt != nil {
+		return ErrUserPurged.WithDetail("purged_at", u.PurgedAt.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// approvesPurged refuses to approve an operation on an account cleared out
+// since it was requested; one attempted already may have booked, so it is
+// finished as any other (C5.5 ⑥). Rejecting it is left open.
+func (s *Service) approvesPurged(ctx context.Context, id string) error {
+	a, err := s.Store.Read().Approvals().Get(ctx, id)
+	if err != nil || a == nil || a.Status != domain.ApprovalPending || !a.AttemptedAt.IsZero() || !userFund(a.Kind) {
+		return err
+	}
+	return s.notPurged(ctx, a.Payload["user_id"])
 }
 
 // decisionDetails is a decision's audit detail: how it ended and its
