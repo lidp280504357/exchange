@@ -42,6 +42,17 @@ CREATE TABLE checkpoints (
 );
 
 -- +goose Down
+-- Once the run has deleted anything, the keys and the checkpoints are what
+-- stands for it: going back would lose them (B199).
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM journal_keys) OR EXISTS (SELECT 1 FROM checkpoints) THEN
+        RAISE EXCEPTION 'the retention run has deleted journals: their keys and checkpoints cannot be dropped (ADR-0022)';
+    END IF;
+END;
+$$;
+-- +goose StatementEnd
 DROP TABLE checkpoints;
 DROP TABLE journal_keys;
 -- +goose StatementBegin

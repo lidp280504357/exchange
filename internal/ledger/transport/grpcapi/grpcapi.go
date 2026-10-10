@@ -181,6 +181,19 @@ func (s *Server) GetSystemBalances(ctx context.Context, req *ledgerv1.GetSystemB
 	return resp, nil
 }
 
+// ListHolders lists what each user holds of an asset, largest first.
+func (s *Server) ListHolders(ctx context.Context, req *ledgerv1.ListHoldersRequest) (*ledgerv1.ListHoldersResponse, error) {
+	list, err := s.svc.Holders(ctx, req.GetAsset())
+	if err != nil {
+		return nil, err
+	}
+	resp := &ledgerv1.ListHoldersResponse{Holders: make([]*ledgerv1.Holder, 0, len(list))}
+	for _, h := range list {
+		resp.Holders = append(resp.Holders, &ledgerv1.Holder{UserId: h.UserID, Amount: h.Amount.String()})
+	}
+	return resp, nil
+}
+
 // Adjust credits or debits a user's SPOT account against ADJUSTMENT.
 func (s *Server) Adjust(ctx context.Context, req *ledgerv1.AdjustRequest) (*ledgerv1.AdjustResponse, error) {
 	a, err := amount(req.GetAmount())

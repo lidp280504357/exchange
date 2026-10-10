@@ -37,6 +37,13 @@ service LedgerService {
   rpc FundSystemAccount(FundSystemAccountRequest) returns (FundSystemAccountResponse);
   // GetSystemBalances returns the platform's system accounts in an asset.
   rpc GetSystemBalances(GetSystemBalancesRequest) returns (GetSystemBalancesResponse);
+  // ListHolders returns what each user holds of an asset now: the
+  // available and frozen of all its accounts of the asset summed, margin
+  // debts included, for the users whose sum is not zero, largest first.
+  // The console's holders card reads it (B199): the ledger lines it summed
+  // in ClickHouse expire after 15 days (ADR-0022). The system accounts are
+  // GetSystemBalances'.
+  rpc ListHolders(ListHoldersRequest) returns (ListHoldersResponse);
   // Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
   // against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
   // console calls it once the adjustment was approved (§5.12). Needs
@@ -260,6 +267,20 @@ message GetSystemBalancesRequest {
 
 message GetSystemBalancesResponse {
   repeated Balance balances = 1;
+}
+
+message ListHoldersRequest {
+  string asset = 1;
+}
+
+message Holder {
+  string user_id = 1;
+  // Decimal string; below zero when the user owes more than it holds.
+  string amount = 2;
+}
+
+message ListHoldersResponse {
+  repeated Holder holders = 1;
 }
 
 message AdjustRequest {

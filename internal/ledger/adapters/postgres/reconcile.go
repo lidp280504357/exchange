@@ -94,12 +94,19 @@ var checks = []struct {
 			FROM checkpoints WHERE name IN ('ACCOUNT_AVAILABLE', 'ACCOUNT_FROZEN') GROUP BY key) c ON c.account_id = a.id::text
 		WHERE a.available <> COALESCE(s.available, 0) + COALESCE(c.available, 0)
 			OR a.frozen <> COALESCE(s.frozen, 0) + COALESCE(c.frozen, 0) LIMIT 100`},
+	// The account's latest line, or the latest the retention run deleted
+	// (account_snapshots), whichever is newer: the newest line left can be
+	// an older one kept for good (B199).
 	{CheckSnapshotMatchesAccnt, `SELECT a.id::text, format('account %s/%s v%s, last line %s/%s v%s',
-		a.available, a.frozen, a.version, l.available_after, l.frozen_after, l.account_version)
+		a.available, a.frozen, a.version, l.available, l.frozen, l.version)
 		FROM accounts a JOIN LATERAL (
-			SELECT available_after, frozen_after, account_version FROM journal_lines
-			WHERE account_id = a.id ORDER BY account_version DESC LIMIT 1) l ON true
-		WHERE a.available <> l.available_after OR a.frozen <> l.frozen_after OR a.version <> l.account_version LIMIT 100`},
+			SELECT available, frozen, version FROM (
+				(SELECT available_after AS available, frozen_after AS frozen, account_version AS version FROM journal_lines
+					WHERE account_id = a.id ORDER BY account_version DESC LIMIT 1)
+				UNION ALL
+				(SELECT available, frozen, account_version FROM account_snapshots WHERE account_id = a.id)) u
+			ORDER BY version DESC LIMIT 1) l ON true
+		WHERE a.available <> l.available OR a.frozen <> l.frozen OR a.version <> l.version LIMIT 100`},
 	{CheckTradesSettled, `SELECT trade_id::text, error_code || ': ' || error FROM trades WHERE status = 'FAILED'
 		ORDER BY recorded_at LIMIT 100`},
 	{CheckTradesNumbered, `SELECT t.symbol, format('%s trades recorded, numbered up to %s', count(*) + COALESCE(max(c.count), 0), max(t.trade_number))

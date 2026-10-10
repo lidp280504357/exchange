@@ -199,6 +199,13 @@ func compareKeys(a, b AccountKey) int {
 		cmp.Compare(a.Type, b.Type), cmp.Compare(a.Scope, b.Scope), cmp.Compare(a.Asset, b.Asset))
 }
 
+// Holding is what a user holds of an asset: the available and frozen of
+// all its accounts of it summed, margin debts included.
+type Holding struct {
+	UserID string
+	Amount decimal.Decimal
+}
+
 // Account is a balance holder.
 type Account struct {
 	ID        string

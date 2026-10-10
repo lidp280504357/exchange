@@ -83,8 +83,9 @@ func (Retention) Run(ctx context.Context, db *pg.DB, w retention.Window) ([]rete
 
 // pruneJournals deletes the journals before cutoff with their lines and
 // line types, a batch per transaction: the batch's keys move to
-// journal_keys and its lines' sums to the checkpoints in the same
-// transaction, which alone may delete them (ledger.retention).
+// journal_keys, its lines' sums to the checkpoints and each account's
+// latest of them to account_snapshots in the same transaction, which
+// alone may delete them (ledger.retention).
 func pruneJournals(ctx context.Context, db *pg.DB, w retention.Window, cutoff time.Time) ([]retention.Result, error) {
 	out := []retention.Result{
 		{Table: "journals", Rule: "journals before the window, their keys kept"},
@@ -148,6 +149,14 @@ func pruneJournals(ctx context.Context, db *pg.DB, w retention.Window, cutoff ti
 					WHERE p.entry_type = 'TRADE_FEE' AND a.account_type = 'FEE_REVENUE' AND p.idem_key NOT LIKE 'futures:%' GROUP BY l.asset
 					ON CONFLICT (name, key) DO UPDATE SET amount = checkpoints.amount + excluded.amount,
 						count = checkpoints.count + excluded.count, updated_at = now()`,
+				// Each account's balances after its latest deleted line
+				// (SNAPSHOT_MATCHES_ACCOUNT, B199).
+				`INSERT INTO account_snapshots (account_id, available, frozen, account_version)
+					SELECT DISTINCT ON (l.account_id) l.account_id, l.available_after, l.frozen_after, l.account_version
+					FROM journal_lines l JOIN pruned p ON p.id = l.journal_id ORDER BY l.account_id, l.account_version DESC
+					ON CONFLICT (account_id) DO UPDATE SET available = excluded.available, frozen = excluded.frozen,
+						account_version = excluded.account_version, updated_at = now()
+					WHERE excluded.account_version > account_snapshots.account_version`,
 				`INSERT INTO journal_keys (idem_key, request_hash, journal_id, seq, entry_type, posted_at)
 					SELECT idem_key, request_hash, id, seq, entry_type, posted_at FROM pruned`,
 			} {

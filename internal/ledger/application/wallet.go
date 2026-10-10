@@ -188,6 +188,16 @@ func (s *Service) FundSystemAccount(ctx context.Context, key, accountType, asset
 	}, asset)
 }
 
+// Holders lists what each user holds of an asset now, largest first: the
+// console's holders card (B199), which the ledger lines in ClickHouse no
+// longer add up once they expire (ADR-0022).
+func (s *Service) Holders(ctx context.Context, asset string) ([]domain.Holding, error) {
+	if strings.TrimSpace(asset) == "" {
+		return nil, apperr.Invalid("asset is required")
+	}
+	return s.Store.Read().Accounts().Holders(ctx, asset)
+}
+
 // SystemBalances returns the system accounts in asset, of every asset
 // when it is "" (HOUSE's liquidity reads all its MARKET_MAKER accounts at
 // once).

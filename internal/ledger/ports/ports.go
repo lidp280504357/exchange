@@ -47,6 +47,9 @@ type AccountRepo interface {
 	// MarginDebts lists every margin debt and interest row that owes
 	// something.
 	MarginDebts(ctx context.Context) ([]domain.Account, error)
+	// Holders lists what each user holds of asset, for the users whose
+	// sum is not zero, largest first.
+	Holders(ctx context.Context, asset string) ([]domain.Holding, error)
 }
 
 // MarginRepo stores the margin postings of margin-service.

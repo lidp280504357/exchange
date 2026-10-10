@@ -108,6 +108,25 @@ func (r accounts) MarginDebts(ctx context.Context) ([]domain.Account, error) {
 		'MARGIN_ISOLATED_DEBT', 'MARGIN_ISOLATED_INTEREST') AND available <> 0 ORDER BY owner_id, account_type, scope, asset`)
 }
 
+func (r accounts) Holders(ctx context.Context, asset string) ([]domain.Holding, error) {
+	rows, err := r.q.Query(ctx, `SELECT owner_id, sum(available + frozen) AS amount FROM accounts
+		WHERE owner_type = 'USER' AND asset = $1 GROUP BY owner_id HAVING sum(available + frozen) <> 0
+		ORDER BY amount DESC, owner_id`, asset)
+	if err != nil {
+		return nil, fmt.Errorf("list holders: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.Holding{}
+	for rows.Next() {
+		var h domain.Holding
+		if err := rows.Scan(&h.UserID, &h.Amount); err != nil {
+			return nil, fmt.Errorf("list holders: %w", err)
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
 func (r accounts) query(ctx context.Context, sql string, args ...any) ([]domain.Account, error) {
 	rows, err := r.q.Query(ctx, sql, args...)
 	if err != nil {

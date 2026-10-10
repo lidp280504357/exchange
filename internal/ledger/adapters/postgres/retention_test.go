@@ -24,6 +24,16 @@ func TestRetention(t *testing.T) {
 	old := time.Now().AddDate(0, 0, -20)
 	svc.Now = func() time.Time { return old }
 	buyer, seller := uuid.NewString(), uuid.NewString()
+	// A custody reset is added up in full (its reversal's limit): it stays.
+	// It comes first, so the seller's newest line left is older than the
+	// ones deleted after it (SNAPSHOT_MATCHES_ACCOUNT, B199).
+	reset, err := domain.AdjustmentPosting("custody-reset:test", seller, []domain.Credit{{Asset: "USDT", Amount: d("5"), Decimals: 6}}, "reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Post(ctx, reset); err != nil {
+		t.Fatal(err)
+	}
 	fund(t, svc, buyer, domain.Credit{Asset: "USDT", Amount: d("1000"), Decimals: 6})
 	fund(t, svc, seller, domain.Credit{Asset: "BTC", Amount: d("1"), Decimals: 8})
 	freeze(t, svc, "order:b", buyer, "USDT", "210.3")
@@ -37,14 +47,6 @@ func TestRetention(t *testing.T) {
 	}
 	if res, err := svc.Settle(ctx, []domain.Trade{trade}); err != nil || res.Settled != 1 {
 		t.Fatalf("settle: %+v %v", res, err)
-	}
-	// A custody reset is added up in full (its reversal's limit): it stays.
-	reset, err := domain.AdjustmentPosting("custody-reset:test", seller, []domain.Credit{{Asset: "USDT", Amount: d("5"), Decimals: 6}}, "reset")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Post(ctx, reset); err != nil {
-		t.Fatal(err)
 	}
 	// Past the topic's replay the trade goes too.
 	if _, err := db.Exec(ctx, `UPDATE trades SET recorded_at = now() - interval '40 days'`); err != nil {
@@ -115,6 +117,9 @@ func TestRetention(t *testing.T) {
 	}
 	if got := mismatches(t, store); len(got) != 0 {
 		t.Fatalf("reconciliation after: %v", got)
+	}
+	if n := count(t, db, `SELECT count(*) FROM account_snapshots`); n == 0 {
+		t.Fatal("no account's latest deleted line was kept")
 	}
 	// The balances are the accounts', untouched.
 	if b := balance(t, svc, buyer, "USDT"); b != "779.9 80.1" {

@@ -28,6 +28,7 @@ const (
 	LedgerService_BookChainFee_FullMethodName         = "/exchange.ledger.v1.LedgerService/BookChainFee"
 	LedgerService_FundSystemAccount_FullMethodName    = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
 	LedgerService_GetSystemBalances_FullMethodName    = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
+	LedgerService_ListHolders_FullMethodName          = "/exchange.ledger.v1.LedgerService/ListHolders"
 	LedgerService_Adjust_FullMethodName               = "/exchange.ledger.v1.LedgerService/Adjust"
 	LedgerService_SettleFutures_FullMethodName        = "/exchange.ledger.v1.LedgerService/SettleFutures"
 	LedgerService_FundInsurance_FullMethodName        = "/exchange.ledger.v1.LedgerService/FundInsurance"
@@ -84,6 +85,13 @@ type LedgerServiceClient interface {
 	FundSystemAccount(ctx context.Context, in *FundSystemAccountRequest, opts ...grpc.CallOption) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(ctx context.Context, in *GetSystemBalancesRequest, opts ...grpc.CallOption) (*GetSystemBalancesResponse, error)
+	// ListHolders returns what each user holds of an asset now: the
+	// available and frozen of all its accounts of the asset summed, margin
+	// debts included, for the users whose sum is not zero, largest first.
+	// The console's holders card reads it (B199): the ledger lines it summed
+	// in ClickHouse expire after 15 days (ADR-0022). The system accounts are
+	// GetSystemBalances'.
+	ListHolders(ctx context.Context, in *ListHoldersRequest, opts ...grpc.CallOption) (*ListHoldersResponse, error)
 	// Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
 	// against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
 	// console calls it once the adjustment was approved (§5.12). Needs
@@ -258,6 +266,16 @@ func (c *ledgerServiceClient) GetSystemBalances(ctx context.Context, in *GetSyst
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetSystemBalancesResponse)
 	err := c.cc.Invoke(ctx, LedgerService_GetSystemBalances_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) ListHolders(ctx context.Context, in *ListHoldersRequest, opts ...grpc.CallOption) (*ListHoldersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListHoldersResponse)
+	err := c.cc.Invoke(ctx, LedgerService_ListHolders_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +471,13 @@ type LedgerServiceServer interface {
 	FundSystemAccount(context.Context, *FundSystemAccountRequest) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error)
+	// ListHolders returns what each user holds of an asset now: the
+	// available and frozen of all its accounts of the asset summed, margin
+	// debts included, for the users whose sum is not zero, largest first.
+	// The console's holders card reads it (B199): the ledger lines it summed
+	// in ClickHouse expire after 15 days (ADR-0022). The system accounts are
+	// GetSystemBalances'.
+	ListHolders(context.Context, *ListHoldersRequest) (*ListHoldersResponse, error)
 	// Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
 	// against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
 	// console calls it once the adjustment was approved (§5.12). Needs
@@ -569,6 +594,9 @@ func (UnimplementedLedgerServiceServer) FundSystemAccount(context.Context, *Fund
 }
 func (UnimplementedLedgerServiceServer) GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSystemBalances not implemented")
+}
+func (UnimplementedLedgerServiceServer) ListHolders(context.Context, *ListHoldersRequest) (*ListHoldersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListHolders not implemented")
 }
 func (UnimplementedLedgerServiceServer) Adjust(context.Context, *AdjustRequest) (*AdjustResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Adjust not implemented")
@@ -794,6 +822,24 @@ func _LedgerService_GetSystemBalances_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(LedgerServiceServer).GetSystemBalances(ctx, req.(*GetSystemBalancesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_ListHolders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHoldersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).ListHolders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_ListHolders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).ListHolders(ctx, req.(*ListHoldersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1110,6 +1156,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSystemBalances",
 			Handler:    _LedgerService_GetSystemBalances_Handler,
+		},
+		{
+			MethodName: "ListHolders",
+			Handler:    _LedgerService_ListHolders_Handler,
 		},
 		{
 			MethodName: "Adjust",
