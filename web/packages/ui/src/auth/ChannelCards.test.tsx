@@ -44,10 +44,25 @@ describe("ChannelCards", () => {
     expect(onChange).toHaveBeenCalledWith("SMS");
   });
 
-  it("holds the cards' places while the identities load", () => {
-    render(<ChannelCards options={[]} value="EMAIL" onValueChange={() => {}} loading />);
+  it("holds the cards' places while the identities load, row for row as the cards lay theirs out", () => {
+    const { container } = render(<ChannelCards options={[]} value="EMAIL" onValueChange={() => {}} loading />);
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.getByTestId("otp-channel-loading").getAttribute("aria-busy")).toBe("true");
+    const { container: cards } = render(
+      <ChannelCards
+        options={[
+          { channel: "EMAIL", target: "a***@example.com", bound: true },
+          { channel: "SMS", bound: false },
+        ]}
+        value="EMAIL"
+        onValueChange={() => {}}
+      />,
+    );
+    // The classes that size a row (its font, gaps, the check's room: F46, F47) are the cards' own.
+    const sizing = (el: Element | null) => (el?.className ?? "").split(" ").filter((c) => /^(text-(sm|xs)|font-|gap-|pr-|w-full|truncate|tabular-nums)/.test(c)).sort();
+    for (const row of ["name", "target"]) {
+      expect(sizing(container.querySelector(`[data-row="${row}"]`))).toEqual(sizing(cards.querySelector(`[data-row="${row}"]`)));
+    }
   });
 
   it("says where the code goes, without a choice, for a single channel", () => {

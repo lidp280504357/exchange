@@ -45,7 +45,7 @@ export function ChannelCards({ options, value, onValueChange, size = "md", loadi
               key={channel}
               className={cn("flex min-w-0 flex-col items-start gap-1 rounded-2 border border-line-1 bg-bg-2 px-3", size === "lg" ? "py-3" : "py-2.5")}
             >
-              <span className="relative flex items-center gap-1.5 text-sm font-medium">
+              <span className="relative flex items-center gap-1.5 pr-5 text-sm font-medium" data-row="name">
                 <span className="invisible flex items-center gap-1.5">
                   <Icon size={16} className="shrink-0" />
                   {t(`ui.otpChannel.name.${channel}`)}
@@ -54,7 +54,7 @@ export function ChannelCards({ options, value, onValueChange, size = "md", loadi
                   <Skeleton className="size-full" />
                 </span>
               </span>
-              <span className="relative w-full truncate text-xs tabular-nums">
+              <span className="relative w-full truncate text-xs tabular-nums" data-row="target">
                 <span className="invisible">{t(`ui.otpChannel.yours.${channel}`)}</span>
                 <span className="absolute inset-0">
                   <Skeleton className="size-full" />
@@ -100,12 +100,12 @@ export function ChannelCards({ options, value, onValueChange, size = "md", loadi
               size === "lg" ? "py-3" : "py-2.5",
             )}
           >
-            <span className="flex items-center gap-1.5 pr-5 text-sm font-medium text-fg-1">
+            <span className="flex items-center gap-1.5 pr-5 text-sm font-medium text-fg-1" data-row="name">
               <Icon size={16} className="shrink-0 text-fg-2 group-data-[state=checked]:text-brand" />
               {t(`ui.otpChannel.name.${o.channel}`)}
             </span>
             {/* fg-2: a checked card's brand tint takes fg-3 under 4.5:1. */}
-            <span className="w-full truncate text-xs text-fg-2 tabular-nums">{o.bound ? where(o) : t("ui.otpChannel.unbound")}</span>
+            <span className="w-full truncate text-xs text-fg-2 tabular-nums" data-row="target">{o.bound ? where(o) : t("ui.otpChannel.unbound")}</span>
             <RRadio.Indicator className="absolute right-2 top-2 grid size-4 animate-fade-in place-items-center rounded-full bg-brand text-brand-fg">
               <Check size={11} strokeWidth={3} />
             </RRadio.Indicator>
