@@ -32,8 +32,21 @@ type Repos interface {
 	Tags() TagRepo
 	Changes() ChangeRepo
 	Keys() IdempotencyRepo
+	Access() AccessRepo
 	// Audit queues an administrator's action on audit.events.
 	Audit(ctx context.Context, msg proto.Message, actor string) error
+}
+
+// AccessRepo stores the console's access switches, one row (N1).
+type AccessRepo interface {
+	// Get returns them, or nil before they were first stored;
+	// GetForUpdate locks them for a change.
+	Get(ctx context.Context) (*domain.ConsoleAccess, error)
+	GetForUpdate(ctx context.Context) (*domain.ConsoleAccess, error)
+	// Init stores them unless they were stored already, and reports
+	// whether it did.
+	Init(ctx context.Context, a domain.ConsoleAccess) (bool, error)
+	Put(ctx context.Context, a domain.ConsoleAccess) error
 }
 
 // ChangeRepo stores the changes of trading parameters (design 2026-10-02

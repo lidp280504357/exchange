@@ -51,6 +51,7 @@ func (r repos) Notes() ports.NoteRepo         { return notes(r) }
 func (r repos) Tags() ports.TagRepo           { return tags(r) }
 func (r repos) Changes() ports.ChangeRepo     { return changes(r) }
 func (r repos) Keys() ports.IdempotencyRepo   { return keys(r) }
+func (r repos) Access() ports.AccessRepo      { return access(r) }
 
 func (r repos) Audit(ctx context.Context, msg proto.Message, actor string) error {
 	env, err := r.events.New(ctx, msg, "actor", actor)
@@ -77,16 +78,17 @@ func stamp(t time.Time) *time.Time {
 type admins repos
 
 const adminColumns = `id, email, name, role, password_hash, totp_sealed, totp_last_step, status, failed_attempts, locked_until,
-	last_login_at, created_at, setup_kind, setup_hash, setup_totp_sealed, setup_expires_at, must_change_password`
+	last_login_at, created_at, setup_kind, setup_hash, setup_totp_sealed, setup_expires_at, must_change_password, totp_confirmed_at`
 
 func scanAdmin(row pgx.Row) (domain.Admin, error) {
 	var a domain.Admin
-	var locked, last, setupExpires *time.Time
+	var locked, last, setupExpires, confirmed *time.Time
 	var failed int32
 	var setupKind *string
 	err := row.Scan(&a.ID, &a.Email, &a.Name, &a.Role, &a.PasswordHash, &a.TOTPSealed, &a.TOTPLastStep, &a.Status, &failed, &locked,
-		&last, &a.CreatedAt, &setupKind, &a.SetupHash, &a.SetupTOTPSealed, &setupExpires, &a.MustChangePassword)
+		&last, &a.CreatedAt, &setupKind, &a.SetupHash, &a.SetupTOTPSealed, &setupExpires, &a.MustChangePassword, &confirmed)
 	a.FailedAttempts, a.LockedUntil, a.LastLoginAt, a.SetupExpiresAt = int(failed), at(locked), at(last), at(setupExpires)
+	a.TOTPConfirmedAt = at(confirmed)
 	if setupKind != nil {
 		a.SetupKind = *setupKind
 	}
@@ -113,10 +115,10 @@ func (r admins) one(ctx context.Context, sql string, args ...any) (*domain.Admin
 
 func (r admins) Insert(ctx context.Context, a domain.Admin) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO admins (`+adminColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-		$15, $16, $17)`,
+		$15, $16, $17, $18)`,
 		a.ID, a.Email, a.Name, a.Role, a.PasswordHash, a.TOTPSealed, a.TOTPLastStep, a.Status, a.FailedAttempts,
 		stamp(a.LockedUntil), stamp(a.LastLoginAt), a.CreatedAt, optKind(a.SetupKind), a.SetupHash, a.SetupTOTPSealed,
-		stamp(a.SetupExpiresAt), a.MustChangePassword)
+		stamp(a.SetupExpiresAt), a.MustChangePassword, stamp(a.TOTPConfirmedAt))
 	if err != nil {
 		return fmt.Errorf("insert admin: %w", err)
 	}
@@ -126,9 +128,11 @@ func (r admins) Insert(ctx context.Context, a domain.Admin) error {
 func (r admins) Update(ctx context.Context, a domain.Admin) error {
 	_, err := r.q.Exec(ctx, `UPDATE admins SET name = $2, role = $3, password_hash = $4, totp_sealed = $5, totp_last_step = $6,
 		status = $7, failed_attempts = $8, locked_until = $9, last_login_at = $10, setup_kind = $11, setup_hash = $12,
-		setup_totp_sealed = $13, setup_expires_at = $14, must_change_password = $15, updated_at = now() WHERE id = $1`,
+		setup_totp_sealed = $13, setup_expires_at = $14, must_change_password = $15, totp_confirmed_at = $16, updated_at = now()
+		WHERE id = $1`,
 		a.ID, a.Name, a.Role, a.PasswordHash, a.TOTPSealed, a.TOTPLastStep, a.Status, a.FailedAttempts, stamp(a.LockedUntil),
-		stamp(a.LastLoginAt), optKind(a.SetupKind), a.SetupHash, a.SetupTOTPSealed, stamp(a.SetupExpiresAt), a.MustChangePassword)
+		stamp(a.LastLoginAt), optKind(a.SetupKind), a.SetupHash, a.SetupTOTPSealed, stamp(a.SetupExpiresAt), a.MustChangePassword,
+		stamp(a.TOTPConfirmedAt))
 	if err != nil {
 		return fmt.Errorf("update admin: %w", err)
 	}

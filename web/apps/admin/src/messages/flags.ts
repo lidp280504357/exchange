@@ -9,7 +9,7 @@ export const flagsZh = {
     flagDesc: {
       account: { transfer: "现货与合约账户之间的划转" },
       admin: {
-        login_without_totp: "管理后台只凭密码登录：不询问也不校验身份验证器验证码（仅测试环境）",
+        login_without_totp: "已由「系统设置 → 登录验证器」（admin.require_totp）取代，不再读取；新版本首次启动时把它的值迁过去",
         two_person_approval: "管理后台：手工调账、保险基金注资与需双人复核的提现，须由第二位管理员批准；关闭时一位管理员在单人限额内即可完成",
       },
       auth: { sms: "短信作为注册与登录渠道（高风险地区仍只用邮箱）" },
@@ -70,7 +70,7 @@ export const flagsEn = {
     flagDesc: {
       account: { transfer: "Transfers between spot and futures accounts" },
       admin: {
-        login_without_totp: "Admin console sign-in with the password alone: the authenticator code is not asked for or checked (test environments only)",
+        login_without_totp: "Retired: replaced by Settings → Sign-in code (admin.require_totp), which took its value at the first start; no longer read",
         two_person_approval: "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
       },
       auth: { sms: "SMS as a registration and login channel (high-risk regions stay email-only)" },

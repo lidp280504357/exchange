@@ -15,8 +15,8 @@ import { BrandPanel, Field } from "./login/parts";
  * Login (design 2026-10-02 §6): the brand on the left half (a grid with
  * two drifting lights and the wordmark drawn), the form on the right.
  * Email, password and a one-time authenticator code in six boxes (each
- * code works once); the code is left out while the flag
- * admin.login_without_totp is on (GET /admin/v1/login-options). Signing
+ * code works once); the code is left out while the setting
+ * admin.require_totp is off (GET /admin/v1/login-options, N1). Signing
  * in shows a progress bar, then a check before the console opens.
  */
 export default function Login() {

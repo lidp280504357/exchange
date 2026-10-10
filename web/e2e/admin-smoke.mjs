@@ -1,6 +1,6 @@
 // Browser smoke test of the admin console (admin.astras.vip, design §10
-// and design 2026-10-02): an administrator signs in (the flag
-// admin.login_without_totp is on in the test environment) and walks every
+// and design 2026-10-02): an administrator signs in (the setting
+// admin.require_totp is off in the test environment) and walks every
 // section: the overview with the services' health and HOUSE, users with a
 // user's page and its tabs (profile, security, risk …), the identity
 // requests, orders and trades, deposits (those to handle, the backfills,
@@ -147,7 +147,7 @@ try {
   await typeInto('input[autocomplete="current-password"]', PASSWORD);
   await page.keyboard.press("Enter");
   await waitPath("/");
-  ok("signs in with the password (admin.login_without_totp)");
+  ok("signs in with the password (admin.require_totp off)");
 
   // 2. Overview: the figures, every service ready, HOUSE.
   await waitText("注册用户");
@@ -1034,6 +1034,17 @@ try {
   await waitText("单笔上限");
   await waitText("每人 24 小时累计上限");
   await waitText("每页条数");
+  // The sign-in code switch (N1): its state as sign-in has it; this run's
+  // ADMIN signed in without a checked code (the switch is off here), so
+  // switching it on is held back with what to do first.
+  const signInCode = await page.waitForSelector("[data-testid=access-totp]", { timeout: 20000 }).then((el) => el.evaluate((e) => e.dataset.on));
+  const asked = await page.evaluate(async () => (await (await fetch("/admin/v1/login-options")).json()).totp_required);
+  if (String(asked) !== signInCode) throw new Error(`the sign-in code switch shows ${signInCode}, sign-in asks ${asked}`);
+  if (signInCode === "false") {
+    await page.waitForSelector("[data-testid=access-totp-blocked]", { timeout: 20000 });
+    await page.waitForSelector("[data-testid=access-you][data-bound=false]");
+    await waitText("你自己与至少一位启用的 ADMIN 要先绑定验证器");
+  }
   const stream = await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -1053,14 +1064,15 @@ try {
     throw new Error(`event stream: ${JSON.stringify(stream)}`);
   }
   await t.shot("5-settings");
-  ok(`fund operations: the approval mode, the form and the records; the settings; the event stream (${JSON.stringify(stream)})`);
+  ok(`fund operations: the approval mode, the form and the records; the settings with the sign-in code (${signInCode === "true" ? "on" : "off, held back until bound"}); the event stream (${JSON.stringify(stream)})`);
 
-  // 10b. The account page: one's own password and authenticator (nothing changed).
+  // 10b. The account page: one's own password and authenticator, and whether it is bound (N1; nothing changed).
   await go("/account");
   await waitText("修改口令");
   await waitText("身份验证器");
+  await page.waitForSelector("[data-testid=own-totp-state][data-bound]");
   await noError("the account page");
-  ok("the account page");
+  ok("the account page, with whether the authenticator is bound");
 
   // 11. Sign out from the account menu.
   await page.click('header button[aria-label="账户菜单"]');

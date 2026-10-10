@@ -71,6 +71,13 @@ export default function Admins({ admin }: { admin: Admin }) {
         ),
       },
       {
+        // Bound once a code was checked (N1): without, no sign-in while the code is asked.
+        id: "totp", header: t("admin.admins.totp"),
+        cell: ({ row }) => (
+          <Badge tone={row.original.totp_bound ? "success" : "warn"}>{t(row.original.totp_bound ? "admin.admins.totpBound" : "admin.admins.totpUnbound")}</Badge>
+        ),
+      },
+      {
         id: "login", header: t("admin.admins.lastLogin"),
         cell: ({ row }) => (row.original.last_login_at ? <TimeText value={row.original.last_login_at} /> : <span className="text-fg-3">{t("admin.admins.never")}</span>),
       },

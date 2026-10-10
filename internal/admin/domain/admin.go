@@ -175,7 +175,14 @@ type Admin struct {
 	// MustChangePassword holds an administrator whose password was
 	// generated for them (exchangectl admin create) until they change it.
 	MustChangePassword bool
+	// TOTPConfirmedAt is when the current authenticator proved itself with
+	// a code (N1): zero until then, and again once it is reset or removed.
+	TOTPConfirmedAt time.Time
 }
+
+// TOTPBound reports whether the administrator's authenticator is bound:
+// one of its codes was checked (N1).
+func (a Admin) TOTPBound() bool { return !a.TOTPConfirmedAt.IsZero() }
 
 // NewAdmin validates a new administrator; the caller sets the hash and
 // the sealed secret.

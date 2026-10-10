@@ -21,7 +21,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
               ──admin schema──> 管理员、会话、资金操作、待生效修改、设置、幂等键；自己的 outbox 发 audit.events
 ```
 
-- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`、`instrument_changes`、平台表 `idempotency_keys`）。契约 `api/admin/admin.yaml`（不进公开 API 文档；改完 `task web:types`）。
+- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`、`console_access`、`instrument_changes`、平台表 `idempotency_keys`）。契约 `api/admin/admin.yaml`（不进公开 API 文档；改完 `task web:types`）。
 - 前端：`https://admin.astras.vip`（`web/apps/admin`，浅色主题）。整站包含 `snippets/admin-access*.conf`，可以挂访问限制，见 [web.md](web.md)；用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件。阶段 2 的旧后台 `web/admin`（`https://astras.vip/admin/`）已删除，旧地址 301 到新后台的同一路径。本机 `task web:dev -- admin`（http://localhost:5180），`/admin/v1` 代理到测试服。
 - 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目先用同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。阶段 4 起后台有了独立域名 `admin.astras.vip`；访问限制与 TOTP 目前按用户决定暂缓（见下文）。
 - 请求体大小：后台 API 一般限 64 KB（nginx），文章与资产资料的接口放宽到 512 KB（长正文、base64 图标）。
@@ -30,10 +30,14 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 - 没有注册入口：管理员由 ADMIN 在「系统 → 管理员与角色」新建（见下文「管理员与角色」）；没有 ADMIN 能登录时，运维用 `exchangectl admin create` 在 admin-service 容器里创建（它有 `ADMIN_SECRET_KEY`，见「运维」）。
 - 登录 = 邮箱 + 密码（Argon2id，至少 12 位）+ 身份验证器 6 位码（RFC 6238，前后一步误差，每个时间步只能用一次）。连续 5 次失败锁定 15 分钟；同一 IP 每分钟最多 10 次登录请求。未知邮箱与已知邮箱耗时相同。
-- **暂不校验验证码**（用户 2026-09-30 决定）：开关 `admin.login_without_totp` 打开时只凭邮箱与密码登录。
-  - 验证码不要求也不校验；登录页通过 `GET /admin/v1/login-options`（`totp_required`）得知后隐藏验证码输入框（选项读到之前登录按钮等待，读不到时显示输入框）。
-  - 登录审计的 `details` 带 `"totp_checked":false`，锁定与限流不变。
-  - 测试服已打开这个开关。恢复要求验证码：`exchangectl flags set admin.login_without_totp --off --reason "..."`，5 秒内生效，不用重新部署；已绑定的身份验证器不受影响。
+- **登录验证器开关**（设计 2026-10-02 N1，用户 2026-10-10 决定由运维在后台开关）：「系统设置」页的「登录验证器」卡片，设置项 `admin.require_totp`。开 → 口令 + 验证码；关 → 只凭邮箱与口令。
+  - 存在 admin-service 自己的单行表 `console_access`（admin 00018），不放功能开关表：守卫只能由 admin-service 执行。admin-service 内存里留一份，每 5 秒重读，自己改完立即生效。
+  - 取代原开关 `admin.login_without_totp`：新版本第一次启动时把它迁过来——取「`NOT admin.login_without_totp` 且至少一位启用的 ADMIN 已绑定验证器」（迁移时还没有人绑定，所以一律是关，审计理由写 `migration: no admin bound`；测试服原开关开着，也是关），`updated_by = migration:admin.login_without_totp`。之后不再读旧开关，它在功能开关页标为「已由系统设置取代」，不删行。
+  - **已绑定** = `admins.totp_confirmed_at` 有值：当前身份验证器的验证码被验证过一次——开着验证码时登录、设置链接里绑定、个人页绑定或换绑；被别的 ADMIN 重置或自己解绑时清空。「管理员与角色」列表有「验证器」列；`/admin/v1/me` 带 `totp_bound`。
+  - 打开要 `settings.write`（ADMIN）、理由与确认词 `on`，且当前管理员与至少一位启用的 ADMIN 已绑定，否则 409 `ADMIN_TOTP_NOT_BOUND`（详情 `you_bound`、`bound_admins`）；卡片在不满足时禁用开关并说明先去「账号与安全」绑定，列出未绑定的启用管理员（开启后他们无法登录，由 ADMIN 重置其验证器；没有 `admins.manage` 的只看到人数）。关闭确认词 `off`。已登录的会话不受影响。审计 `admin.settings.require_totp`（对象 `settings:access`，详情 `from`、`to`）。
+  - 接口：`GET /admin/v1/settings/access`（任何管理员可读）、`PUT /admin/v1/settings/access/totp`（`{enabled, reason}`）。登录页仍按 `GET /admin/v1/login-options` 的 `totp_required` 决定是否显示验证码输入框（选项读到之前登录按钮等待，读不到时显示输入框）。
+  - 关着时验证码不要求也不校验，登录审计的 `details` 带 `"totp_checked":false`，锁定与限流不变。测试服现在关着。
+  - **紧急关闭**（开着后没人能登录时）：在服务器上 `sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T admin-service /app/exchangectl admin settings require-totp off --reason "..."`，5 秒内恢复只凭口令登录（审计 actor 为命令的执行者，详情 `"via":"exchangectl"`）；`exchangectl admin settings show` 看当前值。命令行只能关，打开要走后台的守卫。
 - 会话：随机令牌只存 SHA-256；Cookie `admin_session`，HttpOnly、Secure、SameSite=Strict、Path=/admin/；8 小时到期，1 小时无请求失效；退出或停用管理员时服务端撤销。
 - 没有会话时打开控制台的任何地址都转到 `/login?next=<原地址>`，登录后回到原地址（只认控制台自己的路径，其他的回概览；人工检查清单 1）。
 - CSRF：除 GET 外每个请求必须带 `X-Admin-CSRF: 1`（跨站表单无法设置自定义头；Cookie 又是 SameSite=Strict）。
@@ -46,7 +50,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - 接口（不用会话，与登录共用每个 IP 每分钟 10 次的限制）：`POST /admin/v1/setup/inspect`（`{token}` → 账号、种类、到期时间与要绑定的密钥）、`POST /admin/v1/setup`（`{token, password?, totp_code?}`，204）。
   - 威胁行（协调会话代用户决定）：取"可追溯而非阻止"——设置链接加审计；"决策人的口令或验证器来自请求人签发的链接且未自行更换时不得作第二人"记为后续行 ⑪b，等真有多名管理员时再做。
 - **自己的口令与身份验证器**（右上角菜单「账号与安全」，`/account`，C5.5 ⑪）：
-  - 改口令要当前口令，新口令至少 12 位；换身份验证器要当前口令，登录要验证码时（`admin.login_without_totp` 关闭）还要当前身份验证器的 6 位码（测试服开着这个开关，只凭口令就能换绑，C5.5 ㉒），页面给出新的二维码与密钥，10 分钟内输入新码完成绑定，之前旧的仍可登录。
+  - 改口令要当前口令，新口令至少 12 位；换身份验证器要当前口令，登录要验证码时（`admin.require_totp` 开着）还要当前身份验证器的 6 位码（测试服关着，只凭口令就能换绑，C5.5 ㉒），页面给出新的二维码与密钥，10 分钟内输入新码完成绑定（之后即「已绑定」），之前旧的仍可登录。
+  - 页面显示验证器是否已绑定；**解绑**（N1）只在登录验证器关着时可用：当前口令 + 当前验证码（未绑定时只要口令），换成一个谁都不知道的新密钥、清掉「已绑定」，审计 `admin.totp_removed`；开着时 409 `ADMIN_TOTP_REQUIRED`（只能换绑）。接口 `POST /admin/v1/me/totp/remove`（`{current_password, totp_code?}`，204，与改口令共用每 15 分钟 10 次）。
   - 两种修改都结束自己在其它设备上的会话，审计 `admin.password_changed`、`admin.totp_changed`。每位管理员 15 分钟最多 10 次（`COMMON_RATE_LIMITED`）。
   - `exchangectl admin create` 交互生成的口令（不带 `--secrets-stdin`）标记为必须修改：登录后只能看自己（`GET /admin/v1/me`，带 `must_change_password`）、改口令与退出，其它请求都是 403 `ADMIN_PASSWORD_CHANGE_REQUIRED`，后台只显示改口令的页面。
   - 接口：`POST /admin/v1/me/password`（`{current_password, new_password}`）、`POST /admin/v1/me/totp/start`（`{current_password, totp_code?}` → `{totp_secret, totp_uri}`）、`POST /admin/v1/me/totp`（`{totp_code}`）。
@@ -61,7 +66,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表），外加导出审计日志（`audit.export`：CSV 里有邮箱与 IP，只有 ADMIN 与 AUDITOR 能导出，C5.5 ⑪） |
 
 - 越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`GET /admin/v1/roles`（任何管理员可读）给出角色与权限的矩阵。
-- `admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
+- `admin.*` 开关（`admin.two_person_approval`；已退役的 `admin.login_without_totp` 不再起作用）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。登录验证器 `admin.require_totp` 不在开关页，在「系统设置」页（见上）。
 
 ## 各页通用的规则
 
@@ -515,7 +520,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 注册赠送 `welcome_credits` | 账本设置（并显示总闸） | 全部为 0 | 平台设置 |
 | 测试模式 `test_mode` | 平台资料 | 关（正式模式） | 平台设置 |
 | 注册方式 `registration` | 平台资料 | 开放或按运营决定（只显示，不影响可上线） | 平台设置 |
-| 后台登录需验证码 `admin_totp` | 开关 `admin.login_without_totp` | 关 | 功能开关 |
+| 后台登录需验证码 `admin_totp` | 系统设置 → 登录验证器（`admin.require_totp`，N1），附已绑定验证器的启用 ADMIN 数 | 开（先在「账号与安全」绑定再开启） | 系统设置 |
 | 双人审批 `two_person` | 开关 `admin.two_person_approval` | 开 | 功能开关 |
 | 测试资产资格 `test_assets` | 开关 `wallet.test_assets` | 关（带地区规则也算开） | 功能开关 |
 | 托管方 `custodian` | wallet-service `/internal/wallet/custody` 的 `configured` 与 `gateway_host`（UDUN） | 已配置且不是 `udun-mock`；没有 `gateway_host` 字段时待接入 | 上线手册 |
@@ -524,7 +529,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 平台币资料 `coin_profile` | 模拟市场的币（默认 ASTRA）的资产资料 | 名称与 logo 已设置 | 代币信息 |
 | 法律页 `legal` | 内容 LEGAL 分区 | `terms`、`privacy`、`risk` 在正式模式下有已生效的覆盖稿（FORMAL 或 BOTH，已发布且不是定时到以后；「以默认稿发布」也算；只有测试稿不算）；分区没上线时待接入 | 固定页面 |
 | 第三方 `third_party` | 各服务的 `exchange_config_present` | 人机验证、邮件、链服务都为是；有一项上报为否即未达标，有一项没人上报（那个服务的指标读不到）为读不到；没有服务上报时待接入 | 上线手册 |
-| 管理员 `admins` | 后台名册 | 至少 2 名启用的 ADMIN，全部绑定身份验证器 | 管理员与角色 |
+| 管理员 `admins` | 后台名册 | 至少 2 名启用的 ADMIN，全部已绑定身份验证器（验证码被验证过，N1） | 管理员与角色 |
 | 域名 `domain` | 平台资料的 `domain` 与访问后台用的主机名（nginx 转来的 Host） | 后台在 admin.<资料里的域名> | 平台设置 |
 | HOUSE 报价与资金 `house` | 开关 `market.house_liquidity` 与 HOUSE 库存（MARKET_MAKER 账户） | 开，且每个组成交易对的背书资产（有充值或提现的资产，如 USDT、BTC、ETH；没有交易对的托管方测试资产不算）余额大于 0（复审 ㉚ 补的第 15 项，设计 §3 E 行） | HOUSE 敞口 |
 | 杠杆交易 `margin` | 开关 `margin.enabled`、`margin.liquidation`、`margin.auto_borrow` | 关；或开着且强平开着，杠杆与自动借款都按用户或地区规则开放（对所有人全局打开即未达标，测试服现在如此，协调会话 2026-10-06 07:40 ③；杠杆设计 §8，E5） | 功能开关 |
@@ -615,7 +620,9 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 
 | 错误码 | 含义 |
 |---|---|
-| `ADMIN_LOGIN_FAILED` | 邮箱、密码或验证码错误，或验证码已用过（`admin.login_without_totp` 打开时只看邮箱与密码） |
+| `ADMIN_LOGIN_FAILED` | 邮箱、密码或验证码错误，或验证码已用过（`admin.require_totp` 关着时只看邮箱与密码） |
+| `ADMIN_TOTP_NOT_BOUND` | 开启登录验证器前，当前管理员与至少一位启用的 ADMIN 要先绑定验证器（详情 `you_bound`、`bound_admins`） |
+| `ADMIN_TOTP_REQUIRED` | 登录验证器开着：自己的验证器只能换绑，不能解绑 |
 | `ADMIN_LOCKED` | 连续失败 5 次，锁定 15 分钟 |
 | `ADMIN_UNAUTHORIZED` | 没有会话或会话已过期/撤销 |
 | `ADMIN_FORBIDDEN` | 角色没有该权限 |

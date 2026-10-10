@@ -241,11 +241,12 @@ func setupDetails(s Setup) string {
 }
 
 // ResetAdminTOTP ends an administrator's authenticator and sessions and
-// gives a one-time setup link to bind a new one (C5.5 ⑪).
+// gives a one-time setup link to bind a new one (C5.5 ⑪); until then it
+// is not bound (N1).
 func (s *Service) ResetAdminTOTP(ctx context.Context, p Principal, id, reason string) (Setup, error) {
 	var setup Setup
 	_, err := s.changeAdmin(ctx, p, id, reason, "admin.totp_reset", func(r ports.Repos, a *domain.Admin) (string, error) {
-		a.TOTPSealed, a.TOTPLastStep = s.Box.Seal(totp.NewSecret(), []byte(a.ID)), 0
+		a.TOTPSealed, a.TOTPLastStep, a.TOTPConfirmedAt = s.Box.Seal(totp.NewSecret(), []byte(a.ID)), 0, time.Time{}
 		setup = s.startSetup(a, domain.NextSetup(a.SetupKind, domain.SetupTOTP))
 		return setupDetails(setup), r.Sessions().RevokeAll(ctx, a.ID, s.Now())
 	})

@@ -29,6 +29,7 @@
 //	exchangectl wallet sweep [--min 0.001] | fund --tx HASH [--account GAS_SUPPLY] | reconcile | checks | commands
 //	exchangectl wallet withdrawals [--status PENDING_REVIEW|ALL] | approve|reject <id> --reviewer NAME --reason TEXT
 //	exchangectl admin create --email E --name N --role ADMIN [--secrets-stdin] | list | disable <email> --reason TEXT
+//	exchangectl admin settings show | require-totp off --reason TEXT
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //	exchangectl sim status | call POST /internal/sim/events '{"type":"JUMP",...}'
@@ -167,6 +168,10 @@ commands:
   admin list                  admin console accounts
   admin disable <email> --reason TEXT
                               disable an account and close its sessions
+  admin settings show         the console's access switches (admin.require_totp)
+  admin settings require-totp off --reason TEXT
+                              sign-in takes the password alone again, within 5 seconds (audited): the way
+                              back in when nobody can sign in; switching on takes the console's guards
   dlq list <topic>            dead letters of a business topic (e.g. auth.events)
   dlq replay <topic> --all [--group G] | --offset P:O ...
                               republish dead letters as first attempts of the group that parked them

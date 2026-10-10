@@ -30,7 +30,7 @@ const WIDTHS = [1024, 1280, 1920];
 const nav = (tab, path) => tab.nav(path);
 
 /**
- * signIn signs in with the password alone (admin.login_without_totp) and
+ * signIn signs in with the password alone (admin.require_totp off) and
  * waits for the console at next; here: on the sign-in page the tab is on
  * (where the console sent it). The console takes 10 sign-ins a minute from
  * an address (scripts before this one may have used some): a 429 waits as

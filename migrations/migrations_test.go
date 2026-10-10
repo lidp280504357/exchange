@@ -524,4 +524,11 @@ func TestAdminSchema(t *testing.T) {
 	accepts(t, db, setup, b, "SELF_TOTP", nil, []byte{9}, later)
 	rejects(t, db, "no setup leaves nothing behind", setup, b, nil, nil, nil, later)
 	accepts(t, db, setup, b, nil, nil, nil, nil)
+
+	// The console's access switches (N1): one row; an administrator's bound authenticator.
+	access := `INSERT INTO console_access (id, require_totp, updated_by, updated_at) VALUES ($1, $2, 'migration', now())`
+	rejects(t, db, "the one row only", access, false, true)
+	accepts(t, db, access, true, false)
+	rejects(t, db, "a second row", access, true, true)
+	accepts(t, db, `UPDATE admins SET totp_confirmed_at = now() WHERE id = $1`, a)
 }

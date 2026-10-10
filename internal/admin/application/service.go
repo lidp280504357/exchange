@@ -1,6 +1,6 @@
 // Package application runs the admin console (requirements §5.12):
 // sign-in with a password and an authenticator code (the code can be
-// switched off with the flag admin.login_without_totp), role checks on every
+// switched off in the console's settings, admin.require_totp), role checks on every
 // action, fund operations (ledger adjustments and insurance fund
 // contributions) approved by a second administrator or, in single-person
 // mode, carried out alone within limits, and an audit event for every
@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +25,6 @@ import (
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
-	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/password"
 	"github.com/skill/exchange/internal/platform/secretbox"
 	"github.com/skill/exchange/internal/platform/totp"
@@ -109,6 +109,9 @@ type Service struct {
 	// ChangeDelayFloor is the least the wait of trading parameters'
 	// changes may be set to (domain.DefaultChangeDelayFloor when zero).
 	ChangeDelayFloor time.Duration
+
+	// access is the console's access switches in effect (LoadAccess, N1).
+	access atomic.Pointer[domain.ConsoleAccess]
 }
 
 // Principal is the administrator behind a request.
@@ -122,13 +125,6 @@ func (p Principal) require(perm string) error {
 		return domain.ErrForbidden.WithDetail("permission", perm)
 	}
 	return nil
-}
-
-// TOTPRequired reports whether sign-in asks for the authenticator code:
-// always, unless the flag admin.login_without_totp is on (test
-// environments, user decision of 2026-09-30).
-func (s *Service) TOTPRequired() bool {
-	return s.Features == nil || !s.Features.Enabled(flags.KeyAdminNoTOTP, flags.Subject{})
 }
 
 // Login checks the password and the authenticator code and opens a
@@ -171,6 +167,9 @@ func (s *Service) Login(ctx context.Context, email, pw, code, ip, userAgent stri
 				return err
 			}
 			step, ok = totp.Verify(secret, code, now, a.TOTPLastStep)
+			if ok && !a.TOTPBound() {
+				a.TOTPConfirmedAt = now // its code checked: bound (N1)
+			}
 		}
 		if !ok {
 			a.Failed(now)

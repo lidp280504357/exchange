@@ -23,8 +23,9 @@ import (
 	"github.com/skill/exchange/migrations"
 )
 
-// noCodes is admin.login_without_totp on: the same administrator signs in
-// more than once within a code's 30 seconds here.
+// noCodes is the retired admin.login_without_totp on, carried over into
+// admin.require_totp off at the first LoadAccess (N1): the same
+// administrator signs in more than once within a code's 30 seconds here.
 type noCodes struct{}
 
 func (noCodes) Enabled(key string, _ flags.Subject) bool { return key == flags.KeyAdminNoTOTP }
@@ -50,6 +51,9 @@ func TestSetupLinksAndOwnCredentials(t *testing.T) {
 	store := postgres.NewStore(db, event.NewFactory("admin-test", "t"))
 	hasher := password.NewHasher(1, password.Cost{MemoryKiB: 64, Iterations: 1})
 	svc := &application.Service{Store: store, Hasher: hasher, Box: box, Features: noCodes{}, Log: log, Now: time.Now}
+	if err := svc.LoadAccess(ctx); err != nil || svc.TOTPRequired() {
+		t.Fatalf("the flag carried over: required %t, %v", svc.TOTPRequired(), err)
+	}
 	for _, email := range []string{"boss@example.com", "deputy@example.com"} {
 		if _, err := application.NewAdmin(ctx, store, hasher, box, email, "Test", domain.RoleAdmin, "a long password", totp.NewSecret(), "test",
 			false, time.Now()); err != nil {

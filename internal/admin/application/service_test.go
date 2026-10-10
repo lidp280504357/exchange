@@ -38,6 +38,36 @@ type memStore struct {
 	changes   []domain.InstrumentChange
 	audits    []*auditv1.AdminActionPerformed
 	keys      map[string]memKey
+	access    *domain.ConsoleAccess
+}
+
+func (m *memStore) Access() ports.AccessRepo { return memAccess{m} }
+
+type memAccess struct{ m *memStore }
+
+func (r memAccess) Get(context.Context) (*domain.ConsoleAccess, error) {
+	if r.m.access == nil {
+		return nil, nil
+	}
+	a := *r.m.access
+	return &a, nil
+}
+
+func (r memAccess) GetForUpdate(ctx context.Context) (*domain.ConsoleAccess, error) {
+	return r.Get(ctx)
+}
+
+func (r memAccess) Init(_ context.Context, a domain.ConsoleAccess) (bool, error) {
+	if r.m.access != nil {
+		return false, nil
+	}
+	r.m.access = &a
+	return true, nil
+}
+
+func (r memAccess) Put(_ context.Context, a domain.ConsoleAccess) error {
+	r.m.access = &a
+	return nil
 }
 
 // memKey is a claimed Idempotency-Key.
@@ -1139,16 +1169,15 @@ func TestLoginWithoutTheCodeWhenSwitchedOff(t *testing.T) {
 	ctx := context.Background()
 	h.admin(t, "ann@example.com", domain.RoleAdmin)
 	if !h.svc.TOTPRequired() {
-		t.Fatal("the code is required unless the flag is on")
+		t.Fatal("the code is required until the switches are read")
 	}
-	h.svc.Features = onFlags{}
 	if _, _, _, err := h.svc.Login(ctx, "ann@example.com", testPassword, "", "ip", "ua"); code(err) != "ADMIN_LOGIN_FAILED" {
-		t.Fatalf("no code with the flag off: %v", err)
+		t.Fatalf("no code while it is asked for: %v", err)
 	}
 
-	h.svc.Features = onFlags{flags.KeyAdminNoTOTP: true}
+	h.svc.setAccess(domain.ConsoleAccess{RequireTOTP: false})
 	if h.svc.TOTPRequired() {
-		t.Fatal("the flag switches the code off")
+		t.Fatal("admin.require_totp off switches the code off")
 	}
 	if _, _, _, err := h.svc.Login(ctx, "ann@example.com", "wrong password!", "", "ip", "ua"); code(err) != "ADMIN_LOGIN_FAILED" {
 		t.Fatalf("the password is still checked: %v", err)
@@ -1164,7 +1193,7 @@ func TestLoginWithoutTheCodeWhenSwitchedOff(t *testing.T) {
 	}
 
 	// Switched back on, the code is checked again and an unused one still works.
-	h.svc.Features = onFlags{}
+	h.svc.setAccess(domain.ConsoleAccess{RequireTOTP: true})
 	h.login(t, "ann@example.com")
 }
 

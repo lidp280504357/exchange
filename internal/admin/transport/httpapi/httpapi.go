@@ -71,8 +71,11 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/me/password", h.changeOwnPassword)
 			r.Post("/me/totp/start", h.startOwnTOTP)
 			r.Post("/me/totp", h.confirmOwnTOTP)
+			r.Post("/me/totp/remove", h.removeOwnTOTP)
 			r.Get("/settings", h.settings)
 			r.Put("/settings", h.updateSettings)
+			r.Get("/settings/access", h.access)
+			r.Put("/settings/access/totp", h.setRequireTOTP)
 			r.Get("/todo", h.todo)
 			r.Get("/events", h.events)
 			r.Get("/users", h.users)
@@ -282,16 +285,19 @@ type AdminJSON struct {
 	// MustChangePassword: the password was generated for them; nothing
 	// else is open until they change it (C5.5 ⑪).
 	MustChangePassword bool `json:"must_change_password"`
+	// TOTPBound: their authenticator proved itself with a code (N1).
+	TOTPBound bool `json:"totp_bound"`
 }
 
 func adminJSON(a domain.Admin) AdminJSON {
 	return AdminJSON{
 		ID: a.ID, Email: a.Email, Name: a.Name, Role: a.Role, Permissions: domain.Permissions(a.Role), MustChangePassword: a.MustChangePassword,
+		TOTPBound: a.TOTPBound(),
 	}
 }
 
 // loginOptions tells the sign-in page whether to ask for the
-// authenticator code (flag admin.login_without_totp).
+// authenticator code (admin.require_totp in the console's settings, N1).
 func (h *Handler) loginOptions(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"totp_required": h.Svc.TOTPRequired()})
 }

@@ -10,9 +10,9 @@ export interface paths {
         };
         /**
          * What signing in asks for
-         * @description Whether the sign-in page asks for the authenticator code: true
-         *     unless the feature flag admin.login_without_totp is on. Needs no
-         *     session.
+         * @description Whether the sign-in page asks for the authenticator code: the
+         *     console's setting admin.require_totp (GET /admin/v1/settings/access,
+         *     N1). Needs no session.
          */
         get: operations["loginOptions"];
         put?: never;
@@ -144,10 +144,37 @@ export interface paths {
         /**
          * Bind the new authenticator with its code
          * @description A wrong code is ADMIN_TOTP_CODE_WRONG; nothing waiting (or late)
-         *     COMMON_CONFLICT. Their other sessions end. Audited as
-         *     admin.totp_changed.
+         *     COMMON_CONFLICT. Their other sessions end; the authenticator is
+         *     bound (totp_bound, N1). Audited as admin.totp_changed.
          */
         post: operations["confirmOwnTOTP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/me/totp/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove one's own authenticator
+         * @description Only while sign-in does not ask for the code (admin.require_totp
+         *     off; ADMIN_TOTP_REQUIRED otherwise). The current password and, when
+         *     the authenticator is bound, its code prove it is them
+         *     (ADMIN_PASSWORD_WRONG, ADMIN_TOTP_CODE_WRONG); a new secret nobody
+         *     holds takes its place, so the account is not bound until one is
+         *     bound anew (POST /admin/v1/me/totp/start). Counts with one's own
+         *     credentials' requests (COMMON_RATE_LIMITED). Audited as
+         *     admin.totp_removed (N1).
+         */
+        post: operations["removeOwnTOTP"];
         delete?: never;
         options?: never;
         head?: never;
@@ -412,6 +439,62 @@ export interface paths {
          *     1,000,000 USDT). Needs settings.write (ADMIN).
          */
         put: operations["updateSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/settings/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The console's access switches
+         * @description Whether sign-in asks for the authenticator code (admin.require_totp,
+         *     design 2026-10-02 N1), who changed it last, whether the caller's
+         *     authenticator is bound, how many active ADMINs' are, and the
+         *     active administrators without one - named to those with
+         *     admins.manage, counted for the others. admin-service stored the
+         *     switch from the retired flag admin.login_without_totp at its first
+         *     start (on only once an active ADMIN had a bound authenticator).
+         *     Every administrator may read them.
+         */
+        get: operations["getConsoleAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/settings/access/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Switch whether sign-in asks for the authenticator code
+         * @description admin.require_totp (N1). Switching it on needs the caller's
+         *     authenticator bound and at least one active ADMIN's
+         *     (ADMIN_TOTP_NOT_BOUND, details you_bound and bound_admins);
+         *     sessions already open stay open, administrators without a bound
+         *     authenticator cannot sign in until it is bound (an ADMIN resets
+         *     theirs). As it is already, nothing changes. The other instances
+         *     follow within 5 seconds; in an emergency `exchangectl admin
+         *     settings require-totp off --reason ...` in the admin-service
+         *     container switches it off. Audited as admin.settings.require_totp.
+         *     Needs settings.write (ADMIN).
+         */
+        put: operations["setRequireTOTP"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5634,6 +5717,30 @@ export interface components {
             permissions: components["schemas"]["Permission"][];
             /** @description The password was generated for them (exchangectl admin create): only GET /admin/v1/me, POST /admin/v1/me/password and POST /admin/v1/logout are open until they change it (ADMIN_PASSWORD_CHANGE_REQUIRED, C5.5 ⑪). */
             must_change_password: boolean;
+            /** @description Their authenticator proved itself with a code (N1): signing in while the code is asked, the setup link that binds one, or binding one on the account page; false again once it is reset or removed. */
+            totp_bound: boolean;
+        };
+        ConsoleAccess: {
+            /** @description Whether sign-in asks for the authenticator code (admin.require_totp). */
+            require_totp: boolean;
+            /** @description Who changed it last (an email, exchangectl's actor, or migration:admin.login_without_totp). */
+            updated_by: string | null;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** @description Whether the caller's authenticator is bound. */
+            you_bound: boolean;
+            /** @description The active ADMINs with a bound authenticator; switching the code on needs one. */
+            bound_admins: number;
+            /** @description The active administrators without a bound authenticator (they cannot sign in while the code is asked); empty for callers without admins.manage. */
+            unbound: {
+                /** Format: uuid */
+                id: string;
+                email: string;
+                name: string;
+                role: components["schemas"]["AdminRole"];
+            }[];
+            /** @description How many active administrators have no bound authenticator. */
+            unbound_count: number;
         };
         /** @enum {string} */
         AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
@@ -7418,7 +7525,7 @@ export interface operations {
             content: {
                 "application/json": {
                     current_password: string;
-                    /** @description The current authenticator's code; left out while admin.login_without_totp is on. */
+                    /** @description The current authenticator's code; left out while admin.require_totp is off. */
                     totp_code?: string;
                 };
             };
@@ -7455,6 +7562,33 @@ export interface operations {
         };
         responses: {
             /** @description Bound. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeOwnTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current_password: string;
+                    /** @description The authenticator's code; left out when it is not bound. */
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Removed. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -7818,6 +7952,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Settings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getConsoleAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The switches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAccess"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setRequireTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The switches after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAccess"];
                 };
             };
             default: components["responses"]["Error"];

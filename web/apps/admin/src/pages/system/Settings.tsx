@@ -12,6 +12,7 @@ import { Card, Page } from "../../kit/Page";
 import { settingsKey, useConsoleSettings } from "../../live";
 import { setTheme, useTheme } from "../../theme";
 import { ReadOnly } from "../../kit/ReadOnly";
+import { SignInCode } from "./access";
 
 const LIMITS = ["single_max_usdt", "daily_max_usdt", "withdrawal_max_usdt"] as const;
 type Limit = (typeof LIMITS)[number];
@@ -19,8 +20,8 @@ type Limit = (typeof LIMITS)[number];
 /**
  * Settings (design 2026-10-02 §2, §4.6): whether fund operations need a
  * second administrator and the single-person limits (ADMIN changes them,
- * with a reason; every administrator reads them), and this browser's
- * theme and language.
+ * with a reason; every administrator reads them), whether sign-in asks for
+ * the authenticator code (N1), and this browser's theme and language.
  */
 export default function Settings({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
@@ -36,7 +37,10 @@ export default function Settings({ admin }: { admin: Admin }) {
           {q.data ? <Approvals settings={q.data} editable={editable} /> : <Skeleton className="h-40 w-full" />}
         </Card>
       )}
-      <Card title={t("admin.settings.appearance")} className="stagger" style={stagger(1)}>
+      <Card title={t("admin.access.totp")} className="stagger" style={stagger(1)}>
+        <SignInCode admin={admin} />
+      </Card>
+      <Card title={t("admin.settings.appearance")} className="stagger" style={stagger(2)}>
         <Appearance />
       </Card>
     </Page>

@@ -8,7 +8,6 @@ import (
 
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/platform/apperr"
-	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/totp"
 )
 
@@ -266,13 +265,13 @@ func TestAnAdministratorsOwnCredentials(t *testing.T) {
 	if err := h.svc.ConfirmOwnTOTP(ctx, boss, totp.Code(raw, totp.Step(h.now))); code(err) != apperr.CodeConflict {
 		t.Fatalf("too late: %v", err)
 	}
-	// Without codes at sign-in (admin.login_without_totp) the password
+	// Without codes at sign-in (admin.require_totp off) the password
 	// alone starts one.
-	h.svc.Features = onFlags{flags.KeyAdminNoTOTP: true}
+	h.svc.setAccess(domain.ConsoleAccess{RequireTOTP: false})
 	if _, _, err := h.svc.StartOwnTOTP(ctx, boss, "a brand new password", ""); err != nil {
 		t.Fatalf("without codes: %v", err)
 	}
-	h.svc.Features = nil
+	h.svc.setAccess(domain.ConsoleAccess{RequireTOTP: true})
 	for _, action := range []string{"admin.password_changed", "admin.totp_changed"} {
 		if !slices.Contains(h.actions(), action) {
 			t.Fatalf("%s not audited: %v", action, h.actions())

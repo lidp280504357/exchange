@@ -84,9 +84,9 @@ paths:
       operationId: loginOptions
       summary: What signing in asks for
       description: |
-        Whether the sign-in page asks for the authenticator code: true
-        unless the feature flag admin.login_without_totp is on. Needs no
-        session.
+        Whether the sign-in page asks for the authenticator code: the
+        console's setting admin.require_totp (GET /admin/v1/settings/access,
+        N1). Needs no session.
       tags: [session]
       security: []
       responses:
@@ -239,7 +239,7 @@ paths:
                   type: string
                 totp_code:
                   type: string
-                  description: The current authenticator's code; left out while admin.login_without_totp is on.
+                  description: The current authenticator's code; left out while admin.require_totp is off.
       responses:
         '200':
           description: The new authenticator.
@@ -261,8 +261,8 @@ paths:
       summary: Bind the new authenticator with its code
       description: |
         A wrong code is ADMIN_TOTP_CODE_WRONG; nothing waiting (or late)
-        COMMON_CONFLICT. Their other sessions end. Audited as
-        admin.totp_changed.
+        COMMON_CONFLICT. Their other sessions end; the authenticator is
+        bound (totp_bound, N1). Audited as admin.totp_changed.
       tags: [session]
       security:
         - session: []
@@ -281,6 +281,41 @@ paths:
       responses:
         '204':
           description: Bound.
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/me/totp/remove:
+    post:
+      operationId: removeOwnTOTP
+      summary: Remove one's own authenticator
+      description: |
+        Only while sign-in does not ask for the code (admin.require_totp
+        off; ADMIN_TOTP_REQUIRED otherwise). The current password and, when
+        the authenticator is bound, its code prove it is them
+        (ADMIN_PASSWORD_WRONG, ADMIN_TOTP_CODE_WRONG); a new secret nobody
+        holds takes its place, so the account is not bound until one is
+        bound anew (POST /admin/v1/me/totp/start). Counts with one's own
+        credentials' requests (COMMON_RATE_LIMITED). Audited as
+        admin.totp_removed (N1).
+      tags: [session]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password]
+              properties:
+                current_password:
+                  type: string
+                totp_code:
+                  type: string
+                  description: The authenticator's code; left out when it is not bound.
+      responses:
+        '204':
+          description: Removed.
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/setup/inspect:
@@ -697,6 +732,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Settings'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/settings/access:
+    get:
+      operationId: getConsoleAccess
+      summary: The console's access switches
+      description: |
+        Whether sign-in asks for the authenticator code (admin.require_totp,
+        design 2026-10-02 N1), who changed it last, whether the caller's
+        authenticator is bound, how many active ADMINs' are, and the
+        active administrators without one - named to those with
+        admins.manage, counted for the others. admin-service stored the
+        switch from the retired flag admin.login_without_totp at its first
+        start (on only once an active ADMIN had a bound authenticator).
+        Every administrator may read them.
+      tags: [session]
+      responses:
+        '200':
+          description: The switches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAccess'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/settings/access/totp:
+    put:
+      operationId: setRequireTOTP
+      summary: Switch whether sign-in asks for the authenticator code
+      description: |
+        admin.require_totp (N1). Switching it on needs the caller's
+        authenticator bound and at least one active ADMIN's
+        (ADMIN_TOTP_NOT_BOUND, details you_bound and bound_admins);
+        sessions already open stay open, administrators without a bound
+        authenticator cannot sign in until it is bound (an ADMIN resets
+        theirs). As it is already, nothing changes. The other instances
+        follow within 5 seconds; in an emergency `exchangectl admin
+        settings require-totp off --reason ...` in the admin-service
+        container switches it off. Audited as admin.settings.require_totp.
+        Needs settings.write (ADMIN).
+      tags: [session]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, reason]
+              properties:
+                enabled:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The switches after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleAccess'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/todo:
@@ -9036,7 +9135,7 @@ components:
           format: date-time
     Admin:
       type: object
-      required: [id, email, name, role, permissions, must_change_password]
+      required: [id, email, name, role, permissions, must_change_password, totp_bound]
       properties:
         id:
           type: string
@@ -9056,6 +9155,51 @@ components:
           description: >-
             The password was generated for them (exchangectl admin create): only GET /admin/v1/me, POST /admin/v1/me/password
             and POST /admin/v1/logout are open until they change it (ADMIN_PASSWORD_CHANGE_REQUIRED, C5.5 ⑪).
+        totp_bound:
+          type: boolean
+          description: >-
+            Their authenticator proved itself with a code (N1): signing in while the code is asked, the setup link that binds
+            one, or binding one on the account page; false again once it is reset or removed.
+    ConsoleAccess:
+      type: object
+      required: [require_totp, updated_by, updated_at, you_bound, bound_admins, unbound, unbound_count]
+      properties:
+        require_totp:
+          type: boolean
+          description: Whether sign-in asks for the authenticator code (admin.require_totp).
+        updated_by:
+          type: [string, 'null']
+          description: Who changed it last (an email, exchangectl's actor, or migration:admin.login_without_totp).
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+        you_bound:
+          type: boolean
+          description: Whether the caller's authenticator is bound.
+        bound_admins:
+          type: integer
+          description: The active ADMINs with a bound authenticator; switching the code on needs one.
+        unbound:
+          type: array
+          description: >-
+            The active administrators without a bound authenticator (they cannot sign in while the code is asked); empty for
+            callers without admins.manage.
+          items:
+            type: object
+            required: [id, email, name, role]
+            properties:
+              id:
+                type: string
+                format: uuid
+              email:
+                type: string
+              name:
+                type: string
+              role:
+                $ref: '#/components/schemas/AdminRole'
+        unbound_count:
+          type: integer
+          description: How many active administrators have no bound authenticator.
     AdminRole:
       type: string
       enum: [ADMIN, OPERATOR, FINANCE, AUDITOR]

@@ -198,7 +198,9 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	// The console's own switches (admin.login_without_totp), refreshed every 5 seconds.
+	// The console's own flags (admin.two_person_approval; the retired
+	// admin.login_without_totp, read once to carry it over: N1), refreshed
+	// every 5 seconds.
 	features := flags.NewClient(configDB, a.Logger(), a.Metrics())
 	if err := features.Refresh(ctx); err != nil {
 		return err
@@ -295,6 +297,12 @@ func setup(ctx context.Context, a *app.App) error {
 		Log:              a.Logger(),
 		Now:              time.Now,
 	}
+	// The console's access switches (N1), stored from the flag they replace
+	// at the first start; read again every 5 seconds.
+	if err := svc.LoadAccess(ctx); err != nil {
+		return err
+	}
+	a.Add("console access", app.Loop(svc.RunAccess))
 	a.Add("instrument changes", app.Loop(func(ctx context.Context) error { return applyDueChanges(ctx, svc, 5*time.Second) }))
 	a.Add("idempotency keys", app.Loop(func(ctx context.Context) error { return purgeKeys(ctx, svc, time.Hour) }))
 	a.Add("app files", app.Loop(func(ctx context.Context) error { return sweepAppFiles(ctx, svc, 10*time.Minute) }))

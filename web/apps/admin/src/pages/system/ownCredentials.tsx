@@ -82,19 +82,26 @@ export function PasswordForm({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
-/**
- * TotpForm moves the signed-in administrator to a new authenticator: the
- * current password (and, while sign-in asks for codes, the current
- * authenticator's code) starts it, the new one's code binds it within ten
- * minutes; the old one signs in until then.
- */
-export function TotpForm() {
-  const { t } = useTranslation();
-  const options = useQuery({
+/** useLoginOptions reads whether sign-in asks for the authenticator code (admin.require_totp, N1). */
+function useLoginOptions() {
+  return useQuery({
     queryKey: ["admin", "login-options"],
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/login-options")),
     staleTime: 60_000,
   });
+}
+
+/**
+ * TotpForm moves the signed-in administrator to a new authenticator: the
+ * current password (and, while sign-in asks for codes, the current
+ * authenticator's code) starts it, the new one's code binds it within ten
+ * minutes; the old one signs in until then. Bound, it counts for the
+ * sign-in code switch (N1).
+ */
+export function TotpForm() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const options = useLoginOptions();
   const askCode = options.data?.totp_required ?? true;
   const [current, setCurrent] = useState("");
   const [oldCode, setOldCode] = useState("");
@@ -119,10 +126,11 @@ export function TotpForm() {
       const res = await adminApi.POST("/admin/v1/me/totp", { body: { totp_code: code } });
       if (!res.response.ok) adminData(res);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setPending(null);
       setCode("");
       toast.success(t("admin.account.totpChanged"));
+      await qc.invalidateQueries({ queryKey: ["admin", "me"] });
     },
     onError: () => setCode(""),
   });
@@ -195,6 +203,67 @@ export function TotpForm() {
         </Button>
       </div>
       <p className="text-xs text-fg-3">{t("admin.account.totpHint")}</p>
+    </form>
+  );
+}
+
+/**
+ * RemoveTotp unbinds the signed-in administrator's authenticator while
+ * sign-in does not ask for its code (N1): the current password and its
+ * code prove it is them; while the code is asked, it can only be replaced.
+ */
+export function RemoveTotp() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const options = useLoginOptions();
+  const [current, setCurrent] = useState("");
+  const [code, setCode] = useState("");
+  const remove = useMutation({
+    mutationFn: async () => {
+      const res = await adminApi.POST("/admin/v1/me/totp/remove", { body: { current_password: current, totp_code: code } });
+      if (!res.response.ok) adminData(res);
+    },
+    onSuccess: async () => {
+      setCurrent("");
+      setCode("");
+      toast.success(t("admin.account.removed"));
+      await qc.invalidateQueries({ queryKey: ["admin", "me"] });
+    },
+    onError: () => setCode(""),
+  });
+  if (options.data?.totp_required ?? true) {
+    return (
+      <p className="text-sm text-fg-3" data-testid="own-totp-remove-locked">
+        {t("admin.account.removeLocked")}
+      </p>
+    );
+  }
+  const ready = current.length > 0 && code.length === 6;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (ready && !remove.isPending) remove.mutate();
+  };
+  return (
+    <form onSubmit={submit} className="flex max-w-sm flex-col gap-3" data-testid="own-totp-remove">
+      <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+        {t("admin.account.current")}
+        <Input type="password" autoComplete="current-password" value={current} onValueChange={setCurrent} id="own-remove-current" />
+      </label>
+      <div>
+        <div className="mb-1.5 text-sm text-fg-2">{t("admin.account.removeCode")}</div>
+        <CodeInput value={code} onChange={setCode} label={t("admin.account.removeCode")} />
+      </div>
+      {remove.isError && (
+        <p role="alert" className="text-sm text-danger-strong">
+          {errorText(remove.error)}
+        </p>
+      )}
+      <div>
+        <Button type="submit" variant="danger" loading={remove.isPending} disabled={!ready}>
+          {t("admin.account.remove")}
+        </Button>
+      </div>
+      <p className="text-xs text-fg-3">{t("admin.account.removeHint")}</p>
     </form>
   );
 }

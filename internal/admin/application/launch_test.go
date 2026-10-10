@@ -123,6 +123,9 @@ func TestLaunchChecklist(t *testing.T) {
 	h.svc.Flags, h.svc.Wallet, h.svc.Catalog, h.svc.Content, h.svc.Probe, h.svc.Platform, h.svc.Ledger = flags, wallet, catalog, content, probe, pl, ledger
 	apps := newFakeApps()
 	h.svc.Apps, h.svc.AppFiles, h.svc.AppUploads = apps, newFakeAppFiles(func() time.Time { return h.now }), newMemUploads()
+	// Sign-in without the code (admin.require_totp off, N1; the retired
+	// flag admin.login_without_totp is no longer read).
+	h.store.access = &domain.ConsoleAccess{RequireTOTP: false}
 
 	// The test server: the test setup.
 	c, err := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip")
@@ -204,6 +207,11 @@ func TestLaunchChecklist(t *testing.T) {
 	pl.profile["images"] = map[string]any{"logo_light": "/v1/platform/images/logo_light?v=5", "logo_dark": nil, "favicon": "/v1/platform/images/favicon?v=5"}
 	ledger.house = map[string]string{"USDT": "2000000", "BTC": "20", "ETH": "500"}
 	h.admin(t, "second@example.com", domain.RoleAdmin)
+	// Both ADMINs' authenticators bound (signing in with a code binds one),
+	// then the code asked at sign-in.
+	h.login(t, "boss@example.com")
+	h.login(t, "second@example.com")
+	h.store.access = &domain.ConsoleAccess{RequireTOTP: true}
 	// Still the seeded name, in any case: the brand is not the platform's own yet.
 	for _, seeded := range []string{"Astras", "ASTRAS "} {
 		pl.profile["name"] = seeded

@@ -114,7 +114,7 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 		}
 		set(key, status, value)
 	}
-	flagItem("admin_totp", flags.KeyAdminNoTOTP, false)
+	put("admin_totp")(s.launchTOTP(ctx))
 	flagItem("two_person", flags.KeyTwoPerson, true)
 	flagItem("test_assets", flags.KeyTestAssets, false)
 	flagItem("withdraw", flags.KeyWithdraw, true)
@@ -558,8 +558,34 @@ func (s *Service) launchHouse(ctx context.Context, f ports.Flag) (string, map[st
 	return LaunchOK, value
 }
 
-// launchAdmins: at least two active ADMINs, every one with an
-// authenticator.
+// launchTOTP: sign-in asks for the authenticator code (admin.require_totp
+// in the console's settings, N1), with how many active ADMINs have one
+// bound - bind one first, then switch it on.
+func (s *Service) launchTOTP(ctx context.Context) (string, map[string]any) {
+	r := s.Store.Read()
+	cur, err := r.Access().Get(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "launch checklist: the console's access switches are unknown", "error", err)
+		return LaunchUnknown, map[string]any{"setting": settingRequireTOTP}
+	}
+	admins, err := r.Admins().List(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "launch checklist: the administrators are unknown", "error", err)
+		return LaunchUnknown, map[string]any{"setting": settingRequireTOTP}
+	}
+	on := s.TOTPRequired()
+	if cur != nil {
+		on = cur.RequireTOTP
+	}
+	value := map[string]any{"setting": settingRequireTOTP, "enabled": on, "bound_admins": boundAdmins(admins)}
+	if !on {
+		return LaunchFail, value
+	}
+	return LaunchOK, value
+}
+
+// launchAdmins: at least two active ADMINs, every one with a bound
+// authenticator (N1: one of its codes was checked).
 func (s *Service) launchAdmins(ctx context.Context) (string, map[string]any) {
 	admins, err := s.Store.Read().Admins().List(ctx)
 	if err != nil {
@@ -573,7 +599,7 @@ func (s *Service) launchAdmins(ctx context.Context) (string, map[string]any) {
 			continue
 		}
 		active++
-		if len(a.TOTPSealed) == 0 {
+		if !a.TOTPBound() {
 			without = append(without, a.Email)
 		}
 	}

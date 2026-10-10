@@ -83,9 +83,64 @@ func adminWith(ctx context.Context, db *pg.DB, secretKey string, args []string, 
 		}
 		fmt.Fprintf(out, "disabled %s; their sessions are closed\n", args[1])
 		return nil
+	case "settings":
+		return adminSettings(ctx, store, args[1:], out)
 	default:
 		return fmt.Errorf("unknown admin command %q", args[0])
 	}
+}
+
+// adminSettings shows the console's access switches, or switches one off
+// (design 2026-10-02, N1): the way back in when nobody can sign in;
+// admin-service reads it within 5 seconds. Switching on takes the
+// console's guards, so it is not offered here.
+func adminSettings(ctx context.Context, store *postgres.Store, args []string, out io.Writer) error {
+	const use = "usage: exchangectl admin settings show | require-totp off --reason TEXT"
+	if len(args) == 0 {
+		return errors.New(use)
+	}
+	switch args[0] {
+	case "show":
+		a, err := store.Read().Access().Get(ctx)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			fmt.Fprintln(out, "not stored yet: admin-service stores them at its first start")
+			return nil
+		}
+		fmt.Fprintf(out, "admin.require_totp  %s  (%s, %s)\n", onOff(a.RequireTOTP), a.UpdatedBy, a.UpdatedAt.UTC().Format(time.RFC3339))
+		return nil
+	case "require-totp":
+		if len(args) < 2 || args[1] != "off" {
+			return errors.New(use + " (only off: switching on takes the console's guards)")
+		}
+		fs := flag.NewFlagSet("admin settings require-totp off", flag.ContinueOnError)
+		fs.SetOutput(out)
+		reason := fs.String("reason", "", "why (audited)")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		changed, err := application.SwitchOffRequireTOTP(ctx, store, actor(), *reason, time.Now())
+		if err != nil {
+			return err
+		}
+		if !changed {
+			fmt.Fprintln(out, "admin.require_totp is off already")
+			return nil
+		}
+		fmt.Fprintln(out, "admin.require_totp off: sign-in takes the password alone within 5 seconds")
+		return nil
+	default:
+		return errors.New(use)
+	}
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 func adminCreate(ctx context.Context, store *postgres.Store, secretKey string, args []string, in io.Reader, out io.Writer) error {

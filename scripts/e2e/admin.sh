@@ -6,8 +6,8 @@
 # exchangectl in the admin-service container (random passwords and
 # authenticator secrets passed on stdin, never printed) and disabled at
 # the end. It checks sign-in (password + TOTP, one use per code, or the
-# password alone while the flag admin.login_without_totp is on; the
-# cookie's attributes, the CSRF header), roles, freezing and unfreezing
+# password alone while the setting admin.require_totp is off - and the
+# switch itself, N1; the cookie's attributes, the CSRF header), roles, freezing and unfreezing
 # an account, cancelling its orders, the guard of trading parameters
 # (statuses, a reference symbol, a risk ladder's impact: an ADMIN confirms
 # the preview, the change waits its minute — the run sets the least delay
@@ -178,7 +178,7 @@ if [[ $TOTP_REQUIRED == true ]]; then
   expect 401 ADMIN_LOGIN_FAILED "the same code does not sign in twice"
 else
   login ADMIN 000000
-  expect 200 - "the password alone signs in while admin.login_without_totp is on"
+  expect 200 - "the password alone signs in while admin.require_totp is off"
 fi
 for role in OPERATOR FINANCE AUDITOR; do
   login "$role"
@@ -187,6 +187,72 @@ done
 as AUDITOR GET /admin/v1/me ""
 expect 200 - "me"
 check '.role == "AUDITOR" and (.permissions | index("flags.write")) == null and (.permissions | index("audit.read")) != null' "AUDITOR only reads"
+
+# The sign-in code switch on the settings page (design 2026-10-02, N1):
+# admin.require_totp, which admin-service carried the retired flag
+# admin.login_without_totp over into. Switching it on needs the caller's
+# authenticator bound (a code of it checked) and an active ADMIN's; one's
+# own is removed only while it is off. Where it is off (the test server),
+# this run's ADMIN binds one, removes it, binds another, switches the code
+# on, signs in with it, and switches it off again (exchangectl in the
+# container switches it off when the run ends, whatever happened).
+echo "== the sign-in code switch (N1)"
+as AUDITOR GET /admin/v1/settings/access ""
+if [[ $STATUS == 404 ]]; then
+  echo "skip the sign-in code switch: this admin-service is from before N1"
+else
+  expect 200 - "every administrator reads the access switches"
+  check '(.require_totp | type) == "boolean" and .unbound == [] and (.unbound_count | type) == "number"' "an AUDITOR counts the unbound, unnamed"
+  [[ $(jq -r .require_totp <<<"$BODY") == "$TOTP_REQUIRED" ]] || fail "the switch is not what sign-in asks for: $BODY"
+  as OPERATOR PUT /admin/v1/settings/access/totp '{"enabled":true,"reason":"e2e"}'
+  expect 403 ADMIN_FORBIDDEN "OPERATOR does not switch it"
+  if [[ $TOTP_REQUIRED == true ]]; then
+    echo "skip switching the sign-in code: it is on here"
+  else
+    totp_asked() { # totp_asked true|false: what the sign-in options say
+      acall GET /admin/v1/login-options ""
+      [[ $STATUS == 200 && $(jq -r .totp_required <<<"$BODY") == "$1" ]]
+    }
+    bind_own() { # bind_own: this run's ADMIN binds a new authenticator; SECRET_ADMIN is its secret
+      as ADMIN POST /admin/v1/me/totp/start "$(jq -nc --arg p "$PW_ADMIN" '{current_password: $p}')"
+      expect 200 - "a new authenticator for this run's ADMIN"
+      SECRET_ADMIN=$(jq -r .totp_secret <<<"$BODY")
+      as ADMIN POST /admin/v1/me/totp "{\"totp_code\":\"$(totp "$SECRET_ADMIN")\"}"
+      expect 204 - "bound with its code"
+    }
+    as ADMIN GET /admin/v1/me ""
+    check '.totp_bound == false' "this run's ADMIN signed in without a checked code: not bound"
+    as ADMIN PUT /admin/v1/settings/access/totp '{"enabled":true,"reason":"e2e: before binding"}'
+    expect 409 ADMIN_TOTP_NOT_BOUND "switching it on before the caller binds one is refused"
+    check '.details.you_bound == false' "saying the caller's is not bound"
+    bind_own
+    as ADMIN GET /admin/v1/me ""
+    check '.totp_bound == true' "bound now"
+    as ADMIN POST /admin/v1/me/totp/remove "$(jq -nc --arg p "$PW_ADMIN" --arg c "$(totp "$SECRET_ADMIN" 1)" '{current_password: $p, totp_code: $c}')"
+    expect 204 - "removed with the password and its code while the switch is off"
+    as ADMIN GET /admin/v1/me ""
+    check '.totp_bound == false' "not bound any more"
+    bind_own
+    # shellcheck disable=SC2016 # expanded when the script ends
+    at_exit 'remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin settings require-totp off --reason \"e2e run over\"" >/dev/null'
+    as ADMIN PUT /admin/v1/settings/access/totp '{"enabled":true,"reason":"e2e: the code at sign-in"}'
+    expect 200 - "ADMIN switches the code on"
+    check '.require_totp == true and .you_bound == true and .bound_admins >= 1' "on, the caller's authenticator bound"
+    eventually 20 "sign-in asks for the code" totp_asked true
+    as ADMIN POST /admin/v1/me/totp/remove "$(jq -nc --arg p "$PW_ADMIN" '{current_password: $p, totp_code: "000000"}')"
+    expect 409 ADMIN_TOTP_REQUIRED "an authenticator is not removed while the code is asked for"
+    login ADMIN 000000
+    expect 401 ADMIN_LOGIN_FAILED "a wrong code does not sign in"
+    login ADMIN "$(totp "$SECRET_ADMIN" 1)"
+    expect 200 - "the password and the code sign in"
+    as AUDITOR GET /admin/v1/me ""
+    expect 200 - "a session open before stays open"
+    as ADMIN PUT /admin/v1/settings/access/totp '{"enabled":false,"reason":"e2e: back to the password alone"}'
+    expect 200 - "and switches it off again"
+    check '.require_totp == false and .updated_by == "'"$EMAIL_ADMIN"'"' "off, by this run's ADMIN"
+    eventually 20 "sign-in takes the password alone again" totp_asked false
+  fi
+fi
 
 echo "== roles"
 as AUDITOR PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}'
@@ -2481,7 +2547,9 @@ check '[.items[] | select(.key == "margin")] | all(.status == "UNKNOWN" or (.val
 check '.items[] | select(.key == "house") | .value.flag == "market.house_liquidity" and (.value.backed | has("USDT"))' \
   "HOUSE's item reads its flag and its inventory of the backed assets"
 check '.ready == false and ([.items[] | select(.key == "admin_totp" or .key == "test_assets")] | all(.status == "FAIL"))' \
-  "the test server is not ready: the console's sign-in without the code and the test assets are on"
+  "the test server is not ready: the console's sign-in code is off and the test assets are on"
+check '.items[] | select(.key == "admin_totp") | .status == "UNKNOWN" or (.value.enabled == false and (.value.bound_admins | type) == "number")' \
+  "the sign-in code's item reads the setting (N1), with the ADMINs whose authenticator is bound"
 check '.items[] | select(.key == "test_mode") | .status == "FAIL" and .value.enabled == true and (.value.banner | type) == "boolean"' \
   "and it is in test mode (design 2026-10-04 §4.3)"
 as AUDITOR GET /admin/v1/platform/profile ""

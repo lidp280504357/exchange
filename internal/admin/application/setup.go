@@ -121,7 +121,7 @@ func (s *Service) CompleteSetup(ctx context.Context, token, pw, code, ip string)
 }
 
 // bindPending makes the authenticator waiting in a's setup the one that
-// signs it in, once code proves it.
+// signs it in, once code proves it: bound (N1).
 func (s *Service) bindPending(a *domain.Admin, code string) error {
 	secret, err := s.Box.Open(a.SetupTOTPSealed, setupAAD(a))
 	if err != nil {
@@ -131,7 +131,7 @@ func (s *Service) bindPending(a *domain.Admin, code string) error {
 	if !ok {
 		return domain.ErrTOTPCodeWrong
 	}
-	a.TOTPSealed, a.TOTPLastStep = s.Box.Seal(secret, []byte(a.ID)), step
+	a.TOTPSealed, a.TOTPLastStep, a.TOTPConfirmedAt = s.Box.Seal(secret, []byte(a.ID)), step, s.Now()
 	return nil
 }
 
@@ -211,6 +211,9 @@ func (s *Service) StartOwnTOTP(ctx context.Context, p Principal, current, code s
 				return domain.ErrTOTPCodeWrong
 			}
 			a.TOTPLastStep = step
+			if !a.TOTPBound() {
+				a.TOTPConfirmedAt = s.Now() // its code checked: bound (N1)
+			}
 		}
 		if a.SetupKind != "" && a.SetupKind != domain.SetupSelfTOTP {
 			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "a setup link waits for this account: use it first")

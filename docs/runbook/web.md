@@ -277,7 +277,7 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 以后要限制，二选一：
     - IP 白名单：建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，写 `allow <出口 IP>; deny all;`，然后 `nginx -s reload`；
     - Cloudflare Access：在 Cloudflare Zero Trust 给该域名配 Access（邮箱 OTP）。
-  - 登录要密码；身份验证器验证码目前由开关 `admin.login_without_totp` 关掉，见 [admin.md](admin.md#登录与会话)。
+  - 登录要密码；身份验证器验证码由后台「系统设置 → 登录验证器」（`admin.require_totp`）决定，测试服关着，见 [admin.md](admin.md#登录与会话)。
   - 页面带 `X-Frame-Options: DENY`、`noindex` 与 CSP（`connect-src 'self'`）。
 
 ## 性能与检查
