@@ -588,6 +588,12 @@ type fakeLedger struct {
 	// refuse refuses the adjustments of one user (with err).
 	refuse string
 	holds  []ports.Hold
+	// holders are each asset's holders, as ListHolders answers (A123).
+	holders map[string][]ports.Holder
+}
+
+func (l *fakeLedger) Holders(_ context.Context, asset string) ([]ports.Holder, error) {
+	return l.holders[asset], nil
 }
 
 func (l *fakeLedger) Adjust(_ context.Context, key, userID, account, asset string, amount decimal.Decimal, actor, memo string) (string, error) {

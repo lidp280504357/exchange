@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -210,29 +211,95 @@ func TestSplittingAMint(t *testing.T) {
 	}
 }
 
-// holdingsReports records what the coin's page asked.
-type holdingsReports struct {
-	ports.Reports
-	asset string
-	bots  []string
-	top   int
+// coinLedger answers the coin's holders and system accounts as the ledger
+// holds them now (A123).
+type coinLedger struct{ *fakeLedger }
+
+func (coinLedger) SystemBalances(_ context.Context, asset string) ([]ports.Balance, error) {
+	if asset != "ASTRA" {
+		return nil, fmt.Errorf("asked %s", asset)
+	}
+	return []ports.Balance{
+		{AccountType: "ADJUSTMENT", Asset: asset, Available: "-1000", Frozen: "0"},
+		{AccountType: "FEE_REVENUE", Asset: asset, Available: "0.1", Frozen: "0"},
+		{AccountType: "INSURANCE_FUND", Asset: asset, Available: "0", Frozen: "0"},
+	}, nil
 }
 
-func (f *holdingsReports) Holdings(_ context.Context, asset string, bots []string, top int) (ports.Holdings, error) {
-	f.asset, f.bots, f.top = asset, bots, top
-	return ports.Holdings{Bots: decimal.NewFromInt(999), BotHolders: 3, System: map[string]decimal.Decimal{"ADJUSTMENT": decimal.NewFromInt(-1000)}}, nil
-}
-
+// Who holds the coin (A123): the ledger's balances now, the bots (market-
+// sim's) apart from the other users - what each kind holds, a debt
+// included, and how many hold some - the system accounts not at zero,
+// and the largest holders, bots among them.
 func TestWhoHoldsTheCoin(t *testing.T) {
-	reports := &holdingsReports{}
+	user1, user2, owing := "0192a000-0000-7000-8000-0000000000c1", "0192a000-0000-7000-8000-0000000000c2", "0192a000-0000-7000-8000-0000000000c3"
+	led := &fakeLedger{holders: map[string][]ports.Holder{"ASTRA": {
+		{UserID: botA, Amount: decimal.NewFromInt(600)},
+		{UserID: botB, Amount: decimal.NewFromInt(390)},
+		{UserID: user1, Amount: decimal.RequireFromString("9.9")},
+		{UserID: user2, Amount: decimal.RequireFromString("9.9")},
+		{UserID: owing, Amount: decimal.RequireFromString("-0.5")},
+	}}}
 	at := time.Date(2026, 10, 3, 1, 0, 0, 0, time.UTC)
-	svc := &Service{Sim: &stateSim{}, Reports: reports, Now: func() time.Time { return at }}
+	svc := &Service{Sim: &stateSim{}, Ledger: coinLedger{led}, Now: func() time.Time { return at }}
 	tok, err := svc.SimTokenHoldings(context.Background(), reader)
-	if err != nil || tok.Asset != "ASTRA" || tok.Price == nil || tok.Price.String() != "1.25" || !tok.At.Equal(at) || tok.BotHolders != 3 {
+	if err != nil || tok.Asset != "ASTRA" || tok.Price == nil || tok.Price.String() != "1.25" || !tok.At.Equal(at) {
 		t.Fatalf("the coin %+v %v", tok, err)
 	}
-	if reports.asset != "ASTRA" || !slices.Equal(reports.bots, []string{botA, botB, botC}) || reports.top != simTopHolders {
-		t.Fatalf("asked %+v", reports)
+	h := tok.Holdings
+	if h.Bots.String() != "990" || h.BotHolders != 2 || h.Users.String() != "19.3" || h.UserHolders != 2 ||
+		len(h.System) != 2 || h.System["ADJUSTMENT"].String() != "-1000" || h.System["FEE_REVENUE"].String() != "0.1" {
+		t.Fatalf("holdings %+v", h)
+	}
+	if len(h.Top) != 4 || h.Top[0].UserID != botA || h.Top[1].UserID != botB || h.Top[2].UserID != user1 || h.Top[3].UserID != user2 {
+		t.Fatalf("the largest holders, the user IDs settling a tie %+v", h.Top)
+	}
+	cut, err := holdingsOf(led.holders["ASTRA"], nil, nil, 2)
+	if err != nil || len(cut.Top) != 2 || cut.BotHolders != 0 || cut.UserHolders != 4 || cut.Users.String() != "1009.3" {
+		t.Fatalf("without bots everyone is a user, the top cut at 2 %+v %v", cut, err)
+	}
+}
+
+// movingLedger is a market trading while the page reads it: every read is
+// a moment later, and until moment still each moment's trade pays a fee of
+// 0.1 from the holder to FEE_REVENUE.
+type movingLedger struct {
+	*fakeLedger
+	now, still, reads int
+}
+
+func (l *movingLedger) fees() decimal.Decimal {
+	l.now++
+	return decimal.NewFromInt(int64(min(l.now, l.still))).Div(decimal.NewFromInt(10))
+}
+
+func (l *movingLedger) Holders(context.Context, string) ([]ports.Holder, error) {
+	l.reads++
+	return []ports.Holder{{UserID: botA, Amount: decimal.NewFromInt(100).Sub(l.fees())}}, nil
+}
+
+func (l *movingLedger) SystemBalances(context.Context, string) ([]ports.Balance, error) {
+	return []ports.Balance{{AccountType: "ADJUSTMENT", Available: "-100", Frozen: "0"}, {AccountType: "FEE_REVENUE", Available: l.fees().String(), Frozen: "0"}}, nil
+}
+
+// The holders and the system accounts are read as one moment (A123): the
+// holders again until their total holds still around the system accounts'
+// read, so that what they hold adds up to what was issued.
+func TestTheCoinReadAsOneMoment(t *testing.T) {
+	led := &movingLedger{fakeLedger: &fakeLedger{}, still: 3}
+	svc := &Service{Sim: &stateSim{}, Ledger: led, Now: time.Now}
+	tok, err := svc.SimTokenHoldings(context.Background(), reader)
+	if err != nil || led.reads != 3 {
+		t.Fatalf("the holders read %d times: %v", led.reads, err)
+	}
+	held := tok.Bots.Add(tok.Users).Add(tok.System["FEE_REVENUE"])
+	if !held.Equal(decimal.NewFromInt(100)) || !tok.System["ADJUSTMENT"].Equal(decimal.NewFromInt(-100)) {
+		t.Fatalf("held %s of 100 issued: %+v", held, tok.Holdings)
+	}
+	// Never still: three tries, then the last read stands.
+	led = &movingLedger{fakeLedger: &fakeLedger{}, still: 99}
+	svc.Ledger = led
+	if _, err := svc.SimTokenHoldings(context.Background(), reader); err != nil || led.reads != 4 {
+		t.Fatalf("the holders read %d times: %v", led.reads, err)
 	}
 }
 

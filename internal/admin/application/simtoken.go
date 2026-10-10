@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -67,7 +68,9 @@ func (s *Service) simState(ctx context.Context) (simState, error) {
 }
 
 // SimTokenHoldings returns who holds the simulated market's coin: the
-// bots, the users, the system accounts and the largest holders.
+// bots, the users, the system accounts and the largest holders, as the
+// ledger holds it now (A123: the read model's lines it once summed expire
+// after 15 days).
 func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, error) {
 	if err := p.require(domain.PermReportsRead); err != nil {
 		return SimToken{}, err
@@ -76,11 +79,15 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 	if err != nil {
 		return SimToken{}, err
 	}
-	bots := make([]string, 0, len(st.Bots))
+	bots := make(map[string]bool, len(st.Bots))
 	for _, b := range st.Bots {
-		bots = append(bots, b.UserID)
+		bots[b.UserID] = true
 	}
-	h, err := s.Reports.Holdings(ctx, st.coin(), bots, simTopHolders)
+	holders, system, err := s.coinBalances(ctx, st.coin())
+	if err != nil {
+		return SimToken{}, err
+	}
+	h, err := holdingsOf(holders, bots, system, simTopHolders)
 	if err != nil {
 		return SimToken{}, err
 	}
@@ -88,6 +95,88 @@ func (s *Service) SimTokenHoldings(ctx context.Context, p Principal) (SimToken, 
 	if st.LastPrice != nil {
 		if px, err := decimal.NewFromString(*st.LastPrice); err == nil {
 			out.Price = &px
+		}
+	}
+	return out, nil
+}
+
+// coinBalances reads an asset's holders and system accounts as one moment:
+// the holders again after the system accounts, until their total held
+// still (a trade's fee moves the coin from a holder to FEE_REVENUE
+// between two reads); three tries, then the last read stands.
+func (s *Service) coinBalances(ctx context.Context, asset string) ([]ports.Holder, []ports.Balance, error) {
+	holders, err := s.Ledger.Holders(ctx, asset)
+	if err != nil {
+		return nil, nil, err
+	}
+	var system []ports.Balance
+	for range 3 {
+		if system, err = s.Ledger.SystemBalances(ctx, asset); err != nil {
+			return nil, nil, err
+		}
+		again, err := s.Ledger.Holders(ctx, asset)
+		if err != nil {
+			return nil, nil, err
+		}
+		before, after := heldBy(holders), heldBy(again)
+		holders = again
+		if before.Equal(after) {
+			break
+		}
+	}
+	return holders, system, nil
+}
+
+// heldBy is what the holders hold together.
+func heldBy(holders []ports.Holder) decimal.Decimal {
+	sum := decimal.Zero
+	for _, h := range holders {
+		sum = sum.Add(h.Amount)
+	}
+	return sum
+}
+
+// holdingsOf sums the holders of an asset: the bots apart from the other
+// users (what each kind holds, owing included, and how many hold some),
+// the system accounts by type (those not at zero) and the top largest
+// holders.
+func holdingsOf(holders []ports.Holder, bots map[string]bool, system []ports.Balance, top int) (ports.Holdings, error) {
+	out := ports.Holdings{System: map[string]decimal.Decimal{}, Top: []ports.Holder{}}
+	for _, h := range holders {
+		some := h.Amount.IsPositive()
+		if bots[h.UserID] {
+			out.Bots = out.Bots.Add(h.Amount)
+			if some {
+				out.BotHolders++
+			}
+		} else {
+			out.Users = out.Users.Add(h.Amount)
+			if some {
+				out.UserHolders++
+			}
+		}
+		if some {
+			out.Top = append(out.Top, h)
+		}
+	}
+	slices.SortStableFunc(out.Top, func(a, b ports.Holder) int {
+		if c := b.Amount.Cmp(a.Amount); c != 0 {
+			return c
+		}
+		return strings.Compare(a.UserID, b.UserID)
+	})
+	out.Top = out.Top[:min(len(out.Top), top)]
+	for _, b := range system {
+		available, err := decimal.NewFromString(b.Available)
+		if err != nil {
+			return ports.Holdings{}, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service answered a balance in another shape")
+		}
+		frozen, err := decimal.NewFromString(b.Frozen)
+		if err != nil {
+			return ports.Holdings{}, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service answered a balance in another shape")
+		}
+		if sum := available.Add(frozen); !sum.IsZero() {
+			out.System[b.AccountType] = out.System[b.AccountType].Add(sum)
 		}
 	}
 	return out, nil

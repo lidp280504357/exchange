@@ -352,3 +352,19 @@ func (r Reports) MarginInterest(ctx context.Context, rng ports.ReportRange, asse
 	}
 	return out, nil
 }
+
+// closeRows ends a read, with the error that stopped it.
+func closeRows(rows interface {
+	Err() error
+	Close() error
+},
+) error {
+	err := rows.Err()
+	if cerr := rows.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return unavailable(err)
+	}
+	return nil
+}

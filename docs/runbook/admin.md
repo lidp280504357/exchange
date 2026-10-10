@@ -403,7 +403,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - 各角色的数量与库存合计、每个机器人的余额、永续仓位、最近一次被拒与重试时间，可按角色与"只看被拒"筛选；参数只读，到价格控制修改。
   - 单个机器人的余额用「资金调整」修改（行上的「调整余额」带上它的用户 ID）。机器人之间不划转（用户 2026-10-03 决定），要挪就做两笔调整。
   - **补充库存**：资金操作 `SIM_MINT`（`POST /admin/v1/sim/mint`，要 `ledger.adjust.request`；批准要 `ledger.adjust.approve`）。总数平均分给全部或某个角色的机器人（两位小数，余数给第一个），每个机器人一笔现货账户的人工调整，幂等键 `approval:<id>:<用户>`，重试只补没记上的；单人模式的限额与双人模式同其它资金操作，折合按币的 USDT 交易对最新价。单次最多 10,000,000 个币或 1,000,000 USDT，谁批准都不能越过（422 `ADMIN_SIM_MINT_CAP`）。第一个机器人就被拒时记为失败；记上几个之后被拒时保持待处理（计入申请人的 24 小时累计，错误的详情有 `approval_id`、`bot`、`booked`、`of`），排除原因后在「审批」里完成，幂等键只补剩下的。`payload.bots` 是每个机器人的份额（JSON）。审计 `admin.sim.mint_requested/executed/failed/approved/rejected`，对象 `sim`；账本另记每笔 `ledger.manual_adjustment`。运维脚本 `scripts/ops/astra.sh mint` 仍可用（不经审批）。
-- **代币信息**（`/sim/token`）：币的资料（与资产抽屉里的同一编辑器，要 `instruments.write`），以及持有分布（`GET /admin/v1/sim/token`）：发行总量（`ADJUSTMENT` 账户的借方）、市值（按最近成交价）、机器人与用户各自持有多少、多少个账户持有、平台账户（手续费等）与最大的 20 个持有者。数据来自 ClickHouse 的账本流水（`ledger_entries FINAL`），晚几秒；机器人名单来自 market-sim。
+- **代币信息**（`/sim/token`）：币的资料（与资产抽屉里的同一编辑器，要 `instruments.write`），以及持有分布（`GET /admin/v1/sim/token`）：发行总量（`ADJUSTMENT` 账户的借方）、市值（按最近成交价）、机器人与用户各自持有多少、多少个账户持有、平台账户（手续费等）与最大的 20 个持有者。数据来自账本服务的当前余额（`ListHolders`：每个用户全部账户的可用 + 冻结之和，杠杆负债计入；系统账户来自 `GetSystemBalances`；A123——原先累加 ClickHouse 的 `ledger_entries`，流水只留 15 天后会算小）；机器人名单来自 market-sim。两次读取之间有成交时，持有合计与发行总量可能差一点。
 - **审计**：对象 `sim`，动作 `admin.sim.event_created/event_ended/params_changed`，审批的 `admin.sim.event_requested/approved/rejected/failed`、`admin.sim.params_*`、`admin.sim.mint_*`；market-sim 自己另记 `market.sim.*`（含 `approved_by`）。
 
 ## 杠杆

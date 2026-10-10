@@ -207,6 +207,24 @@ func (l Ledger) SystemBalances(ctx context.Context, asset string) ([]ports.Balan
 	return out, nil
 }
 
+// Holders returns what each user holds of an asset now (B199's
+// ListHolders), largest first.
+func (l Ledger) Holders(ctx context.Context, asset string) ([]ports.Holder, error) {
+	resp, err := l.C.ListHolders(ctx, &ledgerv1.ListHoldersRequest{Asset: asset})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.Holder, 0, len(resp.GetHolders()))
+	for _, h := range resp.GetHolders() {
+		amount, err := decimal.NewFromString(h.GetAmount())
+		if err != nil {
+			return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "ledger-service answered a holder's amount in another shape")
+		}
+		out = append(out, ports.Holder{UserID: h.GetUserId(), Amount: amount})
+	}
+	return out, nil
+}
+
 // Instruments implements ports.Instruments.
 type Instruments struct {
 	C instrumentv1.InstrumentServiceClient

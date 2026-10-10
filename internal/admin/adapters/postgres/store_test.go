@@ -63,6 +63,8 @@ func (l *ledger) FundInsurance(_ context.Context, key, _ string, _ decimal.Decim
 
 func (l *ledger) SystemBalances(context.Context, string) ([]ports.Balance, error) { return nil, nil }
 
+func (l *ledger) Holders(context.Context, string) ([]ports.Holder, error) { return nil, nil }
+
 // wallet has an empty review queue.
 type wallet struct{}
 

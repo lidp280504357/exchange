@@ -904,6 +904,10 @@ type Ledger interface {
 	FundInsurance(ctx context.Context, key, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
 	// SystemBalances returns the system accounts in an asset.
 	SystemBalances(ctx context.Context, asset string) ([]Balance, error)
+	// Holders returns what each user holds of an asset now, all its
+	// accounts summed (margin debts included), for the users whose sum is
+	// not zero, largest first (ledger-service ListHolders, A123).
+	Holders(ctx context.Context, asset string) ([]Holder, error)
 	// PlaceHold freezes part of a user's SPOT balance under the hold ID
 	// (repeating it returns the hold); ReleaseHold returns it; the ledger
 	// audits both with actor.
@@ -1136,10 +1140,6 @@ type Reports interface {
 	// Liquidations returns a page of the liquidation steps, newest first,
 	// and the cursor of the next ("" on the last).
 	Liquidations(ctx context.Context, q LiquidationQuery) ([]LiquidationStep, string, error)
-	// Holdings sums who holds an asset from the ledger's lines: the bots
-	// (in bots) apart from the other users, the system accounts, and the
-	// top largest holders.
-	Holdings(ctx context.Context, asset string, bots []string, top int) (Holdings, error)
 }
 
 // MarketMaker is market-maker's internal API (review C45): HOUSE's caps at
@@ -1313,10 +1313,10 @@ type Holder struct {
 	Amount decimal.Decimal
 }
 
-// Holdings is how an asset is held (ClickHouse ledger_entries, a few
-// seconds behind the ledger): the users' and the bots' balances with how
-// many of each hold some, the system accounts' by type (ADJUSTMENT owes
-// what manual adjustments created) and the largest holders.
+// Holdings is how an asset is held (the ledger's balances now, A123): the
+// users' and the bots' with how many of each hold some, the system
+// accounts' by type (ADJUSTMENT owes what manual adjustments created) and
+// the largest holders.
 type Holdings struct {
 	Users, Bots             decimal.Decimal
 	UserHolders, BotHolders uint64

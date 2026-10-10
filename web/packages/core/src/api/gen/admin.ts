@@ -2344,12 +2344,13 @@ export interface paths {
         };
         /**
          * Who holds the simulated market's coin
-         * @description The coin (the base of market-sim's pair, ASTRA) as the ledger's
-         *     lines hold it (the read model, a few seconds behind): the bots
+         * @description The coin (the base of market-sim's pair, ASTRA) as the ledger holds
+         *     it now (ledger-service's ListHolders and system accounts, A123; the
+         *     read model's lines it once summed expire after 15 days): the bots
          *     (market-sim's list) and the other users with how many of each hold
-         *     some, the platform's system accounts, what manual adjustments
-         *     issued (the ADJUSTMENT account's debit) and the 20 largest holders.
-         *     Needs reports.read.
+         *     some (a margin debt counts against its holder), the platform's
+         *     system accounts, what manual adjustments issued (the ADJUSTMENT
+         *     account's debit) and the 20 largest holders. Needs reports.read.
          */
         get: operations["getSimToken"];
         put?: never;
