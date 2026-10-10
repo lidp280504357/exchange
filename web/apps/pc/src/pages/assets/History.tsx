@@ -1,6 +1,6 @@
 import { dec, routes, timeZoneOf, useSettings } from "@exchange/core";
 import { useLedger, type LedgerEntry } from "@exchange/core/assets/hooks";
-import { dayRange, inRange, LEDGER_ENTRY_TYPES, ledgerRelation, pastRange, presetRange, type RangePreset } from "@exchange/core/assets/ledger";
+import { dayRange, inRange, LEDGER_ENTRY_TYPES, LEDGER_KEPT_DAYS, ledgerRelation, pastRange, presetRange, type RangePreset } from "@exchange/core/assets/ledger";
 import { sortAssets } from "@exchange/core/wallet/networks";
 import {
   AmountText,
@@ -318,6 +318,7 @@ function Filters({
           <FormField label={t("pcAssets.history.to")} className="w-40">
             <Input size="sm" type="date" value={toDate} min={fromDate || undefined} onValueChange={onToDate} />
           </FormField>
+          <span className="mb-2 text-xs text-fg-3">{t("pcAssets.history.kept", { days: LEDGER_KEPT_DAYS })}</span>
         </div>
       )}
       {onReset && (

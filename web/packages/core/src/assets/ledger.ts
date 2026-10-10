@@ -70,7 +70,10 @@ export function ledgerRelation(entryType: string, accountType = "SPOT"): LedgerR
 /** A time range as epoch milliseconds: from inclusive, to exclusive; null is open. */
 export type TimeRange = { from: number | null; to: number | null };
 
-/** The rolling windows offered: the server keeps the last 15 days of entries (M1, user 2026-10-10), so none reaches further. */
+/** How many days of entries the server keeps (M1, user 2026-10-10): older ones are gone. */
+export const LEDGER_KEPT_DAYS = 15;
+
+/** The rolling windows offered: none reaches past what the server keeps (LEDGER_KEPT_DAYS). */
 export type RangePreset = "all" | "7d" | "15d";
 
 const DAY = 86_400_000;

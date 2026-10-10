@@ -239,6 +239,7 @@ export default {
       from: "開始日期",
       to: "結束日期",
       badRange: "結束日期不能早於開始日期",
+      kept: "只保留最近 {{days}} 天的記錄",
       clear: "清空",
       reset: "重設篩選",
       removeFilter: "移除篩選：{{name}}",

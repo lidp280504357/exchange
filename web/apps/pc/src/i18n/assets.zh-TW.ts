@@ -266,6 +266,7 @@ export default {
       ranges: { all: "全部", "7d": "近 7 天", "15d": "近 15 天", custom: "自定義" },
       from: "開始日期",
       to: "結束日期",
+      kept: "只保留最近 {{days}} 天的記錄",
       reset: "重設篩選",
       change: "變動",
       availableAfter: "可用餘額",

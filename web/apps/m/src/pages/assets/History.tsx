@@ -1,6 +1,6 @@
 import { enumLabel, errorText, formatTime, routes, timeZoneOf, useSettings } from "@exchange/core";
 import { useLedger, type LedgerEntry } from "@exchange/core/assets/hooks";
-import { dayRange, inRange, LEDGER_ENTRY_TYPES, ledgerRelation, pastRange, presetRange, type RangePreset } from "@exchange/core/assets/ledger";
+import { dayRange, inRange, LEDGER_ENTRY_TYPES, LEDGER_KEPT_DAYS, ledgerRelation, pastRange, presetRange, type RangePreset } from "@exchange/core/assets/ledger";
 import { sortAssets } from "@exchange/core/wallet/networks";
 import { AmountText, Badge, Button, CoinIcon, EmptyState, ErrorState, FormField, Input, KeyValue, Sheet, Skeleton, Spinner, TimeText, cn } from "@exchange/ui";
 import { ArrowRight, ChevronRight, Info, SlidersHorizontal, X } from "lucide-react";
@@ -461,6 +461,7 @@ function FilterSheet({
               <FormField label={t("mAssets.history.to")} error={badRange ? t("mAssets.history.badRange") : undefined}>
                 <Input size="lg" type="date" value={draft.toDate} min={draft.fromDate || undefined} onValueChange={(v) => patch({ toDate: v })} />
               </FormField>
+              <p className="text-xs text-fg-3">{t("mAssets.history.kept", { days: LEDGER_KEPT_DAYS })}</p>
             </div>
           )}
         </Group>
