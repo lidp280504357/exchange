@@ -24,6 +24,9 @@ type Config struct {
 	DSN string `koanf:"postgres_dsn"`
 	// MaxConns caps the pool (POSTGRES_MAX_CONNS).
 	MaxConns int32 `koanf:"postgres_max_conns"`
+	// AppName names the connections in pg_stat_activity; the schema when
+	// empty (a tool sets its own: exchangectl-retention).
+	AppName string `koanf:"-"`
 }
 
 // DefaultConfig keeps each service's pool small: eight services share one
@@ -71,6 +74,9 @@ func Open(ctx context.Context, cfg Config, schema string) (*DB, error) {
 	}
 	pcfg.ConnConfig.RuntimeParams["search_path"] = schema
 	pcfg.ConnConfig.RuntimeParams["application_name"] = schema
+	if cfg.AppName != "" {
+		pcfg.ConnConfig.RuntimeParams["application_name"] = cfg.AppName
+	}
 	// NUMERIC scans into and binds from shopspring/decimal (ADR-0008).
 	pcfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
 		pgxdecimal.Register(conn.TypeMap())

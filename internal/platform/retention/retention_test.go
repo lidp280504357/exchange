@@ -28,6 +28,7 @@ func TestWindow(t *testing.T) {
 		{Now: now, Days: 0, KeyDays: 90, Batch: 1},
 		{Now: now, Days: 15, KeyDays: 7, Batch: 1},
 		{Now: now, Days: 15, KeyDays: 90},
+		{Now: now, Days: 15, KeyDays: 90, Batch: 1, Pause: -time.Second},
 	} {
 		if bad.Validate() == nil {
 			t.Fatalf("%+v accepted", bad)

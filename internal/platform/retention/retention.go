@@ -66,6 +66,8 @@ func (w Window) Validate() error {
 		return fmt.Errorf("retention: keys (%d days) must outlive the history (%d days)", w.KeyDays, w.Days)
 	case w.Batch < 1:
 		return fmt.Errorf("retention: batch must be at least 1, got %d", w.Batch)
+	case w.Pause < 0:
+		return fmt.Errorf("retention: the pause cannot be negative, got %s", w.Pause)
 	}
 	return nil
 }
