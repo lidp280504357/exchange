@@ -79,6 +79,12 @@ func retentionCmd(ctx context.Context, cfg settings, args []string, out io.Write
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	// The flags stop at the first other word, so an option after it would
+	// be dropped unseen - a --dry-run among them, while the scripts that
+	// take the ops lock read every word (B204).
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q: options only, before any other word\n%s", fs.Arg(0), retentionUsage)
+	}
 	if *days < minDays && !*force {
 		return fmt.Errorf("--days %d keeps less than %d days of history: add --force if that is meant", *days, minDays)
 	}

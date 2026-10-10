@@ -288,7 +288,7 @@ func (f fakePolicy) Run(context.Context, *pg.DB, retention.Window) ([]retention.
 // (B199). ClickHouse down fails the read models' step alone, after the
 // schemas; without its address the step is skipped, saying so; a run
 // stopped ends after the schema it was in (B201). Fewer than 7 days need
-// --force.
+// --force; a word that is no option is refused (B204).
 func TestRetentionGoesOn(t *testing.T) {
 	ctx := context.Background()
 	w := retention.Window{Now: time.Now(), Days: 15, KeyDays: 90, Batch: 10, DryRun: true}
@@ -324,5 +324,11 @@ func TestRetentionGoesOn(t *testing.T) {
 	out.Reset()
 	if err := retentionCmd(ctx, settings{}, []string{"run", "--days", "3"}, &out); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("3 days without --force: %v", err)
+	}
+	// A word that is no option ends the flags: the --dry-run after it would
+	// go unseen and the run delete (B204).
+	if err := retentionCmd(ctx, settings{}, []string{"run", "--only", "trading", "foo", "--dry-run"}, &out); err == nil ||
+		!strings.Contains(err.Error(), `unexpected argument "foo"`) {
+		t.Fatalf("a stray word: %v", err)
 	}
 }
