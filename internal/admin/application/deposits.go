@@ -68,9 +68,13 @@ func (s *Service) depositDecision(p Principal, id, reason string) error {
 // CreditDeposit gives an unclaimed deposit's funds, booked to
 // UNCLAIMED_DEPOSIT, to its user: the same asset and amount (the ledger
 // audits it as ledger.unclaimed_released). The same request again with
-// the same key answers with the deposit it credited.
+// the same key answers with the deposit it credited. Not to an account
+// cleared out (L4, A117): its deposit stays unclaimed, to be dismissed.
 func (s *Service) CreditDeposit(ctx context.Context, p Principal, key, id, reason string) (json.RawMessage, error) {
 	if err := s.depositDecision(p, id, reason); err != nil {
+		return nil, err
+	}
+	if err := s.depositNotPurged(ctx, id); err != nil {
 		return nil, err
 	}
 	reason = strings.TrimSpace(reason)
@@ -91,6 +95,22 @@ func (s *Service) CreditDeposit(ctx context.Context, p Principal, key, id, reaso
 		return nil, err
 	}
 	return current, nil
+}
+
+// depositNotPurged refuses crediting a deposit whose user's account was
+// cleared out (L4, A117).
+func (s *Service) depositNotPurged(ctx context.Context, id string) error {
+	raw, err := s.Deposits.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	var d struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered the deposit in another shape")
+	}
+	return s.notPurged(ctx, d.UserID)
 }
 
 // AssignDeposit credits a deposit of nobody (B7a: a custodian's deposit to

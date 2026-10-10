@@ -614,8 +614,9 @@ export interface paths {
          *     it waits for a second administrator (PENDING). Booked like a
          *     callback (credited, or to UNCLAIMED_DEPOSIT below the minimum)
          *     with source MANUAL; the custodian's own callback, when it comes,
-         *     is matched against it, never booked again. Audited. Needs
-         *     deposits.review.
+         *     is matched against it, never booked again. Audited. An address
+         *     whose user's account was cleared out (L4) is refused, 409
+         *     ADMIN_USER_PURGED. Needs deposits.review.
          */
         post: operations["backfillDeposit"];
         delete?: never;
@@ -659,8 +660,9 @@ export interface paths {
          *     account closed or not eligible) and only its own asset and amount:
          *     the ledger moves it to the user's spot account (DEPOSIT_CREDIT,
          *     audited as ledger.unclaimed_released). An unsupported token has no
-         *     asset and can only be rejected (WALLET_DEPOSIT_NOT_RELEASABLE).
-         *     Needs deposits.review.
+         *     asset and can only be rejected (WALLET_DEPOSIT_NOT_RELEASABLE); a
+         *     deposit whose user's account was cleared out (L4) too (409
+         *     ADMIN_USER_PURGED). Needs deposits.review.
          */
         post: operations["creditDeposit"];
         delete?: never;
@@ -2951,9 +2953,10 @@ export interface paths {
          *     ledger cannot be reached it stays PENDING with how the attempt
          *     ended in result, the error's details name it (approval_id), and it
          *     can be approved again but no longer rejected
-         *     (ADMIN_APPROVAL_ATTEMPTED). An adjustment or a deposit's credit
-         *     whose account was cleared out (L4) since it was requested, not yet
-         *     attempted, is not approved (409 ADMIN_USER_PURGED): reject it.
+         *     (ADMIN_APPROVAL_ATTEMPTED). An adjustment, a deposit's credit or a
+         *     backfill whose account was cleared out (L4) since it was
+         *     requested, not yet attempted, is not approved (409
+         *     ADMIN_USER_PURGED): reject it.
          *     Needs ledger.adjust.approve;
          *     a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
          *     sim.control instead, and approving one that lapsed (a day after it
@@ -4281,7 +4284,7 @@ export interface components {
             kind: components["schemas"]["UserKind"];
             /**
              * Format: date-time
-             * @description L4: when a test account was cleared out (its orders canceled, positions flattened, debts settled and balances moved to ADJUSTMENT) and closed for good; null for every other account. Its money is left alone: the console offers no money operations on it, and adjustments and deposit credits to it are refused (ADMIN_USER_PURGED).
+             * @description L4: when a test account was cleared out (its orders canceled, positions flattened, debts settled and balances moved to ADJUSTMENT) and closed for good; null for every other account. Its money is left alone: the console offers no money operations on it, and adjustments, deposit credits and backfills to it are refused (ADMIN_USER_PURGED).
              */
             purged_at: string | null;
             /** Format: uuid */

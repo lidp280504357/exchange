@@ -74,7 +74,7 @@ export const moneyZh = {
     LEDGER_HOLD_RELEASED: "这笔冻结已经解冻过",
     DERIV_CLOSE_PENDING: "用户的挂单还在撤销中，请稍后再试",
     DERIV_HOUSE_NOT_CLOSED: "HOUSE 的仓位不能在后台强平",
-    ADMIN_USER_PURGED: "这个账户已清理（关闭的测试账户），不再动它的资金；清理前提交的申请只能驳回",
+    ADMIN_USER_PURGED: "这个账户已清理（关闭的测试账户），不再动它的资金：它等待处理的充值与清理前提交的申请都只能驳回",
   },
 };
 
@@ -151,6 +151,6 @@ export const moneyEn = {
     LEDGER_HOLD_RELEASED: "This hold was already released",
     DERIV_CLOSE_PENDING: "The user's orders are still being canceled; try again in a moment",
     DERIV_HOUSE_NOT_CLOSED: "HOUSE's positions are not closed from the console",
-    ADMIN_USER_PURGED: "This account was cleared out (a closed test account): its money is left alone; a request made before can only be rejected",
+    ADMIN_USER_PURGED: "This account was cleared out (a closed test account): its money is left alone; its waiting deposits and the requests made before can only be rejected",
   },
 };

@@ -278,22 +278,31 @@ try {
   const every = new Set(await kinds());
   ok(`users: the humans by default (${humans.length}), the bots by kind (${bots.length}), every kind (${[...every].join(", ")})`);
   // The test accounts cleared out (L4) are listed only when asked, marked
-  // (the end-to-end scripts clear theirs out when they end).
-  await go("/users?kind=TEST&include_purged=true");
-  await page.waitForSelector("main tbody [data-testid=user-purged]", { timeout: 20000 });
-  // One's page says when and offers no money operation: no adjustment,
-  // whatever the role (the ADMIN here may adjust any other).
-  await pressRow("main tbody tr:has([data-testid=user-purged])", (timeout) =>
-    page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }),
-  );
-  const purgedAt = await page.waitForSelector("aside [data-testid=user-purged]", { timeout: 20000 }).then((el) => el.evaluate((e) => e.textContent.trim()));
-  await go(`${new URL(page.url()).pathname}?tab=balances`);
-  await waitText("总估值");
-  await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
-  if (await page.evaluate(() => [...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim() === "调整余额"))) {
-    throw new Error("an account cleared out offers an adjustment");
+  // (the end-to-end scripts clear theirs out when they end) - when the
+  // first page has one (a new database has none: skipped, A117).
+  const purgedFirst = await page.evaluate(async () => {
+    const r = await fetch("/admin/v1/users?kind=TEST&include_purged=true&limit=20");
+    return r.ok ? ((await r.json()).items ?? []).some((u) => u.purged_at) : false;
+  });
+  if (purgedFirst) {
+    await go("/users?kind=TEST&include_purged=true");
+    await page.waitForSelector("main tbody [data-testid=user-purged]", { timeout: 20000 });
+    // One's page says when and offers no money operation: no adjustment,
+    // whatever the role (the ADMIN here may adjust any other).
+    await pressRow("main tbody tr:has([data-testid=user-purged])", (timeout) =>
+      page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }),
+    );
+    const purgedAt = await page.waitForSelector("aside [data-testid=user-purged]", { timeout: 20000 }).then((el) => el.evaluate((e) => e.textContent.trim()));
+    await go(`${new URL(page.url()).pathname}?tab=balances`);
+    await waitText("总估值");
+    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+    if (await page.evaluate(() => [...document.querySelectorAll("main h2, main h3")].some((h) => h.textContent.trim() === "调整余额"))) {
+      throw new Error("an account cleared out offers an adjustment");
+    }
+    ok(`users: the test accounts cleared out, when asked for, marked; one's page says "${purgedAt}" and offers no adjustment`);
+  } else {
+    ok("users: no test account cleared out among the newest 20 (skipped: their mark and page)");
   }
-  ok(`users: the test accounts cleared out, when asked for, marked; one's page says "${purgedAt}" and offers no adjustment`);
   await go("/users?kind=ALL");
   await rows(3);
   // The search box and the region filter (A93): a keyword that names no

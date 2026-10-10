@@ -909,6 +909,8 @@ type fakeDeposits struct {
 	loseAnswer bool
 	// lists are the kind filters of the lists asked for.
 	lists []ports.KindFilter
+	// owners are the users of deposits waiting unclaimed (ID -> user).
+	owners map[string]string
 }
 
 func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json.RawMessage, error) {
@@ -940,6 +942,9 @@ func (d *fakeDeposits) Get(_ context.Context, id string) (json.RawMessage, error
 	}
 	if by, ok := d.credited[id]; ok {
 		return json.RawMessage(`{"id":"` + id + `","status":"CREDITED","resolution":"CREDITED","resolved_by":"` + by + `"}`), nil
+	}
+	if user, ok := d.owners[id]; ok {
+		return json.RawMessage(`{"id":"` + id + `","user_id":"` + user + `","unclaimed":true,"resolution":""}`), nil
 	}
 	return json.RawMessage(`{"id":"` + id + `"}`), nil
 }

@@ -175,6 +175,13 @@ func TestPurgedAccounts(t *testing.T) {
 	if err != nil || asked.Status != domain.ApprovalPending {
 		t.Fatalf("an account user-service does not know is the ledger's to judge: %+v %v", asked, err)
 	}
+	// A backfill to someUser's address (the check names its account), asked
+	// for a second administrator before it was cleared out (A117).
+	before := backfillOfTrade("t-before", "3")
+	backfilled, err := h.svc.SubmitFunds(ctx, boss, FundRequest{Kind: domain.KindDepositBackfill, Backfill: &before, Reason: "callback lost"})
+	if err != nil || backfilled.Status != domain.ApprovalPending || backfilled.Payload["user_id"] != someUser {
+		t.Fatalf("a backfill asked for before: %+v %v", backfilled, err)
+	}
 	at := h.now.Add(-time.Hour)
 	h.users.known[someUser] = ports.User{ID: someUser, Kind: "TEST", Status: "CLOSED", PurgedAt: &at}
 	var e *apperr.Error
@@ -195,5 +202,32 @@ func TestPurgedAccounts(t *testing.T) {
 		Kind: domain.KindDepositAssign, DepositID: someUser, UserID: someUser, Reason: "credit it",
 	}); code(err) != "ADMIN_USER_PURGED" {
 		t.Fatalf("a deposit credited to an account cleared out: %v", err)
+	}
+
+	// Its deposits (A117): a backfill to its address, a deposit of its
+	// waiting unclaimed credited, a backfill asked for before approved -
+	// all refused; nothing booked, nothing released.
+	if _, err := h.svc.Backfill(ctx, boss, "", backfillOfTrade("t-after", "3"), "callback lost"); code(err) != "ADMIN_USER_PURGED" {
+		t.Fatalf("a backfill to an account cleared out: %v", err)
+	}
+	const waiting = "0192a000-0000-7000-8000-00000000abcd"
+	h.deposits.owners = map[string]string{waiting: someUser}
+	if _, err := h.svc.CreditDeposit(ctx, boss, "", waiting, "minimum waived"); code(err) != "ADMIN_USER_PURGED" {
+		t.Fatalf("a deposit of an account cleared out credited: %v", err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, second, backfilled.ID, true, "approve"); code(err) != "ADMIN_USER_PURGED" {
+		t.Fatalf("approving a backfill asked for before: %v", err)
+	}
+	if len(h.deposits.booked) != 0 || len(h.deposits.credited) != 0 {
+		t.Fatalf("booked %+v, credited %v", h.deposits.booked, h.deposits.credited)
+	}
+	// Dismissing its deposit is left open; another account's is credited.
+	if _, err := h.svc.DismissDeposit(ctx, boss, waiting, "the account was cleared out"); err != nil {
+		t.Fatalf("dismissed: %v", err)
+	}
+	const another = "0192a000-0000-7000-8000-00000000abce"
+	h.deposits.owners[another] = "01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7c"
+	if _, err := h.svc.CreditDeposit(ctx, boss, "", another, "minimum waived"); err != nil || h.deposits.credited[another] == "" {
+		t.Fatalf("another account's deposit credited: %v", err)
 	}
 }
