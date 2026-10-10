@@ -102,12 +102,10 @@ curl -s "$BASE/storybook/index.json" | jq -e '.entries | length > 20' >/dev/null
 ok "design system catalogue at /storybook/ ($(curl -s "$BASE/storybook/index.json" | jq '.entries | length') stories)"
 
 # The browser smokes name their accounts for this run (E2E_RUN, F38): the
-# exit hook marks them TEST and clears them out with the run's others, also
-# when a smoke fails before this script signs up its own.
-if [[ -z $MARKS_TEST_ACCOUNTS ]]; then
-  MARKS_TEST_ACCOUNTS=1
-  at_exit mark_test_accounts
-fi
+# exit hook of lib/common.sh marks them TEST, also when a smoke fails
+# before this script signs up its own (B187), and clears out those listed
+# in E2E_REGISTERED.
+E2E_MARK_RUN=1
 
 echo "== PC site in the browser"
 CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" E2E_RUN="$RUN" node "$(dirname "$0")/../../web/e2e/pc-smoke.mjs"

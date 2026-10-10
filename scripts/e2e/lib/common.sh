@@ -186,18 +186,26 @@ export E2E_REGISTERED="$WORK/registered"
 # one still holding a contract position, a margin debt or a withdrawal in
 # flight is left, and so is one exempt from the purge, funding.sh's
 # standing hedges). Registered when this file is sourced, it is the last
-# at_exit to run, after the script's own clean-ups; with no account
-# signed up it does nothing. A failure only warns.
+# at_exit to run, after the script's own clean-ups. It marks when an
+# account was signed up here or the script names its accounts for the run
+# some other way (E2E_MARK_RUN=1: web.sh's and webflows.sh's browser
+# scripts), and clears out only the ones listed (B187). A failure only
+# warns.
+E2E_MARK_RUN=""
+# Set for scripts that armed the hook themselves before B187: they see it
+# armed.
+MARKS_TEST_ACCOUNTS=1
 mark_test_accounts() {
   local out name ctl ids
   ids=$(sort -u "$E2E_REGISTERED" 2>/dev/null | grep -E '^[0-9a-f-]{36}$' | paste -sd, - || true)
-  [[ -n $ids ]] || return 0
+  [[ -n $ids || -n $E2E_MARK_RUN ]] || return 0
   name=$(basename "$0" .sh)
   ctl="cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl"
   if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users kind --email-like '%-$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not marked TEST: $(tail -1 <<<"$out")" >&2
     return 0
   fi
+  [[ -n $ids ]] || return 0
   if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users purge --user '$ids' --pace 0s --reason 'e2e $name done'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not all cleared out: $(grep -v '^skip' <<<"$out" | tail -1)" >&2
   fi

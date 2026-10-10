@@ -58,9 +58,9 @@ make_admin() {
 }
 
 # The checklists name their accounts for this run (E2E_RUN, F38): the exit
-# hook marks them TEST and clears them out.
-MARKS_TEST_ACCOUNTS=1
-at_exit mark_test_accounts
+# hook of lib/common.sh marks them TEST (B187) and clears out those listed
+# in E2E_REGISTERED.
+E2E_MARK_RUN=1
 
 failed=()
 for site in "${sites[@]}"; do
