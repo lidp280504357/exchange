@@ -8,10 +8,14 @@
 # flows after the smokes; other locales may order it otherwise).
 # A failed step leaves screenshots and a log under FLOWS_OUT (printed);
 # every site runs even when an earlier one failed. Skipped without Chrome
-# (before any administrator is made).
+# (before any administrator is made). Like web.sh it holds the ops lock: a
+# deploy, or another session's script closing a product line or turning a
+# switch for a moment, would fail its steps halfway (task e2e takes the
+# lock for all of its scripts; run alone, the script takes it itself, B195).
 #
 #   scripts/e2e/webflows.sh [pc] [m] [admin]
 set -euo pipefail
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "e2e $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
