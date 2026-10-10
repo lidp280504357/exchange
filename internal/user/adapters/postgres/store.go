@@ -365,9 +365,10 @@ func (r users) FindUsername(ctx context.Context, name string) (string, error) {
 	return id, nil
 }
 
-func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
+func (r users) Stats(ctx context.Context, since time.Time, days int, only []string) (ports.UserStats, error) {
 	out := ports.UserStats{Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
-	kinds, err := r.q.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE created_at >= $1) FROM users WHERE purged_at IS NULL GROUP BY kind`, since)
+	kinds, err := r.q.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE created_at >= $1) FROM users
+		WHERE purged_at IS NULL AND (cardinality($2::text[]) = 0 OR kind = ANY($2)) GROUP BY kind`, since, kindsOrEmpty(only))
 	if err != nil {
 		return out, fmt.Errorf("user stats: %w", err)
 	}
@@ -391,7 +392,7 @@ func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.User
 	}
 	rows, err := r.q.Query(ctx, `SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*) FROM users
 		WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $1 - 1)) AT TIME ZONE 'UTC'
-		AND purged_at IS NULL GROUP BY day`, days)
+		AND purged_at IS NULL AND (cardinality($2::text[]) = 0 OR kind = ANY($2)) GROUP BY day`, days, kindsOrEmpty(only))
 	if err != nil {
 		return out, fmt.Errorf("user stats: %w", err)
 	}

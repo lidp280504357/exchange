@@ -231,6 +231,10 @@ message UserStatsRequest {
   google.protobuf.Timestamp since = 1;
   // New accounts per UTC day for the last days (today included; 0 to 90).
   int32 days = 2;
+  // Only accounts of these kinds count, in every figure (B185: the
+  // console's trend follows its users list's kind filter); HUMAN, BOT,
+  // TEST, SYSTEM as in ListUsersRequest.kinds; none for every kind.
+  repeated string kinds = 3;
 }
 
 message UserStatsResponse {

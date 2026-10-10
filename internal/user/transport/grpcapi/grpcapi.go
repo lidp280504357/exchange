@@ -134,7 +134,7 @@ func (s *Server) UserStats(ctx context.Context, req *userv1.UserStatsRequest) (*
 	if req.GetSince() != nil {
 		since = req.GetSince().AsTime()
 	}
-	st, err := s.svc.UserStats(ctx, since, int(req.GetDays()))
+	st, err := s.svc.UserStats(ctx, since, int(req.GetDays()), req.GetKinds())
 	if err != nil {
 		return nil, err
 	}

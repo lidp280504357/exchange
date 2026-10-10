@@ -34,24 +34,28 @@ import (
 // key purge:<user>:<account>:<asset>), it is closed whatever its status
 // (auth ends its sessions) and marked purged.
 //
-// What needs derivatives-service's or margin-service's own way out (L4b:
-// flatten, settle) is skipped and listed: contract positions and orders,
-// a margin debt; so is a withdrawal in flight, and an account exempt from
-// the purge (the end-to-end scripts' standing accounts).
+// Contract positions and orders go first through derivatives-service's
+// flatten, a margin debt through margin-service's settle (L4b, called only
+// for an account that has some: each call is audited); one they leave
+// open, a liquidation under way (409), a withdrawal in flight and an
+// account exempt from the purge (the end-to-end scripts' standing
+// accounts) are skipped and listed. A dry run calls neither: it counts
+// such accounts apart.
 
 // purgeReasonCode is the status changes' reason code.
 const purgeReasonCode = "TEST_ACCOUNT_PURGE"
 
 // The reasons an account is left as it is.
 const (
-	skipExempt     = "exempt from the purge"
-	skipContracts  = "contract positions or orders (derivatives flatten, L4b)"
-	skipDebt       = "a margin debt (margin settle, L4b)"
-	skipWithdrawal = "a withdrawal in flight"
-	skipOrders     = "spot orders not canceled in time"
-	skipFrozen     = "a frozen balance left"
-	skipBalance    = "a balance left"
-	skipFailed     = "failed"
+	skipExempt      = "exempt from the purge"
+	skipNotFlat     = "contract positions or orders left open"
+	skipDebt        = "a margin debt left"
+	skipLiquidating = "a liquidation under way"
+	skipWithdrawal  = "a withdrawal in flight"
+	skipOrders      = "spot orders not canceled in time"
+	skipFrozen      = "a frozen balance left"
+	skipBalance     = "a balance left"
+	skipFailed      = "failed"
 )
 
 type purgeOptions struct {
@@ -112,18 +116,38 @@ type purgeState struct {
 
 func (s purgeState) has(f func(purgeRow) bool) bool { return slices.ContainsFunc(s.rows, f) }
 
-// blocked is why a user cannot be purged by this tool, or "".
-func (s purgeState) blocked() string {
-	switch {
-	case s.positions > 0 || s.contractOrders > 0 || s.conditionals > 0:
-		return skipContracts
-	case s.has(purgeRow.debt):
-		return skipDebt
-	case s.withdrawals > 0:
-		return skipWithdrawal
-	}
-	return ""
+// contracts reports contract positions, orders or conditional orders,
+// which flatten ends.
+func (s purgeState) contracts() bool {
+	return s.positions > 0 || s.contractOrders > 0 || s.conditionals > 0
 }
+
+// purgeEnd is what flatten or settle answered: done, or what is left.
+type purgeEnd struct {
+	complete bool
+	// left describes what is still open; debts are a settle's remaining
+	// debts.
+	left  []string
+	debts []purgeDebt
+}
+
+// purgeDebt is a margin debt settle could not repay from the account.
+type purgeDebt struct {
+	account, symbol, asset string
+	amount                 decimal.Decimal
+}
+
+func (d purgeDebt) String() string {
+	parts := []string{d.account}
+	if d.symbol != "" {
+		parts = append(parts, d.symbol)
+	}
+	return strings.Join(append(parts, d.asset, d.amount.String()), " ")
+}
+
+// errLiquidating is a 409 of flatten or settle: a liquidation is under
+// way on the account.
+var errLiquidating = errors.New("a liquidation is under way")
 
 // purgeData reads the test accounts and what they hold.
 type purgeData interface {
@@ -135,6 +159,9 @@ type purgeData interface {
 // purgeActions settle, close and mark a test account; the moves take
 // their idempotency keys.
 type purgeActions interface {
+	flatten(ctx context.Context, user, actor, reason string) (purgeEnd, error)
+	settleMargin(ctx context.Context, user, actor, reason string) (purgeEnd, error)
+	marginIn(ctx context.Context, user string, d purgeDebt, key string) error
 	cancelOrders(ctx context.Context, user string) error
 	marginOut(ctx context.Context, user string, r purgeRow, key string) error
 	sweep(ctx context.Context, user string, r purgeRow, key, actor, reason string) error
@@ -148,6 +175,9 @@ type purgeOutcome struct {
 	purged bool
 	skip   string
 	detail string
+	// ends are the services' own ends it needs first (a dry run's flatten,
+	// settle).
+	ends []string
 	// swept is what went to ADJUSTMENT (would go, on a dry run), by
 	// account and asset ("SPOT USDT"): a margin account's balance counts
 	// in spot, where it goes first.
@@ -205,8 +235,10 @@ func usersPurge(ctx context.Context, cfg settings, db *pg.DB, svc *application.S
 	p := &purger{
 		data: sqlPurgeData{db: db},
 		act: livePurgeActions{
-			users: svc, ledger: ledger, client: &http.Client{Timeout: 15 * time.Second},
+			// flatten may take some 40 seconds (L4b): a minute and more.
+			users: svc, ledger: ledger, client: &http.Client{Timeout: 90 * time.Second},
 			trading: strings.TrimRight(cfg.TradingURL, "/"), margin: strings.TrimRight(cfg.MarginURL, "/"),
+			derivatives: strings.TrimRight(cfg.DerivativesURL, "/"),
 		},
 		actor: actor(), opts: opts, sleep: sleepCtx,
 	}
@@ -268,6 +300,9 @@ func (p *purger) run(ctx context.Context, out io.Writer) error {
 		fmt.Fprintf(out, "; %s %d", s.reason, s.n)
 	}
 	fmt.Fprintln(out)
+	if flat, settle := countEnds(outcomes, "flatten"), countEnds(outcomes, "settle"); flat+settle > 0 {
+		fmt.Fprintf(out, "first: derivatives flatten %d, margin settle %d (what they leave is not known on a dry run; their balances as they are now)\n", flat, settle)
+	}
 	parts := make([]string, 0, len(recovered))
 	for _, r := range recovered {
 		parts = append(parts, r.key+" "+r.amount.String())
@@ -281,6 +316,16 @@ func (p *purger) run(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("%d accounts failed (see above)", n)
 	}
 	return nil
+}
+
+func countEnds(outcomes []purgeOutcome, end string) int {
+	n := 0
+	for _, o := range outcomes {
+		if slices.Contains(o.ends, end) {
+			n++
+		}
+	}
+	return n
 }
 
 func prefixed(prefix, s string) string {
@@ -357,11 +402,19 @@ func (p *purger) one(ctx context.Context, c purgeCandidate) purgeOutcome {
 		o.skip, o.detail = skipFailed, err.Error()
 		return o
 	}
-	if o.skip = s.blocked(); o.skip != "" {
-		o.detail = fmt.Sprintf("positions %d, contract orders %d, conditional %d, withdrawals %d", s.positions, s.contractOrders, s.conditionals, s.withdrawals)
+	if s.withdrawals > 0 {
+		o.skip, o.detail = skipWithdrawal, fmt.Sprintf("%d", s.withdrawals)
 		return o
 	}
 	if p.opts.dryRun {
+		// flatten and settle are not called: what they would leave is not
+		// known, so these accounts are counted apart.
+		if s.contracts() {
+			o.ends = append(o.ends, "flatten")
+		}
+		if s.has(purgeRow.debt) {
+			o.ends = append(o.ends, "settle")
+		}
 		// What orders hold comes back once they are canceled.
 		for _, r := range s.rows {
 			if all := r.available.Add(r.frozen); all.IsPositive() {
@@ -371,15 +424,33 @@ func (p *purger) one(ctx context.Context, c purgeCandidate) purgeOutcome {
 		o.purged = true
 		return o
 	}
-	if err := p.settle(ctx, c, &o, s); err != nil {
+	if err := p.clear(ctx, c, &o, s); err != nil {
 		o.skip, o.detail = skipFailed, err.Error()
 	}
 	return o
 }
 
-// settle cancels, moves and sweeps, then closes and marks the user; o
-// gets a skip reason when something is left.
-func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, s purgeState) error {
+// clear ends the user's contract and margin trading, cancels, moves and
+// sweeps, then closes and marks the user; o gets a skip reason when
+// something is left.
+func (p *purger) clear(ctx context.Context, c purgeCandidate, o *purgeOutcome, s purgeState) error {
+	if s.contracts() {
+		end, err := p.act.flatten(ctx, c.id, p.actor, p.opts.reason)
+		if done, err := p.ended(o, end, err, skipNotFlat); !done || err != nil {
+			return err
+		}
+	}
+	if s.has(purgeRow.debt) {
+		if done, err := p.settleDebts(ctx, c.id, o); !done || err != nil {
+			return err
+		}
+	}
+	if s.contracts() || s.has(purgeRow.debt) {
+		var err error
+		if s, err = p.data.state(ctx, c.id); err != nil {
+			return err
+		}
+	}
 	if s.spotOrders > 0 {
 		if err := p.act.cancelOrders(ctx, c.id); err != nil {
 			return fmt.Errorf("cancel the spot orders: %w", err)
@@ -439,6 +510,49 @@ func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, 
 	}
 	o.purged = true
 	return nil
+}
+
+// ended reads what flatten or settle answered: on with the purge, or o
+// skipped (a liquidation under way, something left) and not.
+func (p *purger) ended(o *purgeOutcome, end purgeEnd, err error, left string) (bool, error) {
+	switch {
+	case errors.Is(err, errLiquidating):
+		o.skip = skipLiquidating
+		return false, nil
+	case err != nil:
+		return false, err
+	case !end.complete:
+		o.skip, o.detail = left, strings.Join(end.left, "; ")
+		return false, nil
+	}
+	return true, nil
+}
+
+// settleDebts has margin-service repay the user's debts from their margin
+// accounts; a debt they cannot repay is met from spot (moved in as the
+// user would) and settle called again, once (L4b's contract).
+func (p *purger) settleDebts(ctx context.Context, user string, o *purgeOutcome) (bool, error) {
+	end, err := p.act.settleMargin(ctx, user, p.actor, p.opts.reason)
+	if err == nil && !end.complete && len(end.debts) > 0 {
+		s, readErr := p.data.state(ctx, user)
+		if readErr != nil {
+			return false, readErr
+		}
+		for _, d := range end.debts {
+			i := slices.IndexFunc(s.rows, func(r purgeRow) bool { return r.account == ledgerdomain.AccountSpot && r.asset == d.asset })
+			if i < 0 || s.rows[i].available.LessThan(d.amount) {
+				o.skip, o.detail = skipDebt, d.String()+", not in spot"
+				return false, nil
+			}
+			key := fmt.Sprintf("purge:%s:%s:in:v%d", user, d.asset, s.rows[i].version)
+			if err := p.act.marginIn(ctx, user, d, key); err != nil {
+				o.skip, o.detail = skipDebt, fmt.Sprintf("%s: %v", d, err)
+				return false, nil
+			}
+		}
+		end, err = p.act.settleMargin(ctx, user, p.actor, p.opts.reason)
+	}
+	return p.ended(o, end, err, skipDebt)
 }
 
 // ordersEnded waits up to the options' wait for a user's canceled orders
@@ -549,14 +663,94 @@ func (d sqlPurgeData) state(ctx context.Context, user string) (purgeState, error
 // margin-service as the user would through the gateway, the ledger's and
 // user-service's own use cases.
 type livePurgeActions struct {
-	users           *application.Service
-	ledger          *ledgerapp.Service
-	client          *http.Client
-	trading, margin string
+	users                        *application.Service
+	ledger                       *ledgerapp.Service
+	client                       *http.Client
+	trading, margin, derivatives string
 }
 
 func (a livePurgeActions) cancelOrders(ctx context.Context, user string) error {
-	return a.call(ctx, http.MethodDelete, a.trading+"/v1/orders", user, "", nil)
+	return a.call(ctx, http.MethodDelete, a.trading+"/v1/orders", user, "", nil, nil)
+}
+
+// flatten has derivatives-service end the user's contract accounts (L4b):
+// it may take some 40 seconds when the engine does not answer.
+func (a livePurgeActions) flatten(ctx context.Context, user, actor, reason string) (purgeEnd, error) {
+	var answer struct {
+		Remaining []struct {
+			Symbol   string `json:"symbol"`
+			Side     string `json:"side"`
+			Quantity string `json:"quantity"`
+			Reason   string `json:"reason"`
+		} `json:"remaining"`
+		Complete bool `json:"complete"`
+	}
+	err := a.internal(ctx, a.derivatives+"/internal/derivatives/users/"+user+"/flatten", actor, reason, &answer)
+	end := purgeEnd{complete: answer.Complete}
+	for _, r := range answer.Remaining {
+		end.left = append(end.left, strings.Join([]string{r.Symbol, r.Side, r.Quantity, r.Reason}, " "))
+	}
+	return end, err
+}
+
+// settleMargin has margin-service repay the user's margin debts (L4b).
+func (a livePurgeActions) settleMargin(ctx context.Context, user, actor, reason string) (purgeEnd, error) {
+	var answer struct {
+		RemainingDebt []struct {
+			Account string          `json:"account"`
+			Symbol  *string         `json:"symbol"`
+			Asset   string          `json:"asset"`
+			Amount  decimal.Decimal `json:"amount"`
+		} `json:"remaining_debt"`
+		Complete bool `json:"complete"`
+	}
+	err := a.internal(ctx, a.margin+"/internal/margin/users/"+user+"/settle", actor, reason, &answer)
+	end := purgeEnd{complete: answer.Complete}
+	for _, d := range answer.RemainingDebt {
+		debt := purgeDebt{account: d.Account, asset: d.Asset, amount: d.Amount}
+		if d.Symbol != nil {
+			debt.symbol = *d.Symbol
+		}
+		end.debts = append(end.debts, debt)
+		end.left = append(end.left, debt.String())
+	}
+	return end, err
+}
+
+func (a livePurgeActions) marginIn(ctx context.Context, user string, d purgeDebt, key string) error {
+	body := map[string]string{"direction": "IN", "account": d.account, "asset": d.asset, "amount": d.amount.String()}
+	if d.symbol != "" {
+		body["symbol"] = d.symbol
+	}
+	return a.call(ctx, http.MethodPost, a.margin+"/v1/margin/transfer", user, key, body, nil)
+}
+
+// internal posts {actor, reason} to a service's internal purge endpoint
+// and decodes the answer; a 409 is errLiquidating. A 500 after the
+// server's 30 seconds is tried once more (review JV: until C79, a slow
+// engine's answer may come back so).
+func (a livePurgeActions) internal(ctx context.Context, url, actor, reason string, answer any) error {
+	body := map[string]string{"actor": actor, "reason": reason}
+	err := a.call(ctx, http.MethodPost, url, "", "", body, answer)
+	var status *httpStatusError
+	if errors.As(err, &status) && status.code >= 500 {
+		err = a.call(ctx, http.MethodPost, url, "", "", body, answer)
+	}
+	if errors.As(err, &status) && status.code == http.StatusConflict {
+		return errLiquidating
+	}
+	return err
+}
+
+// httpStatusError is a service's answer of 300 or more.
+type httpStatusError struct {
+	method, url string
+	code        int
+	body        string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("%s %s: HTTP %d %s", e.method, e.url, e.code, e.body)
 }
 
 func (a livePurgeActions) marginOut(ctx context.Context, user string, r purgeRow, key string) error {
@@ -564,7 +758,7 @@ func (a livePurgeActions) marginOut(ctx context.Context, user string, r purgeRow
 	if r.scope != "" {
 		body["symbol"] = r.scope
 	}
-	return a.call(ctx, http.MethodPost, a.margin+"/v1/margin/transfer", user, key, body)
+	return a.call(ctx, http.MethodPost, a.margin+"/v1/margin/transfer", user, key, body, nil)
 }
 
 func (a livePurgeActions) sweep(ctx context.Context, user string, r purgeRow, key, actor, reason string) error {
@@ -583,8 +777,9 @@ func (a livePurgeActions) markPurged(ctx context.Context, user, actor, reason st
 }
 
 // call makes a request to a service as the user, as the gateway would
-// forward it (X-User-Id), with an idempotency key when given.
-func (a livePurgeActions) call(ctx context.Context, method, url, user, key string, body any) error {
+// forward it (X-User-Id), or to an internal endpoint (no user), with an
+// idempotency key when given; answer, when given, takes the JSON answer.
+func (a livePurgeActions) call(ctx context.Context, method, url, user, key string, body, answer any) error {
 	var rd io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -597,7 +792,9 @@ func (a livePurgeActions) call(ctx context.Context, method, url, user, key strin
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-User-Id", user)
+	if user != "" {
+		req.Header.Set("X-User-Id", user)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -609,9 +806,14 @@ func (a livePurgeActions) call(ctx context.Context, method, url, user, key strin
 		return err
 	}
 	defer resp.Body.Close()
-	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("%s %s: HTTP %d %s", method, url, resp.StatusCode, strings.TrimSpace(string(answer)))
+		return &httpStatusError{method: method, url: url, code: resp.StatusCode, body: strings.TrimSpace(string(raw[:min(len(raw), 2048)]))}
+	}
+	if answer != nil {
+		if err := json.Unmarshal(raw, answer); err != nil {
+			return fmt.Errorf("%s %s: the answer: %w", method, url, err)
+		}
 	}
 	return nil
 }

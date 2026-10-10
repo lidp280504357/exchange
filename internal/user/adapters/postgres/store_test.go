@@ -171,7 +171,7 @@ func TestListAndCountUsers(t *testing.T) {
 	if none, _ := users.List(ctx, ports.UserFilter{Status: "FROZEN", CreatedFrom: base, Limit: 10}); len(none) != 0 {
 		t.Fatalf("frozen %+v", none)
 	}
-	st, err := users.Stats(ctx, base.Add(90*time.Minute), 3)
+	st, err := users.Stats(ctx, base.Add(90*time.Minute), 3, nil)
 	if err != nil || st.Total < 3 || st.CreatedSince < 1 {
 		t.Fatalf("stats %+v %v", st, err)
 	}
@@ -293,9 +293,15 @@ func TestAccountKindsStore(t *testing.T) {
 	if after, err := users.Update(ctx, u); err != nil || after.Kind != domain.KindBot {
 		t.Fatalf("an update keeps the kind: %+v %v", after, err)
 	}
-	st, err := users.Stats(ctx, time.Now().Add(-time.Hour), 0)
+	st, err := users.Stats(ctx, time.Now().Add(-time.Hour), 0, nil)
 	if err != nil || st.Total != 3 || st.ByKind[domain.KindHuman].Total != 1 || st.ByKind[domain.KindBot].CreatedSince != 1 || st.ByKind[domain.KindSystem].Total != 1 {
 		t.Fatalf("stats %+v %v", st, err)
+	}
+	// Only some kinds (B185): the totals, the kinds and the days alike.
+	today := time.Now().UTC().Format("2006-01-02")
+	st, err = users.Stats(ctx, time.Now().Add(-time.Hour), 1, []string{domain.KindBot, domain.KindSystem})
+	if err != nil || st.Total != 2 || st.CreatedSince != 2 || len(st.ByKind) != 2 || st.ByKind[domain.KindHuman].Total != 0 || st.Days[today] != 2 {
+		t.Fatalf("bots and system: %+v %v", st, err)
 	}
 	// Purged (L4): out of the lists and counts unless asked, in its kind's IDs.
 	at := time.Now().UTC().Truncate(time.Microsecond)
@@ -311,7 +317,7 @@ func TestAccountKindsStore(t *testing.T) {
 	if list, _ := users.List(ctx, ports.UserFilter{IncludePurged: true, Limit: 10}); len(list) != 3 {
 		t.Fatalf("asked for: %d", len(list))
 	}
-	if st, _ := users.Stats(ctx, time.Now().Add(-time.Hour), 1); st.Total != 2 || st.ByKind[domain.KindBot].Total != 0 {
+	if st, _ := users.Stats(ctx, time.Now().Add(-time.Hour), 1, nil); st.Total != 2 || st.ByKind[domain.KindBot].Total != 0 {
 		t.Fatalf("counts %+v", st)
 	}
 	if bots, _ := users.IDsOfKinds(ctx, []string{domain.KindBot}); len(bots) != 1 {

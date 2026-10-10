@@ -216,13 +216,13 @@ func (r memUsers) FindUsername(_ context.Context, name string) (string, error) {
 	return "", domain.ErrUserNotFound
 }
 
-func (r memUsers) Stats(_ context.Context, since time.Time, _ int) (ports.UserStats, error) {
-	st := ports.UserStats{Total: int64(len(r.s.users)), Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
+func (r memUsers) Stats(_ context.Context, since time.Time, _ int, kinds []string) (ports.UserStats, error) {
+	st := ports.UserStats{Days: map[string]int64{}, ByKind: map[string]ports.KindCount{}}
 	for _, u := range r.s.users {
-		if !u.PurgedAt.IsZero() {
-			st.Total--
+		if !u.PurgedAt.IsZero() || (len(kinds) > 0 && !slices.Contains(kinds, u.Kind)) {
 			continue
 		}
+		st.Total++
 		c := st.ByKind[u.Kind]
 		c.Total++
 		if !u.CreatedAt.Before(since) {
@@ -518,7 +518,7 @@ func TestListUsersPages(t *testing.T) {
 	if _, err := svc.ListUsers(ctx, ports.UserFilter{}, "not-a-cursor"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("bad cursor: %v", err)
 	}
-	st, err := svc.UserStats(ctx, base.Add(3*time.Hour), 7)
+	st, err := svc.UserStats(ctx, base.Add(3*time.Hour), 7, nil)
 	if err != nil || st.Total != 5 || st.CreatedSince != 2 {
 		t.Fatalf("stats %+v %v", st, err)
 	}
@@ -582,10 +582,18 @@ func TestAccountKinds(t *testing.T) {
 	if _, err := svc.ListUsers(ctx, ports.UserFilter{Kinds: []string{"ALIEN"}}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("unknown kind: %v", err)
 	}
-	st, err := svc.UserStats(ctx, base.Add(2*time.Hour), 0)
+	st, err := svc.UserStats(ctx, base.Add(2*time.Hour), 0, nil)
 	if err != nil || st.Total != 4 || st.ByKind[domain.KindHuman].Total != 1 || st.ByKind[domain.KindSystem].CreatedSince != 1 ||
 		st.ByKind[domain.KindBot].CreatedSince != 0 {
 		t.Fatalf("stats %+v %v", st, err)
+	}
+	// Only some kinds (B185): every figure counts those alone.
+	st, err = svc.UserStats(ctx, base.Add(2*time.Hour), 0, []string{"human"})
+	if err != nil || st.Total != 1 || len(st.ByKind) != 1 || st.ByKind[domain.KindHuman].Total != 1 {
+		t.Fatalf("humans' stats %+v %v", st, err)
+	}
+	if _, err := svc.UserStats(ctx, time.Time{}, 0, []string{"ALIEN"}); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("unknown kind: %v", err)
 	}
 }
 
@@ -634,7 +642,7 @@ func TestMarkPurged(t *testing.T) {
 	if page, err := svc.ListUsers(ctx, ports.UserFilter{IncludePurged: true}, ""); err != nil || len(page.Users) != 2 {
 		t.Fatalf("asked for: %+v %v", page.Users, err)
 	}
-	if st, err := svc.UserStats(ctx, time.Time{}, 0); err != nil || st.Total != 1 || st.ByKind[domain.KindTest].Total != 1 {
+	if st, err := svc.UserStats(ctx, time.Time{}, 0, nil); err != nil || st.Total != 1 || st.ByKind[domain.KindTest].Total != 1 {
 		t.Fatalf("counts %+v %v", st, err)
 	}
 	if ids, err := svc.IDsOfKinds(ctx, []string{"TEST"}); err != nil || len(ids) != 2 {

@@ -1409,7 +1409,11 @@ type UserStatsRequest struct {
 	// Accounts created from this time on are also counted apart.
 	Since *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=since,proto3" json:"since,omitempty"`
 	// New accounts per UTC day for the last days (today included; 0 to 90).
-	Days          int32 `protobuf:"varint,2,opt,name=days,proto3" json:"days,omitempty"`
+	Days int32 `protobuf:"varint,2,opt,name=days,proto3" json:"days,omitempty"`
+	// Only accounts of these kinds count, in every figure (B185: the
+	// console's trend follows its users list's kind filter); HUMAN, BOT,
+	// TEST, SYSTEM as in ListUsersRequest.kinds; none for every kind.
+	Kinds         []string `protobuf:"bytes,3,rep,name=kinds,proto3" json:"kinds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1456,6 +1460,13 @@ func (x *UserStatsRequest) GetDays() int32 {
 		return x.Days
 	}
 	return 0
+}
+
+func (x *UserStatsRequest) GetKinds() []string {
+	if x != nil {
+		return x.Kinds
+	}
+	return nil
 }
 
 type UserStatsResponse struct {
@@ -1752,10 +1763,11 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x11ListUsersResponse\x12,\n" +
 	"\x05users\x18\x01 \x03(\v2\x16.exchange.user.v1.UserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"X\n" +
+	"nextCursor\"n\n" +
 	"\x10UserStatsRequest\x120\n" +
 	"\x05since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x12\n" +
-	"\x04days\x18\x02 \x01(\x05R\x04days\"\xb4\x01\n" +
+	"\x04days\x18\x02 \x01(\x05R\x04days\x12\x14\n" +
+	"\x05kinds\x18\x03 \x03(\tR\x05kinds\"\xb4\x01\n" +
 	"\x11UserStatsResponse\x12\x14\n" +
 	"\x05total\x18\x01 \x01(\x03R\x05total\x12#\n" +
 	"\rcreated_since\x18\x02 \x01(\x03R\fcreatedSince\x12.\n" +

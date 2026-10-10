@@ -67,6 +67,63 @@ func (w *purgeWorld) fail(what string) error {
 	return nil
 }
 
+// flatten closes the user's positions, unless the user is "stuck" (one
+// left open) or "liquidating" (409); the margin comes back to the futures
+// account.
+func (w *purgeWorld) flatten(_ context.Context, user, _, _ string) (purgeEnd, error) {
+	w.log = append(w.log, "flatten "+user)
+	switch user {
+	case "stuck":
+		return purgeEnd{left: []string{"BTC-USDT-PERP LONG 0.001 NOT_FILLED"}}, nil
+	case "liquidating":
+		return purgeEnd{}, errLiquidating
+	}
+	s := w.states[user]
+	s.positions, s.contractOrders, s.conditionals = 0, 0, 0
+	for i := range s.rows {
+		if s.rows[i].account == "FUTURES" && s.rows[i].frozen.IsPositive() {
+			s.rows[i].available = s.rows[i].available.Add(s.rows[i].frozen)
+			s.rows[i].frozen = decimal.Zero
+			s.rows[i].version++
+		}
+	}
+	return purgeEnd{complete: true}, nil
+}
+
+// settleMargin repays each debt from its margin account, as far as it
+// holds the asset; what it cannot is left.
+func (w *purgeWorld) settleMargin(_ context.Context, user, _, _ string) (purgeEnd, error) {
+	w.log = append(w.log, "settle "+user)
+	s := w.states[user]
+	end := purgeEnd{complete: true}
+	for _, debt := range slices.Clone(s.rows) {
+		if !debt.debt() {
+			continue
+		}
+		owed := debt.available.Neg()
+		i := slices.IndexFunc(s.rows, func(r purgeRow) bool { return r.account == "MARGIN_CROSS" && r.asset == debt.asset })
+		paid := decimal.Zero
+		if i >= 0 {
+			paid = decimal.Min(owed, s.rows[i].available)
+			add(s, "MARGIN_CROSS", debt.asset, paid.Neg())
+		}
+		add(s, debt.account, debt.asset, paid)
+		if left := owed.Sub(paid); left.IsPositive() {
+			end.complete = false
+			end.debts = append(end.debts, purgeDebt{account: "MARGIN_CROSS", asset: debt.asset, amount: left})
+		}
+	}
+	return end, nil
+}
+
+func (w *purgeWorld) marginIn(_ context.Context, user string, d purgeDebt, key string) error {
+	w.log = append(w.log, fmt.Sprintf("in %s %s %s %s", user, d.account, d.asset, d.amount))
+	w.keys = append(w.keys, key)
+	add(w.states[user], "SPOT", d.asset, d.amount.Neg())
+	add(w.states[user], d.account, d.asset, d.amount)
+	return nil
+}
+
 func (w *purgeWorld) cancelOrders(_ context.Context, user string) error {
 	w.log = append(w.log, "cancel "+user)
 	if _, ok := w.pending[user]; !ok {
@@ -135,8 +192,16 @@ func newPurgeWorld() *purgeWorld {
 	add1("plain", domain.StatusActive, false, purgeState{rows: []purgeRow{row("FUTURES", "BTC", "0.01"), row("SPOT", "USDT", "100")}})
 	add1("review", domain.StatusRiskReview, false, purgeState{rows: []purgeRow{row("SPOT", "USDT", "5")}})
 	add1("kept", domain.StatusActive, true, purgeState{rows: []purgeRow{row("SPOT", "USDT", "7")}})
-	add1("hedged", domain.StatusActive, false, purgeState{positions: 1, rows: []purgeRow{row("FUTURES", "USDT", "50")}})
+	hedged := purgeState{positions: 1, rows: []purgeRow{row("FUTURES", "USDT", "50")}}
+	hedged.rows[0].frozen = decimal.NewFromInt(4) // the position's margin
+	add1("hedged", domain.StatusActive, false, hedged)
+	add1("stuck", domain.StatusActive, false, purgeState{positions: 1, rows: []purgeRow{row("FUTURES", "USDT", "9")}})
+	add1("liquidating", domain.StatusActive, false, purgeState{positions: 1, rows: []purgeRow{row("FUTURES", "USDT", "9")}})
 	add1("owing", domain.StatusActive, false, purgeState{rows: []purgeRow{row("MARGIN_CROSS_DEBT", "USDT", "-3"), row("MARGIN_CROSS", "USDT", "10")}})
+	// Owes more than the margin account holds: the rest comes in from spot.
+	add1("short", domain.StatusActive, false, purgeState{rows: []purgeRow{row("MARGIN_CROSS_DEBT", "USDT", "-5"), row("MARGIN_CROSS", "USDT", "2"), row("SPOT", "USDT", "10")}})
+	// Owes what neither account holds.
+	add1("broke", domain.StatusActive, false, purgeState{rows: []purgeRow{row("MARGIN_CROSS_DEBT", "USDT", "-5"), row("SPOT", "USDT", "1")}})
 	add1("leaving", domain.StatusActive, false, purgeState{withdrawals: 1, rows: []purgeRow{row("SPOT", "USDT", "1")}})
 	ordering := purgeState{spotOrders: 1, rows: []purgeRow{row("SPOT", "USDT", "8")}}
 	ordering.rows[0].frozen = decimal.NewFromInt(2)
@@ -182,6 +247,10 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 		"out margin MARGIN_CROSS USDT 20", "sweep margin SPOT USDT 21", "status margin CLOSED", "purged margin",
 		"cancel marginorder", "out marginorder MARGIN_CROSS BTC 0.25", "sweep marginorder SPOT BTC 0.25", "purged marginorder",
 		"purged closed",
+		// L4b: positions flattened, debts settled (from spot when short).
+		"flatten hedged", "sweep hedged FUTURES USDT 54", "purged hedged",
+		"settle owing", "out owing MARGIN_CROSS USDT 7", "sweep owing SPOT USDT 7", "purged owing",
+		"settle short", "in short MARGIN_CROSS USDT 3", "sweep short SPOT USDT 7", "purged short",
 	} {
 		if !slices.Contains(w.log, want) {
 			t.Errorf("missing %q in\n%s", want, strings.Join(w.log, "\n"))
@@ -200,16 +269,23 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 			t.Errorf("missing key %q in %v", want, w.keys)
 		}
 	}
-	for _, id := range []string{"kept", "hedged", "owing", "leaving"} {
+	for _, id := range []string{"kept", "leaving"} {
 		if w.purged[id] || slices.ContainsFunc(w.log, func(l string) bool { return strings.Contains(l, " "+id) }) {
 			t.Errorf("%s was touched: %v", id, w.log)
 		}
 	}
+	for _, id := range []string{"stuck", "liquidating", "broke"} {
+		if w.purged[id] || slices.ContainsFunc(w.log, func(l string) bool { return strings.HasPrefix(l, "sweep "+id) }) {
+			t.Errorf("%s was swept or purged: %v", id, w.log)
+		}
+	}
 	for _, want := range []string{
-		"skip kept: " + skipExempt, "skip hedged: " + skipContracts, "skip owing: " + skipDebt, "skip leaving: " + skipWithdrawal,
-		"purged 6, skipped 4",
-		"recovered to ADJUSTMENT: FUTURES BTC 0.01, SPOT BTC 0.25, SPOT USDT 136",
-		"after: 6 purged",
+		"skip kept: " + skipExempt, "skip leaving: " + skipWithdrawal,
+		"skip stuck: " + skipNotFlat + ": BTC-USDT-PERP LONG 0.001 NOT_FILLED", "skip liquidating: " + skipLiquidating,
+		"skip broke: " + skipDebt + ": MARGIN_CROSS USDT 5, not in spot",
+		"purged 9, skipped 5",
+		"recovered to ADJUSTMENT: FUTURES BTC 0.01, FUTURES USDT 54, SPOT BTC 0.25, SPOT USDT 150",
+		"after: 9 purged",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
@@ -225,7 +301,11 @@ func TestPurgeDryRun(t *testing.T) {
 	if err != nil || len(w.log) != 0 || len(w.purged) != 0 {
 		t.Fatalf("%v %v\n%s", err, w.log, out)
 	}
-	for _, want := range []string{"dry run over 10 test accounts", "would purge 6, skipped 4", "would recover to ADJUSTMENT: FUTURES BTC 0.01, SPOT BTC 0.25, SPOT USDT 136"} {
+	for _, want := range []string{
+		"dry run over 14 test accounts", "would purge 12, skipped 2",
+		"first: derivatives flatten 3, margin settle 3",
+		"would recover to ADJUSTMENT: FUTURES BTC 0.01, FUTURES USDT 72, SPOT BTC 0.25, SPOT USDT 159",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}

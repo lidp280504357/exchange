@@ -67,11 +67,14 @@ type settings struct {
 	// API, HOUSE's caps, and sign their changes (house only).
 	MarketMakerURL     string `koanf:"market_maker_url"`
 	HouseCapsAPISecret string `koanf:"house_caps_api_secret"`
-	// TradingURL and MarginURL reach spot-trading-service and
-	// margin-service as a user would through the gateway (users purge
-	// only: canceling a test account's orders, moving its margin balances).
-	TradingURL string `koanf:"trading_service_url"`
-	MarginURL  string `koanf:"margin_service_url"`
+	// TradingURL, MarginURL and DerivativesURL reach spot-trading-service
+	// and margin-service as a user would through the gateway, and the
+	// internal purge endpoints of margin-service and derivatives-service
+	// (users purge only: a test account's orders, margin balances and
+	// debts, contract positions).
+	TradingURL     string `koanf:"trading_service_url"`
+	MarginURL      string `koanf:"margin_service_url"`
+	DerivativesURL string `koanf:"derivatives_service_url"`
 }
 
 const usage = `usage: exchangectl <command> ...
@@ -230,6 +233,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	cfg := settings{
 		Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098", MarketMakerURL: "http://127.0.0.1:8091",
 		TradingURL: "http://spot-trading-service:8088", MarginURL: "http://margin-service:8099",
+		DerivativesURL: "http://derivatives-service:8095",
 	}
 	if err := config.Load(&cfg); err != nil {
 		return err

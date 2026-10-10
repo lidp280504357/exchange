@@ -434,7 +434,12 @@ func (s *Service) FindUsername(ctx context.Context, name string) (string, error)
 
 // UserStats counts accounts for the admin console's overview: all of
 // them, those created at or after since, and per UTC day for the last
-// days (0 to 90).
-func (s *Service) UserStats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
-	return s.Store.Read().Users().Stats(ctx, since, max(0, min(days, 90)))
+// days (0 to 90); only the accounts of kinds when some are given (B185),
+// an unknown kind refused.
+func (s *Service) UserStats(ctx context.Context, since time.Time, days int, kinds []string) (ports.UserStats, error) {
+	kinds, err := domain.ParseKinds(kinds)
+	if err != nil {
+		return ports.UserStats{}, err
+	}
+	return s.Store.Read().Users().Stats(ctx, since, max(0, min(days, 90)), kinds)
 }

@@ -52,7 +52,7 @@ type UserRepo interface {
 	List(ctx context.Context, f UserFilter) ([]domain.User, error)
 	// Stats counts every account, those created at or after since, and
 	// those created on each of the last days (UTC, today included).
-	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
+	Stats(ctx context.Context, since time.Time, days int, kinds []string) (UserStats, error)
 	// FindUsername returns the account whose username is name, whatever
 	// the case, or domain.ErrUserNotFound.
 	FindUsername(ctx context.Context, name string) (string, error)
