@@ -88,6 +88,15 @@ func (h *Handler) settle(w http.ResponseWriter, r *http.Request) {
 		Asset   string  `json:"asset"`
 		Amount  string  `json:"amount"`
 	}
+	type refusedJSON struct {
+		Account string  `json:"account"`
+		Symbol  *string `json:"symbol"`
+		Code    string  `json:"code"`
+	}
+	refused := make([]refusedJSON, 0, len(res.CancelRefused))
+	for _, c := range res.CancelRefused {
+		refused = append(refused, refusedJSON{Account: string(c.Account.Type), Symbol: nullable(c.Account.Symbol), Code: c.Code})
+	}
 	repaid, owed := make([]repaidJSON, 0, len(res.Repaid)), make([]owedJSON, 0, len(res.Remaining))
 	for _, p := range res.Repaid {
 		repaid = append(repaid, repaidJSON{
@@ -99,7 +108,7 @@ func (h *Handler) settle(w http.ResponseWriter, r *http.Request) {
 		owed = append(owed, owedJSON{Account: string(o.Account.Type), Symbol: nullable(o.Account.Symbol), Asset: o.Asset, Amount: o.Amount.String()})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"canceled_orders": res.CanceledOrders, "repaid": repaid, "remaining_debt": owed, "complete": res.Complete(),
+		"canceled_orders": res.CanceledOrders, "cancel_refused": refused, "repaid": repaid, "remaining_debt": owed, "complete": res.Complete(),
 	})
 }
 

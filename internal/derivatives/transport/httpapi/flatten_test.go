@@ -100,6 +100,10 @@ func flattenServer(t *testing.T, svc *application.Service) *httptest.Server {
 	(&httpapi.Handler{Svc: svc}).InternalRoutes(r)
 	srv := httptest.NewUnstartedServer(r)
 	srv.Config.ReadTimeout, srv.Config.WriteTimeout = 200*time.Millisecond, 200*time.Millisecond
+	// Its own idle timeout (else the read timeout's): a kept-alive
+	// connection idle past 200 ms between two calls would be closed under
+	// the next one (review C80 ②).
+	srv.Config.IdleTimeout = time.Minute
 	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv

@@ -31,8 +31,17 @@ const SettlePrefix = "settle:"
 // SettleResult is what Settle did and what is still owed.
 type SettleResult struct {
 	CanceledOrders int
-	Repaid         []Repaid
-	Remaining      []Owed
+	// CancelRefused are the accounts whose orders the trading service
+	// would not cancel: they may still rest there (review C80 ①).
+	CancelRefused []CancelRefused
+	Repaid        []Repaid
+	Remaining     []Owed
+}
+
+// CancelRefused is an account whose cancel was refused, and the code.
+type CancelRefused struct {
+	Account domain.Account
+	Code    string
 }
 
 // Complete reports whether nothing is owed any more.
@@ -125,6 +134,8 @@ func (s *Service) settle(ctx context.Context, userID string, order []domain.Acco
 		case refused(err):
 			// The trading service refused (review C79 ③): what the orders
 			// hold stays locked and its debt owed below; the rest goes on.
+			// The answer and the audit name it (C80 ①).
+			out.CancelRefused = append(out.CancelRefused, CancelRefused{Account: a, Code: apperr.From(err).Code})
 			s.Log.WarnContext(ctx, "a purge's cancel refused", "user_id", userID, "account", a.Key(), "error", err)
 		default:
 			return err
@@ -194,12 +205,16 @@ func (s *Service) auditSettle(ctx context.Context, userID, actor, reason string,
 	type entry struct {
 		Account   string `json:"account"`
 		Symbol    string `json:"symbol,omitempty"`
-		Asset     string `json:"asset"`
+		Asset     string `json:"asset,omitempty"`
 		Principal string `json:"principal,omitempty"`
 		Interest  string `json:"interest,omitempty"`
 		Amount    string `json:"amount,omitempty"`
+		Code      string `json:"code,omitempty"`
 	}
-	repaid, owed := []entry{}, []entry{}
+	refused, repaid, owed := []entry{}, []entry{}, []entry{}
+	for _, c := range out.CancelRefused {
+		refused = append(refused, entry{Account: string(c.Account.Type), Symbol: c.Account.Symbol, Code: c.Code})
+	}
 	for _, r := range out.Repaid {
 		repaid = append(repaid, entry{
 			Account: string(r.Account.Type), Symbol: r.Account.Symbol, Asset: r.Asset, Principal: r.Principal.String(), Interest: r.Interest.String(),
@@ -209,7 +224,8 @@ func (s *Service) auditSettle(ctx context.Context, userID, actor, reason string,
 		owed = append(owed, entry{Account: string(o.Account.Type), Symbol: o.Account.Symbol, Asset: o.Asset, Amount: o.Amount.String()})
 	}
 	d := map[string]any{
-		"canceled_orders": out.CanceledOrders, "repaid": repaid, "remaining_debt": owed, "complete": failed == nil && out.Complete(),
+		"canceled_orders": out.CanceledOrders, "cancel_refused": refused, "repaid": repaid, "remaining_debt": owed,
+		"complete": failed == nil && out.Complete(),
 	}
 	if failed != nil { // what is owed unknown: it stopped midway
 		d["error"] = apperr.From(failed).Code

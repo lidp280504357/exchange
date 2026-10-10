@@ -94,13 +94,15 @@ paths:
         the same answer: user-service is not asked whether it knows the
         user (a purge calls this for every test account; a 404 would read
         like a wrong path), so there is no 404 for an unknown user. A cancel
-        the trading service refuses (4xx) is logged and the rest goes on:
-        what those orders hold stays locked and its debt in remaining_debt.
-        It takes a few seconds as a rule (8 at most waiting for the
-        cancels): give the call 30 seconds or more. Each call is audited as
-        margin.user_settled (target user:<id>; details the count, repaid,
-        remaining_debt and complete), also one that failed midway (details
-        error, the failure's code, and complete false).
+        the trading service refuses (4xx) is named in cancel_refused and the
+        rest goes on: those orders may still rest there (complete speaks of
+        debts only), what they hold stays locked and its debt in
+        remaining_debt. It takes a few seconds as a rule (8 at most waiting
+        for the cancels): give the call 30 seconds or more. Each call is
+        audited as margin.user_settled (target user:<id>; details the count,
+        cancel_refused, repaid, remaining_debt and complete), also one that
+        failed midway (details error, the failure's code, and complete
+        false).
       tags: [purge]
       parameters:
         - name: id
@@ -248,11 +250,27 @@ components:
   schemas:
     Settled:
       type: object
-      required: [canceled_orders, repaid, remaining_debt, complete]
+      required: [canceled_orders, cancel_refused, repaid, remaining_debt, complete]
       properties:
         complete:
           type: boolean
           description: Nothing owed any more (remaining_debt is empty).
+        cancel_refused:
+          type: array
+          description: The accounts whose cancel the trading service refused (review C80); their orders may still rest there.
+          items:
+            type: object
+            required: [account, symbol, code]
+            properties:
+              account:
+                type: string
+                enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+              symbol:
+                type: [string, 'null']
+                description: An isolated account's pair.
+              code:
+                type: string
+                description: The refusal's code.
         canceled_orders:
           type: integer
           description: Orders whose cancel this call asked for (not those on their way out before).

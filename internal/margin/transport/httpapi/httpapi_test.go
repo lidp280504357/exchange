@@ -598,6 +598,9 @@ func TestInternalEndpoints(t *testing.T) {
 	if owed, _ := body["remaining_debt"].([]any); owed == nil || len(owed) != 0 || body["complete"] != true {
 		t.Fatalf("settled %v", body)
 	}
+	if refused, _ := body["cancel_refused"].([]any); refused == nil || len(refused) != 0 {
+		t.Fatalf("settled %v", body)
+	}
 	st, body = a.do("POST", "/internal/margin/users/not-a-user/settle", purge)
 	expect(t, "a settle of no user", st, body, 400, apperr.CodeInvalidArgument)
 }

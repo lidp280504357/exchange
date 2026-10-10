@@ -77,7 +77,8 @@ func TestSettleRepaysFromWhatTheAccountsHold(t *testing.T) {
 		return nil
 	}
 	res, err := r.svc.Settle(ctx, user, "ops@example.com", "purging a test account")
-	if err != nil || res.CanceledOrders != 1 || tr.canceled != 2 || len(res.Repaid) != 2 || len(res.Remaining) != 1 || res.Complete() {
+	if err != nil || res.CanceledOrders != 1 || tr.canceled != 2 || len(res.Repaid) != 2 || len(res.Remaining) != 1 || res.Complete() ||
+		len(res.CancelRefused) != 0 {
 		t.Fatalf("settle %+v %v (%d cancels)", res, err, tr.canceled)
 	}
 	if p := res.Repaid[0]; p.Account != cross || p.Asset != "USDT" || !p.Principal.Equal(d("500")) || !p.Interest.Equal(d("0.005")) {
@@ -169,6 +170,16 @@ func TestSettleGoesOnPastARefusedCancel(t *testing.T) {
 	res, err := r.svc.Settle(ctx, user, "ops@example.com", "purging a test account")
 	if err != nil || len(res.Repaid) != 1 || !res.Repaid[0].Principal.Equal(d("100")) || !res.Complete() {
 		t.Fatalf("settle past a refused cancel %+v %v", res, err)
+	}
+	// The answer and the audit name the refusal (review C80 ①).
+	if len(res.CancelRefused) != 1 || res.CancelRefused[0].Account != cross || res.CancelRefused[0].Code != apperr.CodeInvalidArgument {
+		t.Fatalf("the refused cancel %+v", res.CancelRefused)
+	}
+	var refusedAudits int
+	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE event_type = 'audit.AdminActionPerformed'
+		AND position(convert_to('"cancel_refused":[{"account":"MARGIN_CROSS","code":"COMMON_INVALID_ARGUMENT"}]', 'UTF8') in envelope) > 0`).
+		Scan(&refusedAudits); err != nil || refusedAudits != 1 {
+		t.Fatalf("%d audits name the refused cancel %v", refusedAudits, err)
 	}
 	audits := func() (n int) {
 		t.Helper()

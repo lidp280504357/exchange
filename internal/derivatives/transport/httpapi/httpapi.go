@@ -720,10 +720,11 @@ func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
 const flattenDeadline = 2 * time.Minute
 
 // outlast moves the connection's write deadline d ahead, for the answer.
-// The read timeout cancels nothing once the body is read: the server
-// clears the read deadline as it starts its background read
-// (net/http's startBackgroundRead, Go 1.27; review C79 ①, which
-// TestTheFlattenEndpoint holds to). A test's recorder takes no deadline.
+// The read timeout cancels nothing once the body is read: net/http clears
+// the read deadline as it starts its background read (startBackgroundRead,
+// since Go 1.8; pipelined bytes cancel nothing since 1.11; review C79 ①,
+// which TestTheFlattenEndpoint holds to). A test's recorder takes no
+// deadline.
 func outlast(w http.ResponseWriter, d time.Duration) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(d))
 }
