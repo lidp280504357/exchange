@@ -3,6 +3,20 @@
 # from the dev inbox and human verification passes with the environment's
 # CAPTCHA_BYPASS_TOKEN (taken from .env when not exported).
 
+# The Mac's bash 3.2 ends a script stopped by set -u's unbound variable
+# with status 0 once the EXIT trap ran, so such a run read as passed
+# (B191: web.sh after e39fe5a0). Sourced at a script's top, under bash 3
+# this runs the script again under a bash of 4 or later when there is one
+# (Homebrew's), which ends it with 1.
+if ((BASH_VERSINFO[0] < 4)) && [[ -z ${FUNCNAME[0]:-} && -z ${E2E_BASH_REEXEC:-} ]]; then
+  for e2e_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x $e2e_bash ]]; then
+      E2E_BASH_REEXEC=1 exec "$e2e_bash" "$0" "$@"
+    fi
+  done
+  echo "warn: bash $BASH_VERSION ends a script an unbound variable stopped with status 0: install bash 4 or later (brew install bash)" >&2
+fi
+
 BASE="${BASE:-https://astras.vip}"
 BYPASS="${CAPTCHA_BYPASS_TOKEN:-$(grep '^CAPTCHA_BYPASS_TOKEN=' .env | cut -d= -f2- | tr -d '"')}"
 RUN="$(date +%s)"
