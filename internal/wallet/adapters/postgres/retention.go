@@ -13,17 +13,20 @@ const ended = `status IN ('CONFIRMED', 'INTERNAL_TRANSFER', 'REJECTED', 'CANCELE
 	AND NOT EXISTS (SELECT 1 FROM chain_fees f WHERE f.purpose = 'WITHDRAWAL' AND f.reference = withdrawals.id::text AND f.status = 'HELD')`
 
 // Retention deletes wallet-service's history older than the window (M1):
-// ended withdrawals with their broadcast attempts, processed custodian
-// callbacks, chain checks but each network's and asset's latest, settled
-// chain fees, finished commands and sweeps, daily prices. Deposits are
-// kept for the keys' window instead: a deposit's row (its transaction)
-// is what tells a custodian's late callback or a rescan from a new
-// deposit, so it goes only with the idempotency keys, and an unclaimed
-// or disputed one only once a person resolved it. Addresses, the
+// processed custodian callbacks that were applied, ignored or refused, chain checks
+// but each network's and asset's latest, settled chain fees, finished
+// commands and sweeps, daily prices. Kept for the keys' window instead:
+// deposits - a deposit's row (its transaction) is what tells a
+// custodian's late callback or a rescan from a new deposit, and an
+// unclaimed or disputed one goes only once a person resolved it; ended
+// withdrawals with their broadcast attempts - a user's monthly limit adds
+// up the month's withdrawals (B200); callbacks that failed, matched
+// nothing or disagreed, which a person may replay (B200). Addresses, the
 // retired addresses' owners, the address book, nonces, cursors, the
 // custodians' baselines and fee units, the suspensions and the
 // platform's own fundings (told apart by their transaction) are state
-// and stay.
+// and stay; the scanned blocks the scanner prunes itself below its reorg
+// window (Blocks.Prune).
 type Retention struct{}
 
 // Schema is wallet-service's.
@@ -31,20 +34,24 @@ func (Retention) Schema() string { return "wallet" }
 
 // Run applies the rules in order: a withdrawal's attempts go before it.
 func (Retention) Run(ctx context.Context, db *pg.DB, w retention.Window) ([]retention.Result, error) {
-	h := w.History()
+	h, k := w.History(), w.Keys()
 	return retention.ApplyAll(ctx, db, w, []retention.Rule{
 		{
-			Table: "withdrawal_attempts", Name: "attempts of withdrawals ended before the window", Cutoff: h,
+			Table: "withdrawal_attempts", Name: "attempts of withdrawals ended before the keys' window", Cutoff: k,
 			Where: "withdrawal_id IN (SELECT id FROM withdrawals WHERE " + ended + ")",
 		},
-		{Table: "withdrawals", Name: "withdrawals ended before the window", Cutoff: h, Where: ended},
+		{Table: "withdrawals", Name: "withdrawals ended before the keys' window", Cutoff: k, Where: ended},
 		{
-			Table: "deposits", Name: "deposits settled before the keys' window", Cutoff: w.Keys(),
+			Table: "deposits", Name: "deposits settled before the keys' window", Cutoff: k,
 			Where: "status IN ('CREDITED', 'REJECTED', 'ORPHANED') AND updated_at < $1 AND discrepancy = '' AND (NOT unclaimed OR resolution <> '')",
 		},
 		{
-			Table: "custody_callbacks", Name: "callbacks processed before the window", Cutoff: h,
-			Where: "processed_at IS NOT NULL AND received_at < $1",
+			Table: "custody_callbacks", Name: "callbacks applied, ignored or refused before the window", Cutoff: h,
+			Where: "processed_at IS NOT NULL AND result IN ('APPLIED', 'IGNORED', 'REJECTED') AND received_at < $1",
+		},
+		{
+			Table: "custody_callbacks", Name: "other processed callbacks before the keys' window", Cutoff: k,
+			Where: "processed_at IS NOT NULL AND result NOT IN ('APPLIED', 'IGNORED', 'REJECTED') AND received_at < $1",
 		},
 		{
 			Table: "chain_checks", Name: "checks before the window but the latest of each network and asset", Cutoff: h,

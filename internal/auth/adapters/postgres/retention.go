@@ -28,6 +28,12 @@ func (Retention) Run(ctx context.Context, db *pg.DB, w retention.Window) ([]rete
 		},
 		{Table: "sessions", Name: "sessions revoked before the window", Cutoff: h, Where: "revoked_at < $1"},
 		{
+			// It ends with its last refresh token, which the service's
+			// own purge deletes once expired (B200).
+			Table: "sessions", Name: "sessions idle since before the window, their tokens expired", Cutoff: h,
+			Where: "revoked_at IS NULL AND coalesce(last_seen_at, created_at) < $1 AND NOT EXISTS (SELECT 1 FROM refresh_tokens r WHERE r.session_id = sessions.id)",
+		},
+		{
 			Table: "identity_rebind_requests", Name: "rebinding requests decided before the window", Cutoff: h,
 			Where: "status <> 'PENDING_REVIEW' AND decided_at < $1",
 		},

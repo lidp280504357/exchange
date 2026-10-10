@@ -58,6 +58,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | OutboxBacklog | warning | 待发事件 > 100 持续 5 分钟 | Redpanda 可用性 |
 | OutboxPublishFailing | critical | 5 分钟内持续发送失败 | Redpanda 是否宕机（恢复后自动补发） |
 | LedgerReconciliationMismatch | critical | 对账不一致 > 0 | [ledger.md](ledger.md)，冻结相关账户，按分录排查 |
+| RetentionRunStale | warning | 每日历史数据保留两天没有成功跑完（node exporter 的 textfile 指标 `exchange_retention_last_success_timestamp_seconds`） | [retention.md](retention.md#排查)：`journalctl -u exchange-retention` 看最后一次输出，修好后补跑 |
 | LedgerReconciliationStopped | warning | 3 小时无完成的对账 | ledger-service 日志 |
 | WalletScanLagging | warning | 充值扫描落后链头 50 块以上持续 10 分钟 | [wallet.md](wallet.md)：节点可用性、租约、数据库 |
 | WalletScanStalled | warning | 10 分钟没有完成一轮扫描 | 同上；wallet-service 日志里的 `deposit scan failed` |

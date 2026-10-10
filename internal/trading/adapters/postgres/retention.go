@@ -7,13 +7,15 @@ import (
 	"github.com/skill/exchange/internal/platform/retention"
 )
 
-// gone is an order the run deletes: ended and released before the window.
-const gone = "status IN ('FILLED', 'CANCELED', 'REJECTED', 'EXPIRED') AND released AND updated_at < $1"
+// gone is an order the run deletes: ended and released before the window,
+// or ended without a freeze (the ledger refused it: nothing to release,
+// B200). The orders_finished index (trading 00010) has the same condition.
+const gone = "status IN ('FILLED', 'CANCELED', 'REJECTED', 'EXPIRED') AND (released OR freeze_state = 'NONE') AND updated_at < $1"
 
 // Retention deletes spot-trading-service's history older than the window
-// (M1): orders that ended and were released before it, then the fills of
-// orders no longer kept. An order still open, or ended but not released,
-// stays whatever its age, with its fills. A replayed engine update of a
+// (M1): orders that ended and were released (or never frozen) before it,
+// then the fills of orders no longer kept. An order still open, or ended
+// but not released, stays whatever its age, with its fills. A replayed engine update of a
 // deleted order is ignored (OnUpdate logs it), and a replayed trade only
 // writes its fill again, which the next run deletes: nothing of the
 // balances is here (ADR-0001).

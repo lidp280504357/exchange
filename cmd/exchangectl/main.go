@@ -50,6 +50,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/skill/exchange/internal/platform/chx"
 	"github.com/skill/exchange/internal/platform/config"
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
@@ -58,6 +59,9 @@ import (
 type settings struct {
 	Postgres pg.Config    `koanf:",squash"`
 	Kafka    kafka.Config `koanf:",squash"`
+	// ClickHouse holds the read models (retention run only: the orders'
+	// state; skipped when CLICKHOUSE_ADDR is not set).
+	ClickHouse chx.Config `koanf:",squash"`
 	// AdminSecretKey seals administrators' authenticator secrets
 	// (admin create only).
 	AdminSecretKey string `koanf:"admin_secret_key"`

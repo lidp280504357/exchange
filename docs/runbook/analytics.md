@@ -2,7 +2,7 @@
 
 需求 §9，阶段 1 验收标准 8，实施计划 §6.3 任务 12。analytics-consumer（运维端口 9087）以消费组 `analytics-consumer` 按批消费全部业务主题，写入 ClickHouse（库 `exchange`，迁移在 `migrations/clickhouse`，服务启动时执行），写入成功后才提交位点；失败整批重试。表大多是 ReplacingMergeTree，重复投递的事件在合并时折叠；`margin_liquidations` 是 AggregatingMergeTree，两个事件各写自己的列、合并时每列取最后一个非 NULL 值（见下表）。两种都要**查询加 `FINAL`**（或按 ID 去重、聚合）。
 
-历史表（事件与写入日志、分录、订单与订单更新、合约成交/资金费/强平、利息、审计）只保留 15 天（clickhouse 00013 的 TTL，M1，见 [retention.md](retention.md#clickhouse)），报表加总"本期之前"要用的注册事件与杠杆利息分录不删；现货成交 `trades`、订单当前状态 `orders_state`、按 ID 的持仓/充值/提现/杠杆强平状态表与 K 线不设 TTL。
+历史表（事件与写入日志、分录、订单与订单更新、合约成交/资金费/强平、利息）只保留 15 天（clickhouse 00013 的 TTL，M1，见 [retention.md](retention.md#clickhouse)），报表加总"本期之前"要用的注册事件与杠杆利息分录不删；现货成交 `trades`、审计日志 `audit_logs`（00014）、订单当前状态 `orders_state`（保留工具每天删 15 天前已终态订单的行）、按 ID 的持仓/充值/提现/杠杆强平状态表与 K 线不设 TTL。
 
 ## 表
 

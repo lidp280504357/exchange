@@ -157,7 +157,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 
 ## 对账
 
-ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后先跑一次）检查，结果写 `ledger.reconciliation_runs`，指标 `ledger_reconcile_mismatches{check}`：
+ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后先跑一次）检查，结果写 `ledger.reconciliation_runs`，指标 `ledger_reconcile_mismatches{check}`。15 天前的流水由保留工具删除（ADR-0022，[retention.md](retention.md#账本怎么删)）：删掉的那部分以检查点（`ledger.checkpoints`）与账户快照（`ledger.account_snapshots`）计入下面几项，键留在 `ledger.journal_keys`：
 
 | 检查 | 含义 |
 |---|---|

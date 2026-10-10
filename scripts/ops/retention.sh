@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The test server's history retention (M1, ADR-0022): exchangectl
-# retention run in the user-service container, under the ops lock (a
+# retention run in a one-off container of the services, under the ops lock (a
 # deploy or an end-to-end run must not see its tables thinned halfway);
 # a dry run deletes nothing and takes no lock. The daily run is the
 # server's cron (deploy/retention/retention.sh).
@@ -21,4 +21,6 @@ if [[ -z ${OPS_LOCK_HELD:-} && -z $dry ]]; then
   exec "$(dirname "$0")/lock.sh" run --owner "ops retention.sh" -- bash "$0" "$@"
 fi
 printf -v args ' %q' "$@"
-ssh exchange "cd $INFRA && $COMPOSE exec -T -e EXCHANGECTL_ACTOR=${EXCHANGECTL_ACTOR:-ops-retention} user-service /app/exchangectl retention run$args" </dev/null
+# A one-off container of the services' image and settings (as the server's
+# daily run), not one inside user-service.
+ssh exchange "cd $INFRA && $COMPOSE run --rm --no-deps -T -e EXCHANGECTL_ACTOR=${EXCHANGECTL_ACTOR:-ops-retention} user-service /app/exchangectl retention run$args" </dev/null

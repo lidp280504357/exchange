@@ -941,3 +941,19 @@ tests:
             exp_annotations:
               summary: "2 approved withdrawals of USDT have waited 30 minutes on its suspension: users are waiting; lift it once the cause is found, or reject them"
               runbook: docs/runbook/custody.md
+
+  - interval: 1m
+    input_series:
+      - series: 'exchange_retention_last_success_timestamp_seconds{job="node", instance="h"}'
+        values: '0x3100'
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: RetentionRunStale
+        exp_alerts: []
+      - eval_time: 50h
+        alertname: RetentionRunStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: node, instance: h}
+            exp_annotations:
+              summary: "the daily history retention has not finished without a failure for two days: the history grows, or a schema's rule fails"
+              runbook: docs/runbook/retention.md
