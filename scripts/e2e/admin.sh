@@ -796,8 +796,10 @@ as AUDITOR GET "/admin/v1/reports/derivatives?days=30" ""
 expect 200 - "contract report"
 check '.items | type == "array" and all(.[]; (.notional | test("^[0-9.]+$")) and (.liquidations >= 0) and (.settle_asset | type) == "string")' \
   "per contract and day, with its settlement asset"
-as AUDITOR GET /admin/v1/reports/open-interest ""
-expect 200 - "open interest"
+# Every kind's (L1: the humans' alone by default, without HOUSE, the other
+# side of their positions).
+as AUDITOR GET "/admin/v1/reports/open-interest?kind=ALL" ""
+expect 200 - "open interest of every kind"
 check '.items | type == "array" and all(.[]; .long == .short and (.settle_asset | type) == "string")' "long equals short per contract"
 TODAY=$(date -u +%Y-%m-%d)
 as AUDITOR GET "/admin/v1/reports/trading?from=$(jq -nr 'now - 40 * 86400 | strftime("%Y-%m-%d")')&to=$TODAY&bucket=month" ""
