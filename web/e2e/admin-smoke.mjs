@@ -912,10 +912,13 @@ try {
   // accounts or the read models; the editors open and close without a
   // change (nothing is asked for), a pair's new leverage offers its
   // suggested thresholds without filling them in (A57).
-  const marginOn = await page.evaluate(async () => {
+  // A refused answer fails here: read as "off" it would skip the pages for good (A119).
+  const margin = await page.evaluate(async () => {
     const r = await fetch("/admin/v1/flags");
-    return r.ok && (await r.json()).items.some((f) => f.key === "margin.enabled" && f.enabled);
+    return { status: r.status, on: r.ok && (await r.json()).items.some((f) => f.key === "margin.enabled" && f.enabled) };
   });
+  if (margin.status !== 200) throw new Error(`the flags, for margin.enabled: ${margin.status}`);
+  const marginOn = margin.on;
   if (marginOn) {
     await go("/margin/params");
     await rows(1);
