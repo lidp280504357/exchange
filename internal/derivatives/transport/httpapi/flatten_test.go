@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
@@ -20,6 +19,7 @@ import (
 	"github.com/skill/exchange/internal/derivatives/domain"
 	"github.com/skill/exchange/internal/derivatives/ports"
 	"github.com/skill/exchange/internal/derivatives/transport/httpapi"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // flatStore is just enough of a store for a flatten: a user without
@@ -88,12 +88,15 @@ func (o flatOrders) Get(_ context.Context, id string) (domain.Order, error) {
 	return *o.working, nil
 }
 
-// flattenServer serves the internal routes over a real server whose
-// timeouts are those of the platform's scaled down: a read timeout of
-// 200 ms.
+// flattenServer serves the internal routes as the service does - on the
+// platform's router, through its middleware, whose response writer must
+// let the handler reach the connection's deadlines (review C79 nit) - over
+// a real server whose timeouts are the platform's scaled down to 200 ms.
 func flattenServer(t *testing.T, svc *application.Service) *httptest.Server {
 	t.Helper()
-	r := chi.NewRouter()
+	r := httpx.NewRouter(httpx.RouterOptions{
+		Logger: slog.New(slog.DiscardHandler), Metrics: httpx.NewHTTPMetrics(prometheus.NewRegistry()),
+	})
 	(&httpapi.Handler{Svc: svc}).InternalRoutes(r)
 	srv := httptest.NewUnstartedServer(r)
 	srv.Config.ReadTimeout, srv.Config.WriteTimeout = 200*time.Millisecond, 200*time.Millisecond
