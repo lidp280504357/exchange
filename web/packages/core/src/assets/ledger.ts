@@ -84,7 +84,7 @@ export function presetRange(preset: RangePreset, now: number = Date.now()): Time
     case "7d":
       return { from: now - 7 * DAY, to: null };
     case "15d":
-      return { from: now - 15 * DAY, to: null };
+      return { from: now - LEDGER_KEPT_DAYS * DAY, to: null };
     default:
       return { from: null, to: null };
   }

@@ -318,7 +318,7 @@ function Filters({
           <FormField label={t("pcAssets.history.to")} className="w-40">
             <Input size="sm" type="date" value={toDate} min={fromDate || undefined} onValueChange={onToDate} />
           </FormField>
-          <span className="mb-2 text-xs text-fg-3">{t("pcAssets.history.kept", { days: LEDGER_KEPT_DAYS })}</span>
+          <span className="mb-2 whitespace-nowrap text-xs text-fg-3">{t("pcAssets.history.kept", { days: LEDGER_KEPT_DAYS })}</span>
         </div>
       )}
       {onReset && (
