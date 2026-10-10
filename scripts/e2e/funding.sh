@@ -59,6 +59,13 @@ login() {
   TOKEN=$(jq -r .access_token <<<"$BODY")
 }
 
+# closed EMAIL DEVICE: the account is closed (B184 ⑤: a purge cleared the
+# hedge out before it was exempt), so the hedge is gone.
+closed() {
+  call POST /v1/auth/login/password "{\"identifier\":\"$1\",\"password\":\"$PASSWORD\",\"device_id\":\"$2\"}" "${APP[@]}" &&
+    [[ $STATUS == 403 && $(jq -r .code <<<"$BODY") == USER_CLOSED ]]
+}
+
 position() { # position AUTH...: BODY holds the user's only position on the contract
   call GET "/v1/derivatives/positions?symbol=$SYMBOL" "" "$@" && jq -e '.positions | length == 1' <<<"$BODY"
 }
@@ -161,7 +168,12 @@ hedge() {
   # shellcheck source=/dev/null
   source "$state"
   echo "== the standing $kind hedge on $SYMBOL (opened $(date -u -r "$OPENED_AT" +%FT%TZ 2>/dev/null || date -u -d "@$OPENED_AT" +%FT%TZ))"
-  exempt "$EMAIL_LONG" "$EMAIL_SHORT"
+  if closed "$EMAIL_LONG" "$DEVICE_LONG" || closed "$EMAIL_SHORT" "$DEVICE_SHORT"; then
+    echo "     the hedge's accounts were closed (a purge cleared them out); opening a new one"
+    rm -f "$state"
+    open_hedge "$kind" "$state"
+    return
+  fi
   login "$EMAIL_LONG" "$DEVICE_LONG"
   LONG=(-H "Authorization: Bearer $TOKEN")
   login "$EMAIL_SHORT" "$DEVICE_SHORT"
@@ -174,6 +186,7 @@ hedge() {
     return
   fi
   echo "ok   both positions are open"
+  exempt "$EMAIL_LONG" "$EMAIL_SHORT"
 
   if [[ $kind == coinm ]]; then
     call GET "/v1/market/contracts/$SYMBOL" ""

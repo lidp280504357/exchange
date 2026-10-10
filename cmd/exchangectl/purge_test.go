@@ -25,6 +25,7 @@ type purgeWorld struct {
 	pending map[string]int
 	failOn  string // an action that fails: "sweep", "close", ...
 	log     []string
+	keys    []string
 	purged  map[string]bool
 }
 
@@ -46,8 +47,11 @@ func (w *purgeWorld) state(_ context.Context, user string) (purgeState, error) {
 			// The engine confirmed the cancels; the ledger released the freezes.
 			s.spotOrders = 0
 			for i := range s.rows {
-				s.rows[i].available = s.rows[i].available.Add(s.rows[i].frozen)
-				s.rows[i].frozen = decimal.Zero
+				if s.rows[i].frozen.IsPositive() {
+					s.rows[i].available = s.rows[i].available.Add(s.rows[i].frozen)
+					s.rows[i].frozen = decimal.Zero
+					s.rows[i].version++
+				}
 			}
 		}
 	}
@@ -71,18 +75,20 @@ func (w *purgeWorld) cancelOrders(_ context.Context, user string) error {
 	return w.fail("cancel")
 }
 
-func (w *purgeWorld) marginOut(_ context.Context, user string, r purgeRow) error {
+func (w *purgeWorld) marginOut(_ context.Context, user string, r purgeRow, key string) error {
 	w.log = append(w.log, fmt.Sprintf("out %s %s %s %s", user, r.account, r.asset, r.available))
+	w.keys = append(w.keys, key)
 	add(w.states[user], r.account, r.asset, r.available.Neg())
 	add(w.states[user], "SPOT", r.asset, r.available)
 	return w.fail("out")
 }
 
-func (w *purgeWorld) sweep(_ context.Context, user string, r purgeRow, _, _ string) error {
+func (w *purgeWorld) sweep(_ context.Context, user string, r purgeRow, key, _, _ string) error {
 	if err := w.fail("sweep"); err != nil {
 		return err
 	}
 	w.log = append(w.log, fmt.Sprintf("sweep %s %s %s %s", user, r.account, r.asset, r.available))
+	w.keys = append(w.keys, key)
 	add(w.states[user], r.account, r.asset, r.available.Neg())
 	return nil
 }
@@ -110,6 +116,7 @@ func add(s *purgeState, account, asset string, amount decimal.Decimal) {
 		i = len(s.rows) - 1
 	}
 	s.rows[i].available = s.rows[i].available.Add(amount)
+	s.rows[i].version++
 	if s.rows[i].available.IsZero() && s.rows[i].frozen.IsZero() {
 		s.rows = slices.Delete(s.rows, i, i+1)
 	}
@@ -135,7 +142,14 @@ func newPurgeWorld() *purgeWorld {
 	ordering.rows[0].frozen = decimal.NewFromInt(2)
 	add1("ordering", domain.StatusActive, false, ordering)
 	add1("margin", domain.StatusFrozen, false, purgeState{rows: []purgeRow{row("MARGIN_CROSS", "USDT", "20"), row("SPOT", "USDT", "1")}})
+	// An order on the margin account holds 5 of it until canceled (B184 ①).
+	marginOrder := purgeState{spotOrders: 1, rows: []purgeRow{row("MARGIN_CROSS", "BTC", "0.2")}}
+	marginOrder.rows[0].frozen = decimal.RequireFromString("0.05")
+	add1("marginorder", domain.StatusActive, false, marginOrder)
+	// Closed by an earlier run that failed to mark it (B184 ③).
+	add1("closed", domain.StatusClosed, false, purgeState{})
 	w.pending["ordering"] = 2
+	w.pending["marginorder"] = 1
 	return w
 }
 
@@ -166,6 +180,8 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 		"status review CLOSED", "purged review",
 		"cancel ordering", "sweep ordering SPOT USDT 10", "purged ordering",
 		"out margin MARGIN_CROSS USDT 20", "sweep margin SPOT USDT 21", "status margin CLOSED", "purged margin",
+		"cancel marginorder", "out marginorder MARGIN_CROSS BTC 0.25", "sweep marginorder SPOT BTC 0.25", "purged marginorder",
+		"purged closed",
 	} {
 		if !slices.Contains(w.log, want) {
 			t.Errorf("missing %q in\n%s", want, strings.Join(w.log, "\n"))
@@ -174,6 +190,16 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 	if slices.ContainsFunc(w.log, func(l string) bool { return strings.HasSuffix(l, " ACTIVE") }) {
 		t.Errorf("an account under review or frozen is closed as it is: %v", w.log)
 	}
+	if slices.Contains(w.log, "status closed CLOSED") {
+		t.Errorf("a closed account is only marked: %v", w.log)
+	}
+	// The keys name the balance as read: the margin account's version 1
+	// after its order's release, spot's version 2 after the move in.
+	for _, want := range []string{"purge:plain:FUTURES:BTC:v0", "purge:marginorder:SPOT:BTC:v1", marginKey("marginorder", purgeRow{account: "MARGIN_CROSS", asset: "BTC", version: 1})} {
+		if !slices.Contains(w.keys, want) {
+			t.Errorf("missing key %q in %v", want, w.keys)
+		}
+	}
 	for _, id := range []string{"kept", "hedged", "owing", "leaving"} {
 		if w.purged[id] || slices.ContainsFunc(w.log, func(l string) bool { return strings.Contains(l, " "+id) }) {
 			t.Errorf("%s was touched: %v", id, w.log)
@@ -181,9 +207,9 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 	}
 	for _, want := range []string{
 		"skip kept: " + skipExempt, "skip hedged: " + skipContracts, "skip owing: " + skipDebt, "skip leaving: " + skipWithdrawal,
-		"purged 4, skipped 4",
-		"recovered to ADJUSTMENT: FUTURES BTC 0.01, SPOT USDT 136",
-		"after: 4 purged",
+		"purged 6, skipped 4",
+		"recovered to ADJUSTMENT: FUTURES BTC 0.01, SPOT BTC 0.25, SPOT USDT 136",
+		"after: 6 purged",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
@@ -199,7 +225,7 @@ func TestPurgeDryRun(t *testing.T) {
 	if err != nil || len(w.log) != 0 || len(w.purged) != 0 {
 		t.Fatalf("%v %v\n%s", err, w.log, out)
 	}
-	for _, want := range []string{"dry run over 8 test accounts", "would purge 4, skipped 4", "would recover to ADJUSTMENT: FUTURES BTC 0.01, SPOT USDT 134"} {
+	for _, want := range []string{"dry run over 10 test accounts", "would purge 6, skipped 4", "would recover to ADJUSTMENT: FUTURES BTC 0.01, SPOT BTC 0.25, SPOT USDT 136"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}

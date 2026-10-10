@@ -164,6 +164,7 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
   otp REGISTER "$email" "$device"
   call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"$password\",\"country\":\"$country\",\"terms_version\":\"$terms\",\"risk_disclosure_version\":\"$risk\",\"device_id\":\"$device\"}" "${APP[@]}"
   expect 201 - "register"
+  REGISTERED+=("$(jq -r .user_id <<<"$BODY")")
   if [[ -z $MARKS_TEST_ACCOUNTS ]]; then
     MARKS_TEST_ACCOUNTS=1
     at_exit mark_test_accounts
@@ -174,7 +175,9 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
 # console leaves test accounts out of its lists by default), in one call
 # by their emails (e2e-...-$RUN@example.com, the fault drills'
 # fault-...-$RUN@example.com) through exchangectl in a container on the
-# test server, then clears them out (L4: exchangectl users purge - the
+# test server, then clears out the ones register signed up (L4:
+# exchangectl users purge by their IDs, not by the emails' second-long
+# RUN, which a script of another session may share - B184 ④; the
 # accounts' balances go to ADJUSTMENT, the accounts are closed and hidden;
 # one still holding a contract position, a margin debt or a withdrawal in
 # flight is left, and so is one exempt from the purge, funding.sh's
@@ -182,15 +185,18 @@ register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
 # with the first account, it is the last at_exit to run). A failure only
 # warns.
 MARKS_TEST_ACCOUNTS=""
+REGISTERED=()
 mark_test_accounts() {
-  local out name ctl
+  local out name ctl ids
   name=$(basename "$0" .sh)
   ctl="cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T -e EXCHANGECTL_ACTOR=e2e-$name user-service /app/exchangectl"
   if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users kind --email-like '%-$RUN@example.com' --kind TEST --reason 'e2e $name'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not marked TEST: $(tail -1 <<<"$out")" >&2
     return 0
   fi
-  if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users purge --email-like '%-$RUN@example.com' --pace 0s --reason 'e2e $name done'" 2>&1 </dev/null); then
+  ids=$(IFS=,; echo "${REGISTERED[*]+"${REGISTERED[*]}"}")
+  [[ -n $ids ]] || return 0
+  if ! out=$(ssh -o ConnectTimeout=20 exchange "$ctl users purge --user '$ids' --pace 0s --reason 'e2e $name done'" 2>&1 </dev/null); then
     echo "warn: this run's accounts were not all cleared out: $(grep -v '^skip' <<<"$out" | tail -1)" >&2
   fi
   grep '^skip\|^purged' <<<"$out" | sed 's/^/note: /' >&2 || true

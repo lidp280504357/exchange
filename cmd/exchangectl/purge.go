@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -72,10 +73,28 @@ type purgeCandidate struct {
 	exempt bool
 }
 
-// purgeRow is one of a user's ledger rows that holds something.
+// purgeRow is one of a user's ledger rows that holds something; version
+// counts the lines applied to it, so a key made with it names the balance
+// as read (B184).
 type purgeRow struct {
 	account, scope, asset string
 	available, frozen     decimal.Decimal
+	version               int64
+}
+
+// sweepKey is the ledger adjustment's idempotency key of a row as read: a
+// run again over the same balance replays it, a balance changed since
+// (credited after a sweep) gets a key of its own (B184 ②). The journal
+// stores it behind the ledger's adjust: prefix.
+func sweepKey(user string, r purgeRow) string {
+	return fmt.Sprintf("purge:%s:%s:%s:v%d", user, r.account, r.asset, r.version)
+}
+
+// marginKey is the same for a margin account's transfer out, within
+// margin-service's 100 bytes: the account and pair as a short hash.
+func marginKey(user string, r purgeRow) string {
+	h := sha256.Sum256([]byte(r.account + "/" + r.scope))
+	return fmt.Sprintf("purge:%s:%s:%x:v%d", user, r.asset, h[:4], r.version)
 }
 
 func (r purgeRow) margin() bool { return ledgerdomain.MarginType(r.account) }
@@ -113,11 +132,12 @@ type purgeData interface {
 	state(ctx context.Context, user string) (purgeState, error)
 }
 
-// purgeActions settle, close and mark a test account.
+// purgeActions settle, close and mark a test account; the moves take
+// their idempotency keys.
 type purgeActions interface {
 	cancelOrders(ctx context.Context, user string) error
-	marginOut(ctx context.Context, user string, r purgeRow) error
-	sweep(ctx context.Context, user string, r purgeRow, actor, reason string) error
+	marginOut(ctx context.Context, user string, r purgeRow, key string) error
+	sweep(ctx context.Context, user string, r purgeRow, key, actor, reason string) error
 	setStatus(ctx context.Context, user, to, actor, note string) error
 	markPurged(ctx context.Context, user, actor, reason string) error
 }
@@ -160,9 +180,9 @@ func usersPurge(ctx context.Context, cfg settings, db *pg.DB, svc *application.S
 	if *kind != domain.KindTest {
 		return fmt.Errorf("only TEST accounts are purged, not %q", *kind)
 	}
-	if strings.TrimSpace(*reason) == "" {
+	if len(strings.TrimSpace(*reason)) < 3 {
 		fs.Usage()
-		return errors.New("--reason is required")
+		return errors.New("--reason of at least 3 characters is required")
 	}
 	opts := purgeOptions{emailLike: *like, olderThan: *older, limit: *limit, dryRun: *dry, reason: *reason, wait: *wait, pace: *pace}
 	for id := range strings.SplitSeq(*ids, ",") {
@@ -342,9 +362,10 @@ func (p *purger) one(ctx context.Context, c purgeCandidate) purgeOutcome {
 		return o
 	}
 	if p.opts.dryRun {
+		// What orders hold comes back once they are canceled.
 		for _, r := range s.rows {
-			if r.available.IsPositive() {
-				o.swept[sweptKey(r)] = o.swept[sweptKey(r)].Add(r.available)
+			if all := r.available.Add(r.frozen); all.IsPositive() {
+				o.swept[sweptKey(r)] = o.swept[sweptKey(r)].Add(all)
 			}
 		}
 		o.purged = true
@@ -363,7 +384,7 @@ func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, 
 		if err := p.act.cancelOrders(ctx, c.id); err != nil {
 			return fmt.Errorf("cancel the spot orders: %w", err)
 		}
-		done, err := p.ordersEnded(ctx, c.id)
+		ended, done, err := p.ordersEnded(ctx, c.id)
 		if err != nil {
 			return err
 		}
@@ -371,12 +392,14 @@ func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, 
 			o.skip = skipOrders
 			return nil
 		}
+		// The balances as they are now, the freezes released (B184 ①).
+		s = ended
 	}
 	// What a margin account holds without a debt goes back to spot, as the
 	// user would move it; it is swept from there with the rest.
 	for _, r := range s.rows {
 		if r.margin() && r.available.IsPositive() {
-			if err := p.act.marginOut(ctx, c.id, r); err != nil {
+			if err := p.act.marginOut(ctx, c.id, r, marginKey(c.id, r)); err != nil {
 				return fmt.Errorf("move %s %s out of %s: %w", r.available, r.asset, r.account, err)
 			}
 		}
@@ -393,7 +416,7 @@ func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, 
 		if r.margin() || !r.available.IsPositive() {
 			continue
 		}
-		if err := p.act.sweep(ctx, c.id, r, p.actor, p.opts.reason); err != nil {
+		if err := p.act.sweep(ctx, c.id, r, sweepKey(c.id, r), p.actor, p.opts.reason); err != nil {
 			return fmt.Errorf("sweep %s %s %s: %w", r.account, r.available, r.asset, err)
 		}
 		o.swept[sweptKey(r)] = o.swept[sweptKey(r)].Add(r.available)
@@ -419,21 +442,22 @@ func (p *purger) settle(ctx context.Context, c purgeCandidate, o *purgeOutcome, 
 }
 
 // ordersEnded waits up to the options' wait for a user's canceled orders
-// to end and their freezes to be released; false when they did not.
-func (p *purger) ordersEnded(ctx context.Context, user string) (bool, error) {
+// to end and their freezes to be released, and returns what the user has
+// then; false when they did not end.
+func (p *purger) ordersEnded(ctx context.Context, user string) (purgeState, bool, error) {
 	for waited := time.Duration(0); ; waited += 300 * time.Millisecond {
 		s, err := p.data.state(ctx, user)
 		if err != nil {
-			return false, err
+			return s, false, err
 		}
 		if s.spotOrders == 0 && !s.has(func(r purgeRow) bool { return r.frozen.IsPositive() }) {
-			return true, nil
+			return s, true, nil
 		}
 		if waited >= p.opts.wait {
-			return false, nil
+			return s, false, nil
 		}
 		if err := p.sleep(ctx, 300*time.Millisecond); err != nil {
-			return false, err
+			return s, false, err
 		}
 	}
 }
@@ -465,10 +489,13 @@ func (d sqlPurgeData) candidates(ctx context.Context, opts purgeOptions) ([]purg
 		WHERE u.kind = 'TEST' AND u.purged_at IS NULL
 		AND (cardinality($1::uuid[]) = 0 OR u.id = ANY($1::uuid[]))
 		AND ($2 = '' OR u.id IN (SELECT user_id FROM auth.identities WHERE kind = 'EMAIL' AND value LIKE $2))
-		AND u.created_at <= $3
-		ORDER BY u.created_at, u.id`
+		AND u.created_at <= $3`
 	if opts.limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", opts.limit)
+		// The limit counts the accounts to purge: the exempt ones are in
+		// the counts before and after.
+		q += fmt.Sprintf(" AND NOT u.purge_exempt ORDER BY u.created_at, u.id LIMIT %d", opts.limit)
+	} else {
+		q += " ORDER BY u.created_at, u.id"
 	}
 	rows, err := d.db.Query(ctx, q, ids, strings.ToLower(opts.emailLike), time.Now().Add(-opts.olderThan))
 	if err != nil {
@@ -502,7 +529,7 @@ func (d sqlPurgeData) state(ctx context.Context, user string) (purgeState, error
 	if err != nil {
 		return s, fmt.Errorf("what %s has: %w", user, err)
 	}
-	rows, err := d.db.Query(ctx, `SELECT account_type, scope, asset, available, frozen FROM ledger.accounts
+	rows, err := d.db.Query(ctx, `SELECT account_type, scope, asset, available, frozen, version FROM ledger.accounts
 		WHERE owner_type = 'USER' AND owner_id = $1 AND (available <> 0 OR frozen <> 0) ORDER BY account_type, scope, asset`, user)
 	if err != nil {
 		return s, fmt.Errorf("%s's balances: %w", user, err)
@@ -510,7 +537,7 @@ func (d sqlPurgeData) state(ctx context.Context, user string) (purgeState, error
 	defer rows.Close()
 	for rows.Next() {
 		var r purgeRow
-		if err := rows.Scan(&r.account, &r.scope, &r.asset, &r.available, &r.frozen); err != nil {
+		if err := rows.Scan(&r.account, &r.scope, &r.asset, &r.available, &r.frozen, &r.version); err != nil {
 			return s, err
 		}
 		s.rows = append(s.rows, r)
@@ -532,16 +559,16 @@ func (a livePurgeActions) cancelOrders(ctx context.Context, user string) error {
 	return a.call(ctx, http.MethodDelete, a.trading+"/v1/orders", user, "", nil)
 }
 
-func (a livePurgeActions) marginOut(ctx context.Context, user string, r purgeRow) error {
+func (a livePurgeActions) marginOut(ctx context.Context, user string, r purgeRow, key string) error {
 	body := map[string]string{"direction": "OUT", "account": r.account, "asset": r.asset, "amount": r.available.String()}
 	if r.scope != "" {
 		body["symbol"] = r.scope
 	}
-	return a.call(ctx, http.MethodPost, a.margin+"/v1/margin/transfer", user, "purge:"+user+":"+r.account+":"+r.scope+":"+r.asset, body)
+	return a.call(ctx, http.MethodPost, a.margin+"/v1/margin/transfer", user, key, body)
 }
 
-func (a livePurgeActions) sweep(ctx context.Context, user string, r purgeRow, actor, reason string) error {
-	_, err := a.ledger.AdjustAccount(ctx, "purge:"+user+":"+r.account+":"+r.asset, user, r.account, r.asset, r.available.Neg(), actor, reason)
+func (a livePurgeActions) sweep(ctx context.Context, user string, r purgeRow, key, actor, reason string) error {
+	_, err := a.ledger.AdjustAccount(ctx, key, user, r.account, r.asset, r.available.Neg(), actor, reason)
 	return err
 }
 
