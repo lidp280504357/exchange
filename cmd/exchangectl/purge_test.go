@@ -23,18 +23,30 @@ type purgeWorld struct {
 	// pending is how many more reads a user's canceled orders take to end
 	// (-1: never).
 	pending map[string]int
-	failOn  string // an action that fails: "sweep", "close", ...
+	failOn  string // an action that fails: "sweep", "close", "mark"
 	log     []string
 	keys    []string
 	purged  map[string]bool
+	closed  map[string]bool
 }
 
 func (w *purgeWorld) counts(context.Context) (string, error) {
 	return fmt.Sprintf("%d purged", len(w.purged)), nil
 }
 
+// candidates are the users not purged yet, with the status the run left.
 func (w *purgeWorld) candidates(context.Context, purgeOptions) ([]purgeCandidate, error) {
-	return w.users, nil
+	var out []purgeCandidate
+	for _, c := range w.users {
+		if w.purged[c.id] {
+			continue
+		}
+		if w.closed[c.id] {
+			c.status = domain.StatusClosed
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 func (w *purgeWorld) state(_ context.Context, user string) (purgeState, error) {
@@ -153,12 +165,18 @@ func (w *purgeWorld) sweep(_ context.Context, user string, r purgeRow, key, _, _
 func (w *purgeWorld) setStatus(_ context.Context, user, to, _, _ string) error {
 	w.log = append(w.log, "status "+user+" "+to)
 	if to == domain.StatusClosed {
-		return w.fail("close")
+		if err := w.fail("close"); err != nil {
+			return err
+		}
+		w.closed[user] = true
 	}
 	return nil
 }
 
 func (w *purgeWorld) markPurged(_ context.Context, user, _, _ string) error {
+	if err := w.fail("mark"); err != nil {
+		return err
+	}
 	w.log = append(w.log, "purged "+user)
 	w.purged[user] = true
 	return nil
@@ -184,7 +202,7 @@ func row(account, asset, available string) purgeRow {
 }
 
 func newPurgeWorld() *purgeWorld {
-	w := &purgeWorld{states: map[string]*purgeState{}, pending: map[string]int{}, purged: map[string]bool{}}
+	w := &purgeWorld{states: map[string]*purgeState{}, pending: map[string]int{}, purged: map[string]bool{}, closed: map[string]bool{}}
 	add1 := func(id, status string, exempt bool, s purgeState) {
 		w.users = append(w.users, purgeCandidate{id: id, status: status, exempt: exempt})
 		w.states[id] = &s
@@ -263,7 +281,8 @@ func TestPurgeSettlesClosesAndMarks(t *testing.T) {
 		t.Errorf("a closed account is only marked: %v", w.log)
 	}
 	// The keys name the balance as read: the margin account's version 1
-	// after its order's release, spot's version 2 after the move in.
+	// after its order's release, spot's version 1 after the move in (a new
+	// row).
 	for _, want := range []string{"purge:plain:FUTURES:BTC:v0", "purge:marginorder:SPOT:BTC:v1", marginKey("marginorder", purgeRow{account: "MARGIN_CROSS", asset: "BTC", version: 1})} {
 		if !slices.Contains(w.keys, want) {
 			t.Errorf("missing key %q in %v", want, w.keys)
@@ -327,5 +346,32 @@ func TestPurgeStopsShort(t *testing.T) {
 	}
 	if !strings.Contains(out, "skip plain: failed: close it: close refused") || w.purged["plain"] {
 		t.Fatalf("a refused close is not purged\n%s", out)
+	}
+}
+
+// A run again (B186): the purged accounts are not candidates any more and
+// nothing is moved twice; an account a failed run closed but did not mark
+// is only marked; the skipped ones are skipped again.
+func TestPurgeRunsAgain(t *testing.T) {
+	w := newPurgeWorld()
+	w.failOn = "mark"
+	if out, err := runPurge(t, w, false); err == nil || len(w.purged) != 0 || len(w.closed) == 0 {
+		t.Fatalf("the marks fail: %v %v\n%s", err, w.purged, out)
+	}
+	swept := len(w.keys)
+	w.failOn, w.log = "", nil
+	out, err := runPurge(t, w, false)
+	if err != nil || len(w.keys) != swept {
+		t.Fatalf("again: %v, %d keys then %d\n%s", err, swept, len(w.keys), out)
+	}
+	if slices.ContainsFunc(w.log, func(l string) bool { return strings.HasPrefix(l, "status ") || strings.HasPrefix(l, "sweep ") }) {
+		t.Fatalf("closed already, swept already: only marked: %v", w.log)
+	}
+	if !strings.Contains(out, "purged 9, skipped 5") {
+		t.Fatalf("the closed ones marked, the others skipped again:\n%s", out)
+	}
+	w.log = nil
+	if out, err := runPurge(t, w, false); err != nil || !strings.Contains(out, "purging 5 test accounts") || !strings.Contains(out, "purged 0, skipped 5") {
+		t.Fatalf("a third run: %v\n%s", err, out)
 	}
 }

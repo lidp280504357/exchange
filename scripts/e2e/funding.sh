@@ -42,28 +42,27 @@ echo "ok   no round waits for its rate too long, none paid out more than it coll
 
 # login EMAIL DEVICE signs in with PASSWORD and sets TOKEN; after 7 days
 # without a login the password alone gets a challenge answered by a code.
+# It fails (status 1) only for an account that is closed (B184/B186: a
+# purge cleared the hedge out) and stops the script on anything else -
+# also where set -e does not, as the condition of an if.
 login() {
   local email=$1 device=$2 challenge before code
-  call POST /v1/auth/login/password "{\"identifier\":\"$email\",\"password\":\"$PASSWORD\",\"device_id\":\"$device\"}" "${APP[@]}"
+  call POST /v1/auth/login/password "{\"identifier\":\"$email\",\"password\":\"$PASSWORD\",\"device_id\":\"$device\"}" "${APP[@]}" || exit 1
+  if [[ $STATUS == 403 && $(jq -r .code <<<"$BODY") == USER_CLOSED ]]; then
+    return 1
+  fi
   if [[ $STATUS == 403 && $(jq -r .code <<<"$BODY") == AUTH_LOGIN_CHALLENGE_REQUIRED ]]; then
     challenge=$(jq -r .details.login_challenge_id <<<"$BODY")
     before=$(inbox_count "$email")
-    call POST /v1/auth/otp/request "{\"scene\":\"LOGIN_CHALLENGE\",\"channel\":\"EMAIL\",\"login_challenge_id\":\"$challenge\",\"captcha_token\":\"$BYPASS\",\"device_id\":\"$device\"}"
+    call POST /v1/auth/otp/request "{\"scene\":\"LOGIN_CHALLENGE\",\"channel\":\"EMAIL\",\"login_challenge_id\":\"$challenge\",\"captcha_token\":\"$BYPASS\",\"device_id\":\"$device\"}" || exit 1
     expect 200 - "a login challenge code for $email"
     code=$(await_code "$email" "$before")
-    call POST /v1/auth/otp/verify "{\"challenge_id\":\"$(jq -r .challenge_id <<<"$BODY")\",\"code\":\"$code\",\"device_id\":\"$device\"}"
+    call POST /v1/auth/otp/verify "{\"challenge_id\":\"$(jq -r .challenge_id <<<"$BODY")\",\"code\":\"$code\",\"device_id\":\"$device\"}" || exit 1
     expect 200 - "otp/verify LOGIN_CHALLENGE"
-    call POST /v1/auth/login/challenge "{\"otp_ticket\":\"$(jq -r .otp_ticket <<<"$BODY")\",\"login_challenge_id\":\"$challenge\",\"device_id\":\"$device\"}" "${APP[@]}"
+    call POST /v1/auth/login/challenge "{\"otp_ticket\":\"$(jq -r .otp_ticket <<<"$BODY")\",\"login_challenge_id\":\"$challenge\",\"device_id\":\"$device\"}" "${APP[@]}" || exit 1
   fi
   expect 200 - "$email signs in"
   TOKEN=$(jq -r .access_token <<<"$BODY")
-}
-
-# closed EMAIL DEVICE: the account is closed (B184 ⑤: a purge cleared the
-# hedge out before it was exempt), so the hedge is gone.
-closed() {
-  call POST /v1/auth/login/password "{\"identifier\":\"$1\",\"password\":\"$PASSWORD\",\"device_id\":\"$2\"}" "${APP[@]}" &&
-    [[ $STATUS == 403 && $(jq -r .code <<<"$BODY") == USER_CLOSED ]]
 }
 
 position() { # position AUTH...: BODY holds the user's only position on the contract
@@ -168,15 +167,15 @@ hedge() {
   # shellcheck source=/dev/null
   source "$state"
   echo "== the standing $kind hedge on $SYMBOL (opened $(date -u -r "$OPENED_AT" +%FT%TZ 2>/dev/null || date -u -d "@$OPENED_AT" +%FT%TZ))"
-  if closed "$EMAIL_LONG" "$DEVICE_LONG" || closed "$EMAIL_SHORT" "$DEVICE_SHORT"; then
+  if ! login "$EMAIL_LONG" "$DEVICE_LONG" || { LONG=(-H "Authorization: Bearer $TOKEN") && ! login "$EMAIL_SHORT" "$DEVICE_SHORT"; }; then
+    # A purge cleared the hedge out before it was exempt (B184 ⑤); the
+    # other account, if it is still there, goes with the next one.
     echo "     the hedge's accounts were closed (a purge cleared them out); opening a new one"
+    exempt --off "$EMAIL_LONG" "$EMAIL_SHORT"
     rm -f "$state"
     open_hedge "$kind" "$state"
     return
   fi
-  login "$EMAIL_LONG" "$DEVICE_LONG"
-  LONG=(-H "Authorization: Bearer $TOKEN")
-  login "$EMAIL_SHORT" "$DEVICE_SHORT"
   SHORT=(-H "Authorization: Bearer $TOKEN")
   if ! position "${LONG[@]}" >/dev/null || ! position "${SHORT[@]}" >/dev/null; then
     echo "     the hedge is gone (closed or deleveraged); opening a new one"
