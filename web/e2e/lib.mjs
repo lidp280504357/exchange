@@ -363,12 +363,25 @@ export async function pickLanguage(page, label, name) {
   const trigger = `main button[aria-label="${label}"]`;
   await page.waitForSelector(trigger, { visible: true, timeout: 20000 });
   await page.click(trigger);
-  await page.waitForSelector('[role="option"]', { visible: true, timeout: 10000 });
-  for (const option of await page.$$('[role="option"]')) {
-    const own = await option.evaluate((o) => (o.querySelector("[lang]")?.textContent ?? o.innerText.split("\n")[0]).trim());
-    if (own === name) return option.click();
+  // The options are looked up again when one goes stale: the list can draw
+  // anew between finding an option and clicking it ("Node is detached from
+  // document" in a run after B192).
+  for (let attempt = 0; ; attempt++) {
+    await page.waitForSelector('[role="option"]', { visible: true, timeout: 10000 });
+    try {
+      for (const option of await page.$$('[role="option"]')) {
+        const own = await option.evaluate((o) => (o.querySelector("[lang]")?.textContent ?? o.innerText.split("\n")[0]).trim());
+        if (own === name) return await option.click();
+      }
+    } catch (e) {
+      if (attempt < 2 && /detached|not clickable|Execution context was destroyed/i.test(String(e?.message))) {
+        await sleep(300);
+        continue;
+      }
+      throw e;
+    }
+    throw new Error(`the language dropdown has no ${name}`);
   }
-  throw new Error(`the language dropdown has no ${name}`);
 }
 
 /**
