@@ -76,6 +76,7 @@ func userOf(p *userv1.User) ports.User {
 	out := ports.User{
 		ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), Timezone: p.GetTimezone(),
 		KYCLevel: p.GetKycLevel(), Username: p.GetUsername(), AvatarURL: p.GetAvatarUrl(), AvatarThumbURL: p.GetAvatarThumbUrl(),
+		Kind: p.GetKind(),
 	}
 	if t := p.GetCreatedAt(); t != nil {
 		out.CreatedAt = t.AsTime()
@@ -126,7 +127,7 @@ func (u Users) ChangeStatus(ctx context.Context, userID, to, reason, actor, note
 // List pages through accounts newest first.
 func (u Users) List(ctx context.Context, q ports.UserQuery) ([]ports.User, string, error) {
 	req := &userv1.ListUsersRequest{
-		Status: q.Status, Region: q.Region, Q: q.Q, UserIds: q.UserIDs, Cursor: q.Cursor, Limit: int32(min(q.Limit, 200)), //nolint:gosec // bounded
+		Status: q.Status, Region: q.Region, Q: q.Q, UserIds: q.UserIDs, Kinds: q.Kinds, Cursor: q.Cursor, Limit: int32(min(q.Limit, 200)), //nolint:gosec // bounded
 	}
 	if !q.CreatedFrom.IsZero() {
 		req.CreatedFrom = timestamppb.New(q.CreatedFrom)
@@ -154,6 +155,9 @@ func (u Users) Stats(ctx context.Context, since time.Time, days int) (ports.User
 	out := ports.UserStats{Total: resp.GetTotal(), CreatedSince: resp.GetCreatedSince(), Days: map[string]int64{}}
 	for _, d := range resp.GetDays() {
 		out.Days[d.GetDay()] = d.GetCount()
+	}
+	for _, k := range resp.GetByKind() {
+		out.ByKind = append(out.ByKind, ports.KindCount{Kind: k.GetKind(), Total: k.GetTotal(), CreatedSince: k.GetCreatedSince()})
 	}
 	return out, nil
 }

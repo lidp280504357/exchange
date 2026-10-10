@@ -265,6 +265,38 @@ else
   fi
 fi
 
+# The accounts' kinds (L1): the list has the humans by default, the others
+# by kind (the simulated market's bots BOT, HOUSE SYSTEM, the scripts'
+# accounts TEST - this run's are marked when it ends); an account's page
+# says its kind.
+as AUDITOR GET "/admin/v1/users?kind=BOT&limit=200" ""
+if [[ $STATUS == 200 && $(jq -r '.items[0].kind // ""' <<<"$BODY") == "" ]]; then
+  echo "skip the accounts' kinds: this admin-service is from before L1"
+else
+  expect 200 - "the bots, by kind"
+  check '(.items | length) >= 1 and all(.items[]; .kind == "BOT")' "only bots"
+  BOT_ID=$(jq -r '.items[0].id' <<<"$BODY")
+  as AUDITOR GET "/admin/v1/users?limit=200" ""
+  expect 200 - "the list without a kind"
+  check "all(.items[]; .kind == \"HUMAN\") and all(.items[]; .id != \"$BOT_ID\")" "has the humans only"
+  as AUDITOR GET "/admin/v1/users?kind=bot,system&limit=200" ""
+  expect 200 - "two kinds, any case"
+  check '(.items | length) >= 1 and all(.items[]; .kind == "BOT" or .kind == "SYSTEM")' "bots and HOUSE"
+  as AUDITOR GET "/admin/v1/users?kind=ALL&limit=200" ""
+  expect 200 - "every kind"
+  check "any(.items[]; .id == \"$USER_ID\")" "this run's account among them (the newest)"
+  as AUDITOR GET "/admin/v1/users?kind=ROBOT" ""
+  expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
+  as AUDITOR GET "/admin/v1/users/$BOT_ID" ""
+  expect 200 - "a bot's page"
+  check '.kind == "BOT"' "says it is a bot"
+  as AUDITOR GET "/admin/v1/dashboard?days=7" ""
+  expect 200 - "the overview"
+  check '([.users.by_kind[].kind] == ["HUMAN", "BOT", "TEST", "SYSTEM"]) and .users.total == (.users.by_kind[] | select(.kind == "HUMAN") | .total)
+    and .users.new_24h == (.users.by_kind[] | select(.kind == "HUMAN") | .new_24h) and (.users.by_kind[] | select(.kind == "BOT") | .total) >= 1' \
+    "counts the humans, each other kind beside them"
+fi
+
 echo "== the account's page: notes and tags"
 as AUDITOR GET "/admin/v1/users/$USER_ID" ""
 expect 200 - "the account"

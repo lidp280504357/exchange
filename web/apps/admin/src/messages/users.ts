@@ -152,6 +152,13 @@ export const usersZh = {
       consentDocument: { TERMS: "用户协议", RISK_DISCLOSURE: "风险披露" },
       loginMethod: { PASSWORD: "密码", OTP: "验证码", LOGIN_CHALLENGE: "登录验证", REGISTER: "注册" },
       reasonCode: { RISK_RULE: "风控规则" },
+      userKind: { HUMAN: "真人", BOT: "机器人", TEST: "测试", SYSTEM: "系统" },
+    },
+    kinds: {
+      label: "类型",
+      all: "全部",
+      others: "另有{{list}}",
+      count: "{{kind}} {{n}}",
     },
   },
 };
@@ -308,6 +315,13 @@ export const usersEn = {
       consentDocument: { TERMS: "Terms of use", RISK_DISCLOSURE: "Risk disclosure" },
       loginMethod: { PASSWORD: "Password", OTP: "Code", LOGIN_CHALLENGE: "Challenge", REGISTER: "Sign-up" },
       reasonCode: { RISK_RULE: "Risk rule" },
+      userKind: { HUMAN: "Human", BOT: "Bot", TEST: "Test", SYSTEM: "System" },
+    },
+    kinds: {
+      label: "Kind",
+      all: "All",
+      others: "besides: {{list}}",
+      count: "{{kind}} {{n}}",
     },
   },
 };

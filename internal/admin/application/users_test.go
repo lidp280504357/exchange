@@ -125,3 +125,28 @@ func TestNotesAndTags(t *testing.T) {
 		t.Fatalf("audited %d times, want two notes and one change of tags", audits)
 	}
 }
+
+// The accounts' kinds (L1): a list without kind has the humans only; ALL,
+// every kind; named kinds once each, whatever their case; another, 400.
+func TestUserKinds(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	auditor := h.login(t, "audit@example.com")
+	for name, c := range map[string]struct {
+		in   []string
+		want []string
+	}{
+		"none":       {nil, []string{"HUMAN"}},
+		"all":        {[]string{"bot", "ALL"}, nil},
+		"named":      {[]string{" bot ", "TEST", "Bot"}, []string{"BOT", "TEST"}},
+		"the system": {[]string{"SYSTEM"}, []string{"SYSTEM"}},
+	} {
+		if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Kinds: c.in}); err != nil || !slices.Equal(h.users.listed.Kinds, c.want) {
+			t.Fatalf("%s: listed %v, want %v (%v)", name, h.users.listed.Kinds, c.want, err)
+		}
+	}
+	if _, _, err := h.svc.ListUsers(ctx, auditor, ports.UserQuery{Kinds: []string{"ROBOT"}}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an unknown kind: %v", err)
+	}
+}

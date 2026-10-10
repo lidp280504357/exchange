@@ -36,6 +36,9 @@ func (s *Service) ListUsers(ctx context.Context, p Principal, q ports.UserQuery)
 	if n := utf8.RuneCountInString(q.Q); q.Q != "" && (n < minKeyword || n > maxKeyword) {
 		return nil, "", apperr.Invalid("a keyword has 2 to 64 characters")
 	}
+	if q.Kinds, err = UserKinds(q.Kinds); err != nil {
+		return nil, "", err
+	}
 	q.UserIDs = nil
 	if q.Q != "" {
 		// A keyword (A93): user-service matches the usernames, and the
@@ -76,6 +79,39 @@ func searchText(q string) (string, error) {
 		return "", apperr.Invalid("the search is too long or has characters no account has")
 	}
 	return q, nil
+}
+
+// The account kinds (L0), and ALL for every one of them.
+const (
+	KindHuman  = "HUMAN"
+	KindBot    = "BOT"
+	KindTest   = "TEST"
+	KindSystem = "SYSTEM"
+	KindAll    = "ALL"
+)
+
+// UserKinds reads a user-dimension list's kinds (L1): none, the humans
+// only (the console's default); ALL among them, every kind (nil); else
+// those named, once each, whatever their case.
+func UserKinds(kinds []string) ([]string, error) {
+	if len(kinds) == 0 {
+		return []string{KindHuman}, nil
+	}
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		k = strings.ToUpper(strings.TrimSpace(k))
+		switch k {
+		case KindAll:
+			return nil, nil
+		case KindHuman, KindBot, KindTest, KindSystem:
+			if !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		default:
+			return nil, apperr.Invalid("kind must be HUMAN, BOT, TEST, SYSTEM or ALL").WithDetail("kind", k)
+		}
+	}
+	return out, nil
 }
 
 func checkUserID(id string) error {

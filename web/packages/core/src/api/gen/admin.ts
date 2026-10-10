@@ -4248,6 +4248,7 @@ export interface components {
         /** @description Pass as cursor for the next page; null on the last. */
         NextCursor: string | null;
         UserSummary: {
+            kind: components["schemas"]["UserKind"];
             /** Format: uuid */
             id: string;
             /** @description The user's username (design 2026-10-07, avatars and usernames); read-only here but for the reset. */
@@ -4268,6 +4269,14 @@ export interface components {
             /** @description The console's tags on the account. */
             tags: string[];
         };
+        /**
+         * @description L0/L1: HUMAN, a person (every sign-up); BOT, the simulated market's
+         *     bots; TEST, the end-to-end scripts' accounts; SYSTEM, HOUSE and the
+         *     like. Operators and scripts set it, not the console; only the
+         *     console's lists and figures read it.
+         * @enum {string}
+         */
+        UserKind: "HUMAN" | "BOT" | "TEST" | "SYSTEM";
         Note: {
             /** Format: uuid */
             id: string;
@@ -4381,11 +4390,20 @@ export interface components {
             }[];
         };
         Dashboard: {
+            /** @description The humans' accounts (L1; every account's from a user-service without kinds), and each kind's beside them. */
             users: {
                 /** Format: int64 */
                 total: number;
                 /** Format: int64 */
                 new_24h: number;
+                /** @description HUMAN, BOT, TEST and SYSTEM in that order, purged test accounts counted nowhere; empty from a user-service without kinds. */
+                by_kind: {
+                    kind: components["schemas"]["UserKind"];
+                    /** Format: int64 */
+                    total: number;
+                    /** Format: int64 */
+                    new_24h: number;
+                }[];
             };
             trading: {
                 /** Format: int64 */
@@ -7145,6 +7163,13 @@ export interface components {
         CallbackID: string;
         /** @description The previous page's next_cursor; omitted for the first page. */
         Cursor: string;
+        /**
+         * @description L1: the kinds of account to list, comma-separated or repeated -
+         *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+         *     Left out, the humans only (the console's default). Another value is
+         *     400.
+         */
+        Kind: ("HUMAN" | "BOT" | "TEST" | "SYSTEM" | "ALL")[];
         Limit: number;
         /** @description From this time on (RFC 3339). */
         From: string;
@@ -7779,6 +7804,13 @@ export interface operations {
                 region?: string;
                 /** @description A keyword: the accounts whose username, email address or phone number contains it (any case). 2 to 64 characters once trimmed, as auth-service and user-service take it (B170), without control characters, otherwise 400. */
                 q?: string;
+                /**
+                 * @description L1: the kinds of account to list, comma-separated or repeated -
+                 *     HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+                 *     Left out, the humans only (the console's default). Another value is
+                 *     400.
+                 */
+                kind?: components["parameters"]["Kind"];
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */

@@ -9,6 +9,7 @@ import { errorToast } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { dayEnd, dayStart, FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, TimeText, useOpenUser } from "../../kit/format";
+import { kindParam, useKindFilter } from "../../kit/kinds";
 import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { clean } from "../records/tables";
@@ -16,7 +17,7 @@ import { UserIdentity } from "./identity";
 import { TagChips } from "./NotesTags";
 
 type UserSummary = AdminSchemas["UserSummary"];
-const KEYS = ["status", "region", "from", "to", "q"] as const;
+const KEYS = ["status", "region", "from", "to", "q", "kind"] as const;
 
 /**
  * Users (design §10.3): find one by ID, email, phone or username, or browse the accounts by a keyword and filters
@@ -32,15 +33,24 @@ export default function Users() {
   // refuse filters nothing, and the box says so.
   const keyword = f.q?.trim() ?? "";
   const keywordOk = keyword === "" || usableKeyword(keyword);
-  const q = { status: f.status, region: f.region?.toUpperCase(), q: keywordOk ? keyword : "", from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
+  // The humans by default; 类型 lists the others (L1).
+  const q = {
+    status: f.status, region: f.region?.toUpperCase(), q: keywordOk ? keyword : "", kind: f.kind, from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? ""),
+  };
+  const kindDef = useKindFilter();
   const list = useCursorList<UserSummary>(["admin", "users", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/users", { params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: pageSize() } } })),
+    adminData(
+      await adminApi.GET("/admin/v1/users", {
+        params: { query: { ...clean({ ...q, kind: undefined }), kind: kindParam(q.kind) as never, status: (q.status || undefined) as never, cursor, limit: pageSize() } },
+      }),
+    ),
   );
   const columns = useMemo<ColumnDef<UserSummary, unknown>[]>(
     () => [
       { id: "user", header: t("admin.users.username"), cell: ({ row }) => <UserIdentity user={row.original} /> },
       { id: "id", header: t("admin.users.id"), cell: ({ row }) => <IdText value={row.original.id} chars={13} /> },
       { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="userStatus" code={row.original.status} /> },
+      { id: "kind", header: t("admin.kinds.label"), cell: ({ row }) => <EnumBadge group="userKind" code={row.original.kind} /> },
       { accessorKey: "region", header: t("admin.users.region") },
       { accessorKey: "language", header: t("admin.users.language") },
       { accessorKey: "kyc_level", header: t("admin.users.kyc") },
@@ -57,6 +67,7 @@ export default function Users() {
         filters={filters}
         extraKeys={["q"]}
         defs={[
+          kindDef,
           { key: "status", label: t("admin.users.filterStatus"), kind: "select", options: options(t("admin.common.all"), ["ACTIVE", "RISK_REVIEW", "FROZEN", "CLOSED"], (c) => label("userStatus", c)) },
           { key: "region", label: t("admin.users.filterRegion"), kind: "text", placeholder: t("admin.users.regionHint"), width: 100 },
           { key: "from", label: t("admin.users.filterFrom"), kind: "date" },

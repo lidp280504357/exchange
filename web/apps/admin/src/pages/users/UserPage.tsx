@@ -122,6 +122,10 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
       <Contacts admin={admin} userId={user.id} />
       <div className="flex flex-wrap items-center gap-2">
         <EnumBadge group="userStatus" code={user.status} />
+        {/* Its kind (L1): a person, a bot, a test account or HOUSE's. */}
+        <span data-testid="user-kind" data-kind={user.kind}>
+          <EnumBadge group="userKind" code={user.kind} />
+        </span>
         <TagChips tags={user.tags} />
       </div>
       <Fields

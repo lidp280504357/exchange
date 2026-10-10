@@ -182,6 +182,9 @@ type User struct {
 	Username       string
 	AvatarURL      string
 	AvatarThumbURL string
+	// Kind is HUMAN, BOT, TEST or SYSTEM (L0): what the console shows and
+	// filters by.
+	Kind string
 	// Tags are the console's tags on it (filled by the console).
 	Tags []string
 }
@@ -201,8 +204,10 @@ type UserQuery struct {
 	// Q keeps the accounts whose username contains it, or that are among
 	// UserIDs: those whose email address or phone number contains it
 	// (Users.Search; B167, A93).
-	Q             string
-	UserIDs       []string
+	Q       string
+	UserIDs []string
+	// Kinds keeps the accounts of these kinds (L1); empty, all of them.
+	Kinds         []string
 	CreatedFrom   time.Time
 	CreatedBefore time.Time
 	Cursor        string
@@ -215,6 +220,16 @@ type UserStats struct {
 	CreatedSince int64
 	// Days maps a UTC day (YYYY-MM-DD) to its new accounts.
 	Days map[string]int64
+	// ByKind are the two counts per kind (L0: HUMAN, BOT, TEST, SYSTEM);
+	// empty from a user-service before it.
+	ByKind []KindCount
+}
+
+// KindCount is the accounts of one kind, and those created since.
+type KindCount struct {
+	Kind         string
+	Total        int64
+	CreatedSince int64
 }
 
 // Users reads and changes accounts (auth-, user- and ledger-service).

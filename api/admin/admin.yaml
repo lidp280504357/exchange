@@ -770,6 +770,7 @@ paths:
             minLength: 2
             maxLength: 64
             examples: [pacminer]
+        - $ref: '#/components/parameters/Kind'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Cursor'
@@ -6399,6 +6400,21 @@ components:
       description: The previous page's next_cursor; omitted for the first page.
       schema:
         type: string
+    Kind:
+      name: kind
+      in: query
+      description: |
+        L1: the kinds of account to list, comma-separated or repeated -
+        HUMAN, BOT, TEST, SYSTEM, or ALL for every kind; whatever the case.
+        Left out, the humans only (the console's default). Another value is
+        400.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          type: string
+          enum: [HUMAN, BOT, TEST, SYSTEM, ALL]
     Limit:
       name: limit
       in: query
@@ -6702,8 +6718,10 @@ components:
       description: Pass as cursor for the next page; null on the last.
     UserSummary:
       type: object
-      required: [id, username, avatar_url, avatar_thumb_url, status, region, language, kyc_level, created_at, tags]
+      required: [id, username, avatar_url, avatar_thumb_url, status, region, language, kyc_level, created_at, tags, kind]
       properties:
+        kind:
+          $ref: '#/components/schemas/UserKind'
         id:
           type: string
           format: uuid
@@ -6736,6 +6754,14 @@ components:
           description: The console's tags on the account.
           items:
             type: string
+    UserKind:
+      type: string
+      enum: [HUMAN, BOT, TEST, SYSTEM]
+      description: |
+        L0/L1: HUMAN, a person (every sign-up); BOT, the simulated market's
+        bots; TEST, the end-to-end scripts' accounts; SYSTEM, HOUSE and the
+        like. Operators and scripts set it, not the console; only the
+        console's lists and figures read it.
     Note:
       type: object
       required: [id, body, admin_id, admin_email, created_at]
@@ -6924,7 +6950,8 @@ components:
       properties:
         users:
           type: object
-          required: [total, new_24h]
+          required: [total, new_24h, by_kind]
+          description: The humans' accounts (L1; every account's from a user-service without kinds), and each kind's beside them.
           properties:
             total:
               type: integer
@@ -6932,6 +6959,21 @@ components:
             new_24h:
               type: integer
               format: int64
+            by_kind:
+              type: array
+              description: HUMAN, BOT, TEST and SYSTEM in that order, purged test accounts counted nowhere; empty from a user-service without kinds.
+              items:
+                type: object
+                required: [kind, total, new_24h]
+                properties:
+                  kind:
+                    $ref: '#/components/schemas/UserKind'
+                  total:
+                    type: integer
+                    format: int64
+                  new_24h:
+                    type: integer
+                    format: int64
         trading:
           type: object
           required: [trades_24h, active_traders_24h, turnover_24h]

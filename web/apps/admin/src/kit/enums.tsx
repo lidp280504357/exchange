@@ -45,7 +45,8 @@ export type EnumGroup =
   | "rateModel"
   | "loanKind"
   | "loanStatus"
-  | "loanReason";
+  | "loanReason"
+  | "userKind";
 
 /** useEnum returns a function that labels a code of a group (the code itself when unknown). */
 export function useEnum() {
@@ -55,6 +56,7 @@ export function useEnum() {
 
 const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   userStatus: { ACTIVE: "success", RISK_REVIEW: "warn", FROZEN: "danger", CLOSED: "neutral" },
+  userKind: { HUMAN: "neutral", BOT: "info", TEST: "warn", SYSTEM: "brand" },
   orderStatus: { NEW: "info", OPEN: "info", PARTIALLY_FILLED: "brand", FILLED: "success", CANCELED: "neutral", REJECTED: "danger", EXPIRED: "neutral" },
   side: { BUY: "up", SELL: "down" },
   depositStatus: { DETECTED: "info", CONFIRMING: "info", CONFIRMED: "brand", CREDITED: "success", ORPHANED: "warn", REJECTED: "danger" },

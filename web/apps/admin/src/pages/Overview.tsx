@@ -7,7 +7,7 @@ import { ArrowDownToLine, ArrowUpFromLine, CalendarClock, ChevronRight, Stamp, U
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { EnumBadge } from "../kit/enums";
+import { EnumBadge, useEnum } from "../kit/enums";
 import { Num } from "../kit/format";
 import { Pulse, Reveal, stagger } from "../kit/motion";
 import { Card, Page } from "../kit/Page";
@@ -24,6 +24,7 @@ import { CustodySummary } from "./system/status";
  */
 export default function Overview({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
+  const label = useEnum();
   const locale = useSettings((s) => s.locale);
   const [days, setDays] = useState("7");
   const q = useQuery({
@@ -55,9 +56,16 @@ export default function Overview({ admin }: { admin: Admin }) {
     "0"
   );
   const count = (n: number | undefined) => (n === undefined ? undefined : <CountUp value={String(n)} decimals={0} />);
-  const stats: { key: string; value: ReactNode; to?: string }[] = [
-    { key: "users", value: count(d?.users.total), to: "/users" },
-    { key: "new24h", value: count(d?.users.new_24h) },
+  // The accounts are the humans' (L1); the other kinds in small print beside them.
+  const others = (pick: (k: { total: number; new_24h: number }) => number) => {
+    const list = (d?.users.by_kind ?? []).filter((k) => k.kind !== "HUMAN" && pick(k) > 0);
+    return list.length
+      ? t("admin.kinds.others", { list: list.map((k) => t("admin.kinds.count", { kind: label("userKind", k.kind), n: formatAmount(String(pick(k)), 0) })).join(t("admin.summary.sep")) })
+      : undefined;
+  };
+  const stats: { key: string; value: ReactNode; to?: string; note?: string }[] = [
+    { key: "users", value: count(d?.users.total), to: "/users", note: others((k) => k.total) },
+    { key: "new24h", value: count(d?.users.new_24h), note: others((k) => k.new_24h) },
     { key: "trades24h", value: count(d?.trading.trades_24h), to: "/orders?tab=trades" },
     { key: "traders24h", value: count(d?.trading.active_traders_24h) },
     { key: "turnover24h", value: turnover },
@@ -81,6 +89,11 @@ export default function Overview({ admin }: { admin: Admin }) {
               ) : (
                 <div className="relative mt-1.5 truncate text-xl font-semibold tabular-nums text-fg-1" title={typeof s.value === "string" ? s.value : undefined}>
                   {s.value ?? "—"}
+                </div>
+              )}
+              {s.note && (
+                <div className="mt-1 truncate text-xs text-fg-3" title={s.note} data-testid={`stat-note-${s.key}`}>
+                  {s.note}
                 </div>
               )}
             </>

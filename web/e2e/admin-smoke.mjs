@@ -240,10 +240,32 @@ try {
   // uploaded none has the sites' built-in avatar of their ID, A79); a row
   // opens the user's page with its tabs.
   await go("/users");
+  await rows(1);
+  // The accounts' kinds (L1): the humans by default, each with its kind;
+  // 类型 → 机器人 lists the bots only, → 全部 every kind.
+  const kinds = () => page.$$eval("main tbody tr[data-row-id] td:nth-child(4)", (cells) => cells.map((c) => c.textContent.trim()));
+  const chooseKind = async (option) => {
+    await page.click('main button[role=combobox][aria-label="类型"]');
+    await page.waitForSelector("[role=option]");
+    await page.evaluate((o) => [...document.querySelectorAll("[role=option]")].find((e) => e.innerText.trim() === o)?.click(), option);
+    await page.waitForFunction((o) => document.querySelector('main button[role=combobox][aria-label="类型"]')?.innerText.trim() === o, { timeout: 5000 }, option);
+    await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+  };
+  const humans = await kinds();
+  if (humans.some((k) => k !== "真人")) throw new Error(`the default users list has ${[...new Set(humans)].join(", ")}`);
+  await chooseKind("机器人");
+  await page.waitForFunction(() => new URL(location.href).searchParams.get("kind") === "BOT", { timeout: 5000 });
+  await rows(1);
+  const bots = await kinds();
+  if (bots.some((k) => k !== "机器人")) throw new Error(`the bots listed ${[...new Set(bots)].join(", ")}`);
+  await chooseKind("全部");
   await rows(3);
+  const every = new Set(await kinds());
+  ok(`users: the humans by default (${humans.length}), the bots by kind (${bots.length}), every kind (${[...every].join(", ")})`);
   // The search box and the region filter (A93): a keyword that names no
   // account filters the list by it, kept in the address; the region
-  // applies as it is typed, without Enter. The reset clears both.
+  // applies as it is typed, without Enter. The reset clears both (and the
+  // kind: the humans again).
   await typeInto("[data-testid=users-search]", "e2e-");
   await page.keyboard.press("Enter");
   await page.waitForSelector("[data-testid=users-keyword]", { timeout: 20000 });
@@ -252,11 +274,14 @@ try {
   await typeInto('main input[aria-label="地区"]', "sg");
   await page.waitForFunction(() => new URL(location.href).searchParams.get("region") === "sg", { timeout: 5000 });
   await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
-  const regions = await page.$$eval("main tbody tr[data-row-id] td:nth-child(4)", (cells) => cells.map((c) => c.textContent.trim()));
+  const regions = await page.$$eval("main tbody tr[data-row-id] td:nth-child(5)", (cells) => cells.map((c) => c.textContent.trim()));
   if (regions.some((r) => r !== "SG")) throw new Error(`the region filter SG listed ${[...new Set(regions)].join(", ")}`);
   await clickButton("重置", "main");
-  await page.waitForFunction(() => !new URL(location.href).searchParams.get("q") && !document.querySelector("[data-testid=users-keyword]"), { timeout: 5000 });
-  await rows(3);
+  await page.waitForFunction(
+    () => !new URL(location.href).searchParams.get("q") && !new URL(location.href).searchParams.get("kind") && !document.querySelector("[data-testid=users-keyword]"),
+    { timeout: 5000 },
+  );
+  await rows(1);
   ok(`users: a keyword filters the list (in the address), the region SG as typed (${regions.length} rows), the reset clears both`);
   await page.waitForSelector("main tbody [data-testid=user-identity]");
   await page.waitForSelector("main tbody [data-testid=user-identity] svg[data-avatar-default]");
@@ -264,6 +289,7 @@ try {
   const userId = await page.evaluate(() => location.pathname.split("/").pop());
   await waitText("UID");
   await page.waitForSelector("[data-testid=user-username]");
+  await page.waitForSelector("[data-testid=user-kind][data-kind]"); // its kind (L1)
   // The username's reset (I3): its dialog opened and closed, nothing reset.
   await page.click("[data-testid=user-reset-username]");
   const resetDialog = '[role=dialog]:has(textarea[id$="-reason"])';

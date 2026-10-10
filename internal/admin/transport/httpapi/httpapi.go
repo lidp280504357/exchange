@@ -463,11 +463,29 @@ func userJSON(u ports.User) map[string]any {
 	if tags == nil {
 		tags = []string{}
 	}
+	kind := u.Kind
+	if kind == "" {
+		kind = application.KindHuman // a user-service before L0: every account a person's
+	}
 	return map[string]any{
 		"id": u.ID, "username": u.Username, "avatar_url": optional(u.AvatarURL), "avatar_thumb_url": optional(u.AvatarThumbURL),
 		"status": u.Status, "region": u.Region, "language": u.Language, "timezone": u.Timezone, "kyc_level": u.KYCLevel,
-		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags,
+		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags, "kind": kind,
 	}
+}
+
+// kindsParam reads a list's kind filter (L1): kind, comma-separated or
+// repeated; none leaves the humans-only default to the service.
+func kindsParam(q url.Values) []string {
+	var out []string
+	for _, v := range q["kind"] {
+		for _, k := range strings.Split(v, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
 }
 
 func (h *Handler) usernameReset(w http.ResponseWriter, r *http.Request) {
@@ -574,8 +592,8 @@ func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list, next, err := h.Svc.ListUsers(r.Context(), principal(r), ports.UserQuery{
-		Status: q.Get("status"), Region: q.Get("region"), Q: q.Get("q"), CreatedFrom: from, CreatedBefore: to, Cursor: q.Get("cursor"),
-		Limit: intParam(q, "limit"),
+		Status: q.Get("status"), Region: q.Get("region"), Q: q.Get("q"), Kinds: kindsParam(q), CreatedFrom: from, CreatedBefore: to,
+		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -669,8 +687,19 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		feed = map[string]any{"state": d.Feed.State, "received_at": d.Feed.ReceivedAt, "followed": d.Feed.Followed, "halted": halted}
 	}
+	// The accounts the overview counts are the humans' (L1), the other kinds
+	// beside them; every account's when user-service gives no kinds.
+	users := map[string]any{"total": d.Users.Total, "new_24h": d.Users.CreatedSince}
+	byKind := make([]map[string]any, 0, len(d.Users.ByKind))
+	for _, k := range d.Users.ByKind {
+		byKind = append(byKind, map[string]any{"kind": k.Kind, "total": k.Total, "new_24h": k.CreatedSince})
+		if k.Kind == application.KindHuman {
+			users["total"], users["new_24h"] = k.Total, k.CreatedSince
+		}
+	}
+	users["by_kind"] = byKind
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"users": map[string]any{"total": d.Users.Total, "new_24h": d.Users.CreatedSince},
+		"users": users,
 		"trading": map[string]any{
 			"trades_24h": d.Activity.Trades24h, "active_traders_24h": d.Activity.ActiveTraders24h, "turnover_24h": turnover,
 		},
