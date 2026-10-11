@@ -86,8 +86,20 @@ mismatches=$(compose "exec -T ledger-service sh -c 'wget -qO- http://127.0.0.1:9
 [[ "$mismatches" == 0 ]] || { echo "FAIL the last ledger reconciliation found $mismatches mismatches" >&2; exit 1; }
 echo "ok   the last ledger reconciliation found no mismatch"
 # Acceptance criterion 8: ClickHouse holds exactly what the outboxes published.
-metrics=$(compose "exec -T analytics-consumer sh -c 'wget -qO- http://127.0.0.1:9087/metrics'")
-grep -q '^analytics_reconcile_missing{topic="auth.events"}' <<<"$metrics" || { echo "FAIL no ClickHouse reconciliation has run" >&2; exit 1; }
+# analytics-consumer reconciles as it starts and then hourly, over what the
+# outboxes still hold (OUTBOX_RETENTION, 6 hours on the test server): right
+# after a deploy, wait for that first run (2 minutes at most). A window with
+# no event of some topic shows no line for it - the deploy of 2026-10-11
+# 08:4x UTC had no auth.events in its window - so the run is told by its
+# finishing time, not by a topic's line.
+reconciled() { awk '/^analytics_reconcile_last_success_timestamp_seconds/ && $2 > 0 {ok = 1} END {exit !ok}' <<<"$1"; }
+metrics=""
+for _ in $(seq 1 24); do
+  metrics=$(compose "exec -T analytics-consumer sh -c 'wget -qO- http://127.0.0.1:9087/metrics'") || true
+  reconciled "$metrics" && break
+  sleep 5
+done
+reconciled "$metrics" || { echo "FAIL no ClickHouse reconciliation has run" >&2; exit 1; }
 off=$(awk '/^analytics_reconcile_missing/ && $2 != 0' <<<"$metrics")
 [[ -z "$off" ]] || { echo "FAIL ClickHouse and the outboxes disagree (published minus ingested): $off" >&2; exit 1; }
 echo "ok   ClickHouse holds exactly the events the outboxes published in the reconciliation window"
