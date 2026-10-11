@@ -50,19 +50,22 @@ func ensureLocal(ctx context.Context, cfg Config, log *slog.Logger, topics ...st
 	if err != nil {
 		return fmt.Errorf("kafka: create local topics: %w", err)
 	}
-	var made, there []string
+	var there []string
 	for _, t := range resp.Sorted() {
 		switch {
 		case t.Err == nil:
-			made = append(made, t.Topic)
 			log.Info("kafka: made a local topic", "topic", t.Topic, "partitions", localPartitions, "retention", localRetention.String())
-		case errors.Is(t.Err, kerr.TopicAlreadyExists):
+		case errors.Is(t.Err, kerr.TopicAlreadyExists), errors.Is(t.Err, kerr.RequestTimedOut):
+			// There, or being made (by another service in the same start,
+			// or by a request that timed out): waited for below as well.
 			there = append(there, t.Topic)
 		default:
 			return fmt.Errorf("kafka: create local topic %s: %w", t.Topic, t.Err)
 		}
 	}
-	if err := awaitLeaders(ctx, adm, made); err != nil {
+	// Every topic asked for, not only those made here: the loser of a race
+	// to make one reads it next too (B206).
+	if err := awaitLeaders(ctx, adm, topics); err != nil {
 		return err
 	}
 	if len(there) == 0 {
@@ -84,9 +87,9 @@ func ensureLocal(ctx context.Context, cfg Config, log *slog.Logger, topics ...st
 // localLeaderWait bounds the wait for a new topic's leader.
 const localLeaderWait = 10 * time.Second
 
-// awaitLeaders waits until every partition of the topics just made has a
-// leader: a read of their offsets right after (the engines' catch-up on
-// their reference books) fails until then.
+// awaitLeaders waits until every partition of topics has a leader: a read
+// of a new topic's offsets right after (the engines' catch-up on their
+// reference books) fails until then.
 func awaitLeaders(ctx context.Context, adm *kadm.Client, topics []string) error {
 	if len(topics) == 0 {
 		return nil
