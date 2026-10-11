@@ -24,6 +24,23 @@ func TestConfigValidate(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	c.AuxMaxConns = -1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "POSTGRES_AUX_MAX_CONNS") {
+		t.Fatalf("a negative auxiliary cap must fail: %v", err)
+	}
+}
+
+// An auxiliary pool keeps its 2 connections unless the local stack asks
+// for fewer (B205); it shares the DSN and nothing else.
+func TestAux(t *testing.T) {
+	c := pg.Config{DSN: "postgres://x", MaxConns: 7, AppName: "tool"}
+	if a := c.Aux(); a != (pg.Config{DSN: "postgres://x", MaxConns: 2}) {
+		t.Fatalf("unset: %+v", a)
+	}
+	c.AuxMaxConns = 1
+	if a := c.Aux(); a != (pg.Config{DSN: "postgres://x", MaxConns: 1}) {
+		t.Fatalf("1: %+v", a)
+	}
 }
 
 func setupTable(t *testing.T, db *pg.DB) {

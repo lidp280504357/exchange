@@ -51,6 +51,21 @@ export INDEX_MIN_SOURCES=${INDEX_MIN_SOURCES:-1} DERIVATIVES_GRPC_ADDR=${DERIVAT
 # deployed one does; two scanners would double the provider quota).
 # DEV_SCAN=1 keeps the endpoint.
 [[ ${DEV_SCAN:-} == 1 ]] || unset ALCHEMY_SEPOLIA_HTTPS_URL
+# Postgres connections (B205): the local services share the test server's
+# max_connections (100) with the deployed ones (about 80 in use), so their
+# pools are small - about PER_SERVICE connections a service, a main pool of
+# 2 and an auxiliary one of 1 - and a start first checks how many fit,
+# leaving HEADROOM to the deployed services. api-gateway uses none.
+export POSTGRES_MAX_CONNS=2 POSTGRES_AUX_MAX_CONNS=1
+PER_SERVICE=3
+HEADROOM=5
+NO_POSTGRES=" api-gateway "
+# A lease (pg.AcquireLease) keeps one connection for good: these services
+# get a third, or their readiness check waits behind their own work.
+LEASED=" matching-engine derivatives-engine wallet-service "
+
+# pool SERVICE prints its pool size.
+pool() { if [[ $LEASED == *" $1 "* ]]; then echo 3; else echo 2; fi; }
 
 if [[ ${1:-} == ctl ]]; then
   shift
@@ -85,6 +100,37 @@ EOF
   if [[ $out == *"created database"* ]]; then fresh=1; fi
 }
 
+# fits SERVICE... checks that the services' Postgres connections fit what
+# the test server has free, less the headroom, and stops with the numbers
+# when they do not - before the namespace is made or anything is built or
+# started (B205).
+fits() {
+  local svc need=0 pg_free
+  for svc in "$@"; do
+    [[ $NO_POSTGRES == *" $svc "* ]] || need=$((need + PER_SERVICE))
+  done
+  pg_free=$(ssh -o ConnectTimeout=20 exchange 'bash -s' <<'EOF' || true
+cd /opt/exchange/infra
+set -a && . ./.env && set +a
+sudo docker compose exec -T postgres psql -U "$POSTGRES_USER" -d postgres -tAc \
+  "SELECT current_setting('max_connections')::int - count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'" </dev/null
+EOF
+  )
+  if [[ ! $pg_free =~ ^[0-9]+$ ]]; then
+    echo "dev: the free Postgres connections could not be read; starting anyway" >&2
+    return
+  fi
+  local spare=$((pg_free > HEADROOM ? pg_free - HEADROOM : 0))
+  if ((need > spare)); then
+    echo "dev: the test server's Postgres has $pg_free connections free (max_connections less those in use);" \
+      "keeping $HEADROOM for the deployed services, at about $PER_SERVICE a service $((spare / PER_SERVICE)) services fit," \
+      "and the $# asked for need $need. Start fewer with DEV_SKIP=... (docs/runbook/local-dev.md has a subset that fits)" \
+      "or one with task run -- SERVICE." >&2
+    exit 1
+  fi
+  echo "Postgres: $pg_free connections free; the $# services asked for need about $need"
+}
+
 # default_flags CTL... turns on DEV_FLAGS with the exchangectl command given.
 default_flags() {
   local flag
@@ -97,8 +143,10 @@ default_flags() {
 if [[ ${1:-} == run ]]; then
   svc=${2:-}
   [[ -n "$svc" && -d "cmd/$svc" ]] || { echo "usage: scripts/dev.sh run SERVICE (one of: ${SERVICES[*]})" >&2; exit 2; }
+  fits "$svc"
   prepare
   if ((fresh)); then default_flags go run ./cmd/exchangectl; fi
+  POSTGRES_MAX_CONNS=$(pool "$svc") # exported above
   exec go run "./cmd/$svc"
 fi
 
@@ -130,6 +178,7 @@ for svc in "${SERVICES[@]}"; do
   [[ $skip == *" $svc "* ]] || started+=("$svc")
 done
 
+fits "${started[@]}"
 prepare
 
 echo "== build"
@@ -172,9 +221,9 @@ echo "== start"
 # sequence take minutes.
 for svc in "${started[@]}"; do
   if [[ $svc == derivatives-engine ]]; then
-    MATCHING_SHARD=derivatives "$DEV_DIR/bin/matching-engine" >"$DEV_DIR/logs/$svc.log" 2>&1 &
+    POSTGRES_MAX_CONNS=$(pool "$svc") MATCHING_SHARD=derivatives "$DEV_DIR/bin/matching-engine" >"$DEV_DIR/logs/$svc.log" 2>&1 &
   else
-    "$DEV_DIR/bin/$svc" >"$DEV_DIR/logs/$svc.log" 2>&1 &
+    POSTGRES_MAX_CONNS=$(pool "$svc") "$DEV_DIR/bin/$svc" >"$DEV_DIR/logs/$svc.log" 2>&1 &
   fi
   pids+=($!)
 done

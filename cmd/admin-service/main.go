@@ -388,7 +388,7 @@ func sweepAppFiles(ctx context.Context, svc *application.Service, every time.Dur
 // configSchema opens the shared config schema, where flag switches are
 // written with their audit events, and relays its outbox.
 func configSchema(ctx context.Context, a *app.App, cfg settings) (*pg.DB, error) {
-	db, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 2}, "config")
+	db, err := pg.Open(ctx, cfg.Postgres.Aux(), "config")
 	if err != nil {
 		return nil, err
 	}

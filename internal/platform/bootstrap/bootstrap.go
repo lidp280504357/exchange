@@ -92,7 +92,7 @@ func janitor(ctx context.Context, a *app.App, db *pg.DB) error {
 // Flags opens the shared config schema, applies its migrations and keeps a
 // local copy of the feature flags that refreshes every 5 seconds.
 func Flags(ctx context.Context, a *app.App, cfg pg.Config) (*flags.Client, error) {
-	db, err := pg.Open(ctx, pg.Config{DSN: cfg.DSN, MaxConns: 2}, "config")
+	db, err := pg.Open(ctx, cfg.Aux(), "config")
 	if err != nil {
 		return nil, err
 	}

@@ -34,11 +34,31 @@ API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：PC 站连本机
 
 端口与容器里相同（[server-deploy.md](server-deploy.md)），网关 `http://localhost:8080`。
 
+### 两个资源限制（B205，用户 2026-10-11 决定"改小、不碰服务器"）
+
+本机栈与已部署的测试环境共用测试服的 Redpanda 与 PostgreSQL，两者都有上限：
+
+- **Redpanda 按内存限分区总数**（`--memory 2G`，`topic_memory_per_partition` 4 MiB）：所以 `dev.` 的 topic 由服务按需自建、每个 1 个分区（上面第 2 步）。
+- **PostgreSQL 的 `max_connections` 是 100**，测试环境自己占约 80，本机栈只剩约 20：所以 `scripts/dev.sh` 给本机服务的连接池设 `POSTGRES_MAX_CONNS=2`、辅助池（开关所在的 config 库）`POSTGRES_AUX_MAX_CONNS=1`，每个服务约 3 个连接（网关不连 PostgreSQL；持租约的 matching-engine、derivatives-engine、wallet-service 主池 3 个，租约一直占着一个）；启动前先查一次测试服还剩多少连接（`max_connections` 减去在用的客户端连接），留 5 个给测试环境，**不够就在建库、编译之前停下并说清楚**，例如：
+
+  ```
+  dev: the test server's Postgres has 21 connections free (max_connections less those in use); keeping 5 for the deployed services, at about 3 a service 5 services fit, and the 16 asked for need 45. Start fewer with DEV_SKIP=... (docs/runbook/local-dev.md has a subset that fits) or one with task run -- SERVICE.
+  ```
+
+  所以平时 `task dev` 起不全 16 个服务，用 `DEV_SKIP` 起要用的子集，或 `task run -- <服务>` 起一个（启动前同样检查）。推荐子集（2026-10-11 实测装得下、全部就绪，含两个撮合引擎读参考簿那条路径；实测占 15 个连接）：
+
+  ```bash
+  DEV_SKIP=notification-service,user-service,ledger-service,spot-trading-service,derivatives-service,market-maker,wallet-service,risk-service,analytics-consumer,admin-service task dev
+  ```
+
+  即 auth-service、instrument-service、matching-engine、derivatives-engine、market-data-service、api-gateway；要改别的服务时从中换出、换入（每个约 3 个连接）。小连接池加上 380 ms 往返，请求更慢，instrument-service 在同步参考数据时就绪检查偶尔超时，属正常。
+- **以后要全开**：把测试服 PostgreSQL 的 `max_connections` 提到 200（`deploy/compose/docker-compose.yml` 的 postgres 服务眼下用默认参数，加 `command: [postgres, -c, max_connections=200]` 后部署，PostgreSQL 重启、测试环境断几秒；本机栈全开时约多占 100–400 MB 内存）——留给用户以后决定，眼下不改。
+
 ### 只改一个服务时
 
 ```bash
-DEV_SKIP=auth-service task dev     # 终端 1：除 auth-service 外全部启动（多个用逗号分隔）
-task run -- auth-service           # 终端 2：= scripts/dev.sh run auth-service，前台 go run，改完 Ctrl-C 重跑
+DEV_SKIP=auth-service,... task dev   # 终端 1：起一个装得下的子集，不含要改的服务（多个用逗号分隔）
+task run -- auth-service             # 终端 2：= scripts/dev.sh run auth-service，前台 go run，改完 Ctrl-C 重跑
 ```
 
 ### 运维命令

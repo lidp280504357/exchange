@@ -24,9 +24,24 @@ type Config struct {
 	DSN string `koanf:"postgres_dsn"`
 	// MaxConns caps the pool (POSTGRES_MAX_CONNS).
 	MaxConns int32 `koanf:"postgres_max_conns"`
+	// AuxMaxConns caps a service's auxiliary pools, the shared config
+	// schema's (POSTGRES_AUX_MAX_CONNS); 0 keeps their 2. The local stack
+	// sets 1 (scripts/dev.sh, B205): it shares the test server's
+	// connections with the deployed services.
+	AuxMaxConns int32 `koanf:"postgres_aux_max_conns"`
 	// AppName names the connections in pg_stat_activity; the schema when
 	// empty (a tool sets its own: exchangectl-retention).
 	AppName string `koanf:"-"`
+}
+
+// Aux is the configuration of an auxiliary pool: the same database, at most
+// AuxMaxConns connections (2 when unset).
+func (c Config) Aux() Config {
+	n := c.AuxMaxConns
+	if n <= 0 {
+		n = 2
+	}
+	return Config{DSN: c.DSN, MaxConns: n}
 }
 
 // DefaultConfig keeps each service's pool small: eight services share one
@@ -42,6 +57,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxConns <= 0 {
 		return fmt.Errorf("POSTGRES_MAX_CONNS must be positive, got %d", c.MaxConns)
+	}
+	if c.AuxMaxConns < 0 {
+		return fmt.Errorf("POSTGRES_AUX_MAX_CONNS cannot be negative, got %d", c.AuxMaxConns)
 	}
 	return nil
 }
