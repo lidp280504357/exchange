@@ -40,7 +40,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
     - PC 站 `astras.vip` 与手机站 `m.astras.vip` 分两套站点（按 UA 与 `site_pref` Cookie 分流），后台独立域名 `admin.astras.vip`；
     - 行情全部显示币安、不标注来源（ADR-0010）；
     - 充提改接第三方托管钱包（优盾，B6）；
-    - 后台暂不做访问限制；后台登录暂不校验身份验证器验证码（开关 `admin.login_without_totp`，测试服打开）。
+    - 后台访问限制与后台登录验证码都是后台「设置」页的开关（N1，2026-10-11 起：`admin.access_restriction` 地址名单、`admin.require_totp` 登录需验证码，由运维人员在后台开关，紧急时只能用 admin-service 容器里的 `exchangectl admin settings … off` 关掉；旧开关 `admin.login_without_totp` 已退役），测试服两个都关着。
   - 已完成：
     - B1 后端接口：`tickers` 频道、币安 ticker、`/v1/market/summary`、自选、网络与地址校验、后台游标分页与新视图；提交 `e72a905`、`2ad58c3`、`1fc2a1d`。
     - B0 前端地基：`web/` pnpm workspace（`apps/{pc,m,admin}`、`packages/{core,ui}`）、Storybook `https://astras.vip/storybook/`、nginx 三个 server 块；提交 `dc3b9f1`，见 `docs/runbook/web.md`、ADR-0012。
