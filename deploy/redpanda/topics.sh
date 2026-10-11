@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # 幂等创建 Redpanda topic（测试环境，单 broker，副本数 1）。
 # 用法（在测试服上）：bash /opt/exchange/infra/redpanda/topics.sh
-# KAFKA_NAMESPACE=dev. 时建带前缀的一套（本机开发栈 scripts/dev.sh 用，见 docs/runbook/local-dev.md）。
+# 本机开发栈（KAFKA_NAMESPACE=dev.）的 topic 不在这里建：各服务启动时自己建用到的那几个，每个 1 个分区、保留 1 天
+# （B205，internal/platform/kafka/local.go，docs/runbook/local-dev.md）——照这里的分区数再建一整套带前缀的，
+# 测试服的 Redpanda 按内存限分区总数，会以 INVALID_PARTITIONS 拒绝。
 # 已存在的 topic 只核对，不改分区；保留期按需求文档 §8.2：业务 topic 7 天，order.commands / trade.events / *.dlq 30 天。
 set -euo pipefail
+if [[ -n ${KAFKA_NAMESPACE:-} ]]; then
+  echo "topics.sh: the ${KAFKA_NAMESPACE} topics are made by the services themselves (B205, docs/runbook/local-dev.md)" >&2
+  exit 1
+fi
 
 INFRA_DIR="${INFRA_DIR:-/opt/exchange/infra}"
 NS="${KAFKA_NAMESPACE:-}"

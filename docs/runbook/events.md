@@ -1,6 +1,6 @@
 # 事件链路运维（outbox、消费者、重试与死信）
 
-需求 §8；实现见 `internal/platform/{event,outbox,inbox,kafka}`，topic 由 `deploy/redpanda/topics.sh` 幂等创建（每个业务 topic 另有 `.retry` 与 `.dlq`）。
+需求 §8；实现见 `internal/platform/{event,outbox,inbox,kafka}`，topic 由 `deploy/redpanda/topics.sh` 幂等创建（每个业务 topic 另有 `.retry` 与 `.dlq`）（本机开发栈的 `dev.` topic 由服务启动时自建、每个 1 个分区，见 [local-dev.md](local-dev.md)，B205）。
 
 ## 链路
 

@@ -26,6 +26,9 @@ type Tail struct {
 
 // NewTail connects and positions itself at the end of every partition.
 func NewTail(ctx context.Context, cfg Config, name string, topics []string, h Handler, log *slog.Logger) (*Tail, error) {
+	if err := ensureLocal(ctx, cfg, log, cfg.topics(topics...)...); err != nil {
+		return nil, fmt.Errorf("kafka tail %s: %w", name, err)
+	}
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
 		kgo.ClientID(name),

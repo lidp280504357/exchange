@@ -14,6 +14,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
+	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -471,5 +472,101 @@ func TestABatchConsumerPutOutOfItsGroupComesBack(t *testing.T) {
 	waitFor(t, "the record after the rejoin", func() bool { return got.Load() >= 2 })
 	if err := c.Ready(ctx); err != nil {
 		t.Fatalf("ready after the rejoin: %v", err)
+	}
+}
+
+// A local stack's topics (B205): with a namespace, a consumer makes its
+// missing topic with the .retry and .dlq, a producer the topic it first
+// publishes to, a tail the topic it reads - one partition each, kept a day
+// and at most 256 MiB - and a topic already there with another partition
+// count is left as it is. Without a namespace nothing is made.
+func TestLocalTopicsMadeOnUse(t *testing.T) {
+	cfg := kafka.Config{Brokers: testenv.KafkaBrokers(t), SchemaRegistryURL: testenv.SchemaRegistryURL(t), Namespace: testenv.Name("ns") + "."}
+	consumed, produced, tailed, wide := testenv.Name("c")+".events", testenv.Name("p")+".events", testenv.Name("t")+".events", testenv.Name("w")+".events"
+	made := []string{consumed, consumed + ".retry", consumed + ".dlq", produced, tailed}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adm := kadm.NewClient(cl)
+	broker := func(names ...string) []string {
+		out := make([]string, len(names))
+		for i, n := range names {
+			out[i] = cfg.Namespace + n
+		}
+		return out
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, _ = adm.DeleteTopics(ctx, broker(append(made, wide, wide+".retry", wide+".dlq")...)...)
+		if rc, err := sr.NewClient(sr.URLs(cfg.SchemaRegistryURL)); err == nil {
+			_, _ = rc.DeleteSubject(ctx, cfg.Namespace+produced+"-value", sr.SoftDelete)
+			_, _ = rc.DeleteSubject(ctx, cfg.Namespace+produced+"-value", sr.HardDelete)
+		}
+		cl.Close()
+	})
+	if resp, err := adm.CreateTopics(ctx, 2, 1, nil, cfg.Namespace+wide); err != nil || resp.Error() != nil {
+		t.Fatalf("the wide topic: %v %v", err, resp.Error())
+	}
+
+	runConsumer(t, cfg, consumed, func(context.Context, *eventv1.Envelope) error { return nil })
+	runConsumer(t, cfg, wide, func(context.Context, *eventv1.Envelope) error { return nil })
+	prod, err := kafka.NewProducer(ctx, cfg, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prod.Close()
+	publish(t, prod, produced, "made on first use")
+	tail, err := kafka.NewTail(ctx, cfg, "tail", []string{tailed}, func(context.Context, *eventv1.Envelope) error { return nil }, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = tail.Run() }()
+	defer func() { _ = tail.Stop(ctx) }()
+
+	details, err := adm.ListTopics(ctx, broker(append(made, wide)...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range broker(made...) {
+		if d, ok := details[name]; !ok || d.Err != nil || len(d.Partitions) != 1 {
+			t.Fatalf("%s: %+v", name, d)
+		}
+	}
+	if d := details[cfg.Namespace+wide]; len(d.Partitions) != 2 {
+		t.Fatalf("the wide topic was changed: %d partitions", len(d.Partitions))
+	}
+	configs, err := adm.DescribeTopicConfigs(ctx, cfg.Namespace+consumed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := configs.On(cfg.Namespace+consumed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"retention.ms": "86400000", "retention.bytes": "268435456"}
+	for _, c := range rc.Configs {
+		if v, ok := want[c.Key]; ok {
+			if c.MaybeValue() != v {
+				t.Fatalf("%s = %s, want %s", c.Key, c.MaybeValue(), v)
+			}
+			delete(want, c.Key)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("configs missing: %v", want)
+	}
+
+	// Without a namespace a missing topic stays missing (topics.sh makes them).
+	plain := kafka.Config{Brokers: cfg.Brokers, SchemaRegistryURL: cfg.SchemaRegistryURL}
+	missing := testenv.Name("m") + ".events"
+	if _, err := kafka.ReadToEnd(ctx, plain, missing, nil, 0, func(context.Context, []kafka.Delivery) error { return nil }); err == nil {
+		t.Fatal("reading a missing topic without a namespace should fail")
+	}
+	if d, err := adm.ListTopics(ctx, missing); err != nil || d[missing].Err == nil {
+		t.Fatalf("the missing topic was made: %+v %v", d[missing], err)
 	}
 }

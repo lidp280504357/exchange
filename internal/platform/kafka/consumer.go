@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -110,9 +111,12 @@ func NewConsumer(ctx context.Context, cfg Config, opts ConsumerOptions) (*Consum
 	// sees envelopes.
 	opts.Group = cfg.Namespace + opts.Group
 	opts.Topics = cfg.topics(opts.Topics...)
-	retryTopics := make([]string, len(opts.Topics))
+	retryTopics, dlqTopics := make([]string, len(opts.Topics)), make([]string, len(opts.Topics))
 	for i, t := range opts.Topics {
-		retryTopics[i] = t + ".retry"
+		retryTopics[i], dlqTopics[i] = t+".retry", t+".dlq"
+	}
+	if err := ensureLocal(ctx, cfg, opts.Logger, slices.Concat(opts.Topics, retryTopics, dlqTopics)...); err != nil {
+		return nil, fmt.Errorf("kafka consumer %s: %w", opts.Group, err)
 	}
 	client := func(group string, topics []string) (*kgo.Client, error) {
 		return kgo.NewClient(

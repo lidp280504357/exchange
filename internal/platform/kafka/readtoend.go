@@ -26,6 +26,9 @@ func ReadToEnd(ctx context.Context, cfg Config, topic string, from map[int32]int
 		maxBatch = 500
 	}
 	name := cfg.Namespace + topic
+	if err := ensureLocal(ctx, cfg, nil, name); err != nil {
+		return 0, fmt.Errorf("read %s: %w", name, err)
+	}
 	start, end, err := bounds(ctx, cfg, name)
 	if err != nil {
 		return 0, err

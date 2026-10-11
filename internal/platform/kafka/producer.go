@@ -1,6 +1,8 @@
 // Package kafka connects services to Redpanda: a producer that frames
 // envelopes for Schema Registry, and a consumer with retry and dead-letter
-// topics (requirements §8.2). Topics are created by deploy/redpanda/topics.sh.
+// topics (requirements §8.2). Topics are created by deploy/redpanda/topics.sh;
+// a local stack's (a namespace) by the clients themselves as they first use
+// them, one partition each (local.go, B205).
 package kafka
 
 import (
@@ -72,11 +74,13 @@ type Publisher interface {
 }
 
 // Producer publishes envelopes synchronously with acks=all and idempotent
-// writes, registering the envelope schema per topic on first use.
+// writes, registering the envelope schema per topic on first use (and, in a
+// local stack's namespace, making the topic when it is missing).
 type Producer struct {
-	cl *kgo.Client
-	sr *sr.Client
-	ns string
+	cl  *kgo.Client
+	sr  *sr.Client
+	ns  string
+	cfg Config
 
 	mu        sync.Mutex
 	schemaIDs map[string]int32
@@ -101,7 +105,7 @@ func NewProducer(ctx context.Context, cfg Config, clientID string) (*Producer, e
 		cl.Close()
 		return nil, fmt.Errorf("kafka: schema registry: %w", err)
 	}
-	return &Producer{cl: cl, sr: reg, ns: cfg.Namespace, schemaIDs: map[string]int32{}}, nil
+	return &Producer{cl: cl, sr: reg, ns: cfg.Namespace, cfg: cfg, schemaIDs: map[string]int32{}}, nil
 }
 
 // Publish writes the records and waits until all are acknowledged. Records
@@ -142,6 +146,9 @@ func (p *Producer) schemaID(ctx context.Context, topic string) (int32, error) {
 	defer p.mu.Unlock()
 	if id, ok := p.schemaIDs[topic]; ok {
 		return id, nil
+	}
+	if err := ensureLocal(ctx, p.cfg, nil, topic); err != nil {
+		return 0, err
 	}
 	ss, err := p.sr.CreateSchema(ctx, topic+"-value", sr.Schema{Schema: protodef.EnvelopeProto, Type: sr.TypeProtobuf})
 	if err != nil {

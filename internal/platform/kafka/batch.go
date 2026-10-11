@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -90,6 +91,14 @@ func NewBatchConsumer(ctx context.Context, cfg Config, opts BatchOptions) (*Batc
 	}
 	opts.Group = cfg.Namespace + opts.Group
 	opts.Topics = cfg.topics(opts.Topics...)
+	// It parks what it cannot take in each topic's .dlq.
+	local := slices.Clone(opts.Topics)
+	for _, t := range opts.Topics {
+		local = append(local, t+".dlq")
+	}
+	if err := ensureLocal(ctx, cfg, opts.Logger, local...); err != nil {
+		return nil, fmt.Errorf("kafka batch consumer %s: %w", opts.Group, err)
+	}
 	cctx, cancel := context.WithCancel(context.Background())
 	c := &BatchConsumer{opts: opts, ns: cfg.Namespace, ctx: cctx, cancel: cancel, done: make(chan struct{})}
 	now := time.Now().UnixNano()

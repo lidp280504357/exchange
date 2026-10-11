@@ -7,7 +7,7 @@
 | PostgreSQL | 库 `exchange` | 库 `exchange_dev`（各服务启动时自己跑迁移） |
 | Redis | DB 0 | DB 1 |
 | ClickHouse | 库 `exchange` | 库 `exchange_dev` |
-| Redpanda | topic `auth.events`… 与消费组 `ledger-service`… | 前缀 `dev.`：`dev.auth.events`…、`dev.ledger-service`…（Schema Registry 主题随 topic 名分开） |
+| Redpanda | topic `auth.events`… 与消费组 `ledger-service`…（`topics.sh` 建） | 前缀 `dev.`：`dev.auth.events`…、`dev.ledger-service`…（Schema Registry 主题随 topic 名分开）；topic 由服务启动时自建、每个 1 个分区（B205，见下） |
 
 Kafka 前缀由配置 `KAFKA_NAMESPACE` 实现（`internal/platform/kafka`）：生产者、消费者、Tail、死信工具在连接 broker 时统一加前缀，业务代码与 outbox 里仍是逻辑名（`auth.events`），ClickHouse 里记录的也是逻辑名。生产与测试环境不设置它。
 
@@ -23,8 +23,9 @@ API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：PC 站连本机
 `scripts/dev.sh` 依次：
 
 1. 读 `.env`，把 `POSTGRES_DSN`、`REDIS_URL`、`CLICKHOUSE_DB` 改到 dev 命名空间，设 `KAFKA_NAMESPACE=dev.`（进程环境变量优先于 `.env`）。
-2. 经 ssh 在测试服幂等准备命名空间：建库 `exchange_dev`（PostgreSQL、ClickHouse），`KAFKA_NAMESPACE=dev. topics.sh` 建带前缀的全部 topic。
-   2026-10-08 实测这一步曾失败（审查 C67 ①）：测试服的 Redpanda 进程打开文件数的软上限是 Docker 默认的 1024，按 `topic_fds_per_partition` 5 最多约 204 个分区；正式命名空间已占 114 个（含内部 topic），`dev.` 一套还要约 110 个，建到第 64 个 topic（`dev.derivatives.order.references`）时答 `INVALID_PARTITIONS: unable to create topic ... due to hardware constraints`。compose 已给 redpanda 设 `ulimits: nofile 65536`（审查 C71，协调会话代用户决定），之后的上限是内存：`--memory 2G` 按 `topic_memory_per_partition` 4 MiB 可到 512 个，两套合计约 224 个放得下；`scripts/dev.sh` 不加检查。`dev.*` topic 不会被任何脚本删除，要删只手动：先确认没有数据（`rpk topic describe <topic> -p` 的高水位都是 0），再 `rpk topic delete -r '^dev\..*'`（2026-10-07 验证保留方案时建出的 63 个空 `dev.*` topic 就是这样删的）。
+2. 经 ssh 在测试服幂等建库 `exchange_dev`（PostgreSQL、ClickHouse）。Kafka 的 `dev.*` topic 不在这一步建，而是每个服务启动时由 `internal/platform/kafka`（`local.go`）建它用到的那几个：消费者的 topic 连同 `.retry`、`.dlq`，Tail 与 ReadToEnd 读的 topic，生产者第一次发往的 topic——每个 **1 个分区**、保留 1 天、每分区至多 256 MiB；已存在的跳过，分区数不同只在日志里提示（`a local topic has another partition count`）、不改。所以 `task run -- auth-service` 只建 auth-service 用到的，`task dev` 建全部服务用到的（每个 1 个分区，合计几十个）。哪个服务用哪些 topic 只有代码一处（各服务的消费组与发布），不另抄一份；只有设了 `KAFKA_NAMESPACE` 才会这样建，测试与生产环境不设，它们的 topic 仍只由 `deploy/redpanda/topics.sh` 建，`topics.sh` 带 `KAFKA_NAMESPACE` 运行会拒绝。
+   原因（B205，用户 2026-10-11 决定"改小"）：测试服的 Redpanda 限 2 GB 内存（`--memory 2G`，不动），按内存限分区总数（`topic_memory_per_partition` 4 MiB）；以前这一步照 `topics.sh` 的分区数建一整套 `dev.` topic，和正式命名空间加在一起超限，答 `INVALID_PARTITIONS`（再早一次是打开文件数上限，审查 C67 ①，compose 已放宽到 65536，C71）。正式命名空间的 topic 与分区数都不变。
+   `dev.*` topic 不会被任何脚本删除，要删只手动：先确认没有数据（`rpk topic describe <topic> -p` 的高水位都是 0），再 `rpk topic delete -r '^dev\..*'`；以前按旧方式建的多分区 `dev.*` topic 留着也能用，只是日志会提示分区数，删掉后下次启动按 1 个分区重建。
 3. `go build` 到 `.dev/bin/`（已被 git 忽略）。命名空间是这次新建的，就打开测试环境也打开的开关：`ledger.welcome_credit`、`account.transfer`、`ledger.manual_adjustment`、`auth.sms`。
 4. 同时启动全部服务（gRPC 按需连接、网关会重试取签名公钥，互不依赖启动顺序），逐个等运维端口的 `/readyz`；instrument-service 就绪后同步参考数据 `deploy/instruments/test.json`。
 5. 打印入口后守护：任一服务退出则打印其日志末尾并停止全部。日志在 `.dev/logs/<服务>.log`（本机默认文本格式，`LOG_FORMAT=json` 可改）。

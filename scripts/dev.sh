@@ -4,8 +4,10 @@
 # of its own so nothing mixes with the deployed environment: PostgreSQL
 # database exchange_dev, Redis DB 1, ClickHouse database exchange_dev, and
 # Kafka topics and consumer groups prefixed "dev.". Addresses and
-# credentials come from .env; the namespace is created on the server over
-# ssh (idempotent, so every start checks it). Ports are the services'
+# credentials come from .env; the databases are created on the server over
+# ssh (idempotent, so every start checks it), the topics by the services
+# themselves as they first use them - one partition each, kept a day, only
+# those of the services started (B205). Ports are the services'
 # defaults (docs/runbook/server-deploy.md), the gateway on
 # http://localhost:8080; logs go to .dev/logs/. See docs/runbook/local-dev.md.
 #
@@ -64,7 +66,7 @@ prepare() {
   # The script arrives on stdin, so every command in it reads /dev/null:
   # docker compose exec would otherwise swallow the rest of the script.
   # shellcheck disable=SC2087 # the variables are expanded here on purpose
-  out=$(ssh -o ConnectTimeout=20 exchange "DEV_DB=$DEV_DB KAFKA_NAMESPACE=$NS bash -s" <<'EOF'
+  out=$(ssh -o ConnectTimeout=20 exchange "DEV_DB=$DEV_DB bash -s" <<'EOF'
 set -euo pipefail
 cd /opt/exchange/infra
 set -a && . ./.env && set +a
@@ -74,11 +76,12 @@ if [ "$(pg "SELECT 1 FROM pg_database WHERE datname = '$DEV_DB'")" != 1 ]; then
 fi
 sudo docker compose exec -T clickhouse clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
   --query "CREATE DATABASE IF NOT EXISTS $DEV_DB" </dev/null
-created=$(bash redpanda/topics.sh </dev/null | grep -c '^created' || true)
-echo "topics ready ($created created now)"
 EOF
   )
   echo "$out"
+  # Not a copy of the deployed set: the test server's Redpanda bounds its
+  # partitions by its memory and refused one (INVALID_PARTITIONS).
+  echo "Kafka topics ${NS}*: each service makes the ones it uses as it starts, one partition each, kept a day (B205)"
   if [[ $out == *"created database"* ]]; then fresh=1; fi
 }
 
