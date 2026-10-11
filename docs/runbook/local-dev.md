@@ -16,7 +16,7 @@ Kafka 前缀由配置 `KAFKA_NAMESPACE` 实现（`internal/platform/kafka`）：
 需要：根目录 `.env`（基础设施地址与凭据，`.env.example` 有清单）、`ssh exchange` 可用、Go、curl。
 
 ```bash
-task dev                                    # = scripts/dev.sh：全部 8 个服务，Ctrl-C 全部停止
+task dev                                    # = scripts/dev.sh：全部 18 个服务（测试服连接不够时先停下，见下面的两个资源限制），Ctrl-C 全部停止
 API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：PC 站连本机网关（-- m 手机站）
 ```
 
@@ -39,19 +39,19 @@ API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：PC 站连本机
 本机栈与已部署的测试环境共用测试服的 Redpanda 与 PostgreSQL，两者都有上限：
 
 - **Redpanda 按内存限分区总数**（`--memory 2G`，`topic_memory_per_partition` 4 MiB）：所以 `dev.` 的 topic 由服务按需自建、每个 1 个分区（上面第 2 步）。
-- **PostgreSQL 的 `max_connections` 是 100**，测试环境自己占约 80，本机栈只剩约 20：所以 `scripts/dev.sh` 给本机服务的连接池设 `POSTGRES_MAX_CONNS=2`、辅助池（开关所在的 config 库）`POSTGRES_AUX_MAX_CONNS=1`，每个服务约 3 个连接（网关不连 PostgreSQL；持租约的 matching-engine、derivatives-engine、wallet-service 主池 3 个，租约一直占着一个）；启动前先查一次测试服还剩多少连接（`max_connections` 减去在用的客户端连接），留 5 个给测试环境，**不够就在建库、编译之前停下并说清楚**，例如：
+- **PostgreSQL 的 `max_connections` 是 100**，测试环境自己占约 80，本机栈只剩约 20：所以 `scripts/dev.sh` 把本机服务的连接池压到最小——主池 `POSTGRES_MAX_CONNS=2`，每持有一个租约（`pg.AcquireLease`，一直占着一个连接）再加 1（margin-service 两个租约共 4，两个撮合引擎与 market-sim 各 3，wallet-service 3、`DEV_SCAN=1` 时 4；B207：少了这一个，就绪检查与全部工作都排在租约后面，撮合引擎实测 180 秒没就绪），读开关的服务另有开关池 `POSTGRES_AUX_MAX_CONNS=1`（哪些服务读开关按各自 `main.go` 判断）；网关不连 PostgreSQL。全部 18 个服务约 52 个连接。启动前先查一次测试服还剩多少连接（`max_connections` 减去在用的客户端连接），留 5 个给测试环境，**不够就在建库、编译之前停下并说清楚**，例如：
 
   ```
-  dev: the test server's Postgres has 21 connections free (max_connections less those in use); keeping 5 for the deployed services, at about 3 a service 5 services fit, and the 16 asked for need 45. Start fewer with DEV_SKIP=... (docs/runbook/local-dev.md has a subset that fits) or one with task run -- SERVICE.
+  dev: the test server's Postgres has 21 connections free (max_connections less those in use); keeping 5 for the deployed services leaves 16: the first 5 of the 18 services asked for fit, all 18 need 52 (2 a pool, one more for each lease, one for the flags' pool). Start fewer with DEV_SKIP=... (docs/runbook/local-dev.md has a subset that fits) or one with task run -- SERVICE.
   ```
 
-  所以平时 `task dev` 起不全 16 个服务，用 `DEV_SKIP` 起要用的子集，或 `task run -- <服务>` 起一个（启动前同样检查）。推荐子集（2026-10-11 实测装得下、全部就绪，含两个撮合引擎读参考簿那条路径；实测占 15 个连接）：
+  读不到剩余连接数（ssh 或 psql 失败）时同样停下，不再"照样启动"——那样会回到起到一半报 too many clients 的老路（B207）；确实要跳过检查用 `DEV_FORCE=1`。所以平时 `task dev` 起不全 18 个服务，用 `DEV_SKIP` 起要用的子集，或 `task run -- <服务>` 起一个（启动前同样检查）。推荐子集（2026-10-11 实测装得下、全部就绪，含两个撮合引擎读参考簿那条路径；实测占 15 个连接）：
 
   ```bash
-  DEV_SKIP=notification-service,user-service,ledger-service,spot-trading-service,derivatives-service,market-maker,wallet-service,risk-service,analytics-consumer,admin-service task dev
+  DEV_SKIP=notification-service,user-service,ledger-service,spot-trading-service,derivatives-service,margin-service,market-maker,market-sim,wallet-service,risk-service,analytics-consumer,admin-service task dev
   ```
 
-  即 auth-service、instrument-service、matching-engine、derivatives-engine、market-data-service、api-gateway；要改别的服务时从中换出、换入（每个约 3 个连接）。小连接池加上 380 ms 往返，请求更慢，instrument-service 在同步参考数据时就绪检查偶尔超时，属正常。
+  即 auth-service、instrument-service、matching-engine、derivatives-engine、market-data-service、api-gateway；要改别的服务时从中换出、换入（多数服务 3 个连接，margin-service 5 个、market-sim 4 个）。小连接池加上 380 ms 往返，请求更慢，instrument-service 在同步参考数据时就绪检查偶尔超时，属正常。部署的 18 个读写 PostgreSQL 的服务池上限合计本来就超过 100（靠不会同时打满），本机子集占 15 个后测试环境只剩约 5 个可增长——这是"不碰服务器"的代价。
 - **以后要全开**：把测试服 PostgreSQL 的 `max_connections` 提到 200（`deploy/compose/docker-compose.yml` 的 postgres 服务眼下用默认参数，加 `command: [postgres, -c, max_connections=200]` 后部署，PostgreSQL 重启、测试环境断几秒；本机栈全开时约多占 100–400 MB 内存）——留给用户以后决定，眼下不改。
 
 ### 只改一个服务时

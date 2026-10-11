@@ -23,7 +23,7 @@ DEV_DB=exchange_dev
 NS=dev.
 DEV_DIR=.dev
 # Readiness is reported in this order.
-SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine derivatives-engine market-data-service derivatives-service market-maker wallet-service risk-service analytics-consumer admin-service api-gateway)
+SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine derivatives-engine market-data-service derivatives-service margin-service market-maker market-sim wallet-service risk-service analytics-consumer admin-service api-gateway)
 # Flags that are on in the test environment (docs/runbook/ledger.md,
 # otp.md), turned on when the namespace is created.
 DEV_FLAGS=(ledger.welcome_credit account.transfer ledger.manual_adjustment auth.sms derivatives.trading)
@@ -53,19 +53,43 @@ export INDEX_MIN_SOURCES=${INDEX_MIN_SOURCES:-1} DERIVATIVES_GRPC_ADDR=${DERIVAT
 [[ ${DEV_SCAN:-} == 1 ]] || unset ALCHEMY_SEPOLIA_HTTPS_URL
 # Postgres connections (B205): the local services share the test server's
 # max_connections (100) with the deployed ones (about 80 in use), so their
-# pools are small - about PER_SERVICE connections a service, a main pool of
-# 2 and an auxiliary one of 1 - and a start first checks how many fit,
-# leaving HEADROOM to the deployed services. api-gateway uses none.
+# pools are small - a main pool of 2 and more for its leases (pool), the
+# config schema's of 1 when it reads the flags (aux) - and a start first
+# checks that they fit, leaving HEADROOM to the deployed services
+# (DEV_FORCE=1 skips the check). api-gateway uses none.
 export POSTGRES_MAX_CONNS=2 POSTGRES_AUX_MAX_CONNS=1
-PER_SERVICE=3
 HEADROOM=5
 NO_POSTGRES=" api-gateway "
-# A lease (pg.AcquireLease) keeps one connection for good: these services
-# get a third, or their readiness check waits behind their own work.
-LEASED=" matching-engine derivatives-engine wallet-service "
 
-# pool SERVICE prints its pool size.
-pool() { if [[ $LEASED == *" $1 "* ]]; then echo 3; else echo 2; fi; }
+# leases SERVICE prints how many leases (pg.AcquireLease) it keeps, each a
+# connection for good (B207): margin-service margin-interest and
+# margin-monitor; the engines and market-sim theirs; wallet-service its
+# custodian's, and the deposit scanner's with DEV_SCAN=1.
+leases() {
+  case $1 in
+    margin-service) echo 2 ;;
+    matching-engine | derivatives-engine | market-sim) echo 1 ;;
+    wallet-service) if [[ ${DEV_SCAN:-} == 1 ]]; then echo 2; else echo 1; fi ;;
+    *) echo 0 ;;
+  esac
+}
+
+# pool SERVICE prints its main pool's size: 2 and one for each lease, or
+# its readiness check and its work wait behind them.
+pool() { echo $((2 + $(leases "$1"))); }
+
+# aux SERVICE prints 1 when it opens the config schema's pool (the flags),
+# as its main.go says.
+aux() {
+  local dir=$1
+  [[ $dir == derivatives-engine ]] && dir=matching-engine
+  if grep -qE 'bootstrap\.Flags\(|\.Aux\(\)' "cmd/$dir/main.go"; then echo 1; else echo 0; fi
+}
+
+# conns SERVICE prints the connections it may hold.
+conns() {
+  if [[ $NO_POSTGRES == *" $1 "* ]]; then echo 0; else echo $(($(pool "$1") + $(aux "$1"))); fi
+}
 
 if [[ ${1:-} == ctl ]]; then
   shift
@@ -106,8 +130,12 @@ EOF
 # started (B205).
 fits() {
   local svc need=0 pg_free
+  if [[ ${DEV_FORCE:-} == 1 ]]; then
+    echo "dev: DEV_FORCE=1: the Postgres connections are not checked" >&2
+    return
+  fi
   for svc in "$@"; do
-    [[ $NO_POSTGRES == *" $svc "* ]] || need=$((need + PER_SERVICE))
+    need=$((need + $(conns "$svc")))
   done
   pg_free=$(ssh -o ConnectTimeout=20 exchange 'bash -s' <<'EOF' || true
 cd /opt/exchange/infra
@@ -117,15 +145,22 @@ sudo docker compose exec -T postgres psql -U "$POSTGRES_USER" -d postgres -tAc \
 EOF
   )
   if [[ ! $pg_free =~ ^[0-9]+$ ]]; then
-    echo "dev: the free Postgres connections could not be read; starting anyway" >&2
-    return
+    # Starting without knowing is how a start stopped halfway on "too many
+    # clients" (B207).
+    echo "dev: the test server's free Postgres connections could not be read (ssh or psql failed): not starting." \
+      "Try again, or DEV_FORCE=1 to start without the check." >&2
+    exit 1
   fi
-  local spare=$((pg_free > HEADROOM ? pg_free - HEADROOM : 0))
+  local spare=$((pg_free > HEADROOM ? pg_free - HEADROOM : 0)) sum=0 fit=0
   if ((need > spare)); then
+    for svc in "$@"; do
+      (( sum + $(conns "$svc") > spare )) && break
+      sum=$((sum + $(conns "$svc"))) fit=$((fit + 1))
+    done
     echo "dev: the test server's Postgres has $pg_free connections free (max_connections less those in use);" \
-      "keeping $HEADROOM for the deployed services, at about $PER_SERVICE a service $((spare / PER_SERVICE)) services fit," \
-      "and the $# asked for need $need. Start fewer with DEV_SKIP=... (docs/runbook/local-dev.md has a subset that fits)" \
-      "or one with task run -- SERVICE." >&2
+      "keeping $HEADROOM for the deployed services leaves $spare: the first $fit of the $# services asked for fit," \
+      "all $# need $need (2 a pool, one more for each lease, one for the flags' pool). Start fewer with DEV_SKIP=..." \
+      "(docs/runbook/local-dev.md has a subset that fits) or one with task run -- SERVICE." >&2
     exit 1
   fi
   echo "Postgres: $pg_free connections free; the $# services asked for need about $need"
@@ -162,8 +197,10 @@ ops_port() {
     matching-engine) echo 9089 ;;
     derivatives-engine) echo 9096 ;;
     derivatives-service) echo 9095 ;;
+    margin-service) echo 9099 ;;
     market-data-service) echo 9090 ;;
     market-maker) echo 9091 ;;
+    market-sim) echo 9098 ;;
     wallet-service) echo 9092 ;;
     risk-service) echo 9086 ;;
     analytics-consumer) echo 9087 ;;
